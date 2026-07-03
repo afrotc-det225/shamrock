@@ -51,9 +51,8 @@ Allowed values:
 
 ## Cadet Ranks (`CADET_RANKS`)
 Allowed values:
+- C/4C
 - C/3C
-- C/2C
-- C/1C
 - C/2d Lt
 - C/1st Lt
 - C/Capt
@@ -63,9 +62,8 @@ Allowed values:
 
 ## Ranks (`RANKS`)
 Allowed values:
+- C/4C
 - C/3C
-- C/2C
-- C/1C
 - C/2d Lt
 - C/1st Lt
 - C/Capt
