@@ -160,8 +160,9 @@ Likely causes:
 Operator checks:
 - Re-run Sync Directory, Rebuild Attendance Matrix, Apply frontend formatting, or setup to recreate validations and frontend tables.
 - Confirm Data Legend is present and populated.
-- Confirm the frontend Data Legend includes the v2 `rank_options` column and that Directory `Rank` validates against cadet rank options while `Email` has no dropdown validation.
-- Confirm Data Legend order follows the v2 Directory flow: AS year, flight, squadron, rank, university, dorm, academic options, home state, flight path, then attendance codes.
+- Confirm the frontend Data Legend includes the v2 `cadet_rank_options` and `rank_options` columns.
+- Confirm Directory `Rank` validates against cadet rank options, Leadership `Rank` validates against the broader rank options, and Directory `Email` has no dropdown validation.
+- Confirm Data Legend order follows the v2 Directory flow: AS year, flight, squadron, cadet rank, rank, university, dorm, academic options, home state, flight path, then attendance codes.
 
 ### 6.4 Attendance percentages look wrong
 Likely causes:

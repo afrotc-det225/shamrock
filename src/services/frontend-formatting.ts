@@ -28,7 +28,8 @@ namespace FrontendFormattingService {
 
     const mapping: Record<string, string> = {
       as_year_options: 'AS_YEARS',
-      rank_options: 'CADET_RANKS',
+      cadet_rank_options: 'CADET_RANKS',
+      rank_options: 'RANKS',
       flight_options: 'FLIGHTS',
       squadron_options: 'SQUADRONS',
       university_options: 'UNIVERSITIES',
@@ -112,6 +113,30 @@ namespace FrontendFormattingService {
     }
   }
 
+  function applyLeadershipValidations(ss: GoogleAppsScript.Spreadsheet.Spreadsheet) {
+    const sheet = ss.getSheetByName('Leadership');
+    if (!sheet) return;
+
+    try {
+      const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0].map((h) => String(h || ''));
+      const dataRows = Math.max(1, sheet.getMaxRows() - 2);
+      const rankIdx = headers.indexOf('rank');
+      if (rankIdx < 0) return;
+      const rankRange = ss.getRangeByName('RANKS');
+      if (!rankRange) return;
+      const dataRange = sheet.getRange(3, rankIdx + 1, dataRows, 1);
+      dataRange.clearDataValidations();
+      dataRange.setDataValidation(
+        SpreadsheetApp.newDataValidation()
+          .requireValueInRange(rankRange, true)
+          .setAllowInvalid(false)
+          .build(),
+      );
+    } catch (err) {
+      Log.warn(`Skipping Leadership rank validation due to sheet constraints: ${err}`);
+    }
+  }
+
   function applyAttendanceValidations(ss: GoogleAppsScript.Spreadsheet.Spreadsheet) {
     const namedRange = ss.getRangeByName('ATTENDANCE_CODES');
     if (!namedRange) return;
@@ -165,6 +190,7 @@ namespace FrontendFormattingService {
     });
 
     applyDirectoryValidations(ss);
+    applyLeadershipValidations(ss);
     applyAttendanceValidations(ss);
     clearLegacyBandingFromFrontendTables(ss);
 

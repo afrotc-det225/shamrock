@@ -12,6 +12,7 @@ namespace DataLegendService {
     'as_year_options',
     'flight_options',
     'squadron_options',
+    'cadet_rank_options',
     'rank_options',
     'university_options',
     'dorm_options',
@@ -25,6 +26,7 @@ namespace DataLegendService {
     'AS Year Options',
     'Flight Options',
     'Squadron Options',
+    'Cadet Rank Options',
     'Rank Options',
     'University Options',
     'Dorm Options',
@@ -43,7 +45,8 @@ namespace DataLegendService {
     }
     const valueMap: Record<string, string[]> = {
       as_year_options: A.AS_YEARS || [],
-      rank_options: A.CADET_RANKS || [],
+      cadet_rank_options: A.CADET_RANKS || [],
+      rank_options: A.RANKS || [],
       flight_options: A.FLIGHTS || [],
       squadron_options: A.SQUADRONS || [],
       university_options: A.UNIVERSITIES || [],
@@ -57,7 +60,8 @@ namespace DataLegendService {
 
     const rangeMap: Record<string, string> = {
       as_year_options: 'AS_YEARS',
-      rank_options: 'CADET_RANKS',
+      cadet_rank_options: 'CADET_RANKS',
+      rank_options: 'RANKS',
       flight_options: 'FLIGHTS',
       squadron_options: 'SQUADRONS',
       university_options: 'UNIVERSITIES',
@@ -82,12 +86,16 @@ namespace DataLegendService {
 
   function ensureLegendHeaders(sheet: GoogleAppsScript.Spreadsheet.Sheet) {
     const width = LEGEND_HEADERS.length;
+    const maxCols = sheet.getMaxColumns();
+    if (maxCols < width) {
+      sheet.insertColumnsAfter(maxCols, width - maxCols);
+    }
     sheet.getRange(1, 1, 1, width).setValues([LEGEND_HEADERS]);
     sheet.getRange(2, 1, 1, width).setValues([LEGEND_DISPLAY_HEADERS]);
     // Trim extra columns if present
-    const maxCols = sheet.getMaxColumns();
-    if (maxCols > width) {
-      sheet.deleteColumns(width + 1, maxCols - width);
+    const finalMaxCols = sheet.getMaxColumns();
+    if (finalMaxCols > width) {
+      sheet.deleteColumns(width + 1, finalMaxCols - width);
     }
   }
 

@@ -2,7 +2,29 @@
 
 namespace Arrays {
   export const AS_YEARS = ['AS100', 'AS150', 'AS200', 'AS250', 'AS300', 'AS400', 'AS500', 'AS700', 'AS800', 'AS900'];
-  export const CADET_RANKS = ['C/4C', 'C/3C', 'C/2C', 'C/1C', 'C/2d Lt', 'C/1st Lt', 'C/Capt', 'C/Maj', 'C/Lt Col', 'C/Col'];
+  export const CADET_RANKS = ['C/3C', 'C/2C', 'C/1C', 'C/2d Lt', 'C/1st Lt', 'C/Capt', 'C/Maj', 'C/Lt Col', 'C/Col'];
+  export const RANKS = [
+    ...CADET_RANKS,
+    'AB',
+    'Amn',
+    'A1C',
+    'SrA',
+    'SSgt',
+    'TSgt',
+    'MSgt',
+    'SMSgt',
+    'CMSgt',
+    '2d Lt',
+    '1st Lt',
+    'Capt',
+    'Maj',
+    'Lt Col',
+    'Col',
+    'Brig Gen',
+    'Maj Gen',
+    'Lt Gen',
+    'Gen',
+  ];
   export const FLIGHTS = ['Alpha', 'Bravo', 'Charlie', 'Delta', 'Echo', 'Foxtrot', 'Abroad'];
   export const SQUADRONS = ['Blue', 'Gold', 'Abroad'];
   export const UNIVERSITIES = ['Notre Dame', "St. Mary's", 'Holy Cross', 'Trine', 'Valparaiso'];

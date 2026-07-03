@@ -19,6 +19,7 @@ These are recommended stable names for the Data Legend workbook ranges.
 - `FLIGHTS`
 - `SQUADRONS`
 - `CADET_RANKS`
+- `RANKS`
 - `UNIVERSITIES`
 - `DORMS`
 - `CIP_BROAD_AREAS`
@@ -49,7 +50,6 @@ Allowed values:
 
 ## Cadet Ranks (`CADET_RANKS`)
 Allowed values:
-- C/4C
 - C/3C
 - C/2C
 - C/1C
@@ -59,6 +59,37 @@ Allowed values:
 - C/Maj
 - C/Lt Col
 - C/Col
+
+## Ranks (`RANKS`)
+Allowed values:
+- C/3C
+- C/2C
+- C/1C
+- C/2d Lt
+- C/1st Lt
+- C/Capt
+- C/Maj
+- C/Lt Col
+- C/Col
+- AB
+- Amn
+- A1C
+- SrA
+- SSgt
+- TSgt
+- MSgt
+- SMSgt
+- CMSgt
+- 2d Lt
+- 1st Lt
+- Capt
+- Maj
+- Lt Col
+- Col
+- Brig Gen
+- Maj Gen
+- Lt Gen
+- Gen
 
 ## Flights (`FLIGHTS`)
 Allowed values:

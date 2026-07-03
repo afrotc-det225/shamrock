@@ -209,7 +209,6 @@ namespace SetupService {
       const machineHeaders = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0].map((h) => String(h || '').trim());
       const tableDropdownOptions: Record<string, string[]> = {
         as_year: Arrays.AS_YEARS,
-        rank: Arrays.CADET_RANKS,
         flight: Arrays.FLIGHTS,
         squadron: Arrays.SQUADRONS,
         university: Arrays.UNIVERSITIES,
@@ -241,6 +240,8 @@ namespace SetupService {
           columnType: 'TEXT',
         };
         const dropdownOptions = tableDropdownOptions[machineHeader]
+          || (machineHeader === 'rank' && sheetName === 'Directory' ? Arrays.CADET_RANKS : null)
+          || (machineHeader === 'rank' && sheetName === 'Leadership' ? Arrays.RANKS : null)
           || (sheetName === 'Attendance' && idx >= attendanceBase.size ? Arrays.ATTENDANCE_CODES : null);
         if (dropdownOptions?.length) {
           prop.columnType = 'DROPDOWN';
