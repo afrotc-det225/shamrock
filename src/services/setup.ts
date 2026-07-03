@@ -2176,7 +2176,6 @@ namespace SetupService {
     // Reset table column types before FrontendFormattingService clears/reapplies validations.
     ensureFrontendTables(frontendId);
     FrontendFormattingService.applyAll(frontendId);
-    ensureFrontendTables(frontendId);
     ProtectionService.applyFrontendProtections(frontendId);
   }
 
@@ -2337,7 +2336,10 @@ namespace SetupService {
     try {
       // Re-apply Attendance header formatting and validations after matrix rebuild.
       fixAttendanceHeaders();
-      if (frontendId) ensureTableForSheet(frontendId, 'Attendance', 'Attendance');
+      if (frontendId) {
+        ensureTableForSheet(frontendId, 'Attendance', 'Attendance');
+        FrontendFormattingService.applyValidations(frontendId);
+      }
       reapplyFrontendProtections();
     } catch (err) {
       Log.warn(`fixAttendanceHeaders post-rebuild failed: ${err}`);
@@ -2563,11 +2565,11 @@ namespace SetupService {
     DirectoryService.syncDirectoryFrontend();
     SyncService.syncByBackendSheetName('Leadership Backend');
 
-    // Apply frontend validations, plus visual formatting unless disabled.
-    FrontendFormattingService.applyAll(frontend.id);
-
     // Create structured tables on key frontend sheets via Sheets API.
     ensureFrontendTables(frontend.id);
+
+    // Apply frontend validations, plus visual formatting unless disabled.
+    FrontendFormattingService.applyAll(frontend.id);
 
     // Build attendance matrix initially.
     rebuildAttendanceMatrix();

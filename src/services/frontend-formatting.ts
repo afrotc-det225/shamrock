@@ -182,12 +182,22 @@ namespace FrontendFormattingService {
           .requireValueInRange(namedRange, true)
           .setAllowInvalid(false)
           .build();
-        dataRange.setDataValidation(rule);
+        try {
+          dataRange.setDataValidation(rule);
+        } catch (err) {
+          Log.warn(`Skipping ${sheetName} attendance validation on column ${col} due to typed column/table constraints: ${err}`);
+        }
       });
     };
 
     applyToSheet('Attendance');
     applyToSheet('Attendance Matrix Backend');
+  }
+
+  function applyValidationRules(ss: GoogleAppsScript.Spreadsheet.Spreadsheet) {
+    applyDirectoryValidations(ss);
+    applyLeadershipValidations(ss);
+    applyAttendanceValidations(ss);
   }
 
   function clearLegacyBandingFromFrontendTables(ss: GoogleAppsScript.Spreadsheet.Spreadsheet) {
@@ -214,9 +224,6 @@ namespace FrontendFormattingService {
       }
     });
 
-    applyDirectoryValidations(ss);
-    applyLeadershipValidations(ss);
-    applyAttendanceValidations(ss);
     clearLegacyBandingFromFrontendTables(ss);
 
     if (!shouldSkipColumnWidths()) {
@@ -232,6 +239,7 @@ namespace FrontendFormattingService {
       applyDashboardFormatting(ss); // keep layout populated so Dashboard isn’t blank
       applyFaqsFormatting(ss); // keep the mobile-friendly FAQ layout even when formatting is disabled
       ensureFaqLayout(ss);
+      applyValidationRules(ss);
       return;
     }
 
@@ -243,6 +251,21 @@ namespace FrontendFormattingService {
     applyDataLegendFormatting(ss);
     applyAttendanceFormatting(ss);
     ensureFaqLayout(ss);
+    applyValidationRules(ss);
+  }
+
+  export function applyValidations(frontendId: string) {
+    const ss = openFrontend(frontendId);
+    if (!ss) return;
+    const namedRanges = buildNamedRanges(ss);
+    namedRanges.forEach((def) => {
+      try {
+        ss.setNamedRange(def.name, def.range);
+      } catch (err) {
+        Log.warn(`Unable to set named range ${def.name}: ${err}`);
+      }
+    });
+    applyValidationRules(ss);
   }
 
   // Final safety net to keep FAQs as one mobile-friendly column without forcing all content into one cell.

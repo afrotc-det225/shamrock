@@ -84,7 +84,7 @@ Post-deploy validation checklist:
 - Use `Inactive`, `Commissioned`, or `Dropped` in `Flight Path` when a cadet should remain in backend records but be removed from operational frontend, leadership, attendance, and form choices.
 - Cadet rank and cadet leadership role are maintained on Directory. Leadership is rebuilt only from active Directory rows with Leadership-eligible command/advisor roles and sorted with non-cadet ranks/honorifics above cadet ranks, then wing commander, deputy wing commander, operations group, squadron commanders, flight commanders, deputy flight commanders, and advisor roles, while non-cadet/cadre/manual Leadership rows are preserved.
 - Leadership does not have separate flight or squadron columns. Flight and squadron commander routing comes from role names, so use explicit roles like `Alpha Flight Commander`, `Alpha Deputy Flight Commander`, and `Blue Squadron Commander`.
-- Sync Directory refreshes the frontend Data Legend first, clears stale frontend Directory dropdown rules, writes the v2 mirror, trims stale blank rows, removes legacy banded ranges, then reapplies v2 validations and Sheets API frontend tables named `Directory`, `Leadership`, `Attendance`, and `Data Legend` with column types left as `None`.
+- Sync Directory refreshes the frontend Data Legend first, clears stale frontend Directory dropdown rules, writes the v2 mirror, trims stale blank rows, removes legacy banded ranges, then reapplies Sheets API frontend tables named `Directory`, `Leadership`, `Attendance`, and `Data Legend` with column types left as `None`; v2 validations are applied afterward so they remain inside the table body.
 - Prefer menu-driven sync/repair actions over ad hoc edits in the frontend.
 
 ### 5.2 Event maintenance
