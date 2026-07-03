@@ -2,7 +2,6 @@
 
 namespace SyncService {
   const MAPPINGS: { backend: string; frontend: string }[] = [
-    { backend: 'Directory Backend', frontend: 'Directory' },
     { backend: 'Leadership Backend', frontend: 'Leadership' },
     { backend: 'Data Legend', frontend: 'Data Legend' },
   ];
@@ -59,12 +58,22 @@ namespace SyncService {
   }
 
   export function syncByBackendSheetName(name: string) {
+    if (name === 'Directory Backend') {
+      DirectoryService.syncLeadershipBackendFromDirectory();
+      DirectoryService.syncDirectoryFrontend();
+      return;
+    }
+    if (name === 'Leadership Backend') {
+      DirectoryService.syncLeadershipBackendFromDirectory();
+    }
     const mapping = MAPPINGS.find((m) => m.backend === name);
     if (!mapping) return;
     copyTable(mapping.backend, mapping.frontend);
   }
 
   export function syncAllMapped() {
+    DirectoryService.syncLeadershipBackendFromDirectory();
+    DirectoryService.syncDirectoryFrontend();
     MAPPINGS.forEach((m) => copyTable(m.backend, m.frontend));
   }
 }

@@ -11,6 +11,7 @@ Internal architecture rules live in `docs/system/SYSTEM_SPEC.md`. Deployment and
 | Feature | Primary Surfaces | Entry Points | Status |
 | --- | --- | --- | --- |
 | Setup and repair | Backend/admin workbook, frontend/main workbook, forms, triggers | Backend SHAMROCK menu, `setup` Apps Script function | Active |
+| Semester/year transition | Backend/admin workbook, frontend/main workbook, forms, triggers | Backend SHAMROCK menu, v2 transition actions | Active |
 | Directory sync | Directory Backend, frontend Directory, Directory Form | Backend SHAMROCK menu, form submit trigger, periodic reconciliation | Active |
 | Attendance | Attendance Backend, frontend Attendance, Attendance Form, Events Backend | Form submit trigger, backend menu actions | Active |
 | Excusals | Excusals Backend, Excusals Management workbook, frontend Excusals, Excusal Form | Form submit trigger, edit trigger, backend menu actions | Active |
@@ -59,6 +60,8 @@ The frontend/main workbook intentionally does not expose admin menus.
 
 Directory is the authoritative roster source for cadets and drives attendance, leadership lookups, form choices, and frontend display.
 
+Cadet rank and cadet leadership role live on Directory. The Leadership view is derived from active Directory rows with a role, plus preserved cadre/manual leadership contacts.
+
 ### Operator Entry Points
 
 - Backend/admin workbook Directory Backend edits.
@@ -69,6 +72,7 @@ Directory is the authoritative roster source for cadets and drives attendance, l
 
 - Directory Backend.
 - Frontend Directory.
+- Leadership Backend and frontend Leadership for cadets with assigned roles.
 - Attendance matrix rebuild inputs.
 - Form choice regeneration inputs.
 
@@ -77,7 +81,43 @@ Directory is the authoritative roster source for cadets and drives attendance, l
 - Add or update a test-safe directory row in the backend.
 - Run the directory sync action.
 - Confirm the frontend Directory reflects the backend.
+- If the row has a role, confirm Leadership reflects rank, role, flight/squadron, email, and phone from Directory.
 - Confirm attendance/form rebuild actions use active cadets only.
+
+## Semester And Academic Year Transition
+
+### Purpose
+
+The v2 transition workflow prepares SHAMROCK for a new semester or academic year through an operator-guided wizard.
+
+### Operator Entry Points
+
+- Backend/admin workbook: SHAMROCK menu -> Setup & Automations -> Transfer to new semester (v2).
+- Backend/admin workbook: SHAMROCK menu -> Setup & Automations -> Transfer to new academic year (v2).
+
+### Data Touched
+
+- Frontend Leadership, Directory, and Attendance archives.
+- Backend Leadership, Directory, Events, Attendance, and Excusals archives.
+- Directory Backend roster fields.
+- Events Backend generated term events.
+- Attendance Backend, Excusals Backend, and form response rows.
+- Attendance, Excusals, and Directory forms/triggers.
+
+### Safeguards
+
+- The wizard saves a draft after each prompt and does not mutate data until final confirmation.
+- Current core frontend sheets are copied, locked, and hidden with term labels.
+- Backend rollback archives are copied, locked, hidden, and registered for deletion after seven days.
+- Attendance/Excusals logs and response rows are cleared only after archive creation and confirmation.
+
+### Validation
+
+- Confirm archived frontend tabs exist, are hidden, and use the previous term label.
+- Confirm Events Backend contains the new term, expected training weeks, and Mando/LLAB/Secondary/POC events.
+- Confirm Directory removed dropped/graduated cadets and applied AS-year overrides when applicable.
+- Confirm Leadership reflects Directory roles plus cadre/manual contacts.
+- Confirm Attendance matrix and both Attendance/Excusals forms were rebuilt from the new Events Backend.
 
 ## Attendance
 

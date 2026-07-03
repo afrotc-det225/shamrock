@@ -16,6 +16,7 @@ This document records the canonical option sets used for Google Sheets data vali
 These are recommended stable names for the Data Legend workbook ranges.
 
 - `AS_YEARS`
+- `CADET_RANKS`
 - `FLIGHTS`
 - `SQUADRONS`
 - `UNIVERSITIES`
@@ -45,6 +46,19 @@ Allowed values:
 - AS700
 - AS800
 - AS900
+
+## Cadet Ranks (`CADET_RANKS`)
+Allowed values:
+- C/4C
+- C/3C
+- C/2C
+- C/1C
+- C/2d Lt
+- C/1st Lt
+- C/Capt
+- C/Maj
+- C/Lt Col
+- C/Col
 
 ## Flights (`FLIGHTS`)
 Allowed values:

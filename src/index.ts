@@ -107,6 +107,10 @@ function addShamrockMenu() {
       ui
         .createMenu('Setup & Automations')
         .addItem('Run setup (ensure-exists)', 'setup')
+        .addSeparator()
+        .addItem('Transfer to new semester (v2)', 'transferToNewSemesterV2')
+        .addItem('Transfer to new academic year (v2)', 'transferToNewAcademicYearV2')
+        .addSeparator()
         .addItem('Pause automations', 'pauseAutomations')
         .addItem('Resume automations', 'resumeAutomations')
         .addItem('Reinstall triggers', 'reinstallAllTriggers')
@@ -129,8 +133,6 @@ function addShamrockMenu() {
     .addSubMenu(
       ui
         .createMenu('Attendance')
-        .addItem('Process Attendance Form backlog', 'processAttendanceFormBacklog')
-        .addItem('Prune Attendance response duplicates', 'pruneAttendanceResponseColumns')
         .addItem('Fix Attendance headers', 'fixAttendanceHeaders')
         .addItem('Fill Attendance event cells', 'fillAttendanceEventPrompt')
         .addItem('Debug Attendance response columns', 'debugAttendanceResponseSheet')
@@ -142,10 +144,6 @@ function addShamrockMenu() {
         .addItem('Share management spreadsheet', 'shareExcusalsManagementSpreadsheet')
         .addItem('Reinitialize management sheets', 'reinitializeExcusalsManagementSheets')
         .addSeparator()
-        .addItem('Process Excusals Form backlog', 'processExcusalsFormBacklog')
-        .addItem('Prune Excusals response duplicates', 'pruneExcusalsResponseColumns')
-        .addItem('Purge junk excusal rows', 'purgeJunkExcusalRows')
-        .addItem('Backpopulate requested type', 'backpopulateExcusalRequestedType')
         .addItem('Debug Excusals response columns', 'debugExcusalsResponseColumnsVerbose')
     )
     .addSubMenu(
@@ -181,7 +179,7 @@ function addShamrockMenu() {
       ui
         .createMenu('Maintenance')
         .addItem('Clean up script properties', 'cleanupScriptProperties')
-        .addItem('Deep clean form response sheets', 'deepCleanFormResponseSheets')
+        .addItem('Cleanup expired transition archives', 'cleanupExpiredTransitionArchivesV2')
         .addItem('Dump structure to logs', 'dumpShamrockStructure')
         .addItem('Save structure snapshot to Drive', 'dumpShamrockStructureToDrive')
     )
@@ -212,6 +210,18 @@ function setup() {
       Log.warn(`No UI context for alert; logging summary instead. Error: ${err}`);
       Log.info(message);
     }
+  });
+}
+
+function transferToNewSemesterV2() {
+  runMenuAction({ label: 'Transfer to new semester (v2)', category: 'Setup & Automations', action: 'menu.transfer_new_semester_v2' }, () => {
+    TransitionService.runTransition('semester');
+  });
+}
+
+function transferToNewAcademicYearV2() {
+  runMenuAction({ label: 'Transfer to new academic year (v2)', category: 'Setup & Automations', action: 'menu.transfer_new_academic_year_v2' }, () => {
+    TransitionService.runTransition('academic_year');
   });
 }
 
@@ -359,36 +369,8 @@ function restoreCoreSheetsFromArchive() {
   });
 }
 
-function pruneAttendanceResponseColumns() {
-  runMenuAction({ label: 'Prune Attendance response duplicates', category: 'Attendance', action: 'menu.prune_attendance_response_columns', targetSheet: Config.RESOURCE_NAMES.ATTENDANCE_FORM_SHEET }, () => {
-    confirmMenuAction('Prune Attendance response duplicates', 'This may delete duplicate or empty Attendance response columns after preserving usable data. Continue?');
-    SetupService.pruneAttendanceResponseColumns();
-  });
-}
-
-function pruneExcusalsResponseColumns() {
-  runMenuAction({ label: 'Prune Excusals response duplicates', category: 'Excusals', action: 'menu.prune_excusals_response_columns', targetSheet: Config.RESOURCE_NAMES.EXCUSALS_FORM_SHEET }, () => {
-    confirmMenuAction('Prune Excusals response duplicates', 'This may delete duplicate or empty response columns after preserving usable data. Continue?');
-    SetupService.pruneExcusalsResponseColumns();
-  });
-}
-
 function refreshExcusalsForm() {
   runMenuAction({ label: 'Refresh Excusals Form choices', category: 'Sync & Refresh', action: 'menu.refresh_excusals_form' }, () => SetupService.refreshExcusalsForm());
-}
-
-function processExcusalsFormBacklog() {
-  runMenuAction({ label: 'Process Excusals Form backlog', category: 'Excusals', action: 'menu.process_excusals_backlog', targetSheet: Config.RESOURCE_NAMES.EXCUSALS_FORM_SHEET }, () => {
-    confirmMenuAction('Process Excusals Form backlog', 'This scans existing form responses and appends missing excusal records. Continue?');
-    SetupService.processExcusalsFormBacklog();
-  });
-}
-
-function processAttendanceFormBacklog() {
-  runMenuAction({ label: 'Process Attendance Form backlog', category: 'Attendance', action: 'menu.process_attendance_backlog', targetSheet: Config.RESOURCE_NAMES.ATTENDANCE_FORM_SHEET }, () => {
-    confirmMenuAction('Process Attendance Form backlog', 'This scans existing form responses, appends missing attendance records, and updates the attendance matrix. Continue?');
-    SetupService.processAttendanceFormBacklog();
-  });
 }
 
 function debugAttendanceResponseSheet() {
@@ -458,6 +440,8 @@ function addLeadershipEntry() {
     if (rank === null) throw new MenuActionCancelled('Leadership entry cancelled before Rank was provided.');
     const role = ask('Role (e.g., Commander)', true);
     if (role === null) throw new MenuActionCancelled('Leadership entry cancelled before Role was provided.');
+    const flight = ask('Flight (optional)') || '';
+    const squadron = ask('Squadron (optional)') || '';
     const reportsTo = ask('Reports To (optional)') || '';
     const email = ask('Email', true);
     if (email === null) throw new MenuActionCancelled('Leadership entry cancelled before Email was provided.');
@@ -466,13 +450,39 @@ function addLeadershipEntry() {
     const officeLocation = ask('Office Location (optional)') || '';
 
     const backendId = Config.getBackendId();
-    const sheet = backendId ? SpreadsheetApp.openById(backendId).getSheetByName('Leadership Backend') : null;
-    if (!sheet) {
+    const leadershipSheet = backendId ? SpreadsheetApp.openById(backendId).getSheetByName('Leadership Backend') : null;
+    const directorySheet = backendId ? SpreadsheetApp.openById(backendId).getSheetByName('Directory Backend') : null;
+    if (!leadershipSheet) {
       throw new Error('Leadership Backend sheet not found.');
     }
 
-    const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0].map((h) => String(h || '').trim());
-    const targetRow = Math.max(3, sheet.getLastRow() + 1);
+    if (directorySheet) {
+      const directoryTable = SheetUtils.readTable(directorySheet);
+      const matchIdx = directoryTable.rows.findIndex((row) => {
+        const rowEmail = String(row['email'] || '').toLowerCase();
+        if (email && rowEmail === email.toLowerCase()) return true;
+        return String(row['last_name'] || '').toLowerCase() === lastName.toLowerCase() &&
+          String(row['first_name'] || '').toLowerCase() === firstName.toLowerCase();
+      });
+      if (matchIdx >= 0) {
+        const headers = directoryTable.headers;
+        const rowNumber = matchIdx + 3;
+        const setDirectory = (key: string, val: string) => {
+          const idx = headers.indexOf(key);
+          if (idx >= 0) directorySheet.getRange(rowNumber, idx + 1).setValue(val);
+        };
+        setDirectory('rank', rank);
+        setDirectory('role', role);
+        if (flight) setDirectory('flight', flight);
+        if (squadron) setDirectory('squadron', squadron);
+        SetupService.refreshDirectoryArtifacts({ rebuildAttendanceMatrix: Boolean(flight || squadron), rebuildAttendanceForm: Boolean(flight) });
+        ui.alert('Directory leadership fields updated and synced to frontend.');
+        return;
+      }
+    }
+
+    const headers = leadershipSheet.getRange(1, 1, 1, leadershipSheet.getLastColumn()).getValues()[0].map((h) => String(h || '').trim());
+    const targetRow = Math.max(3, leadershipSheet.getLastRow() + 1);
     const row: string[] = Array.from({ length: headers.length }, () => '');
     const set = (key: string, val: string) => {
       const idx = headers.indexOf(key);
@@ -483,13 +493,15 @@ function addLeadershipEntry() {
     set('first_name', firstName);
     set('rank', rank);
     set('role', role);
+    set('flight', flight);
+    set('squadron', squadron);
     set('reports_to', reportsTo);
     set('email', email);
     set('cell_phone', cellPhone);
     set('office_phone', officePhone);
     set('office_location', officeLocation);
 
-    sheet.getRange(targetRow, 1, 1, row.length).setValues([row]);
+    leadershipSheet.getRange(targetRow, 1, 1, row.length).setValues([row]);
     // Sync to frontend after adding.
     try {
       SetupService.syncLeadershipBackendToFrontend();
@@ -890,7 +902,6 @@ function dumpShamrockStructureToDrive() {
 
 function cleanupScriptProperties() {
   runMenuAction({ label: 'Clean up script properties', category: 'Maintenance', action: 'menu.cleanup_script_properties' }, () => {
-    Config.migrateLegacyScriptProperties();
     const lines = Config.SCRIPT_PROPERTY_HELP.map((entry) => `${entry.key}: ${entry.description}`);
     Log.info(`Current SHAMROCK script properties:\n${lines.join('\n')}`);
     try {
@@ -898,6 +909,12 @@ function cleanupScriptProperties() {
     } catch {
       // Running from clasp or the script editor may not have a spreadsheet UI.
     }
+  });
+}
+
+function cleanupExpiredTransitionArchivesV2() {
+  runMenuAction({ label: 'Cleanup expired transition archives', category: 'Maintenance', action: 'menu.cleanup_transition_archives_v2' }, () => {
+    TransitionService.cleanupExpiredBackendArchives();
   });
 }
 
@@ -936,10 +953,9 @@ function addDeputyFlightCommanders() {
     throw new Error('Backend spreadsheet not found.');
   }
 
-  const leadershipSheet = SheetUtils.getSheet(backendId, 'Leadership Backend');
   const directorySheet = SheetUtils.getSheet(backendId, 'Directory Backend');
-  if (!leadershipSheet || !directorySheet) {
-    throw new Error('Leadership Backend or Directory Backend sheet not found.');
+  if (!directorySheet) {
+    throw new Error('Directory Backend sheet not found.');
   }
 
   const deputyResp = ui.prompt(
@@ -977,114 +993,46 @@ function addDeputyFlightCommanders() {
   }
 
   const directoryTable = SheetUtils.readTable(directorySheet);
-  const leadershipHeaders = leadershipSheet
-    .getRange(1, 1, 1, leadershipSheet.getLastColumn())
-    .getValues()[0]
-    .map((h) => String(h || '').trim());
+  const directoryHeaders = directoryTable.headers;
 
   const results: string[] = [];
   let added = 0;
 
-  // Check for existing deputy entries to avoid duplicates
-  const leadershipTable = SheetUtils.readTable(leadershipSheet);
-  const existingDeputies = new Set(
-    leadershipTable.rows
-      .filter((r) => String(r['role'] || '').toLowerCase().includes('deputy'))
-      .map((r) => `${String(r['last_name'] || '').toLowerCase()}-${String(r['first_name'] || '').toLowerCase()}`)
-  );
-
   for (const dep of deputies) {
-    const key = `${dep.last.toLowerCase()}-${dep.first.toLowerCase()}`;
-    if (existingDeputies.has(key)) {
-      results.push(`${dep.first} ${dep.last}: already exists, skipped`);
-      continue;
-    }
-
-    // Look up email from Directory Backend
-    const cadet = directoryTable.rows.find((r) => {
+    const matchIdx = directoryTable.rows.findIndex((r) => {
       const rLast = String(r['last_name'] || '').toLowerCase().trim();
       const rFirst = String(r['first_name'] || '').toLowerCase().trim();
       return rLast === dep.last.toLowerCase() && rFirst === dep.first.toLowerCase();
     });
-    const email = cadet ? String(cadet['email'] || '').trim() : '';
-
-    if (!email) {
-      results.push(`${dep.first} ${dep.last}: WARNING - not found in Directory, added without email`);
-    }
+    const cadet = matchIdx >= 0 ? directoryTable.rows[matchIdx] : null;
 
     const role = `${dep.flight} Deputy Flight Commander`;
-    const nextRow = Math.max(3, leadershipSheet.getLastRow() + 1);
-    const row: string[] = Array.from({ length: leadershipHeaders.length }, () => '');
+    if (!cadet) {
+      results.push(`${dep.first} ${dep.last}: not found in Directory, skipped`);
+      continue;
+    }
+
+    const rowNumber = matchIdx + 3;
     const set = (header: string, val: string) => {
-      const idx = leadershipHeaders.indexOf(header);
-      if (idx >= 0) row[idx] = val;
+      const idx = directoryHeaders.indexOf(header);
+      if (idx >= 0) directorySheet.getRange(rowNumber, idx + 1).setValue(val);
     };
 
-    set('last_name', dep.last);
-    set('first_name', dep.first);
     set('rank', dep.rank);
     set('role', role);
-    set('reports_to', `${dep.flight} Flight Commander`);
-    set('email', email);
-
-    leadershipSheet.getRange(nextRow, 1, 1, row.length).setValues([row]);
+    set('flight', dep.flight);
     added++;
-    results.push(`${dep.first} ${dep.last}: added as ${role}${email ? ` (${email})` : ' (no email found)'}`);
+    results.push(`${dep.first} ${dep.last}: set as ${role}${cadet['email'] ? ` (${cadet['email']})` : ''}`);
   }
 
   // Sync to frontend
   try {
-    SetupService.syncLeadershipBackendToFrontend();
+    SetupService.refreshDirectoryArtifacts({ rebuildAttendanceMatrix: true, rebuildAttendanceForm: true });
   } catch (err) {
-    Log.warn(`Unable to sync leadership to frontend after deputy add: ${err}`);
+    Log.warn(`Unable to sync leadership to frontend after deputy update: ${err}`);
   }
 
-  ui.alert(`Deputy Flight Commanders: ${added} added\n\n${results.join('\n')}`);
-  });
-}
-
-/**
- * One-time utility: remove "Done selecting events" junk rows from Excusals Backend
- * and Management sheets. Safe to run from Apps Script editor.
- */
-function purgeJunkExcusalRows() {
-  runMenuAction({ label: 'Purge junk excusal rows', category: 'Excusals', action: 'menu.purge_junk_excusal_rows', targetSheet: 'Excusals Backend' }, () => {
-    confirmMenuAction('Purge junk excusal rows', 'This removes known junk excusal rows from backend and management sheets. Continue?');
-    const result = ExcusalsService.purgeJunkExcusalRows();
-    SpreadsheetApp.getUi().alert(
-      `Cleanup complete.\nBackend rows removed: ${result.backendPurged}\nManagement rows removed: ${result.managementPurged}`
-    );
-  });
-}
-
-/**
- * One-time utility: backpopulate the Requested Type column in Management sheets
- * from Excusals Backend data. Also refreshes management sheet headers to match
- * the current schema.
- */
-function backpopulateExcusalRequestedType() {
-  runMenuAction({ label: 'Backpopulate requested type', category: 'Excusals', action: 'menu.backpopulate_excusal_requested_type', targetSheet: 'Excusals Management' }, () => {
-    confirmMenuAction('Backpopulate requested type', 'This updates missing Requested Type values in management sheets from Excusals Backend. Continue?');
-    const result = ExcusalsService.backpopulateManagementRequestedType();
-    SpreadsheetApp.getUi().alert(
-      `Backpopulate complete.\nManagement rows updated: ${result.updated}`
-    );
-  });
-}
-
-/**
- * Deep-clean both form response sheets: merge duplicate/orphan columns, distribute
- * legacy data into active columns, and delete empty junk columns.
- */
-function deepCleanFormResponseSheets() {
-  runMenuAction({ label: 'Deep clean form response sheets', category: 'Maintenance', action: 'menu.deep_clean_form_response_sheets' }, () => {
-    confirmMenuAction('Deep clean form response sheets', 'This merges duplicate/orphan form response data and may delete empty or redundant columns. Continue?');
-    const result = SetupService.deepCleanFormResponseSheets();
-    SpreadsheetApp.getUi().alert(
-      `Deep clean complete.\n\n` +
-      `Excusals Form Responses:\n  Cells merged: ${result.excusals.merged}\n  Columns deleted: ${result.excusals.deleted}\n\n` +
-      `Attendance Form Responses:\n  Columns deleted: ${result.attendance.deleted}`
-    );
+  ui.alert(`Deputy Flight Commanders: ${added} updated\n\n${results.join('\n')}`);
   });
 }
 

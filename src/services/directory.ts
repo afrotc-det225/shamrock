@@ -8,6 +8,8 @@ namespace DirectoryService {
     source: string;
     last_name: string;
     first_name: string;
+    rank: string;
+    role: string;
     as_year: string;
     class_year: string;
     flight: string;
@@ -109,6 +111,8 @@ namespace DirectoryService {
     const mapped = backend.rows.filter((row) => isOperationallyActiveCadet(row)).map((row) => ({
       last_name: row['last_name'] || '',
       first_name: row['first_name'] || '',
+      rank: row['rank'] || '',
+      role: row['role'] || '',
       as_year: row['as_year'] || '',
       class_year: row['class_year'] || '',
       flight: row['flight'] || '',
@@ -212,6 +216,8 @@ namespace DirectoryService {
       source: 'directory_form',
       last_name: pick(['last name', 'last']),
       first_name: pick(['first name', 'first']),
+      rank: pick(['rank', 'cadet rank']),
+      role: pick(['role', 'leadership role']),
       as_year: pick(['as year', 'as-year', 'year']),
       class_year: pick(['class year (yyyy)', 'class year']),
       flight: pick(['flight']),
@@ -233,6 +239,78 @@ namespace DirectoryService {
 
     upsertBackendRecord(record);
     SetupService.refreshDirectoryArtifacts({ rebuildAttendanceMatrix: true, rebuildAttendanceForm: true });
+  }
+
+  function normalizeIdentity(row: any): string {
+    const email = String(row?.['email'] || '').trim().toLowerCase();
+    if (email) return `email:${email}`;
+    const last = String(row?.['last_name'] || '').trim().toLowerCase();
+    const first = String(row?.['first_name'] || '').trim().toLowerCase();
+    return last || first ? `name:${last},${first}` : '';
+  }
+
+  function isCadetDirectoryRow(row: any): boolean {
+    const source = String(row?.['source'] || '').toLowerCase();
+    const email = String(row?.['email'] || '').toLowerCase();
+    return source.includes('directory') || source.includes('cadet') || email.includes('@') || Boolean(row?.['as_year']);
+  }
+
+  function leadershipRowFromDirectory(row: any): Record<string, any> | null {
+    const role = String(row?.['role'] || '').trim();
+    if (!role) return null;
+    return {
+      last_name: row['last_name'] || '',
+      first_name: row['first_name'] || '',
+      rank: row['rank'] || '',
+      role,
+      flight: row['flight'] || '',
+      squadron: row['squadron'] || '',
+      reports_to: '',
+      email: row['email'] || '',
+      cell_phone: normalizePhone(String(row['phone'] || '')),
+      office_phone: '',
+      office_location: '',
+    };
+  }
+
+  export function syncLeadershipBackendFromDirectory(): void {
+    const backendId = Config.getBackendId();
+    if (!backendId) return;
+    const directorySheet = SheetUtils.getSheet(backendId, 'Directory Backend');
+    const leadershipSheet = SheetUtils.getSheet(backendId, 'Leadership Backend');
+    if (!directorySheet || !leadershipSheet) return;
+
+    SheetUtils.ensureSchemaColumns(leadershipSheet);
+    const directoryRows = SheetUtils.readTable(directorySheet).rows;
+    const currentLeadership = SheetUtils.readTable(leadershipSheet).rows;
+
+    const activeDirectoryIdentities = new Set<string>();
+    const derivedRows: Record<string, any>[] = [];
+    directoryRows.filter((row) => isOperationallyActiveCadet(row)).forEach((row) => {
+      const identity = normalizeIdentity(row);
+      if (identity) activeDirectoryIdentities.add(identity);
+      const leadership = leadershipRowFromDirectory(row);
+      if (leadership) derivedRows.push(leadership);
+    });
+
+    const preservedRows = currentLeadership.filter((row) => {
+      const identity = normalizeIdentity(row);
+      if (!identity) return true;
+      if (!activeDirectoryIdentities.has(identity)) return true;
+      return !isCadetDirectoryRow(row);
+    });
+
+    const nextRows = preservedRows.concat(
+      derivedRows.sort((a, b) => {
+        const roleCmp = String(a.role || '').localeCompare(String(b.role || ''), undefined, { sensitivity: 'base' });
+        if (roleCmp !== 0) return roleCmp;
+        const lastCmp = String(a.last_name || '').localeCompare(String(b.last_name || ''), undefined, { sensitivity: 'base' });
+        if (lastCmp !== 0) return lastCmp;
+        return String(a.first_name || '').localeCompare(String(b.first_name || ''), undefined, { sensitivity: 'base' });
+      }),
+    );
+
+    SheetUtils.writeTable(leadershipSheet, nextRows);
   }
 
   /**

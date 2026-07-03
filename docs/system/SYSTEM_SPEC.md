@@ -20,10 +20,11 @@ SHAMROCK is an Apps Script system (TypeScript, V8 runtime) that provisions and o
   - Admins operate the system via custom menus and controlled backend edits.
 
 ## 2. Supported Baseline
-The checked-in source and this documentation describe the supported SHAMROCK baseline.
+The checked-in source and this documentation describe the supported SHAMROCK v2 baseline.
 
 - Current schemas, script properties, menu actions, and service boundaries are authoritative.
 - Historical CSV layouts, retired property names, and one-off migration paths are not automatically supported.
+- CSV imports require the current row-1 machine headers exactly.
 - Compatibility code may remain only when it supports active production data or a documented operator workflow.
 - When a feature establishes a new baseline, obsolete compatibility checks should be removed or clearly quarantined.
 - If old and new behavior must coexist, version the Apps Script entry points or workflow labels explicitly.
@@ -69,12 +70,14 @@ The backend workbook is authoritative.
 
 ### 4.3 Cadre & Leadership Ownership
 Default ownership model:
-- Backend is the source of truth for the Cadre & Leadership contact list.
+- Directory Backend is the source of truth for cadet rank and cadet leadership roles.
+- Leadership Backend preserves non-cadet/cadre/manual leadership contacts and receives derived cadet leadership rows from Directory Backend.
 - Frontend contains a read-only mirror.
 
 Rationale:
 - Centralizes authority and reduces accidental edits.
 - Keeps “who should be notified” consistent with system automation.
+- Avoids duplicating cadet contact details across Directory and Leadership.
 
 If later requirements indicate a better model, the chosen model must still preserve an authoritative source and a deterministic sync path.
 
@@ -83,12 +86,14 @@ If later requirements indicate a better model, the chosen model must still prese
 All table logic must be header-driven.
 
 - Row 1 contains machine-friendly stable column identifiers.
-- Tables start at row 2.
+- Row 2 contains display headers for the user-facing table UI.
+- Data rows start at row 3.
 - Column positions must never be assumed.
 - Code must locate columns by row-1 header values.
 
 Display headers:
 - Row 2 is the visible header row under the current baseline.
+- The two-row model is retained in v2 because setup, sync, formatting, protections, Apps Script table operations, and form-response processing all depend on stable machine headers plus operator-friendly display labels.
 - If this two-row model is changed, the replacement must be justified, documented, and migrated consistently across setup, sync, formatting, and form-response logic.
 
 Hidden helper columns:
@@ -106,6 +111,7 @@ All dropdown validations must be driven from the Data Legend tab(s) using ranges
 
 - The Data Legend acts as the canonical option registry.
 - Validations in other sheets reference Data Legend ranges.
+- SHAMROCK can apply Apps Script data validations and conditional formatting programmatically. Per-option Google Sheets dropdown chip colors/display styling are not part of the Apps Script validation builder or Sheets API data-validation rule shape used by SHAMROCK, so those visual details remain manual/template polish unless Google exposes a supported API.
 
 Canonical option sets:
 - The authoritative lists for dropdowns (AS years, flights, universities, dorms, CIP broad areas, AFSC options, attendance codes, etc.) are recorded in `docs/system/DATA_LEGEND_RANGES.md`.
@@ -134,7 +140,7 @@ This section describes the current operational shape of the system so feature wo
 - FAQs: two-column end-user information.
 - Dashboard: links, metrics, charts, rotating upcoming birthdays, rotating “cadets out this week”.
 - Cadre & Leadership: minimal contact directory.
-- Directory: cadet directory (sorted Z-A by AS year, then A-Z by last name) with required formatting constraints.
+- Directory: cadet directory with rank, role, AS year, flight, squadron, contact, academic, and status fields (sorted Z-A by AS year, then A-Z by last name) with required formatting constraints.
 - Attendance: directory-synced cadet rows + event columns with attendance codes and percentage rollups.
 - Events: event metadata driving attendance columns and dashboard.
 - Excusals: public-facing excusal request log.
@@ -199,6 +205,8 @@ Operators should not run scripts from the editor.
 - Provide custom menus for user/admin actions.
 - Triggers should call stable, explicit entry points.
 - Trigger installation must be idempotent.
+- v2 operator workflows that replace earlier behavior must use explicit v2 menu/global names. Current transition entry points are `transferToNewSemesterV2` and `transferToNewAcademicYearV2`.
+- Semester/year transitions must be interactive, auditable, archive-before-write, and resumable until the final confirmation.
 
 ## 13. Document Policy
 - Public docs: explain how features work operationally without sensitive IDs.

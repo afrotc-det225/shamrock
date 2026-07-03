@@ -12,19 +12,9 @@ namespace Config {
     DISABLE_MAIN_WORKBOOK_FORMATTING: 'DISABLE_MAIN_WORKBOOK_FORMATTING',
     DISABLE_MAIN_WORKBOOK_COLUMN_WIDTHS: 'DISABLE_MAIN_WORKBOOK_COLUMN_WIDTHS',
     AUTOMATIONS_PAUSED: 'AUTOMATIONS_PAUSED',
+    V2_TRANSITION_DRAFT: 'V2_TRANSITION_DRAFT',
+    V2_BACKEND_ARCHIVES: 'V2_BACKEND_ARCHIVES',
   } as const;
-
-  const LEGACY_PROPERTY_KEYS: Record<string, string[]> = {
-    [PROPERTY_KEYS.MAIN_SPREADSHEET_ID]: ['FRONTEND_SHEET_ID'],
-    [PROPERTY_KEYS.ADMIN_SPREADSHEET_ID]: ['BACKEND_SHEET_ID'],
-    [PROPERTY_KEYS.EXCUSAL_REQUEST_FORM_ID]: ['EXCUSALS_FORM_ID'],
-    [PROPERTY_KEYS.CADET_DIRECTORY_FORM_ID]: ['DIRECTORY_FORM_ID'],
-    [PROPERTY_KEYS.EXCUSAL_MANAGEMENT_SPREADSHEET_ID]: ['EXCUSALS_MANAGEMENT_SHEET_ID'],
-    [PROPERTY_KEYS.MAIN_WORKBOOK_ALLOWED_EDITOR_EMAILS]: ['SHAMROCK_MENU_ALLOWED_EMAILS'],
-    [PROPERTY_KEYS.DISABLE_MAIN_WORKBOOK_FORMATTING]: ['DISABLE_FRONTEND_FORMATTING'],
-    [PROPERTY_KEYS.DISABLE_MAIN_WORKBOOK_COLUMN_WIDTHS]: ['DISABLE_FRONTEND_COLUMN_WIDTHS'],
-    [PROPERTY_KEYS.AUTOMATIONS_PAUSED]: ['FRONTEND_SYNC_PAUSED'],
-  };
 
   export const SCRIPT_PROPERTY_HELP = [
     { key: PROPERTY_KEYS.MAIN_SPREADSHEET_ID, description: 'Google Sheet ID for the main user-facing SHAMROCK workbook.' },
@@ -37,6 +27,8 @@ namespace Config {
     { key: PROPERTY_KEYS.DISABLE_MAIN_WORKBOOK_FORMATTING, description: 'Set to true to stop SHAMROCK from applying main workbook visual formatting.' },
     { key: PROPERTY_KEYS.DISABLE_MAIN_WORKBOOK_COLUMN_WIDTHS, description: 'Set to true to stop SHAMROCK from changing main workbook column widths.' },
     { key: PROPERTY_KEYS.AUTOMATIONS_PAUSED, description: 'Internal pause flag set by the SHAMROCK Pause automations menu action.' },
+    { key: PROPERTY_KEYS.V2_TRANSITION_DRAFT, description: 'Internal resumable draft for the v2 semester/year transition wizard.' },
+    { key: PROPERTY_KEYS.V2_BACKEND_ARCHIVES, description: 'Internal registry of temporary backend transition archives pending deletion.' },
   ];
 
   export const RESOURCE_NAMES = {
@@ -55,41 +47,17 @@ namespace Config {
   }
 
   export function getScriptProperty(key: string): string {
-    const props = scriptProperties();
-    const current = props.getProperty(key) || '';
-    const legacyKeys = LEGACY_PROPERTY_KEYS[key] || [];
-
-    if (current) {
-      legacyKeys.forEach((legacyKey) => props.deleteProperty(legacyKey));
-      return current;
-    }
-
-    for (const legacyKey of legacyKeys) {
-      const legacyValue = props.getProperty(legacyKey) || '';
-      if (legacyValue) {
-        props.setProperty(key, legacyValue);
-        props.deleteProperty(legacyKey);
-        Log.info(`Migrated script property ${legacyKey} -> ${key}`);
-        return legacyValue;
-      }
-      props.deleteProperty(legacyKey);
-    }
-
-    return '';
+    return scriptProperties().getProperty(key) || '';
   }
 
   export function setScriptProperty(key: string, value: string) {
     const props = scriptProperties();
     if (value) props.setProperty(key, value);
     else props.deleteProperty(key);
-
-    (LEGACY_PROPERTY_KEYS[key] || []).forEach((legacyKey) => props.deleteProperty(legacyKey));
   }
 
   export function deleteScriptProperty(key: string) {
-    const props = scriptProperties();
-    props.deleteProperty(key);
-    (LEGACY_PROPERTY_KEYS[key] || []).forEach((legacyKey) => props.deleteProperty(legacyKey));
+    scriptProperties().deleteProperty(key);
   }
 
   export function getBooleanScriptProperty(key: string): boolean {
@@ -107,9 +75,4 @@ namespace Config {
       .filter(Boolean);
   }
 
-  export function migrateLegacyScriptProperties() {
-    Object.keys(LEGACY_PROPERTY_KEYS).forEach((key) => {
-      getScriptProperty(key);
-    });
-  }
 }

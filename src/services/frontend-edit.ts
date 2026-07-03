@@ -3,6 +3,8 @@
 namespace FrontendEditService {
   type AllowedField =
     | 'as_year'
+    | 'rank'
+    | 'role'
     | 'flight'
     | 'squadron'
     | 'university'
@@ -20,6 +22,8 @@ namespace FrontendEditService {
 
   const ALLOWED_FIELDS: AllowedField[] = [
     'as_year',
+    'rank',
+    'role',
     'flight',
     'squadron',
     'university',

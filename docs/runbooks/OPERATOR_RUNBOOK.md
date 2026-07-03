@@ -23,6 +23,7 @@ Each environment consists of:
 
 IDs and resource references:
 - Store environment-specific IDs in a configuration mechanism designed not to leak secrets.
+- Use the current v2 Script Property names shown by the SHAMROCK menu. Retired property names are not migrated automatically.
 - Public docs must never include raw IDs.
 
 ## 3. Setup And Repair
@@ -78,6 +79,7 @@ Post-deploy validation checklist:
 ### 5.1 Directory maintenance
 - Directory source of truth is maintained in the backend.
 - Frontend Directory is a mirror.
+- Cadet rank and cadet leadership role are maintained on Directory. Leadership is rebuilt from active Directory rows with a role, while non-cadet/cadre/manual Leadership rows are preserved.
 - Prefer menu-driven sync/repair actions over ad hoc edits in the frontend.
 
 ### 5.2 Event maintenance
@@ -99,6 +101,30 @@ Post-deploy validation checklist:
 ### 5.5 Audit review
 - Review Audit Backend after setup, repair, and bulk operator actions.
 - Matching `started` and terminal rows with the same `run_id` indicate a menu action completed, failed, or was cancelled.
+
+### 5.6 Semester and academic-year transition
+Use the backend/admin workbook SHAMROCK menu:
+
+- `Transfer to new semester (v2)` when cadet AS years and graduation removal should not run.
+- `Transfer to new academic year (v2)` when cadets should advance AS years and graduating/commissioning years should roll off unless explicitly overridden.
+
+Before starting:
+- Confirm the backend Directory has current rank, role, AS year, flight, squadron, email, and phone data.
+- Prepare dropped cadets as emails or `Last, First` identifiers.
+- Prepare non-standard AS-year overrides as `identifier=AS500` or similar.
+- Prepare leadership changes as `identifier=Role|Rank`.
+- Know the Sunday date for the first generated training week and the weekly Mando PT, LLAB, and POC Third Hour times.
+
+During the wizard:
+- The draft is saved after each prompt. Cancelling before final confirmation does not archive or rewrite workbook data.
+- The final confirmation is the destructive boundary. After that point, the workflow archives current sheets, updates roster/events, clears current attendance/excusal logs and form responses, rebuilds forms, and reinstalls triggers.
+
+After completion:
+- Confirm hidden frontend archives exist for Leadership, Directory, and Attendance using the prior term label.
+- Confirm hidden backend rollback archives exist. They are automatically eligible for deletion after seven days.
+- Confirm Events Backend has the new term and the expected training-week sequence.
+- Confirm Attendance and Excusals forms list only current-term events.
+- Run one controlled attendance/excusal validation if this is a production transition.
 
 ## 6. Troubleshooting
 ### 6.1 Menus not appearing
@@ -124,6 +150,7 @@ Operator checks:
 Likely causes:
 - Data Legend ranges missing or renamed.
 - Named ranges missing.
+- Dropdown option validation and conditional formatting can be applied by SHAMROCK, but per-option dropdown chip colors/display styling may require manual/template maintenance because SHAMROCK does not have a supported Apps Script field for those visual details.
 
 Operator checks:
 - Re-run setup to recreate validations.
@@ -143,6 +170,7 @@ General rollback principles:
 - Prefer disabling triggers and reverting derived views over deleting data.
 - Avoid deleting backend logs.
 - If an operation is destructive, preserve or export the affected backend state first unless the action is explicitly designed as a permanent cleanup.
+- v2 transition backend rollback archives are temporary by design and are deleted after the seven-day rollback window by the archive cleanup trigger.
 
 Emergency actions:
 - Disable installable triggers.

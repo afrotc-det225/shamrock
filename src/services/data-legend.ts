@@ -10,6 +10,7 @@ namespace DataLegendService {
   const legendSchema = Schemas.BACKEND_TABS.find((t) => t.name === 'Data Legend');
   const LEGEND_HEADERS = legendSchema?.machineHeaders || [
     'as_year_options',
+    'rank_options',
     'flight_options',
     'squadron_options',
     'university_options',
@@ -22,6 +23,7 @@ namespace DataLegendService {
   ];
   const LEGEND_DISPLAY_HEADERS = legendSchema?.displayHeaders || [
     'AS Year Options',
+    'Rank Options',
     'Flight Options',
     'Squadron Options',
     'University Options',
@@ -41,6 +43,7 @@ namespace DataLegendService {
     }
     const valueMap: Record<string, string[]> = {
       as_year_options: A.AS_YEARS || [],
+      rank_options: A.CADET_RANKS || [],
       flight_options: A.FLIGHTS || [],
       squadron_options: A.SQUADRONS || [],
       university_options: A.UNIVERSITIES || [],
@@ -54,6 +57,7 @@ namespace DataLegendService {
 
     const rangeMap: Record<string, string> = {
       as_year_options: 'AS_YEARS',
+      rank_options: 'CADET_RANKS',
       flight_options: 'FLIGHTS',
       squadron_options: 'SQUADRONS',
       university_options: 'UNIVERSITIES',

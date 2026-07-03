@@ -28,6 +28,7 @@ namespace FrontendFormattingService {
 
     const mapping: Record<string, string> = {
       as_year_options: 'AS_YEARS',
+      rank_options: 'CADET_RANKS',
       flight_options: 'FLIGHTS',
       squadron_options: 'SQUADRONS',
       university_options: 'UNIVERSITIES',
@@ -87,6 +88,7 @@ namespace FrontendFormattingService {
 
       const map: Record<string, string> = {
         as_year: 'AS_YEARS',
+        rank: 'CADET_RANKS',
         flight: 'FLIGHTS',
         squadron: 'SQUADRONS',
         university: 'UNIVERSITIES',

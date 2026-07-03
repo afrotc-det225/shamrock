@@ -429,26 +429,38 @@ namespace FormService {
     removeItemsByTitle(form, ['University Email']);
 
     seedIfEmpty(form, (f) => {
-      f.addTextItem().setTitle('Last Name').setRequired(true);
-      f.addTextItem().setTitle('First Name').setRequired(true);
-      f.addListItem().setTitle('AS Year').setChoiceValues(Arrays.AS_YEARS).setRequired(true);
-      f.addTextItem().setTitle('Class Year (YYYY)').setRequired(true);
-      f.addListItem().setTitle('Flight').setChoiceValues(Arrays.FLIGHTS);
-      f.addListItem().setTitle('Squadron').setChoiceValues(Arrays.SQUADRONS);
-      f.addListItem().setTitle('University').setChoiceValues(Arrays.UNIVERSITIES).setRequired(true);
-      f.addTextItem().setTitle('Phone (+5 (555) 555-5555)').setRequired(true);
-      f.addListItem().setTitle('Dorm').setChoiceValues(Arrays.DORMS);
-      f.addTextItem().setTitle('Home Town').setRequired(true);
-      f.addListItem().setTitle('Home State').setChoiceValues(Arrays.HOME_STATES).setRequired(true);
-      f.addDateItem().setTitle('DOB (MM/DD/YYYY)').setRequired(true);
-      f.addListItem().setTitle('CIP Broad Area').setChoiceValues(Arrays.CIP_BROAD_AREAS);
-      f.addTextItem().setTitle('CIP Code (XX.XXXX)');
-      f.addListItem().setTitle('Desired/Assigned AFSC').setChoiceValues(Arrays.AFSC_OPTIONS);
-      f.addListItem().setTitle('Flight Path Status').setChoiceValues(Arrays.FLIGHT_PATH_STATUSES);
-      f.addTextItem().setTitle('Photo Link (URL)');
-      f.addParagraphTextItem().setTitle('Notes');
+      buildDirectoryForm(f);
     }, 'Directory Form');
 
+    applyDirectoryRegexValidations(form);
+  }
+
+  function buildDirectoryForm(f: GoogleAppsScript.Forms.Form) {
+    f.addTextItem().setTitle('Last Name').setRequired(true);
+    f.addTextItem().setTitle('First Name').setRequired(true);
+    f.addListItem().setTitle('Rank').setChoiceValues(Arrays.CADET_RANKS);
+    f.addTextItem().setTitle('Role');
+    f.addListItem().setTitle('AS Year').setChoiceValues(Arrays.AS_YEARS).setRequired(true);
+    f.addTextItem().setTitle('Class Year (YYYY)').setRequired(true);
+    f.addListItem().setTitle('Flight').setChoiceValues(Arrays.FLIGHTS);
+    f.addListItem().setTitle('Squadron').setChoiceValues(Arrays.SQUADRONS);
+    f.addListItem().setTitle('University').setChoiceValues(Arrays.UNIVERSITIES).setRequired(true);
+    f.addTextItem().setTitle('Phone (+1 (555) 555-5555)').setRequired(true);
+    f.addListItem().setTitle('Dorm').setChoiceValues(Arrays.DORMS);
+    f.addTextItem().setTitle('Home Town').setRequired(true);
+    f.addListItem().setTitle('Home State').setChoiceValues(Arrays.HOME_STATES).setRequired(true);
+    f.addDateItem().setTitle('DOB (MM/DD/YYYY)').setRequired(true);
+    f.addListItem().setTitle('CIP Broad Area').setChoiceValues(Arrays.CIP_BROAD_AREAS);
+    f.addTextItem().setTitle('CIP Code (XX.XXXX)');
+    f.addListItem().setTitle('Desired/Assigned AFSC').setChoiceValues(Arrays.AFSC_OPTIONS);
+    f.addListItem().setTitle('Flight Path Status').setChoiceValues(Arrays.FLIGHT_PATH_STATUSES);
+    f.addTextItem().setTitle('Photo Link (URL)');
+    f.addParagraphTextItem().setTitle('Notes');
+  }
+
+  export function rebuildDirectoryForm(form: GoogleAppsScript.Forms.Form) {
+    clearItems(form);
+    buildDirectoryForm(form);
     applyDirectoryRegexValidations(form);
   }
 

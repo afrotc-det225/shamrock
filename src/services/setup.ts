@@ -1713,6 +1713,14 @@ namespace SetupService {
     ScriptApp.newTrigger(handlerName).timeBased().everyMinutes(intervalMinutes).create();
   }
 
+  function ensureDailyTrigger(handlerName: string) {
+    const triggers = ScriptApp.getProjectTriggers();
+    const exists = triggers.some((t) => t.getHandlerFunction() === handlerName && t.getTriggerSource() === ScriptApp.TriggerSource.CLOCK);
+    if (exists) return;
+    Log.info(`Creating daily trigger handler=${handlerName}`);
+    ScriptApp.newTrigger(handlerName).timeBased().everyDays(1).atHour(3).create();
+  }
+
   // Deletes all installable triggers, then reinstalls the canonical SHAMROCK triggers for forms and spreadsheets.
   export function reinstallAllTriggers() {
     Log.info('Reinstalling all installable triggers');
@@ -1739,6 +1747,7 @@ namespace SetupService {
 
     // Time-based trigger: reconcile frontend Directory edits every 10 minutes (handles edits by unauthorized users).
     ensurePeriodicTrigger('reconcilePendingDirectoryEdits', 10);
+    ensureDailyTrigger('cleanupExpiredTransitionArchivesV2');
 
     // Recreate form submit triggers for attendance/excusal/directory.
     const attendanceFormId = Config.getScriptProperty(Config.PROPERTY_KEYS.ATTENDANCE_FORM_ID);
@@ -2028,11 +2037,13 @@ namespace SetupService {
   }
 
   export function syncDirectoryBackendToFrontend() {
+    DirectoryService.syncLeadershipBackendFromDirectory();
     syncDirectoryFrontend();
     applyFrontendFormatting();
   }
 
   export function syncLeadershipBackendToFrontend() {
+    DirectoryService.syncLeadershipBackendFromDirectory();
     SyncService.syncByBackendSheetName('Leadership Backend');
     applyFrontendFormatting();
   }
@@ -2058,6 +2069,7 @@ namespace SetupService {
   }
 
   export function refreshDirectoryArtifacts(opts?: { rebuildAttendanceMatrix?: boolean; rebuildAttendanceForm?: boolean }) {
+    DirectoryService.syncLeadershipBackendFromDirectory();
     syncDirectoryFrontend();
     if (opts?.rebuildAttendanceMatrix) rebuildAttendanceMatrix();
     if (opts?.rebuildAttendanceForm) rebuildAttendanceForm();
@@ -2077,9 +2089,6 @@ namespace SetupService {
   export function refreshAttendanceForm() {
     const backendId = Config.getBackendId();
     ensureForm('attendance', Config.RESOURCE_NAMES.ATTENDANCE_FORM, Config.PROPERTY_KEYS.ATTENDANCE_FORM_ID, backendId);
-    slimAttendanceResponseSheet();
-    pruneAttendanceResponseColumnsExplicit();
-    normalizeAttendanceBackendHeaders();
     applyAttendanceBackendFormatting();
   }
 
@@ -2091,7 +2100,6 @@ namespace SetupService {
     const ensured = ensureForm('excusals', Config.RESOURCE_NAMES.EXCUSALS_FORM, Config.PROPERTY_KEYS.EXCUSAL_REQUEST_FORM_ID, backendId, { syncQuestions: false });
     const form = FormApp.openById(ensured.id);
     FormService.refreshExcusalsFormEventChoices(form);
-    safeDeduplicateExcusalsResponseColumns();
   }
 
   export function rebuildAttendanceForm() {
@@ -2107,10 +2115,20 @@ namespace SetupService {
     FormService.rebuildAttendanceForm(form);
     // After rebuilding questions, refresh event list and clean up response artifacts.
     FormService.refreshAttendanceFormEventChoices(form);
-    slimAttendanceResponseSheet();
-    pruneAttendanceResponseColumnsExplicit();
-    normalizeAttendanceBackendHeaders();
     applyAttendanceBackendFormatting();
+  }
+
+  export function rebuildDirectoryForm() {
+    const backendId = Config.getBackendId();
+    const ensured = ensureForm(
+      'directory',
+      Config.RESOURCE_NAMES.DIRECTORY_FORM,
+      Config.PROPERTY_KEYS.CADET_DIRECTORY_FORM_ID,
+      backendId,
+      { syncQuestions: false },
+    );
+    const form = FormApp.openById(ensured.id);
+    FormService.rebuildDirectoryForm(form);
   }
 
   export function refreshAttendanceFormEventChoices() {
@@ -2151,14 +2169,6 @@ namespace SetupService {
     FormService.refreshExcusalsFormEventChoices(form);
   }
 
-  export function pruneAttendanceResponseColumns() {
-    pruneAttendanceResponseColumnsExplicit();
-  }
-
-  export function pruneExcusalsResponseColumns() {
-    pruneExcusalsResponseColumnsExplicit();
-  }
-
   export function refreshEventsArtifacts() {
     SyncService.syncByBackendSheetName('Events Backend');
     rebuildAttendanceMatrix();
@@ -2168,12 +2178,15 @@ namespace SetupService {
 
   export function showMenuHelp() {
     const lines = [
-      'Sync Directory/Leadership/Data Legend: copies backend sheet -> frontend twin (frontend is overwritten for those sheets).',
-      'Sync ALL mapped: runs all backend -> frontend copies (Directory, Leadership, Data Legend).',
+      'Sync Directory: derives cadet Leadership rows from Directory, then syncs Directory to frontend.',
+      'Sync Leadership: preserves cadre/manual Leadership rows, derives cadet rows from Directory roles, then syncs to frontend.',
+      'Sync Data Legend: copies backend Data Legend to frontend.',
+      'Sync ALL mapped: runs Directory/Leadership/Data Legend syncs.',
       'Refresh Events + Attendance: sync events backend -> frontend artifacts and rebuild attendance matrix/form choices.',
       'Rebuild Attendance Matrix: replay attendance backend log -> frontend matrix.',
       'Rebuild Attendance Form: rebuild questions + event choices from backend events.',
       'CSV exports: create Drive CSV from the specified backend table. Imports overwrite the target backend sheet (headers must match).',
+      'Transition v2: archive current sheets, update roster/events, clear current-term logs/responses, rebuild forms, and keep backend rollback archives for seven days.',
       'Protections/formatting items only affect frontend presentation; data comes from backend tables.',
     ];
 
@@ -2239,7 +2252,6 @@ namespace SetupService {
 
   export function runSetup(): Types.SetupSummary {
     Log.info('Starting setup (ensure-exists)');
-    Config.migrateLegacyScriptProperties();
     const spreadsheetResults: Types.EnsureSpreadsheetResult[] = [];
     const sheetResults: Types.EnsureSheetResult[] = [];
     const formResults: Types.EnsureFormResult[] = [];
@@ -2285,10 +2297,6 @@ namespace SetupService {
       { formId: excusalForm.id, desiredSheetName: Config.RESOURCE_NAMES.EXCUSALS_FORM_SHEET },
       { formId: directoryForm.id, desiredSheetName: Config.RESOURCE_NAMES.DIRECTORY_FORM_SHEET },
     ]);
-    // Slim attendance response sheet to drop stale/duplicate columns left over from form rebuilds (keeps any columns that still have data).
-    slimAttendanceResponseSheet();
-    pruneAttendanceResponseColumnsExplicit();
-    normalizeAttendanceBackendHeaders();
     applyAttendanceBackendFormatting();
 
     // Refresh event choices for forms (attendance + excusals) after ensuring sheets/forms.
@@ -2305,7 +2313,9 @@ namespace SetupService {
 
     // Protect user-facing directory and sync it from backend.
     ProtectionService.applyFrontendProtections(frontend.id);
+    DirectoryService.syncLeadershipBackendFromDirectory();
     DirectoryService.syncDirectoryFrontend();
+    SyncService.syncByBackendSheetName('Leadership Backend');
 
     // Apply frontend validations/banding after syncs.
     if (!isFrontendFormattingDisabled()) {
@@ -2339,6 +2349,7 @@ namespace SetupService {
 
     // Time-based trigger: reconcile frontend Directory edits every 10 minutes (handles edits by unauthorized users).
     ensurePeriodicTrigger('reconcilePendingDirectoryEdits', 10);
+    ensureDailyTrigger('cleanupExpiredTransitionArchivesV2');
 
     Log.info(`Setup finished: spreadsheets=${spreadsheetResults.length}, sheets=${sheetResults.length}, forms=${formResults.length}`);
 
