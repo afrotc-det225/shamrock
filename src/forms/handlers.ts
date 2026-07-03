@@ -327,46 +327,47 @@ namespace FormHandlers {
 		let lastName = '';
 		let firstName = '';
 		let reason = '';
-		let requestedAttendanceType = 'E'; // default to generic excused
+		let requestedOutcome = 'E'; // default to generic excused
 		const itemResponses = e.response?.getItemResponses() || [];
-		
+
 		for (const itemResponse of itemResponses) {
 			const title = itemResponse.getItem().getTitle();
 			const response = itemResponse.getResponse();
-			
-				// Match actual event selection items (checkboxes titled "Select Event(s) (…)")
-				// but NOT the category navigation item ("Select Event Type (or Done to continue)")
-				const titleLower = title.toLowerCase();
-				const isEventSelection = title === 'Event' || (titleLower.includes('select event(s)'));
-				const IGNORED_EVENT_VALUES = new Set(['(no events)', 'Done selecting events']);
-				if (isEventSelection) {
-					if (Array.isArray(response)) {
-						response
-							.map((e) => String(e || '').trim())
-							.filter(Boolean)
-							.forEach((eventName) => {
-								if (!events.includes(eventName) && !IGNORED_EVENT_VALUES.has(eventName)) events.push(eventName);
-							});
-					} else {
-						const eventRaw = String(response || '').trim();
-						eventRaw
-							.split(',')
-							.map((ev) => ev.trim())
-							.filter(Boolean)
-							.forEach((eventName) => {
-								if (!events.includes(eventName) && !IGNORED_EVENT_VALUES.has(eventName)) events.push(eventName);
-							});
-					}
-				} else if (title === 'Last Name') {
+
+			// Match actual event selection items (checkboxes titled "Select Event(s) (…)")
+			// but NOT the category navigation item ("Select Event Type (or Done to continue)")
+			const titleLower = title.toLowerCase();
+			const isEventSelection = title === 'Event' || (titleLower.includes('select event(s)'));
+			const IGNORED_EVENT_VALUES = new Set(['(no events)', 'Done selecting events']);
+			if (isEventSelection) {
+				if (Array.isArray(response)) {
+					response
+						.map((e) => String(e || '').trim())
+						.filter(Boolean)
+						.forEach((eventName) => {
+							if (!events.includes(eventName) && !IGNORED_EVENT_VALUES.has(eventName)) events.push(eventName);
+						});
+				} else {
+					const eventRaw = String(response || '').trim();
+					eventRaw
+						.split(',')
+						.map((ev) => ev.trim())
+						.filter(Boolean)
+						.forEach((eventName) => {
+							if (!events.includes(eventName) && !IGNORED_EVENT_VALUES.has(eventName)) events.push(eventName);
+						});
+				}
+			} else if (title === 'Last Name') {
 				lastName = String(response || '').trim();
 			} else if (title === 'First Name') {
 				firstName = String(response || '').trim();
 			} else if (title === 'Reason') {
 				reason = String(response || '').trim();
-			} else if (title === 'Requested Attendance Type') {
-				requestedAttendanceType = String(response || 'E').trim();
+			} else if (title === 'Requested Outcome') {
+				requestedOutcome = String(response || 'E').trim().toUpperCase();
 			}
 		}
+		if (!Arrays.EXCUSAL_REQUESTED_OUTCOMES.includes(requestedOutcome)) requestedOutcome = 'E';
 
 		if (events.length === 0) {
 			Log.warn(`Excusal submission from ${email} has no events; skipping backend append.`);
@@ -387,15 +388,20 @@ namespace FormHandlers {
 				first_name: cadet?.first_name || firstName,
 				flight: cadet?.flight || '',
 				squadron: cadet?.squadron || '',
-				status: 'Pending',
+				status: 'Submitted',
 				decision: '',
 				decided_by: '',
 				decided_at: '',
-				requested_attendance_type: requestedAttendanceType,
-				attendance_effect: '',
+				requested_outcome: requestedOutcome,
+				attendance_effect: 'R',
+				prior_attendance_code: ExcusalsService.getCurrentAttendanceCode(
+					eventName,
+					String(cadet?.last_name || lastName),
+					String(cadet?.first_name || firstName),
+				),
 				submitted_at: submittedAt,
 				last_updated_at: submittedAt,
-				notes: reason,
+				reason,
 			};
 		});
 
@@ -405,11 +411,10 @@ namespace FormHandlers {
 		rows.forEach((row) => {
 			ExcusalsService.notifySquadronCommanderOfNewExcusal(row);
 			ExcusalsService.syncExcusalToManagementPanel(row);
-			// Update attendance matrix: empty -> ESR/MRSR/ER, unexcused -> UR
 			ExcusalsService.updateAttendanceOnExcusalSubmission(row);
 		});
 
-		Log.info(`Excusal submission processed: ${email} requesting excusal for ${events.length} event(s) as ${requestedAttendanceType}`);
+		Log.info(`Excusal submission processed: ${email} requesting ${requestedOutcome} for ${events.length} event(s)`);
 
 		// Deliberately omit email receipt for excusal submissions per policy.
 	}

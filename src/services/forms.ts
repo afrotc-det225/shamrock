@@ -799,10 +799,10 @@ namespace FormService {
     const otherEventList = addCheckboxItemSafe(workingForm, 'Select Event(s) (Other)', []);
     workingForm = otherEventList.form;
 
-    // Section 4: Attendance type and reason (shared final section)
+    // Section 4: Requested outcome and reason (shared final section)
     const detailsPage = addPageBreakItemSafe(workingForm, 'Excusal Details', FormApp.PageNavigationType.SUBMIT);
     workingForm = detailsPage.form;
-    const attendanceTypeItem = addListItemSafe(workingForm, 'Requested Attendance Type', ['E', 'ES', 'MU', 'MRS'], true);
+    const attendanceTypeItem = addListItemSafe(workingForm, 'Requested Outcome', Arrays.EXCUSAL_REQUESTED_OUTCOMES, true);
     workingForm = attendanceTypeItem.form;
     const reasonItem = addTextItemSafe(workingForm, 'Reason', true);
     workingForm = reasonItem.form;

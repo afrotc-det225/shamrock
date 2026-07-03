@@ -117,6 +117,9 @@ namespace Schemas {
         'home_state_options',
         'flight_path_status_options',
         'attendance_code_options',
+        'excusal_decision_options',
+        'excusal_status_options',
+        'excusal_requested_outcome_options',
       ],
       displayHeaders: [
         'AS Year Options',
@@ -131,6 +134,9 @@ namespace Schemas {
         'Home State Options',
         'Flight Path Status Options',
         'Attendance Code Options',
+        'Excusal Decision Options',
+        'Excusal Status Options',
+        'Excusal Requested Outcome Options',
       ],
     },
   ];
@@ -263,11 +269,12 @@ namespace Schemas {
         'decision',
         'decided_by',
         'decided_at',
-        'requested_attendance_type',
+        'requested_outcome',
         'attendance_effect',
+        'prior_attendance_code',
         'submitted_at',
         'last_updated_at',
-        'notes',
+        'reason',
       ],
       displayHeaders: [
         'Request ID',
@@ -280,10 +287,13 @@ namespace Schemas {
         'Status',
         'Decision',
         'Decided By',
-        'Decided At',        'Requested Attendance Type',        'Attendance Effect',
+        'Decided At',
+        'Requested Outcome',
+        'Attendance Effect',
+        'Prior Attendance Code',
         'Submitted At',
         'Last Updated At',
-        'Notes',
+        'Reason',
       ],
     },
     {
@@ -391,6 +401,9 @@ namespace Schemas {
         'home_state_options',
         'flight_path_status_options',
         'attendance_code_options',
+        'excusal_decision_options',
+        'excusal_status_options',
+        'excusal_requested_outcome_options',
       ],
       displayHeaders: [
         'AS Year Options',
@@ -405,14 +418,17 @@ namespace Schemas {
         'Home State Options',
         'Flight Path Status Options',
         'Attendance Code Options',
+        'Excusal Decision Options',
+        'Excusal Status Options',
+        'Excusal Requested Outcome Options',
       ],
     },
   ];
 
   export const EXCUSALS_MANAGEMENT_SCHEMA: Types.TabSchema = {
     name: 'Excusals Management',
-    machineHeaders: ['timestamp', 'decision', 'event', 'reason', 'requested_attendance_type', 'email', 'last_name', 'first_name', 'flight', 'request_id'],
-    displayHeaders: ['Timestamp', 'Decision', 'Event', 'Reason', 'Requested Type', 'Email', 'Last Name', 'First Name', 'Flight', 'Request ID'],
+    machineHeaders: ['timestamp', 'decision', 'event', 'reason', 'requested_outcome', 'email', 'last_name', 'first_name', 'flight', 'request_id'],
+    displayHeaders: ['Timestamp', 'Decision', 'Event', 'Reason', 'Requested Outcome', 'Email', 'Last Name', 'First Name', 'Flight', 'Request ID'],
   };
 
   export function getTabSchema(name: string): Types.TabSchema | undefined {

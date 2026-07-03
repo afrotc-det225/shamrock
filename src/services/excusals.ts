@@ -1,6 +1,60 @@
 // Excusals processing service: handle notifications, decisions, and management panel.
 
 namespace ExcusalsService {
+  const DECISION_VALUES = ['Approved', 'Denied', 'Withdrawn', 'Superseded'];
+  const TERMINAL_RESTORE_DECISIONS = new Set(['Withdrawn', 'Superseded']);
+  const REQUESTED_OUTCOMES = new Set(['P', 'T', 'E', 'ES', 'MED']);
+  const ATTENDANCE_CODES = new Set(['P', 'T', 'A', 'R', 'D', 'U', 'E', 'ES', 'MED', 'N/A', '']);
+
+  function normalizeRequestedOutcome(raw: any): string {
+    const value = String(raw || '').trim().toUpperCase();
+    return REQUESTED_OUTCOMES.has(value) ? value : 'E';
+  }
+
+  function normalizeAttendanceCode(raw: any): string {
+    const value = String(raw || '').trim().toUpperCase();
+    return ATTENDANCE_CODES.has(value) ? value : '';
+  }
+
+  function eventHasStarted(eventName: string): boolean {
+    const backendId = Config.getBackendId();
+    if (!backendId || !eventName) return true;
+    const eventsSheet = SheetUtils.getSheet(backendId, 'Events Backend');
+    if (!eventsSheet) return true;
+    const table = SheetUtils.readTable(eventsSheet);
+    const target = eventName.trim();
+    const match = table.rows.find((row) => {
+      const name = String(row['display_name'] || row['attendance_column_label'] || row['event_id'] || '').trim();
+      return name === target;
+    });
+    if (!match || !match['start_datetime']) return true;
+    const start = new Date(match['start_datetime']);
+    if (Number.isNaN(start.getTime())) return true;
+    return start.getTime() <= Date.now();
+  }
+
+  function effectForDecision(opts: {
+    decision: string;
+    requestedOutcome: string;
+    priorAttendanceCode: string;
+    currentAttendanceCode?: string;
+    eventName: string;
+  }): string {
+    const prior = normalizeAttendanceCode(opts.priorAttendanceCode);
+    if (opts.decision === 'Approved') return normalizeRequestedOutcome(opts.requestedOutcome);
+    if (opts.decision === 'Denied') {
+      const current = normalizeAttendanceCode(opts.currentAttendanceCode);
+      if (current === 'P' || current === 'T') return current;
+      if (prior === 'P' || prior === 'T') return prior;
+      if (prior === 'A' || prior === 'U') return 'U';
+      return eventHasStarted(opts.eventName) ? 'U' : 'D';
+    }
+    if (TERMINAL_RESTORE_DECISIONS.has(opts.decision)) {
+      return prior === 'R' || prior === 'D' ? '' : prior;
+    }
+    return 'R';
+  }
+
   function currentUserEmail(): string {
     try {
       const active = Session.getActiveUser().getEmail();
@@ -31,7 +85,7 @@ namespace ExcusalsService {
     const firstName = String(excusalRow['first_name'] || '');
     const cadetEmail = String(excusalRow['email'] || '');
     const event = String(excusalRow['event'] || '');
-    const reason = String(excusalRow['notes'] || '');
+    const reason = String(excusalRow['reason'] || '');
     const submittedAt = excusalRow['submitted_at'] ? new Date(excusalRow['submitted_at']) : new Date();
 
     // Determine time of day
@@ -74,8 +128,9 @@ SHAMROCK Automations`;
 
   /**
    * Update attendance matrix when excusal is submitted.
-   * Empty cell -> ER (Excusal Requested)
-   * Unexcused (U) -> UR (Unexcused Report Submitted)
+   * Any request in review is shown as R. The original value is stored on the
+   * excusal row as prior_attendance_code and used when the request is denied,
+   * withdrawn, or superseded.
    */
   export function updateAttendanceOnExcusalSubmission(excusalRow: Record<string, any>) {
     const backendId = Config.getBackendId();
@@ -84,20 +139,14 @@ SHAMROCK Automations`;
     const lastName = String(excusalRow['last_name'] || '').trim();
     const firstName = String(excusalRow['first_name'] || '').trim();
     const eventName = String(excusalRow['event'] || '').trim();
-    const requestedType = String(excusalRow['requested_attendance_type'] || 'E').trim();
 
     if (!lastName || !firstName || !eventName) return;
-
-    // Determine current matrix value to pick appropriate pending code
-    const current = lookupMatrixValue(eventName, lastName, firstName);
-    // If currently unexcused, mark as UR; otherwise use requested type + R (e.g., ESR, MRSR, ER)
-    const code = current === 'U' ? 'UR' : `${requestedType}R`;
 
     const logEntry = {
       submission_id: `excusal-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
       submitted_at: new Date(),
       event: eventName,
-      attendance_type: code,
+      attendance_type: 'R',
       email: excusalRow['email'] || '',
       name: 'Excusal Request',
       flight: excusalRow['flight'] || '',
@@ -237,7 +286,7 @@ SHAMROCK Automations`;
     sheet.setColumnWidth(2, 100);  // decision
     sheet.setColumnWidth(3, 150);  // event
     sheet.setColumnWidth(4, 220);  // reason
-    sheet.setColumnWidth(5, 100);  // requested_attendance_type
+    sheet.setColumnWidth(5, 100);  // requested_outcome
     sheet.setColumnWidth(6, 150);  // email
     sheet.setColumnWidth(7, 100);  // last_name
     sheet.setColumnWidth(8, 100);  // first_name
@@ -249,8 +298,8 @@ SHAMROCK Automations`;
 
     // Add data validation for Decision column (col 2, starting at row 3 since row 2 is frozen)
     const decisionRule = SpreadsheetApp.newDataValidation()
-      .requireValueInList(['Approved', 'Denied'])
-      .setHelpText('Select Approved or Denied')
+      .requireValueInList(DECISION_VALUES)
+      .setHelpText('Select Approved, Denied, Withdrawn, or Superseded')
       .build();
     sheet.getRange('B3:B').setDataValidation(decisionRule);
 
@@ -305,8 +354,8 @@ SHAMROCK Automations`;
         excusalRow['submitted_at'] || '',
         '', // Decision column starts empty
         excusalRow['event'] || '',
-        excusalRow['reason'] || excusalRow['notes'] || '',
-        excusalRow['requested_attendance_type'] || '',
+        excusalRow['reason'] || '',
+        excusalRow['requested_outcome'] || '',
         excusalRow['email'] || '',
         excusalRow['last_name'] || '',
         excusalRow['first_name'] || '',
@@ -325,6 +374,31 @@ SHAMROCK Automations`;
       Log.info(`Synced excusal ${excusalRow['request_id']} to ${squadron} management sheet`);
     } catch (err) {
       Log.warn(`Failed to sync excusal to management panel: ${err}`);
+    }
+  }
+
+  function mirrorDecisionToManagementPanel(requestId: string, decision: string) {
+    const managementId = Config.getScriptProperty(Config.PROPERTY_KEYS.EXCUSAL_MANAGEMENT_SPREADSHEET_ID);
+    if (!managementId || !requestId) return;
+    try {
+      const ss = SpreadsheetApp.openById(managementId);
+      const headers = Schemas.EXCUSALS_MANAGEMENT_SCHEMA.machineHeaders || [];
+      const requestIdx = headers.indexOf('request_id');
+      const decisionIdx = headers.indexOf('decision');
+      if (requestIdx < 0 || decisionIdx < 0) return;
+
+      ss.getSheets().forEach((sheet) => {
+        const lastRow = sheet.getLastRow();
+        if (lastRow < 3) return;
+        const values = sheet.getRange(3, 1, lastRow - 2, headers.length).getValues();
+        for (let i = 0; i < values.length; i++) {
+          if (String(values[i][requestIdx] || '').trim() !== requestId) continue;
+          sheet.getRange(i + 3, decisionIdx + 1).setValue(decision);
+          return;
+        }
+      });
+    } catch (err) {
+      Log.warn(`Failed to mirror backend decision ${requestId} to management panel: ${err}`);
     }
   }
 
@@ -389,15 +463,15 @@ SHAMROCK Automations`;
   }
 
   /**
-   * Backpopulate requested_attendance_type from Excusals Backend into existing
+   * Backpopulate requested_outcome from Excusals Backend into existing
    * Management sheet rows. Also refreshes management sheet headers to match
    * the current schema (adds any new columns).
    */
   /**
-   * Fill empty requested_attendance_type cells in Excusals Backend by matching rows
+   * Fill empty requested_outcome cells in Excusals Backend by matching rows
    * to the Excusals Form Responses sheet (by email + submitted_at timestamp).
    */
-  function backfillBackendRequestedType(backendSheet: GoogleAppsScript.Spreadsheet.Sheet) {
+  function backfillBackendRequestedOutcome(backendSheet: GoogleAppsScript.Spreadsheet.Sheet) {
     let formSheet: GoogleAppsScript.Spreadsheet.Sheet;
     try {
       formSheet = Config.getBackendSheet(Config.RESOURCE_NAMES.EXCUSALS_FORM_SHEET);
@@ -413,24 +487,22 @@ SHAMROCK Automations`;
     const formHeaders = formSheet.getRange(1, 1, 1, formLastCol).getValues()[0].map((h) => String(h || '').trim());
     const formEmailIdx = formHeaders.findIndex((h) => h.toLowerCase().startsWith('email'));
     const formTsIdx = formHeaders.indexOf('Timestamp');
-    // Find the active "Requested Attendance Type" column (first occurrence)
-    const formReqTypeIdx = formHeaders.indexOf('Requested Attendance Type');
+    const formReqTypeIdx = formHeaders.indexOf('Requested Outcome');
 
     if (formEmailIdx < 0 || formTsIdx < 0 || formReqTypeIdx < 0) {
-      Log.warn('Excusals Form Responses missing required columns for backfill');
+      Log.warn('Excusals Form Responses missing required v2 columns for backfill');
       return;
     }
 
-    // Build lookup: email|timestamp → requested_attendance_type from form responses
+    // Build lookup: email|timestamp -> requested_outcome from form responses.
     const formData = formSheet.getRange(2, 1, formLastRow - 1, formLastCol).getValues();
     const typeByKey = new Map<string, string>();
-    const ATT_TYPES = new Set(['E', 'ES', 'MU', 'MRS']);
     for (const row of formData) {
       const email = String(row[formEmailIdx] || '').trim().toLowerCase();
       const ts = String(row[formTsIdx] || '').trim();
       let reqType = String(row[formReqTypeIdx] || '').trim();
       if (!email || !ts) continue;
-      if (!reqType || !ATT_TYPES.has(reqType)) continue;
+      reqType = normalizeRequestedOutcome(reqType);
       // Normalize timestamp to ISO for matching
       let isoTs = ts;
       try { isoTs = new Date(ts).toISOString(); } catch {}
@@ -438,15 +510,15 @@ SHAMROCK Automations`;
     }
 
     if (typeByKey.size === 0) {
-      Log.info('No form response attendance types to backfill');
+      Log.info('No form response requested outcomes to backfill');
       return;
     }
 
-    // Read backend data and fill empty requested_attendance_type cells
+    // Read backend data and fill empty requested_outcome cells.
     const backendHeaders = backendSheet.getRange(1, 1, 1, backendSheet.getLastColumn()).getValues()[0].map((h) => String(h || '').trim());
     const bEmailIdx = backendHeaders.indexOf('email');
     const bTsIdx = backendHeaders.indexOf('submitted_at');
-    const bReqTypeIdx = backendHeaders.indexOf('requested_attendance_type');
+    const bReqTypeIdx = backendHeaders.indexOf('requested_outcome');
     if (bEmailIdx < 0 || bTsIdx < 0 || bReqTypeIdx < 0) return;
 
     const bLastRow = backendSheet.getLastRow();
@@ -472,20 +544,20 @@ SHAMROCK Automations`;
 
     if (filled > 0) {
       backendSheet.getRange(3, 1, bData.length, backendHeaders.length).setValues(bData);
-      Log.info(`backfillBackendRequestedType: filled ${filled} rows in Excusals Backend`);
+      Log.info(`backfillBackendRequestedOutcome: filled ${filled} rows in Excusals Backend`);
     } else {
-      Log.info('backfillBackendRequestedType: no empty rows matched form responses');
+      Log.info('backfillBackendRequestedOutcome: no empty rows matched form responses');
     }
   }
 
-  export function backpopulateManagementRequestedType() {
+  export function backpopulateManagementRequestedOutcome() {
     const managementId = Config.getScriptProperty(Config.PROPERTY_KEYS.EXCUSAL_MANAGEMENT_SPREADSHEET_ID);
     if (!managementId) {
       Log.warn('Excusals management spreadsheet not found; cannot backpopulate');
       return { updated: 0 };
     }
 
-    // Ensure Excusals Backend has all schema columns (e.g. requested_attendance_type)
+    // Ensure Excusals Backend has all schema columns.
     const backendSheet = Config.getBackendSheet('Excusals Backend');
     if (!backendSheet) {
       Log.warn('Excusals Backend not found; cannot backpopulate');
@@ -493,22 +565,22 @@ SHAMROCK Automations`;
     }
     SheetUtils.ensureSchemaColumns(backendSheet);
 
-    // Backfill requested_attendance_type in the backend from Excusals Form Responses
-    backfillBackendRequestedType(backendSheet);
+    // Backfill requested_outcome in the backend from Excusals Form Responses.
+    backfillBackendRequestedOutcome(backendSheet);
 
-    // Build a lookup of request_id -> requested_attendance_type from Excusals Backend
+    // Build a lookup of request_id -> requested_outcome from Excusals Backend.
     const backendTable = SheetUtils.readTable(backendSheet);
     const typeByRequestId = new Map<string, string>();
     backendTable.rows.forEach((row) => {
       const rid = String(row['request_id'] || '').trim();
-      const rtype = String(row['requested_attendance_type'] || '').trim();
+      const rtype = String(row['requested_outcome'] || '').trim();
       if (rid) typeByRequestId.set(rid, rtype);
     });
 
     const schema = Schemas.EXCUSALS_MANAGEMENT_SCHEMA;
     const machineHeaders = schema.machineHeaders!;
     const displayHeaders = schema.displayHeaders!;
-    const reqTypeColIdx = machineHeaders.indexOf('requested_attendance_type');
+    const reqTypeColIdx = machineHeaders.indexOf('requested_outcome');
     const requestIdColIdx = machineHeaders.indexOf('request_id');
     if (reqTypeColIdx < 0 || requestIdColIdx < 0) {
       Log.warn('Schema missing expected columns; cannot backpopulate');
@@ -539,25 +611,7 @@ SHAMROCK Automations`;
         const data = dataRange.getValues();
         let sheetUpdated = 0;
 
-        // Old schema (9 cols): timestamp, decision, event, reason, email, last_name, first_name, flight, request_id
-        // New schema (10 cols): timestamp, decision, event, reason, requested_attendance_type, email, last_name, first_name, flight, request_id
-        // Detect old-format rows where col 5 (reqTypeColIdx) contains an email instead of attendance type,
-        // and shift data right to insert the new column.
-        const VALID_ATT_TYPES = new Set(['E', 'ES', 'MU', 'MRS', '']);
-        for (let r = 0; r < data.length; r++) {
-          const col5Val = String(data[r][reqTypeColIdx] || '').trim();
-          // If col 5 looks like an email (contains @), this is an old-format row that needs shifting
-          if (col5Val.includes('@')) {
-            // Shift cols 5..8 right by one to make room for requested_attendance_type
-            for (let c = machineHeaders.length - 1; c > reqTypeColIdx; c--) {
-              data[r][c] = data[r][c - 1] || '';
-            }
-            data[r][reqTypeColIdx] = ''; // new column starts empty
-            sheetUpdated++;
-          }
-        }
-
-        // Now fill in requested_attendance_type from backend data
+        // Fill in requested_outcome from backend data.
         for (let r = 0; r < data.length; r++) {
           const requestId = String(data[r][requestIdColIdx] || '').trim();
           if (!requestId) continue;
@@ -578,10 +632,10 @@ SHAMROCK Automations`;
         trimAndSortManagementSheet(sheet);
       }
     } catch (err) {
-      Log.warn(`backpopulateManagementRequestedType failed: ${err}`);
+      Log.warn(`backpopulateManagementRequestedOutcome failed: ${err}`);
     }
 
-    Log.info(`backpopulateManagementRequestedType: updated ${totalUpdated} management rows`);
+    Log.info(`backpopulateManagementRequestedOutcome: updated ${totalUpdated} management rows`);
     return { updated: totalUpdated };
   }
 
@@ -715,34 +769,47 @@ SHAMROCK Automations`;
     const statusIdx = headers.indexOf('status');
     const decidedByIdx = headers.indexOf('decided_by');
     const decidedAtIdx = headers.indexOf('decided_at');
+    const lastUpdatedIdx = headers.indexOf('last_updated_at');
 
-    // Only process if Decision column was edited and value is Approved/Denied
+    // Only process if Decision column was edited and value is a v2 workflow decision.
     if (col - 1 !== decisionColIdx || row < 3) return;
-    if (!['Approved', 'Denied'].includes(newValue)) return;
+    if (!DECISION_VALUES.includes(newValue)) return;
 
     try {
       const backendSheet = SheetUtils.getSheet(Config.getBackendId(), 'Excusals Backend');
       if (!backendSheet) return;
       const table = SheetUtils.readTable(backendSheet);
-      const rowData = table.rows[row - 2]; // -1 for header, -1 for 0-index
+      const rowData = table.rows[row - 3]; // data starts on sheet row 3
       if (!rowData) return;
 
       const oldDecision = String(rowData['decision'] || '').trim();
+      const requestId = String(rowData['request_id'] || '').trim();
       const cadetEmail = String(rowData['email'] || '').trim();
       const eventName = String(rowData['event'] || '').trim();
-      const reason = String(rowData['notes'] || '').trim();
+      const reason = String(rowData['reason'] || '').trim();
       const squadron = String(rowData['squadron'] || '').trim();
       const firstName = String(rowData['first_name'] || '').trim();
       const lastName = String(rowData['last_name'] || '').trim();
 
       // Update status and decided_at in the same row
-      if (statusIdx >= 0) sheet.getRange(row, statusIdx + 1).setValue(newValue === 'Approved' ? 'Approved' : 'Denied');
+      if (statusIdx >= 0) sheet.getRange(row, statusIdx + 1).setValue(newValue);
       if (decidedByIdx >= 0) sheet.getRange(row, decidedByIdx + 1).setValue(currentUserEmail());
       if (decidedAtIdx >= 0) sheet.getRange(row, decidedAtIdx + 1).setValue(new Date().toISOString());
+      if (lastUpdatedIdx >= 0) sheet.getRange(row, lastUpdatedIdx + 1).setValue(new Date().toISOString());
 
-      // Lookup requested attendance type from the row
-      const requestedTypeIdx = headers.indexOf('requested_attendance_type');
-      const requestedType = requestedTypeIdx >= 0 ? String(sheet.getRange(row, requestedTypeIdx + 1).getValue() || 'E') : 'E';
+      const requestedOutcomeIdx = headers.indexOf('requested_outcome');
+      const priorIdx = headers.indexOf('prior_attendance_code');
+      const effectIdx = headers.indexOf('attendance_effect');
+      const requestedOutcome = requestedOutcomeIdx >= 0 ? String(sheet.getRange(row, requestedOutcomeIdx + 1).getValue() || 'E') : 'E';
+      const priorAttendanceCode = priorIdx >= 0 ? String(sheet.getRange(row, priorIdx + 1).getValue() || '') : '';
+      const attendanceEffect = effectForDecision({
+        decision: newValue,
+        requestedOutcome,
+        priorAttendanceCode,
+        currentAttendanceCode: lookupMatrixValue(eventName, lastName, firstName),
+        eventName,
+      });
+      if (effectIdx >= 0) sheet.getRange(row, effectIdx + 1).setValue(attendanceEffect);
 
       // Update attendance matrix based on decision
       updateAttendanceOnExcusalDecision({
@@ -750,8 +817,11 @@ SHAMROCK Automations`;
         firstName,
         eventName,
         decision: newValue,
-        requestedType,
+        requestedOutcome,
+        priorAttendanceCode,
+        attendanceEffect,
       });
+      mirrorDecisionToManagementPanel(requestId, newValue);
 
       // Check if decision is being changed (not initial decision)
       const isDecisionChange = oldDecision && oldDecision !== newValue;
@@ -793,7 +863,7 @@ SHAMROCK Automations`;
     const requestCol = Schemas.EXCUSALS_MANAGEMENT_SCHEMA.machineHeaders?.indexOf('request_id') ?? -1;
     if (decisionCol < 0 || requestCol < 0) return;
     if (row < 3 || col !== decisionCol + 1) return;
-    if (!['Approved', 'Denied'].includes(decision)) return;
+    if (!DECISION_VALUES.includes(decision)) return;
 
     const requestId = String(sheet.getRange(row, requestCol + 1).getValue() || '').trim();
     if (!requestId) {
@@ -823,8 +893,10 @@ SHAMROCK Automations`;
       last: headers.indexOf(headerName('last_name')),
       first: headers.indexOf(headerName('first_name')),
       squadron: headers.indexOf(headerName('squadron')),
-      notes: headers.indexOf(headerName('notes')),
-      requested_attendance_type: headers.indexOf(headerName('requested_attendance_type')),
+      reason: headers.indexOf(headerName('reason')),
+      requestedOutcome: headers.indexOf(headerName('requested_outcome')),
+      priorAttendanceCode: headers.indexOf(headerName('prior_attendance_code')),
+      attendanceEffect: headers.indexOf(headerName('attendance_effect')),
     };
 
     if (idx.request < 0) return;
@@ -848,27 +920,38 @@ SHAMROCK Automations`;
     const nowIso = new Date().toISOString();
     const activeEmail = currentUserEmail();
 
-    if (idx.status >= 0) backendSheet.getRange(rowNumber, idx.status + 1).setValue(decision);
-    if (idx.decision >= 0) backendSheet.getRange(rowNumber, idx.decision + 1).setValue(decision);
-    if (idx.decidedBy >= 0) backendSheet.getRange(rowNumber, idx.decidedBy + 1).setValue(activeEmail);
-    if (idx.decidedAt >= 0) backendSheet.getRange(rowNumber, idx.decidedAt + 1).setValue(nowIso);
-    if (idx.lastUpdated >= 0) backendSheet.getRange(rowNumber, idx.lastUpdated + 1).setValue(nowIso);
-
     const lastName = idx.last >= 0 ? String(data[targetRow][idx.last] || '') : '';
     const firstName = idx.first >= 0 ? String(data[targetRow][idx.first] || '') : '';
     const eventName = idx.event >= 0 ? String(data[targetRow][idx.event] || '') : '';
     const cadetEmail = idx.email >= 0 ? String(data[targetRow][idx.email] || '') : '';
     const squadron = idx.squadron >= 0 ? String(data[targetRow][idx.squadron] || '') : '';
-    const reason = idx.notes >= 0 ? String(data[targetRow][idx.notes] || '') : '';
-    const requestedType = idx.requested_attendance_type >= 0 ? String(data[targetRow][idx.requested_attendance_type] || 'E') : 'E';
+    const reason = idx.reason >= 0 ? String(data[targetRow][idx.reason] || '') : '';
+    const requestedOutcome = idx.requestedOutcome >= 0 ? String(data[targetRow][idx.requestedOutcome] || 'E') : 'E';
+    const priorAttendanceCode = idx.priorAttendanceCode >= 0 ? String(data[targetRow][idx.priorAttendanceCode] || '') : '';
+    const attendanceEffect = effectForDecision({
+      decision,
+      requestedOutcome,
+      priorAttendanceCode,
+      currentAttendanceCode: lookupMatrixValue(eventName, lastName, firstName),
+      eventName,
+    });
     const isDecisionChange = !!(oldDecision && oldDecision !== decision);
+
+    if (idx.status >= 0) backendSheet.getRange(rowNumber, idx.status + 1).setValue(decision);
+    if (idx.decision >= 0) backendSheet.getRange(rowNumber, idx.decision + 1).setValue(decision);
+    if (idx.decidedBy >= 0) backendSheet.getRange(rowNumber, idx.decidedBy + 1).setValue(activeEmail);
+    if (idx.decidedAt >= 0) backendSheet.getRange(rowNumber, idx.decidedAt + 1).setValue(nowIso);
+    if (idx.lastUpdated >= 0) backendSheet.getRange(rowNumber, idx.lastUpdated + 1).setValue(nowIso);
+    if (idx.attendanceEffect >= 0) backendSheet.getRange(rowNumber, idx.attendanceEffect + 1).setValue(attendanceEffect);
 
     updateAttendanceOnExcusalDecision({
       lastName,
       firstName,
       eventName,
       decision,
-      requestedType,
+      requestedOutcome,
+      priorAttendanceCode,
+      attendanceEffect,
     });
 
     sendExcusalDecisionEmail({
@@ -889,27 +972,26 @@ SHAMROCK Automations`;
 
   /**
    * Update attendance matrix when excusal decision is made.
-   * Approved: ER->E, UR->E
-   * Denied: ER->ED, UR->U
+   * Approved writes the requested outcome. Denied writes U after an event, D
+   * before an event, or preserves P/T if the cadet actually attended.
+   * Withdrawn/Superseded restore the prior attendance code.
    */
   function updateAttendanceOnExcusalDecision(opts: {
     lastName: string;
     firstName: string;
     eventName: string;
     decision: string;
-    requestedType?: string;
+    requestedOutcome?: string;
+    priorAttendanceCode?: string;
+    attendanceEffect?: string;
   }) {
-    const current = lookupMatrixValue(opts.eventName, opts.lastName, opts.firstName);
-    let code = '';
-    if (opts.decision === 'Approved') {
-      // Use the requested type if available, otherwise default to E
-      // Strip R suffix if current is pending (e.g., ESR -> ES, MRSR -> MRS, ER -> E)
-      const requestedType = opts.requestedType || 'E';
-      code = requestedType;
-    } else {
-      // Denied: UR -> U, anything else -> ED
-      code = current === 'UR' ? 'U' : 'ED';
-    }
+    const code = opts.attendanceEffect ?? effectForDecision({
+      decision: opts.decision,
+      requestedOutcome: opts.requestedOutcome || 'E',
+      priorAttendanceCode: opts.priorAttendanceCode || '',
+      currentAttendanceCode: lookupMatrixValue(opts.eventName, opts.lastName, opts.firstName),
+      eventName: opts.eventName,
+    });
 
     const logEntry = {
       submission_id: `excusal-decision-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
@@ -1044,6 +1126,10 @@ C/${commanderLastName}`;
       }
     }
     return '';
+  }
+
+  export function getCurrentAttendanceCode(eventName: string, lastName: string, firstName: string): string {
+    return lookupMatrixValue(eventName, lastName, firstName);
   }
 
   /**

@@ -39,6 +39,9 @@ namespace FrontendFormattingService {
       afsc_options: 'AFSC_OPTIONS',
       flight_path_status_options: 'FLIGHT_PATH_STATUSES',
       attendance_code_options: 'ATTENDANCE_CODES',
+      excusal_decision_options: 'EXCUSAL_DECISIONS',
+      excusal_status_options: 'EXCUSAL_STATUSES',
+      excusal_requested_outcome_options: 'EXCUSAL_REQUESTED_OUTCOMES',
     };
 
     const lastRow = sheet.getLastRow();

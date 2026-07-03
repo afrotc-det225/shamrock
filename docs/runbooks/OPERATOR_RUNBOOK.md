@@ -95,11 +95,15 @@ Post-deploy validation checklist:
 - Attendance submissions append to Attendance Backend.
 - Frontend Attendance matrix is derived; rebuild is available via admin menu.
 - Treat frontend attendance as derived state. Rebuild it instead of manually patching formulas or event columns.
+- V2 attendance codes are `P`, `T`, `A`, `R`, `D`, `U`, `E`, `ES`, `MED`, and `N/A`.
+- `A` requires follow-up, `R` is pending leadership review, and `D` means a denied advance request where the cadet is still expected to attend.
 
 ### 5.4 Excusals processing
 - Requests append via form.
 - Decisions are made in Excusals Backend by authorized staff.
 - Decisions drive notifications and attendance effects.
+- Requested outcomes are `P`, `T`, `E`, `ES`, and `MED`.
+- Denied post-event absences become `U`; denied pre-event requests become `D` until attendance is taken or closeout marks the absence.
 - Use cleanup/backfill actions only when repairing a known data issue.
 
 ### 5.5 Audit review
@@ -162,7 +166,7 @@ Operator checks:
 - Confirm Data Legend is present and populated.
 - Confirm the frontend Data Legend includes the v2 `cadet_rank_options` and `rank_options` columns.
 - Confirm Directory `Rank` validates against cadet rank options, Leadership `Rank` validates against the broader rank options, and Directory `Email` has no dropdown validation.
-- Confirm Data Legend order follows the v2 Directory flow: AS year, flight, squadron, cadet rank, rank, university, dorm, academic options, home state, flight path, then attendance codes.
+- Confirm Data Legend order follows the v2 Directory flow: AS year, flight, squadron, cadet rank, rank, university, dorm, academic options, home state, flight path, attendance codes, excusal decisions, excusal statuses, and excusal requested outcomes.
 
 ### 6.4 Attendance percentages look wrong
 Likely causes:

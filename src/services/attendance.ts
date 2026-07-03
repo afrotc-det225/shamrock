@@ -41,10 +41,9 @@ namespace AttendanceService {
   const BASE_HEADERS = ATTENDANCE_MACHINE_HEADERS.filter((h) => !SUMMARY_HEADER_SET.has(h));
   const ATT_HEADER_LAST = BASE_HEADERS.find((h) => h === 'last_name') || 'last_name';
   const ATT_HEADER_FIRST = BASE_HEADERS.find((h) => h === 'first_name') || 'first_name';
-  const CREDIT_CODES = new Set(['P', 'E', 'ES', 'MU', 'MRS']);
-  const CREDIT_PATTERNS = ['P*', 'E', 'ES*', 'MU*', 'MRS*'];
-  // ER/ED stay neutral (not in denominator); UR counts against attendance
-  const TOTAL_PATTERNS = ['P*', 'E', 'ES*', 'T*', 'U', 'UR', 'MU*', 'MRS*'];
+  const CREDIT_CODES = new Set(['P', 'T', 'E', 'ES', 'MED']);
+  const CREDIT_PATTERNS = ['P', 'T', 'E', 'ES', 'MED'];
+  const TOTAL_PATTERNS = ['P', 'T', 'A', 'U', 'E', 'ES', 'MED'];
 
   function ensureMatrixSheet(spreadsheetId: string, name: string): GoogleAppsScript.Spreadsheet.Sheet | null {
     if (!spreadsheetId) return null;
@@ -639,11 +638,7 @@ namespace AttendanceService {
 
   function isExcusedCode(code: string): boolean {
     const c = code.trim().toUpperCase();
-    if (!c) return false;
-    if (c === 'ED' || c === 'ER' || c === 'P') return false;
-    if (c.startsWith('E')) return true; // E, ES
-    if (c.startsWith('MU') || c.startsWith('MRS')) return true;
-    return false;
+    return c === 'E' || c === 'ES' || c === 'MED';
   }
 
   function greetingForRecipient(lastName: string): string {
@@ -850,13 +845,11 @@ namespace AttendanceService {
       const colOffset = colIdx; // zero-based in array, but range uses 1-based later
       for (let r = 0; r < data.length; r++) {
         const cell = String(data[r][colOffset] || '').trim();
-        if (cell && cell !== 'ED') continue; // Only fill if empty or ED (Excusal Denied)
+        if (cell && cell !== 'D') continue; // Only fill if empty or denied-before-event.
         
         if (!cell) {
-          // Empty cell -> U
-          data[r][colOffset] = 'U';
-        } else if (cell === 'ED') {
-          // Excusal Denied -> U
+          data[r][colOffset] = 'A';
+        } else if (cell === 'D') {
           data[r][colOffset] = 'U';
         } else {
           continue;
@@ -864,12 +857,12 @@ namespace AttendanceService {
 
         // Queue a log entry for this fill so rebuilds stay consistent
         pendingLogs.push({
-          submission_id: `fill-u-${Date.now()}-${r}-${colIdx}`,
+          submission_id: `fill-attendance-closeout-${Date.now()}-${r}-${colIdx}`,
           submitted_at: new Date(),
           event: headers[colIdx] || '',
-          attendance_type: 'U',
-          email: 'auto-unexcused',
-          name: 'Weekly Unexcused Fill',
+          attendance_type: data[r][colOffset],
+          email: 'auto-attendance-closeout',
+          name: 'Weekly Attendance Closeout',
           flight: baseHeaderIdx.flight >= 0 ? String(data[r][baseHeaderIdx.flight] || '') : '',
           cadets:
             (baseHeaderIdx.last >= 0 ? String(data[r][baseHeaderIdx.last] || '') : '') +
@@ -922,11 +915,11 @@ namespace AttendanceService {
         .sort();
       const hasIssues = lines.length > 0;
       const body = hasIssues
-        ? `${greeting}\n\nUnexcused attendance this week (week of ${weekLabel}):\n- ${lines.join('\n- ')}\n\nPlease address these absences with your cadets.\n\n${EMAIL_SIGNATURE}`
+        ? `${greeting}\n\nAttendance issues requiring follow-up this week (week of ${weekLabel}):\n- ${lines.join('\n- ')}\n\nA means absent with no resolved request. U means the absence is final unexcused.\n\n${EMAIL_SIGNATURE}`
         : `${greeting}\n\nYour flight has perfect attendance for this week. Well done.\n\n${EMAIL_SIGNATURE}`;
 
       const subject = hasIssues
-        ? `Unexcused attendance – week of ${weekLabel}`
+        ? `Attendance follow-up – week of ${weekLabel}`
         : `Perfect attendance – week of ${weekLabel}`;
 
       const emailOpts: GoogleAppsScript.Gmail.GmailAdvancedOptions = { name: 'SHAMROCK Automations' };

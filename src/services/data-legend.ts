@@ -21,6 +21,9 @@ namespace DataLegendService {
     'home_state_options',
     'flight_path_status_options',
     'attendance_code_options',
+    'excusal_decision_options',
+    'excusal_status_options',
+    'excusal_requested_outcome_options',
   ];
   const LEGEND_DISPLAY_HEADERS = legendSchema?.displayHeaders || [
     'AS Year Options',
@@ -35,6 +38,9 @@ namespace DataLegendService {
     'Home State Options',
     'Flight Path Status Options',
     'Attendance Code Options',
+    'Excusal Decision Options',
+    'Excusal Status Options',
+    'Excusal Requested Outcome Options',
   ];
 
   function legendColumns(): LegendColumn[] {
@@ -56,6 +62,9 @@ namespace DataLegendService {
       afsc_options: A.AFSC_OPTIONS || [],
       flight_path_status_options: A.FLIGHT_PATH_STATUSES || [],
       attendance_code_options: A.ATTENDANCE_CODES || [],
+      excusal_decision_options: A.EXCUSAL_DECISIONS || [],
+      excusal_status_options: A.EXCUSAL_STATUSES || [],
+      excusal_requested_outcome_options: A.EXCUSAL_REQUESTED_OUTCOMES || [],
     };
 
     const rangeMap: Record<string, string> = {
@@ -71,6 +80,9 @@ namespace DataLegendService {
       afsc_options: 'AFSC_OPTIONS',
       flight_path_status_options: 'FLIGHT_PATH_STATUSES',
       attendance_code_options: 'ATTENDANCE_CODES',
+      excusal_decision_options: 'EXCUSAL_DECISIONS',
+      excusal_status_options: 'EXCUSAL_STATUSES',
+      excusal_requested_outcome_options: 'EXCUSAL_REQUESTED_OUTCOMES',
     };
 
     return LEGEND_HEADERS.map((header) => ({

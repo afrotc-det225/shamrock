@@ -30,6 +30,7 @@ These are recommended stable names for the Data Legend workbook ranges.
 - `ATTENDANCE_CODES`
 - `EXCUSAL_DECISIONS`
 - `EXCUSAL_STATUSES`
+- `EXCUSAL_REQUESTED_OUTCOMES`
 
 You may add additional named ranges as needed, but keep names consistent across environments.
 
@@ -355,35 +356,45 @@ Non-operational statuses:
 - Dropped
 
 ## Attendance Codes (`ATTENDANCE_CODES`)
-Represent attendance codes as a two-column table in Data Legend:
-- Column 1: Code
-- Column 2: Meaning
+Represent attendance codes as a single-column Data Legend option list. The code meanings are:
 
 Canonical rows:
 - P | Present
+- T | Tardy
+- A | Absent, unresolved
+- R | Request pending
+- D | Request denied before event; attendance still required
+- U | Unexcused absence
 - E | Excused
 - ES | Excused – Sport
-- ER | Excusal Requested
-- ED | Excusal Denied
-- T | Tardy
-- U | Unexcused
-- UR | Unexcused – Report Submitted
-- MU | Make-Up
-- MRS | Medical / No PT
+- MED | Medical
 - N/A | Cancelled / Not Applicable
 
 Notes:
 - Blank is allowed in attendance cells to mean “not taken / not occurred yet”.
-- For dropdowns, the code list should be validated against the Code column.
+- `P`, `T`, `E`, `ES`, and `MED` count as attendance credit.
+- `A` and `U` count against attendance.
+- `R`, `D`, `N/A`, and blank are neutral until resolved.
 
 ## Excusal Decisions (`EXCUSAL_DECISIONS`)
 Allowed values:
 - Approved
 - Denied
+- Withdrawn
+- Superseded
 
 ## Excusal Statuses (`EXCUSAL_STATUSES`)
 Allowed values:
 - Submitted
 - Approved
 - Denied
-- Withdrawn / Superseded
+- Withdrawn
+- Superseded
+
+## Excusal Requested Outcomes (`EXCUSAL_REQUESTED_OUTCOMES`)
+Allowed values:
+- P
+- T
+- E
+- ES
+- MED

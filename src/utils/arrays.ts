@@ -193,5 +193,8 @@ namespace Arrays {
   ];
   export const FLIGHT_PATH_STATUSES = ['Participating 1/4', 'Enrolled 2/4', 'Active 3/4', 'Ready 4/4', 'Inactive', 'Commissioned', 'Dropped'];
   export const NON_OPERATIONAL_FLIGHT_PATH_STATUSES = ['Inactive', 'Commissioned', 'Dropped'];
-  export const ATTENDANCE_CODES = ['P', 'E', 'ES', 'ER', 'ED', 'T', 'U', 'UR', 'MU', 'MRS', 'N/A'];
+  export const ATTENDANCE_CODES = ['P', 'T', 'A', 'R', 'D', 'U', 'E', 'ES', 'MED', 'N/A'];
+  export const EXCUSAL_DECISIONS = ['Approved', 'Denied', 'Withdrawn', 'Superseded'];
+  export const EXCUSAL_STATUSES = ['Submitted', 'Approved', 'Denied', 'Withdrawn', 'Superseded'];
+  export const EXCUSAL_REQUESTED_OUTCOMES = ['P', 'T', 'E', 'ES', 'MED'];
 }

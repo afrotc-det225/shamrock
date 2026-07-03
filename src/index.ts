@@ -733,7 +733,7 @@ function fillAttendanceEventPrompt() {
     return selector;
   })();
 
-  const codeResp = ui.prompt('Attendance code', 'Enter attendance code to set (e.g., N/A, P, U, E, ED, ER):', ui.ButtonSet.OK_CANCEL);
+  const codeResp = ui.prompt('Attendance code', 'Enter attendance code to set (e.g., P, T, A, R, D, U, E, ES, MED, N/A):', ui.ButtonSet.OK_CANCEL);
   if (codeResp.getSelectedButton() !== ui.Button.OK) throw new MenuActionCancelled('Attendance fill cancelled before attendance code was provided.');
   const code = codeResp.getResponseText().trim();
   if (!code) {

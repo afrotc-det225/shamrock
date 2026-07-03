@@ -217,6 +217,12 @@ namespace SetupService {
         cip_broad_area: Arrays.CIP_BROAD_AREAS,
         desired_assigned_afsc: Arrays.AFSC_OPTIONS,
         flight_path_status: Arrays.FLIGHT_PATH_STATUSES,
+        attendance_type: Arrays.ATTENDANCE_CODES,
+        attendance_effect: Arrays.ATTENDANCE_CODES,
+        prior_attendance_code: Arrays.ATTENDANCE_CODES,
+        decision: Arrays.EXCUSAL_DECISIONS,
+        status: Arrays.EXCUSAL_STATUSES,
+        requested_outcome: Arrays.EXCUSAL_REQUESTED_OUTCOMES,
       };
       const attendanceBase = new Set((Schemas.getTabSchema('Attendance')?.machineHeaders || []).map((h) => h.toLowerCase()));
 
@@ -883,7 +889,7 @@ namespace SetupService {
    * Deep-clean the Excusals Form Responses sheet:
    * 1. Merge same-name duplicate columns into their active counterpart
    * 2. Distribute legacy "Column 23" event data into category-specific event columns
-   * 3. Merge "Column 27" attendance type data into Requested Attendance Type
+   * 3. Merge "Column 27" requested outcome data into Requested Outcome
    * 4. Merge "Column 24" last names into Last Name (if active is empty)
    * 5. Delete empty/redundant orphan columns
    */
@@ -914,7 +920,7 @@ namespace SetupService {
       'Select Event Type (or Done to continue)',
       'Select Event(s) (Mando)', 'Select Event(s) (LLAB)', 'Select Event(s) (POC Third Hour)',
       'Select Event(s) (Secondary)', 'Select Event(s) (Other)',
-      'Requested Attendance Type', 'Reason',
+      'Requested Outcome', 'Reason',
     ];
     CANONICAL.forEach((name) => {
       const idx = headers.indexOf(name);
@@ -988,17 +994,17 @@ namespace SetupService {
       Log.info(`[deep-clean-excusals] Distributed Column 23 legacy events to active category columns`);
     }
 
-    // 3. Merge "Column 27" — mostly attendance types, some POC events
+    // 3. Merge "Column 27" — mostly requested outcomes, some POC events
     const col27Idx = headers.findIndex((h) => h === 'Column 27');
     if (col27Idx >= 0) {
-      const reqTypeIdx = ACTIVE_COLS['Requested Attendance Type'];
+      const reqTypeIdx = ACTIVE_COLS['Requested Outcome'];
       const pocIdx = ACTIVE_COLS['Select Event(s) (POC Third Hour)'];
-      const ATT_TYPES = new Set(['E', 'ES', 'MU', 'MRS']);
+      const REQUESTED_OUTCOMES = new Set(Arrays.EXCUSAL_REQUESTED_OUTCOMES);
 
       for (let r = 0; r < dataRows; r++) {
         const raw = String(data[r][col27Idx] || '').trim();
         if (!raw) continue;
-        if (ATT_TYPES.has(raw) && reqTypeIdx !== undefined) {
+        if (REQUESTED_OUTCOMES.has(raw) && reqTypeIdx !== undefined) {
           const existing = String(data[r][reqTypeIdx] || '').trim();
           if (!existing) {
             data[r][reqTypeIdx] = raw;
@@ -1161,7 +1167,7 @@ namespace SetupService {
       const firstIdx = headerIndex('First Name');
       const reasonIdx = headerIndex('Reason');
       const eventIdx = headers.map((h) => normalizeEventHeader(h)).indexOf('event');
-      const reqTypeIdx = headerIndex('Requested Attendance Type');
+      const reqTypeIdx = headerIndex('Requested Outcome');
 
       if (eventIdx < 0 || emailIdx < 0) {
         throw new Error('Excusals responses missing required headers (Event/Email); cannot backfill.');
@@ -1205,7 +1211,8 @@ namespace SetupService {
         const lastName = lastIdx >= 0 ? String(row[lastIdx] || '').trim() : '';
         const firstName = firstIdx >= 0 ? String(row[firstIdx] || '').trim() : '';
         const reason = reasonIdx >= 0 ? String(row[reasonIdx] || '').trim() : '';
-        const requestedType = reqTypeIdx >= 0 ? String(row[reqTypeIdx] || '').trim() : '';
+        const requestedOutcomeRaw = reqTypeIdx >= 0 ? String(row[reqTypeIdx] || '').trim().toUpperCase() : '';
+        const requestedOutcome = Arrays.EXCUSAL_REQUESTED_OUTCOMES.includes(requestedOutcomeRaw) ? requestedOutcomeRaw : 'E';
         const tsVal = tsIdx >= 0 ? row[tsIdx] : '';
         const submittedAt = (() => {
           try { return new Date(tsVal).toISOString(); } catch { return new Date().toISOString(); }
@@ -1234,15 +1241,20 @@ namespace SetupService {
             first_name: cadet?.first_name || firstName,
             flight: cadet?.flight || '',
             squadron: cadet?.squadron || '',
-            status: 'Pending',
+            status: 'Submitted',
             decision: '',
             decided_by: '',
             decided_at: '',
-            requested_attendance_type: requestedType || 'E',
-            attendance_effect: '',
+            requested_outcome: requestedOutcome,
+            attendance_effect: 'R',
+            prior_attendance_code: ExcusalsService.getCurrentAttendanceCode(
+              eventName,
+              String(cadet?.last_name || lastName),
+              String(cadet?.first_name || firstName),
+            ),
             submitted_at: submittedAt,
             last_updated_at: submittedAt,
-            notes: reason,
+            reason,
           };
 
           toAppend.push(backendRow);
@@ -1259,6 +1271,7 @@ namespace SetupService {
       toSync.forEach((row) => {
         ExcusalsService.notifySquadronCommanderOfNewExcusal(row);
         ExcusalsService.syncExcusalToManagementPanel(row);
+        ExcusalsService.updateAttendanceOnExcusalSubmission(row);
       });
 
       Log.info(`Processed excusals form backlog: appended ${toAppend.length} event rows.`);

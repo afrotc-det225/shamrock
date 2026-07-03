@@ -130,6 +130,7 @@ The v2 transition workflow prepares SHAMROCK for a new semester or academic year
 ### Purpose
 
 Attendance records form submissions in backend logs and derives the frontend attendance matrix from attendance events, excusals, and directory state.
+The v2 code set is `P`, `T`, `A`, `R`, `D`, `U`, `E`, `ES`, `MED`, and `N/A`.
 
 ### Operator Entry Points
 
@@ -157,6 +158,7 @@ Attendance records form submissions in backend logs and derives the frontend att
 ### Purpose
 
 Excusals capture cadet requests, route decisions through backend/management sheets, update attendance effects, and send appropriate notifications.
+Requests use a requested outcome of `P`, `T`, `E`, `ES`, or `MED`; pending requests show as `R` in Attendance until leadership records a decision.
 
 ### Operator Entry Points
 
@@ -178,6 +180,7 @@ Excusals capture cadet requests, route decisions through backend/management shee
 - Submit a controlled excusal request.
 - Confirm it appears in Excusals Backend and management surfaces.
 - Record a decision and confirm attendance effect updates.
+- Confirm denied pre-event requests show `D`, denied post-event absences show `U`, and approved medical requests show `MED`.
 - Confirm related audit rows are written.
 
 ## Audit Logging

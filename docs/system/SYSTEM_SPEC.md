@@ -166,7 +166,11 @@ The attendance system is a replayable pipeline.
 - Rebuild/regenerate is an admin operation and must be deterministic.
 
 Attendance codes:
-- Codes map to credit, no-credit, pending, or excluded status.
+- `P`, `T`, `E`, `ES`, and `MED` are credit outcomes.
+- `A` means absent and unresolved; `U` means final unexcused absence.
+- `R` means an attendance exception request is pending.
+- `D` means a pre-event request was denied and attendance is still required.
+- `N/A` means the cadet was not expected for that event.
 - Blank means not yet taken / not applicable yet.
 
 Roster status:
@@ -180,10 +184,12 @@ Percent metrics:
 Excusals are captured via a form and processed via backend decisions.
 
 Workflow summary:
-- Cadet submits request (includes event selection, reason, and PDF upload).
+- Cadet submits an attendance exception request with event selection, requested outcome, and reason.
 - Backend enriches flight/squadron from Directory.
+- Submission records the prior attendance code and marks the matrix `R` while pending.
 - Decision is recorded by authorized staff.
 - Decision propagates to attendance computation.
+- Approved requests apply the requested outcome; denied requests become `D` before the event or `U` after the event unless the prior state proves the cadet attended.
 - Notifications are sent to appropriate leadership derived from Cadre & Leadership.
 
 ## 10. Audit / Changelog Expectations
