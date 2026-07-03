@@ -10,6 +10,33 @@ namespace FrontendFormattingService {
   const ATTENDANCE_BASE_HEADERS = ATTENDANCE_SCHEMA?.machineHeaders || ['last_name', 'first_name', 'as_year', 'flight', 'squadron', 'overall_attendance_pct', 'llab_attendance_pct'];
   const ATT_HEADER_OVERALL = ATTENDANCE_BASE_HEADERS.find((h) => h.includes('overall_attendance')) || 'overall_attendance_pct';
   const ATT_HEADER_LLAB = ATTENDANCE_BASE_HEADERS.find((h) => h.includes('llab_attendance')) || 'llab_attendance_pct';
+  const STANDARD_COLUMN_WIDTHS: Record<string, number> = {
+    last_name: 115,
+    first_name: 115,
+    as_year: 75,
+    flight: 75,
+    squadron: 75,
+    rank: 75,
+    university: 100,
+    phone: 125,
+    cell_phone: 125,
+    office_phone: 125,
+    dorm: 150,
+    cip_code: 75,
+    class_year: 75,
+    dob: 100,
+    flight_path_status: 125,
+    photo_link: 100,
+  };
+  const DIRECTORY_FIT_TO_DATA_COLUMNS = [
+    'role',
+    'email',
+    'cip_broad_area',
+    'desired_assigned_afsc',
+    'home_town',
+    'home_state',
+  ];
+  const LEADERSHIP_FIT_TO_DATA_COLUMNS = ['role', 'email', 'office_location'];
 
   function openFrontend(frontendId: string): GoogleAppsScript.Spreadsheet.Spreadsheet | null {
     if (!frontendId) return null;
@@ -101,7 +128,7 @@ namespace FrontendFormattingService {
         const namedRange = ss.getRangeByName(rangeName);
         if (!namedRange) return;
         const dataRange = sheet.getRange(3, colIdx + 1, dataRows, 1);
-        const showDropdown = field !== 'rank';
+        const showDropdown = !['as_year', 'rank', 'university'].includes(field);
         const rule = SpreadsheetApp.newDataValidation()
           .requireValueInRange(namedRange, showDropdown)
           .setAllowInvalid(false)
@@ -355,6 +382,28 @@ namespace FrontendFormattingService {
     });
   }
 
+  function autoResizeColumnsByHeader(sheet: GoogleAppsScript.Spreadsheet.Sheet, headerNames: string[]) {
+    const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0].map((h) => String(h || '').trim());
+    headerNames.forEach((header) => {
+      const idx = headers.indexOf(header);
+      if (idx >= 0) sheet.autoResizeColumn(idx + 1);
+    });
+  }
+
+  function applyStandardColumnWidths(
+    sheet: GoogleAppsScript.Spreadsheet.Sheet,
+    fixedHeaders: string[],
+    fitHeaders: string[],
+  ) {
+    const fixedWidths: Record<string, number> = {};
+    fixedHeaders.forEach((header) => {
+      const width = STANDARD_COLUMN_WIDTHS[header];
+      if (width) fixedWidths[header] = width;
+    });
+    setColumnWidths(sheet, fixedWidths);
+    autoResizeColumnsByHeader(sheet, fitHeaders);
+  }
+
   function setHeaderLabels(sheet: GoogleAppsScript.Spreadsheet.Sheet, mapping: Record<string, string>) {
     const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0].map((h) => String(h || '').trim());
     const display = sheet.getRange(2, 1, 1, sheet.getLastColumn()).getValues()[0];
@@ -394,24 +443,26 @@ namespace FrontendFormattingService {
       desired_assigned_afsc: 'Desired / Assigned AFSC',
     });
 
-    setColumnWidths(sheet, {
-      as_year: 100,
-      class_year: 75,
-      flight: 75,
-      squadron: 75,
-      university: 100,
-      email: 175,
-      phone: 125,
-      cip_code: 75,
-      dob: 100,
-      flight_path_status: 125,
-    });
-
-    // Fit-to-data widths where requested.
-    ['last_name', 'first_name', 'email', 'dorm', 'home_town', 'home_state', 'cip_broad_area', 'desired_assigned_afsc', 'photo_link'].forEach((h) => {
-      const idx = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0].indexOf(h);
-      if (idx >= 0) sheet.autoResizeColumn(idx + 1);
-    });
+    applyStandardColumnWidths(
+      sheet,
+      [
+        'last_name',
+        'first_name',
+        'as_year',
+        'flight',
+        'squadron',
+        'rank',
+        'university',
+        'phone',
+        'dorm',
+        'cip_code',
+        'class_year',
+        'dob',
+        'flight_path_status',
+        'photo_link',
+      ],
+      DIRECTORY_FIT_TO_DATA_COLUMNS,
+    );
 
     // Alignments
     const dataRange = sheet.getRange(3, 1, Math.max(1, sheet.getMaxRows() - 2), sheet.getLastColumn());
@@ -482,34 +533,57 @@ namespace FrontendFormattingService {
 
     normalizeDirectoryHeaders(sheet);
 
-    setColumnWidths(sheet, {
-      as_year: 100,
-      class_year: 75,
-      flight: 75,
-      squadron: 75,
-      university: 100,
-      email: 175,
-      phone: 125,
-      cip_code: 75,
-      dob: 100,
-      flight_path_status: 125,
-    });
-
-    ['last_name', 'first_name', 'email', 'dorm', 'home_town', 'home_state', 'cip_broad_area', 'desired_assigned_afsc', 'photo_link'].forEach((h) => {
-      const idx = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0].indexOf(h);
-      if (idx >= 0) sheet.autoResizeColumn(idx + 1);
-    });
+    applyStandardColumnWidths(
+      sheet,
+      [
+        'last_name',
+        'first_name',
+        'as_year',
+        'flight',
+        'squadron',
+        'rank',
+        'university',
+        'phone',
+        'dorm',
+        'cip_code',
+        'class_year',
+        'dob',
+        'flight_path_status',
+        'photo_link',
+      ],
+      DIRECTORY_FIT_TO_DATA_COLUMNS,
+    );
   }
 
   function applyLeadershipFormatting(ss: GoogleAppsScript.Spreadsheet.Spreadsheet) {
     const sheet = ss.getSheetByName('Leadership');
     if (!sheet) return;
-    sheet.autoResizeColumns(1, sheet.getLastColumn());
+    applyStandardColumnWidths(
+      sheet,
+      ['last_name', 'first_name', 'rank', 'cell_phone', 'office_phone'],
+      LEADERSHIP_FIT_TO_DATA_COLUMNS,
+    );
+
+    const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0].map((h) => String(h || '').trim());
+    const dataRange = sheet.getRange(3, 1, Math.max(1, sheet.getMaxRows() - 2), sheet.getLastColumn());
+    dataRange
+      .setHorizontalAlignment('left')
+      .setVerticalAlignment('middle')
+      .setWrapStrategy(SpreadsheetApp.WrapStrategy.CLIP)
+      .setFontColor('#434343');
+    const dataRows = Math.max(1, sheet.getMaxRows() - 2);
+    const alignColumn = (key: string, alignment: 'left' | 'center' | 'right') => {
+      const idx = headers.indexOf(key);
+      if (idx >= 0) sheet.getRange(3, idx + 1, dataRows, 1).setHorizontalAlignment(alignment);
+    };
+    alignColumn('rank', 'left');
+    alignColumn('cell_phone', 'center');
+    alignColumn('office_phone', 'center');
+
     sheet.setFrozenRows(2);
     sheet.setFrozenColumns(2);
 
     // Hide reports_to helper column for charting.
-    const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0].map((h) => String(h || '').trim());
     const reportsIdx = headers.indexOf('reports_to');
     if (reportsIdx >= 0) {
       sheet.hideColumns(reportsIdx + 1, 1);
@@ -523,7 +597,11 @@ namespace FrontendFormattingService {
   function applyLeadershipColumnWidths(ss: GoogleAppsScript.Spreadsheet.Spreadsheet) {
     const sheet = ss.getSheetByName('Leadership');
     if (!sheet) return;
-    sheet.autoResizeColumns(1, sheet.getLastColumn());
+    applyStandardColumnWidths(
+      sheet,
+      ['last_name', 'first_name', 'rank', 'cell_phone', 'office_phone'],
+      LEADERSHIP_FIT_TO_DATA_COLUMNS,
+    );
   }
 
   function applyDashboardFormatting(ss: GoogleAppsScript.Spreadsheet.Spreadsheet) {

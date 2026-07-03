@@ -216,6 +216,7 @@ Required standards:
 - Row 2: display headers.
 - Archived frontend transition tables must be renamed to match their archived sheet names, such as `Spring 2026 Directory`.
 - Keep Sheets Table column types unset. Prefer Data Legend-backed cell validation, number/date formats, widths, freezes, and protection over conditional formatting for frontend sheets.
+- Directory and Leadership shared columns use standard widths: last/first name `115`, year/flight/squadron/rank/class `75`, university/photo link `100`, phone `125`, dorm `150`, DOB `100`, and flight path `125`. Role, email, CIP broad area, AFSC, hometown, and home state fit to data. Directory Year, Rank, and University validations use plain-text display.
 - Use borders and separators for readability (Directory requires specific separators).
 - Use smart chips for links where helpful.
 
