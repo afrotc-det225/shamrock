@@ -238,11 +238,7 @@ namespace FrontendFormattingService {
 
   function pruneTrailingRows(sheet: GoogleAppsScript.Spreadsheet.Sheet | null) {
     if (!sheet) return;
-    const lastDataRow = Math.max(3, sheet.getLastRow());
-    const maxRows = sheet.getMaxRows();
-    if (maxRows > lastDataRow) {
-      sheet.deleteRows(lastDataRow + 1, maxRows - lastDataRow);
-    }
+    SheetUtils.trimTrailingBlankRows(sheet);
   }
 
   function setDefaultFont(sheet: GoogleAppsScript.Spreadsheet.Sheet | null) {
@@ -383,8 +379,8 @@ namespace FrontendFormattingService {
       const eventCount = sheet.getLastColumn() - baseCount;
       sheet.setColumnWidths(eventStart, eventCount, 75);
     }
-    if (overallIdx !== undefined) sheet.setColumnWidth(overallIdx + 1, 75);
-    if (llabIdx !== undefined) sheet.setColumnWidth(llabIdx + 1, 75);
+    if (overallIdx >= 0) sheet.setColumnWidth(overallIdx + 1, 75);
+    if (llabIdx >= 0) sheet.setColumnWidth(llabIdx + 1, 75);
   }
 
   function applyDataLegendColumnWidths(ss: GoogleAppsScript.Spreadsheet.Spreadsheet) {
@@ -417,17 +413,6 @@ namespace FrontendFormattingService {
       const idx = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0].indexOf(h);
       if (idx >= 0) sheet.autoResizeColumn(idx + 1);
     });
-  }
-
-  function columnToLetter(col: number): string {
-    let temp = '';
-    let n = col;
-    while (n > 0) {
-      const rem = (n - 1) % 26;
-      temp = String.fromCharCode(65 + rem) + temp;
-      n = Math.floor((n - 1) / 26);
-    }
-    return temp;
   }
 
   function applyLeadershipFormatting(ss: GoogleAppsScript.Spreadsheet.Spreadsheet) {
@@ -662,13 +647,17 @@ namespace FrontendFormattingService {
     const sheet = ss.getSheetByName('Attendance');
     if (!sheet) return;
 
-    const canSetRules = typeof (sheet as any).setConditionalFormatRules === 'function';
     const baseCount = ATTENDANCE_BASE_HEADERS.length;
 
     // Hide machine headers, prune, defaults
     pruneTrailingRows(sheet);
     hideMachineHeaderRow(sheet);
     setDefaultFont(sheet);
+    try {
+      sheet.clearConditionalFormatRules();
+    } catch (err) {
+      Log.warn(`Unable to clear frontend Attendance conditional formatting: ${err}`);
+    }
 
     // Rename percentage headers
     const display = sheet.getRange(2, 1, 1, sheet.getLastColumn()).getValues()[0];
@@ -729,65 +718,5 @@ namespace FrontendFormattingService {
     sheet.setFrozenRows(2);
     sheet.setFrozenColumns(2);
 
-    const rules: GoogleAppsScript.Spreadsheet.ConditionalFormatRule[] = [];
-
-    // Attendance percentage gradient (LLAB/Overall columns)
-    const maxRows = Math.max(3, sheet.getMaxRows());
-    if (llabIdx >= 0 && overallIdx >= 0) {
-      const startCol = Math.min(llabIdx, overallIdx) + 1;
-      const colCount = Math.abs(llabIdx - overallIdx) + 1;
-      rules.push(
-        SpreadsheetApp.newConditionalFormatRule()
-          .setGradientMinpointWithValue('#e67c73', SpreadsheetApp.InterpolationType.NUMBER, '0.8')
-          .setGradientMidpointWithValue('#ffce65', SpreadsheetApp.InterpolationType.NUMBER, '0.9')
-          .setGradientMaxpointWithValue('#57bb8a', SpreadsheetApp.InterpolationType.NUMBER, '1')
-          .setRanges([sheet.getRange(3, startCol, maxRows - 2, colCount)])
-          .build(),
-      );
-    }
-
-    // Attendance code colors for event columns
-    const startRow = 3;
-    const lastRow = Math.max(startRow, sheet.getLastRow());
-    const rowCount = Math.max(1, lastRow - startRow + 1);
-    const codePalette: Record<string, string> = {
-      P: '#C8E6C9',
-      E: '#BBDEFB',
-      ES: '#E1BEE7',
-      ER: '#FFF9C4',
-      ED: '#FFE0B2',
-      T: '#E0E0E0',
-      U: '#FFCDD2',
-      UR: '#F8BBD0',
-      MU: '#D1C4E9',
-      MRS: '#C5CAE9',
-      'N/A': '#F5F5F5',
-      '': '#FFFFFF',
-    };
-    headers.forEach((h, idx) => {
-      if (idx < baseCount) return; // event columns only
-      const colLetter = columnToLetter(idx + 1);
-      const colRange = sheet.getRange(startRow, idx + 1, rowCount, 1);
-      Object.entries(codePalette).forEach(([code, color]) => {
-        rules.push(
-          SpreadsheetApp.newConditionalFormatRule()
-            .whenFormulaSatisfied(`=$${colLetter}${startRow}="${code}"`)
-            .setBackground(color)
-            .setRanges([colRange])
-            .build(),
-        );
-      });
-    });
-
-    if (!canSetRules) {
-      Log.warn('Skipping Attendance conditional formatting: setConditionalFormatRules not available in this environment.');
-      return;
-    }
-
-    try {
-      sheet.setConditionalFormatRules(rules);
-    } catch (err) {
-      Log.warn(`Unable to set conditional formatting on Attendance: ${err}`);
-    }
   }
 }

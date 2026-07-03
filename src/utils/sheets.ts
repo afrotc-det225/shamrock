@@ -165,7 +165,7 @@ namespace SheetUtils {
       sheet.getRange(3, 1, lastRow - 2, lastCol).clearContent();
     }
     if (!rows.length) {
-      if (opts?.trimBlankRows) trimSheetRowsToData(sheet, 0);
+      if (opts?.trimBlankRows) trimRowsToDataCount(sheet, 0);
       return;
     }
     const output = rows.map((r) => headers.map((h) => r[h] ?? ''));
@@ -179,17 +179,35 @@ namespace SheetUtils {
       targetRange.clearDataValidations();
       targetRange.setValues(output);
     }
-    if (opts?.trimBlankRows) trimSheetRowsToData(sheet, rows.length);
+    if (opts?.trimBlankRows) trimRowsToDataCount(sheet, rows.length);
   }
 
-  function trimSheetRowsToData(sheet: GoogleAppsScript.Spreadsheet.Sheet, dataRowCount: number) {
-    const neededRows = Math.max(3, dataRowCount + 2);
+  export function trimRowsToDataCount(sheet: GoogleAppsScript.Spreadsheet.Sheet, dataRowCount: number, headerRows = 2) {
+    const neededRows = Math.max(headerRows + 1, dataRowCount + headerRows);
     const currentMax = sheet.getMaxRows();
     if (currentMax > neededRows) {
       sheet.deleteRows(neededRows + 1, currentMax - neededRows);
     } else if (currentMax < neededRows) {
       sheet.insertRowsAfter(currentMax, neededRows - currentMax);
     }
+  }
+
+  export function trimTrailingBlankRows(sheet: GoogleAppsScript.Spreadsheet.Sheet, headerRows = 2) {
+    const maxRows = sheet.getMaxRows();
+    const dataStartRow = headerRows + 1;
+    if (maxRows <= dataStartRow) return;
+
+    const lastCol = Math.max(1, sheet.getLastColumn());
+    const values = sheet.getRange(dataStartRow, 1, maxRows - headerRows, lastCol).getValues();
+    let lastDataOffset = -1;
+    for (let i = values.length - 1; i >= 0; i--) {
+      if (values[i].some((cell) => cell !== '' && cell !== null && cell !== undefined)) {
+        lastDataOffset = i;
+        break;
+      }
+    }
+
+    trimRowsToDataCount(sheet, lastDataOffset + 1, headerRows);
   }
 
   // Appends rows to the table starting at the first empty row after header rows.

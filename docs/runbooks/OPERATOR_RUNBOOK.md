@@ -83,7 +83,7 @@ Post-deploy validation checklist:
 - Directory Backend uses the same v2 column order as the frontend Directory and no longer includes legacy `source` or freeform Directory `notes`.
 - Use `Inactive`, `Commissioned`, or `Dropped` in `Flight Path` when a cadet should remain in backend records but be removed from operational frontend, leadership, attendance, and form choices.
 - Cadet rank and cadet leadership role are maintained on Directory. Leadership is rebuilt from active Directory rows with a role, while non-cadet/cadre/manual Leadership rows are preserved.
-- Sync Directory refreshes the frontend Data Legend first, clears stale frontend Directory dropdown rules, writes the v2 mirror, then reapplies v2 dropdowns from Data Legend named ranges.
+- Sync Directory refreshes the frontend Data Legend first, clears stale frontend Directory dropdown rules, writes the v2 mirror, trims stale blank rows, then reapplies v2 dropdowns and frontend table column types.
 - Prefer menu-driven sync/repair actions over ad hoc edits in the frontend.
 
 ### 5.2 Event maintenance
@@ -154,10 +154,11 @@ Operator checks:
 Likely causes:
 - Data Legend ranges missing or renamed.
 - Named ranges missing.
-- Dropdown option validation and conditional formatting can be applied by SHAMROCK, but per-option dropdown chip colors/display styling may require manual/template maintenance because SHAMROCK does not have a supported Apps Script field for those visual details.
+- Sheets advanced service unavailable, which prevents SHAMROCK from applying frontend table column types.
+- Data validation can be applied by SHAMROCK from Data Legend ranges. Frontend Attendance code styling is handled by table dropdown columns, not conditional-format color rules.
 
 Operator checks:
-- Re-run Sync Directory or setup to recreate validations.
+- Re-run Sync Directory, Rebuild Attendance Matrix, Apply frontend formatting, or setup to recreate validations and frontend tables.
 - Confirm Data Legend is present and populated.
 - Confirm the frontend Data Legend includes the v2 `rank_options` column and that Directory `Rank` validates against cadet rank options while `Email` has no dropdown validation.
 - Confirm Data Legend order follows the v2 Directory flow: AS year, flight, squadron, rank, university, dorm, academic options, home state, flight path, then attendance codes.

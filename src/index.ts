@@ -577,49 +577,20 @@ function fixAttendanceHeaders() {
       }
     }
 
-    const gradientColumns = [llabIdx, overallIdx].filter((idx) => idx >= 0).map((idx) => idx + 1);
-
     const eventWidth = Math.max(0, lastCol - eventStartCol + 1);
     const eventRange = eventWidth > 0 ? sheet.getRange(3, eventStartCol, dataRows, eventWidth) : null;
 
-    // Rebuild conditional formatting rules, removing overlaps with gradient columns (keep existing event rules/colors intact).
-    const rules = sheet.getConditionalFormatRules().filter((rule) => {
-      try {
-        const ranges = rule.getRanges ? rule.getRanges() : [];
-        return !ranges.some((rg) => {
-          const colStart = rg.getColumn();
-          const colEnd = colStart + rg.getNumColumns() - 1;
-          const rowStart = rg.getRow();
-          const rowEnd = rowStart + rg.getNumRows() - 1;
-
-          const touchesGradient = gradientColumns.some((col) => col >= colStart && col <= colEnd);
-          const touchesDisplayHeader = rowStart <= 2 && rowEnd >= 2;
-          return touchesGradient || touchesDisplayHeader;
-        });
-      } catch (err) {
-        Log.warn(`Skipping rule during conditional formatting rebuild: ${err}`);
-        return true;
-      }
-    });
-
-    const addGradientScale = (col: number) => {
-      const range = sheet.getRange(3, col, dataRows, 1);
-      const rule = SpreadsheetApp.newConditionalFormatRule()
-        .setGradientMinpointWithValue('#e67c73', SpreadsheetApp.InterpolationType.NUMBER, '0.8')
-        .setGradientMidpointWithValue('#ffce65', SpreadsheetApp.InterpolationType.NUMBER, '0.9')
-        .setGradientMaxpointWithValue('#57bb8a', SpreadsheetApp.InterpolationType.NUMBER, '1')
-        .setRanges([range])
-        .build();
-      rules.push(rule);
-    };
-
-    gradientColumns.forEach(addGradientScale);
+    try {
+      sheet.clearConditionalFormatRules();
+    } catch (err) {
+      Log.warn(`Unable to clear Attendance conditional formatting: ${err}`);
+    }
 
     // Data validation + formatting for event columns.
     if (eventRange && eventWidth > 0) {
       try {
         eventRange.clearDataValidations();
-        const codesRange = ss ? (ss.getRangeByName('ATTENDANCE_CODES') || ss.getRange('Data Legend!$K$3:$K')) : null;
+        const codesRange = ss ? ss.getRangeByName('ATTENDANCE_CODES') : null;
         if (codesRange) {
           const validation = SpreadsheetApp.newDataValidation()
             .requireValueInRange(codesRange, true)
@@ -639,11 +610,6 @@ function fixAttendanceHeaders() {
       }
     }
 
-    try {
-      sheet.setConditionalFormatRules(rules);
-    } catch (err) {
-      Log.warn(`Unable to set conditional format rules for attendance sheet: ${err}`);
-    }
     SpreadsheetApp.flush();
 
     SpreadsheetApp.getUi().alert('Attendance headers updated.');

@@ -246,39 +246,57 @@ namespace SetupService {
         return prop;
       });
 
-      // Attempt to replace any existing table with the same id.
-      try {
-        svc.batchUpdate({ requests: [{ deleteTable: { tableId } } as any] }, spreadsheetId);
-      } catch (err) {
-        Log.info(`No existing table to delete for ${tableId} on ${sheetName}: ${err}`);
-      }
+      const table = {
+        name: tableId,
+        tableId,
+        range: {
+          sheetId,
+          startColumnIndex: 0,
+          endColumnIndex: endColIndex,
+          startRowIndex: headerRow - 1, // zero-based (row 2)
+          endRowIndex,
+        },
+        columnProperties,
+      };
+
+      const existingTable = findExistingTable(svc, spreadsheetId, sheetId, tableId);
+      const request = existingTable
+        ? {
+            updateTable: {
+              table: { ...table, tableId: existingTable.tableId },
+              fields: 'name,range,columnProperties',
+            },
+          }
+        : {
+            addTable: {
+              table,
+            },
+          };
 
       svc.batchUpdate(
         {
-          requests: [
-            {
-              addTable: {
-                table: {
-                  name: tableId,
-                  tableId,
-                  range: {
-                    sheetId,
-                    startColumnIndex: 0,
-                    endColumnIndex: endColIndex,
-                    startRowIndex: headerRow - 1, // zero-based (row 2)
-                    endRowIndex,
-                  },
-                  columnProperties,
-                },
-              },
-            } as any,
-          ],
+          requests: [request as any],
         },
         spreadsheetId,
       );
       Log.info(`Ensured table ${tableId} on sheet ${sheetName}`);
     } catch (err) {
       Log.warn(`Unable to ensure table ${tableId} on sheet ${sheetName}: ${err}`);
+    }
+  }
+
+  function findExistingTable(svc: any, spreadsheetId: string, sheetId: number, tableId: string): any | null {
+    try {
+      if (!svc.get) return null;
+      const spreadsheet = svc.get(spreadsheetId, {
+        fields: 'sheets(properties(sheetId),tables(tableId,name,range))',
+      });
+      const targetSheet = (spreadsheet.sheets || []).find((sh: any) => sh?.properties?.sheetId === sheetId);
+      const tables = targetSheet?.tables || [];
+      return tables.find((table: any) => table?.tableId === tableId || table?.name === tableId) || null;
+    } catch (err) {
+      Log.warn(`Unable to inspect existing table ${tableId}: ${err}`);
+      return null;
     }
   }
 
@@ -2117,10 +2135,12 @@ namespace SetupService {
   }
 
   export function rebuildAttendanceMatrix() {
+    const frontendId = Config.getFrontendId();
     AttendanceService.rebuildMatrix();
     try {
       // Re-apply Attendance header formatting and validations after matrix rebuild.
       fixAttendanceHeaders();
+      if (frontendId) ensureTableForSheet(frontendId, 'Attendance', 'attendance');
       reapplyFrontendProtections();
     } catch (err) {
       Log.warn(`fixAttendanceHeaders post-rebuild failed: ${err}`);
@@ -2353,14 +2373,10 @@ namespace SetupService {
     // Apply frontend validations, plus visual formatting unless disabled.
     FrontendFormattingService.applyAll(frontend.id);
 
-    // Create structured tables on key frontend sheets via Sheets API (skip if formatting disabled).
-    if (!isFrontendFormattingDisabled()) {
-      ['Directory', 'Leadership', 'Attendance', 'Data Legend'].forEach((name) => {
-        ensureTableForSheet(frontend.id, name, name.replace(/\s+/g, '_').toLowerCase());
-      });
-    } else {
-      Log.info(`${Config.PROPERTY_KEYS.DISABLE_MAIN_WORKBOOK_FORMATTING}=true; skipping table creation.`);
-    }
+    // Create structured tables on key frontend sheets via Sheets API.
+    ['Directory', 'Leadership', 'Attendance', 'Data Legend'].forEach((name) => {
+      ensureTableForSheet(frontend.id, name, name.replace(/\s+/g, '_').toLowerCase());
+    });
 
     // Build attendance matrix initially.
     rebuildAttendanceMatrix();

@@ -107,11 +107,12 @@ General normalization:
 - Preserve valid name casing where possible (support names like “ben Yosef”).
 
 ### 5.3 Data Validation Strategy
-All dropdown validations must be driven from the Data Legend tab(s) using ranges, not inlined lists.
+Cell-level dropdown validations must be driven from the Data Legend tab(s) using ranges, not inlined lists.
 
 - The Data Legend acts as the canonical option registry.
 - Validations in other sheets reference Data Legend ranges.
-- SHAMROCK can apply Apps Script data validations and conditional formatting programmatically. Per-option Google Sheets dropdown chip colors/display styling are not part of the Apps Script validation builder or Sheets API data-validation rule shape used by SHAMROCK, so those visual details remain manual/template polish unless Google exposes a supported API.
+- Frontend primary sheets use Google Sheets Tables where available. Table dropdown column types mirror the same canonical option arrays because the Sheets Table API dropdown column type requires a `ONE_OF_LIST` validation rule.
+- Frontend Attendance code entry is represented by table dropdown columns plus strict Data Legend-backed validation, not conditional-format color rules.
 
 Canonical option sets:
 - The authoritative lists for dropdowns (AS years, flights, universities, dorms, CIP broad areas, AFSC options, attendance codes, etc.) are recorded in `docs/system/DATA_LEGEND_RANGES.md`.
@@ -198,7 +199,7 @@ Required standards:
 - Use Google Sheets Table feature for all primary tables.
 - Row 1: machine headers (stable identifiers).
 - Row 2: display headers.
-- Conditional formatting where it improves operational clarity (e.g., attendance codes).
+- Prefer table column types, data validation, number/date formats, widths, freezes, and protection over conditional formatting for frontend sheets.
 - Use borders and separators for readability (Directory requires specific separators).
 - Use smart chips for links where helpful.
 

@@ -551,14 +551,7 @@ namespace AttendanceService {
       applyAttendanceFormulas(sheet, data.length, machineHeaders, baseLength);
     }
 
-    // Trim excess rows after the write so stale blank tails from prior matrix sizes disappear.
-    const neededRows = Math.max(3, data.length + 2); // 2 header rows + at least 1 body row.
-    const currentMax = sheet.getMaxRows();
-    if (currentMax > neededRows) {
-      sheet.deleteRows(neededRows + 1, currentMax - neededRows);
-    } else if (currentMax < neededRows) {
-      sheet.insertRowsAfter(currentMax, neededRows - currentMax);
-    }
+    SheetUtils.trimRowsToDataCount(sheet, data.length);
   }
 
   function sortAttendanceRows(rows: any[]): any[] {
