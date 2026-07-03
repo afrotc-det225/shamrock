@@ -150,7 +150,7 @@ The v2 code set is `P`, `T`, `A`, `R`, `D`, `U`, `E`, `ES`, `MED`, and `N/A`.
 - Submit a controlled attendance response.
 - Confirm the response is appended to Attendance Backend.
 - Rebuild attendance and confirm the frontend matrix updates deterministically.
-- Confirm attendance codes validate against Data Legend options and show as frontend table dropdown columns when the Sheets advanced service is available.
+- Confirm attendance codes validate against Data Legend options while frontend table column types remain unset.
 - Confirm stale blank rows are removed from the frontend matrix after cadets are removed or marked non-operational.
 
 ## Excusals

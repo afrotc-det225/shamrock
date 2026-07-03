@@ -382,49 +382,12 @@ namespace SetupService {
       const endColIndex = colCount; // zero-based exclusive
       const endRowIndex = Math.max(headerRow + 1, sheet.getLastRow());
 
-      const machineHeaders = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0].map((h) => String(h || '').trim());
-      const tableDropdownOptions: Record<string, string[]> = {
-        as_year: Arrays.AS_YEARS,
-        flight: Arrays.FLIGHTS,
-        squadron: Arrays.SQUADRONS,
-        university: Arrays.UNIVERSITIES,
-        dorm: Arrays.DORMS,
-        home_state: Arrays.HOME_STATES,
-        cip_broad_area: Arrays.CIP_BROAD_AREAS,
-        desired_assigned_afsc: Arrays.AFSC_OPTIONS,
-        flight_path_status: Arrays.FLIGHT_PATH_STATUSES,
-        attendance_type: Arrays.ATTENDANCE_CODES,
-        attendance_effect: Arrays.ATTENDANCE_CODES,
-        prior_attendance_code: Arrays.ATTENDANCE_CODES,
-        decision: Arrays.EXCUSAL_DECISIONS,
-        status: Arrays.EXCUSAL_STATUSES,
-        requested_outcome: Arrays.EXCUSAL_REQUESTED_OUTCOMES,
-      };
-      const attendanceBase = new Set((Schemas.getTabSchema('Attendance')?.machineHeaders || []).map((h) => h.toLowerCase()));
-
       const columnProperties = headerValues.map((name, idx) => {
-        const machineHeader = machineHeaders[idx] || '';
-        const prop: Record<string, any> = {
+        return {
           columnIndex: idx,
           columnName: String(name || `Column ${idx + 1}`),
-          columnType: 'TEXT',
+          columnType: 'COLUMN_TYPE_UNSPECIFIED',
         };
-        const dropdownOptions = tableDropdownOptions[machineHeader]
-          || (sheetName === 'Attendance' && idx >= attendanceBase.size ? Arrays.ATTENDANCE_CODES : null);
-        if (dropdownOptions?.length) {
-          prop.columnType = 'DROPDOWN';
-          prop.dataValidationRule = {
-            condition: {
-              type: 'ONE_OF_LIST',
-              values: dropdownOptions.map((value) => ({ userEnteredValue: value })),
-            },
-          };
-        } else if (machineHeader === 'dob' || machineHeader.endsWith('_at') || machineHeader.endsWith('_datetime')) {
-          prop.columnType = 'DATE';
-        } else if (machineHeader.includes('_pct')) {
-          prop.columnType = 'PERCENT';
-        }
-        return prop;
       });
 
       const tableRange = {
@@ -480,7 +443,7 @@ namespace SetupService {
               fields: 'columnProperties',
             },
           } as any],
-          `Update table column types ${tableId} on ${sheetName}`,
+          `Reset table column types ${tableId} on ${sheetName}`,
         );
       }
 

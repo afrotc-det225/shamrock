@@ -114,12 +114,12 @@ Cell-level dropdown validations must be driven from the Data Legend tab(s) using
 - The Data Legend acts as the canonical option registry.
 - Validations in other sheets reference Data Legend ranges.
 - Frontend primary sheets use Google Sheets Table objects through the Sheets API advanced service. They must not rely on ordinary `applyRowBanding()` ranges as a substitute for Tables.
-- Table dropdown column types mirror the same canonical option arrays because the Sheets Table API dropdown column type requires a `ONE_OF_LIST` validation rule.
+- Table column types must remain `None` / `COLUMN_TYPE_UNSPECIFIED`. Controlled values are enforced with normal cell-level data validation rules, not Sheets Table dropdown column types.
 - Frontend table creation/update also applies Sheets API cell-format requests for the Fall 2025-style visible table treatment: dark header row, clipped middle-aligned text, and white/light banded body rows. This is not conditional formatting or legacy row banding.
-- Table creation/update is split into base table, column type, and visual style requests with retry/backoff. If Sheets returns a transient internal error for Table object creation, SHAMROCK still applies the visible table-style fallback and logs the table-object failure for retry.
+- Table creation/update is split into base table, column reset, and visual style requests with retry/backoff. If Sheets returns a transient internal error for Table object creation, SHAMROCK still applies the visible table-style fallback and logs the table-object failure for retry.
 - Frontend formatting temporarily clears SHAMROCK-managed protections before table creation/update, then reapplies protections after the Sheets API table and style requests complete. Protected ranges must not prevent table repair.
 - Directory `Rank` uses the cadet-only `CADET_RANKS` list. Leadership `Rank` accepts the adjacent Data Legend `CADET_RANKS`, non-cadet `RANKS`, and `HONORIFICS` ranges. Rank validations are strict range validations with plain-text display, not visible dropdown arrows/chips.
-- Frontend Attendance code entry is represented by table dropdown columns plus strict Data Legend-backed validation, not conditional-format color rules.
+- Frontend Attendance code entry is represented by strict Data Legend-backed validation and normal spreadsheet formatting, not conditional-format color rules or Sheets Table dropdown column types.
 
 Canonical option sets:
 - The authoritative lists for dropdowns (AS years, flights, universities, dorms, CIP broad areas, AFSC options, attendance codes, etc.) are recorded in `docs/system/DATA_LEGEND_RANGES.md`.
@@ -212,7 +212,7 @@ Required standards:
 - Use Google Sheets Table feature for all primary tables.
 - Row 1: machine headers (stable identifiers).
 - Row 2: display headers.
-- Prefer table column types, data validation, number/date formats, widths, freezes, and protection over conditional formatting for frontend sheets.
+- Keep Sheets Table column types unset. Prefer Data Legend-backed cell validation, number/date formats, widths, freezes, and protection over conditional formatting for frontend sheets.
 - Use borders and separators for readability (Directory requires specific separators).
 - Use smart chips for links where helpful.
 
