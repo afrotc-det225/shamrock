@@ -113,13 +113,13 @@ The v2 transition workflow prepares SHAMROCK for a new semester or academic year
 ### Safeguards
 
 - The wizard saves a draft after each prompt and does not mutate data until final confirmation.
-- Current core frontend sheets are copied, locked, and hidden with term labels.
+- Current core frontend sheets are copied, locked, and hidden with term labels. Copied table objects are renamed to match the archive sheet names, such as `Spring 2026 Directory`.
 - Backend rollback archives are copied, locked, hidden, and registered for deletion after seven days.
 - Attendance/Excusals logs and response rows are cleared only after archive creation and confirmation.
 
 ### Validation
 
-- Confirm archived frontend tabs exist, are hidden, and use the previous term label.
+- Confirm archived frontend tabs exist, are hidden, use the previous term label, and have matching table names.
 - Confirm Events Backend contains the new term, expected training weeks, and Mando/LLAB/Secondary/POC events.
 - Confirm Directory removed dropped/graduated cadets and applied AS-year overrides when applicable.
 - Confirm Leadership reflects Directory roles plus cadre/manual contacts.

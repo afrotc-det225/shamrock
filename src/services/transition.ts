@@ -256,6 +256,7 @@ namespace TransitionService {
       counter += 1;
     }
     const archived = source.copyTo(spreadsheet).setName(finalName);
+    SheetUtils.renameTablesOnSheet(spreadsheet.getId(), archived, finalName);
     const range = archived.getDataRange();
     range.copyTo(range, { contentsOnly: true });
     archived.getProtections(SpreadsheetApp.ProtectionType.RANGE).forEach((p) => p.remove());

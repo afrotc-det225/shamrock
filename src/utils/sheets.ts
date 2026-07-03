@@ -210,6 +210,48 @@ namespace SheetUtils {
     trimRowsToDataCount(sheet, lastDataOffset + 1, headerRows);
   }
 
+  export function renameTablesOnSheet(
+    spreadsheetId: string,
+    sheet: GoogleAppsScript.Spreadsheet.Sheet,
+    tableName: string,
+  ): boolean {
+    if (!spreadsheetId || !sheet || !tableName) return false;
+    if (typeof (globalThis as any).Sheets === 'undefined') {
+      Log.warn(`Sheets advanced service unavailable; cannot rename tables on ${sheet.getName()}`);
+      return false;
+    }
+
+    try {
+      const svc = (Sheets as any)?.Spreadsheets;
+      if (!svc?.get || !svc?.batchUpdate) {
+        Log.warn(`Sheets advanced service unavailable; cannot rename tables on ${sheet.getName()}`);
+        return false;
+      }
+      const spreadsheet = svc.get(spreadsheetId, {
+        fields: 'sheets(properties(sheetId),tables(tableId,name))',
+      });
+      const sheetId = sheet.getSheetId();
+      const target = (spreadsheet.sheets || []).find((sh: any) => sh?.properties?.sheetId === sheetId);
+      const tables = (target?.tables || []).filter((table: any) => table?.tableId);
+      if (!tables.length) return false;
+
+      const requests = tables.map((table: any, idx: number) => ({
+        updateTable: {
+          table: {
+            tableId: table.tableId,
+            name: idx === 0 ? tableName : `${tableName} ${idx + 1}`,
+          },
+          fields: 'name',
+        },
+      }));
+      svc.batchUpdate({ requests }, spreadsheetId);
+      return true;
+    } catch (err) {
+      Log.warn(`Unable to rename table(s) on ${sheet.getName()} to ${tableName}: ${err}`);
+      return false;
+    }
+  }
+
   // Appends rows to the table starting at the first empty row after header rows.
   export function appendRows(sheet: GoogleAppsScript.Spreadsheet.Sheet, rows: Record<string, any>[]) {
     if (!rows.length) return;

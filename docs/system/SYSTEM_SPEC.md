@@ -114,6 +114,7 @@ Cell-level dropdown validations must be driven from the Data Legend tab(s) using
 - The Data Legend acts as the canonical option registry.
 - Validations in other sheets reference Data Legend ranges.
 - Frontend primary sheets use Google Sheets Table objects through the Sheets API advanced service. They must not rely on ordinary `applyRowBanding()` ranges as a substitute for Tables.
+- Active frontend table names must match the sheet display names: `Directory`, `Leadership`, `Attendance`, and `Data Legend`.
 - Table column types must remain `None` / `COLUMN_TYPE_UNSPECIFIED`. Controlled values are enforced with normal cell-level data validation rules, not Sheets Table dropdown column types.
 - Frontend table creation/update also applies Sheets API cell-format requests for the Fall 2025-style visible table treatment: dark header row, clipped middle-aligned text, and white/light banded body rows. This is not conditional formatting or legacy row banding.
 - Table creation/update is split into base table, column reset, and visual style requests with retry/backoff. If Sheets returns a transient internal error for Table object creation, SHAMROCK still applies the visible table-style fallback and logs the table-object failure for retry.
@@ -212,6 +213,7 @@ Required standards:
 - Use Google Sheets Table feature for all primary tables.
 - Row 1: machine headers (stable identifiers).
 - Row 2: display headers.
+- Archived frontend transition tables must be renamed to match their archived sheet names, such as `Spring 2026 Directory`.
 - Keep Sheets Table column types unset. Prefer Data Legend-backed cell validation, number/date formats, widths, freezes, and protection over conditional formatting for frontend sheets.
 - Use borders and separators for readability (Directory requires specific separators).
 - Use smart chips for links where helpful.

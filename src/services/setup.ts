@@ -345,7 +345,19 @@ namespace SetupService {
     return false;
   }
 
-  function ensureTableForSheet(spreadsheetId: string, sheetName: string, tableId: string) {
+  const FRONTEND_TABLE_SHEETS = ['Directory', 'Leadership', 'Attendance', 'Data Legend'];
+
+  function tableIdForName(tableName: string): string {
+    return String(tableName || 'table')
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9_]+/g, '_')
+      .replace(/^_+|_+$/g, '') || 'table';
+  }
+
+  function ensureTableForSheet(spreadsheetId: string, sheetName: string, tableName = sheetName) {
+    const tableId = tableIdForName(tableName);
+    const displayTableName = String(tableName || sheetName).trim() || sheetName;
     // Sheets advanced service may be disabled in some environments; skip gracefully if absent.
     if (typeof (globalThis as any).Sheets === 'undefined') {
       Log.warn(`Sheets advanced service unavailable; cannot create tables for ${sheetName}`);
@@ -399,7 +411,7 @@ namespace SetupService {
       };
 
       const baseTable = {
-        name: tableId,
+        name: displayTableName,
         tableId,
         range: tableRange,
         rowsProperties: {
@@ -414,7 +426,7 @@ namespace SetupService {
         columnProperties,
       };
 
-      const existingTable = findExistingTable(svc, spreadsheetId, sheetId, tableId);
+      const existingTable = findExistingTable(svc, spreadsheetId, sheetId, tableId, displayTableName);
       const baseRequest = existingTable
         ? {
             updateTable: {
@@ -430,9 +442,9 @@ namespace SetupService {
 
       const baseOk = sheetsBatchUpdateWithRetry(svc, spreadsheetId, [baseRequest as any], `Ensure table ${tableId} on ${sheetName}`);
       if (!baseOk) {
-        Log.warn(`Unable to ensure table ${tableId} on sheet ${sheetName}; applying visual formatting fallback only.`);
+        Log.warn(`Unable to ensure table ${displayTableName} on sheet ${sheetName}; applying visual formatting fallback only.`);
       } else {
-        const currentTable = findExistingTable(svc, spreadsheetId, sheetId, tableId) || existingTable;
+        const currentTable = findExistingTable(svc, spreadsheetId, sheetId, tableId, displayTableName) || existingTable;
         const updateTableId = currentTable?.tableId || tableId;
         sheetsBatchUpdateWithRetry(
           svc,
@@ -455,11 +467,11 @@ namespace SetupService {
       );
       Log.info(`Ensured table styling path completed for ${tableId} on sheet ${sheetName}`);
     } catch (err) {
-      Log.warn(`Unable to ensure table ${tableId} on sheet ${sheetName}: ${err}`);
+      Log.warn(`Unable to ensure table ${displayTableName} on sheet ${sheetName}: ${err}`);
     }
   }
 
-  function findExistingTable(svc: any, spreadsheetId: string, sheetId: number, tableId: string): any | null {
+  function findExistingTable(svc: any, spreadsheetId: string, sheetId: number, tableId: string, tableName: string): any | null {
     try {
       if (!svc.get) return null;
       const spreadsheet = svc.get(spreadsheetId, {
@@ -467,7 +479,7 @@ namespace SetupService {
       });
       const targetSheet = (spreadsheet.sheets || []).find((sh: any) => sh?.properties?.sheetId === sheetId);
       const tables = targetSheet?.tables || [];
-      return tables.find((table: any) => table?.tableId === tableId || table?.name === tableId) || null;
+      return tables.find((table: any) => table?.tableId === tableId || table?.name === tableId || table?.name === tableName) || null;
     } catch (err) {
       Log.warn(`Unable to inspect existing table ${tableId}: ${err}`);
       return null;
@@ -546,6 +558,7 @@ namespace SetupService {
 
     try {
       archived.setName(archiveName);
+      SheetUtils.renameTablesOnSheet(ss.getId(), archived, archiveName);
     } catch (err) {
       Log.warn(`Unable to rename archive copy to ${archiveName}: ${err}`);
     }
@@ -2166,9 +2179,7 @@ namespace SetupService {
 
   function ensureFrontendTables(frontendId: string) {
     if (!frontendId) return;
-    ['Directory', 'Leadership', 'Attendance', 'Data Legend'].forEach((name) => {
-      ensureTableForSheet(frontendId, name, name.replace(/\s+/g, '_').toLowerCase());
-    });
+    FRONTEND_TABLE_SHEETS.forEach((name) => ensureTableForSheet(frontendId, name, name));
   }
 
   export function rebuildDashboard() {
@@ -2323,7 +2334,7 @@ namespace SetupService {
     try {
       // Re-apply Attendance header formatting and validations after matrix rebuild.
       fixAttendanceHeaders();
-      if (frontendId) ensureTableForSheet(frontendId, 'Attendance', 'attendance');
+      if (frontendId) ensureTableForSheet(frontendId, 'Attendance', 'Attendance');
       reapplyFrontendProtections();
     } catch (err) {
       Log.warn(`fixAttendanceHeaders post-rebuild failed: ${err}`);
@@ -2452,9 +2463,7 @@ namespace SetupService {
     archiveAndResetSheets(backendId, Schemas.BACKEND_TABS, backendNames);
 
     if (frontendId) {
-      ['Directory', 'Leadership', 'Attendance', 'Data Legend'].forEach((name) => {
-        ensureTableForSheet(frontendId, name, name.replace(/\s+/g, '_').toLowerCase());
-      });
+      ensureFrontendTables(frontendId);
       FrontendFormattingService.applyAll(frontendId);
       ProtectionService.applyFrontendProtections(frontendId);
     }
@@ -2474,9 +2483,7 @@ namespace SetupService {
     restoreFromArchiveSheets(backendId, Schemas.BACKEND_TABS, backendNames);
 
     if (frontendId) {
-      ['Directory', 'Leadership', 'Attendance', 'Data Legend'].forEach((name) => {
-        ensureTableForSheet(frontendId, name, name.replace(/\s+/g, '_').toLowerCase());
-      });
+      ensureFrontendTables(frontendId);
       FrontendFormattingService.applyAll(frontendId);
       ProtectionService.applyFrontendProtections(frontendId);
     }
@@ -2557,9 +2564,7 @@ namespace SetupService {
     FrontendFormattingService.applyAll(frontend.id);
 
     // Create structured tables on key frontend sheets via Sheets API.
-    ['Directory', 'Leadership', 'Attendance', 'Data Legend'].forEach((name) => {
-      ensureTableForSheet(frontend.id, name, name.replace(/\s+/g, '_').toLowerCase());
-    });
+    ensureFrontendTables(frontend.id);
 
     // Build attendance matrix initially.
     rebuildAttendanceMatrix();
