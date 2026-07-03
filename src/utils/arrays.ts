@@ -4,7 +4,6 @@ namespace Arrays {
   export const AS_YEARS = ['AS100', 'AS150', 'AS200', 'AS250', 'AS300', 'AS400', 'AS500', 'AS700', 'AS800', 'AS900'];
   export const CADET_RANKS = ['C/4C', 'C/3C', 'C/2d Lt', 'C/1st Lt', 'C/Capt', 'C/Maj', 'C/Lt Col', 'C/Col'];
   export const RANKS = [
-    ...CADET_RANKS,
     'AB',
     'Amn',
     'A1C',

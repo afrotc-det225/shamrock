@@ -113,7 +113,7 @@ Cell-level dropdown validations must be driven from the Data Legend tab(s) using
 - Validations in other sheets reference Data Legend ranges.
 - Frontend primary sheets use Google Sheets Table objects through the Sheets API advanced service. They must not rely on ordinary `applyRowBanding()` ranges as a substitute for Tables.
 - Table dropdown column types mirror the same canonical option arrays because the Sheets Table API dropdown column type requires a `ONE_OF_LIST` validation rule.
-- Directory `Rank` uses the cadet-only `CADET_RANKS` list; Leadership `Rank` uses the broader `RANKS` list for cadets, enlisted ranks, and officers.
+- Directory `Rank` uses the cadet-only `CADET_RANKS` list. Leadership `Rank` accepts the adjacent Data Legend `CADET_RANKS` and non-cadet `RANKS` ranges.
 - Frontend Attendance code entry is represented by table dropdown columns plus strict Data Legend-backed validation, not conditional-format color rules.
 
 Canonical option sets:

@@ -62,14 +62,6 @@ Allowed values:
 
 ## Ranks (`RANKS`)
 Allowed values:
-- C/4C
-- C/3C
-- C/2d Lt
-- C/1st Lt
-- C/Capt
-- C/Maj
-- C/Lt Col
-- C/Col
 - AB
 - Amn
 - A1C
