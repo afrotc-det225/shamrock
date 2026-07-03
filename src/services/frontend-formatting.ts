@@ -491,12 +491,17 @@ namespace FrontendFormattingService {
     });
 
     if (!requests.length) return;
-    try {
-      sheetsService.batchUpdate({ requests }, ss.getId());
-      Log.info(`Applied Directory Photo Link file chips to ${requests.length} cell(s).`);
-    } catch (err) {
-      Log.warn(`Unable to apply Directory Photo Link file chips: ${err}`);
+    let applied = 0;
+    for (let i = 0; i < requests.length; i += 10) {
+      const chunk = requests.slice(i, i + 10);
+      try {
+        sheetsService.batchUpdate({ requests: chunk }, ss.getId());
+        applied += chunk.length;
+      } catch (err) {
+        Log.warn(`Unable to apply Directory Photo Link file chips for rows ${i + 1}-${i + chunk.length}: ${err}`);
+      }
     }
+    if (applied) Log.info(`Applied Directory Photo Link file chips to ${applied} cell(s).`);
   }
 
   function applyDirectoryFormatting(ss: GoogleAppsScript.Spreadsheet.Spreadsheet) {
@@ -652,6 +657,16 @@ namespace FrontendFormattingService {
     alignColumn('rank', 'left');
     alignColumn('cell_phone', 'center');
     alignColumn('office_phone', 'center');
+    try {
+      const displayHeaders = sheet.getRange(2, 1, 1, sheet.getLastColumn()).getValues()[0].map((h) => String(h || '').trim().toLowerCase());
+      const centerDisplayColumns = new Set(['overall', 'llab', 'overall_attendance_pct', 'llab_attendance_pct']);
+      headers.forEach((header, idx) => {
+        if (!centerDisplayColumns.has(header.toLowerCase()) && !centerDisplayColumns.has(displayHeaders[idx])) return;
+        sheet.getRange(2, idx + 1, dataRows + 1, 1).setHorizontalAlignment('center');
+      });
+    } catch (err) {
+      Log.warn(`Unable to center Leadership Overall/LLAB columns: ${err}`);
+    }
 
     sheet.setFrozenRows(2);
     sheet.setFrozenColumns(2);
@@ -941,8 +956,8 @@ namespace FrontendFormattingService {
         .setFontWeight('bold');
     }
     // Explicitly center LLAB/Overall data columns (not just percentages) to avoid left drift.
-    if (llabIdx >= 0) sheet.getRange(3, llabIdx + 1, dataRows, 1).setHorizontalAlignment('center');
-    if (overallIdx >= 0) sheet.getRange(3, overallIdx + 1, dataRows, 1).setHorizontalAlignment('center');
+    if (llabIdx >= 0) sheet.getRange(2, llabIdx + 1, dataRows + 1, 1).setHorizontalAlignment('center');
+    if (overallIdx >= 0) sheet.getRange(2, overallIdx + 1, dataRows + 1, 1).setHorizontalAlignment('center');
 
     // Percentage formats
     const formatPercent = (idx: number) => {
@@ -959,5 +974,11 @@ namespace FrontendFormattingService {
     sheet.setFrozenRows(2);
     sheet.setFrozenColumns(2);
 
+  }
+
+  export function applyPostTableFormatting(frontendId: string) {
+    const ss = openFrontend(frontendId);
+    if (!ss) return;
+    applyAttendanceFormatting(ss);
   }
 }

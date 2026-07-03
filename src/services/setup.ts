@@ -2106,6 +2106,7 @@ namespace SetupService {
     FrontendFormattingService.applyAll(frontendId);
     ensureFrontendTables(frontendId);
     FrontendFormattingService.applyValidations(frontendId);
+    FrontendFormattingService.applyPostTableFormatting(frontendId);
     ProtectionService.applyFrontendProtections(frontendId);
   }
 
@@ -2270,6 +2271,7 @@ namespace SetupService {
         FrontendFormattingService.applyValidations(frontendId);
         ensureTableForSheet(frontendId, 'Attendance', 'Attendance');
         FrontendFormattingService.applyValidations(frontendId);
+        FrontendFormattingService.applyPostTableFormatting(frontendId);
       }
       reapplyFrontendProtections();
     } catch (err) {

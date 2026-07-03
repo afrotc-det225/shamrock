@@ -98,9 +98,13 @@ namespace ProtectionService {
     ss.getSheets().forEach((sheet) => {
       const name = sheet.getName();
       if (name === 'FAQs' || name === 'Dashboard') return; // handled separately
-      const lastCol = Math.max(1, sheet.getLastColumn(), sheet.getMaxColumns());
-      const range = sheet.getRange(1, 1, 2, lastCol);
-      ensureRangeProtection(sheet, range, `${sheet.getName()}:header_rows`, { warningOnly: false, editors });
+      try {
+        const lastCol = Math.max(1, sheet.getLastColumn());
+        const range = sheet.getRange(1, 1, 2, lastCol);
+        ensureRangeProtection(sheet, range, `${sheet.getName()}:header_rows`, { warningOnly: false, editors });
+      } catch (err) {
+        Log.warn(`Skipping header-row protection on ${sheet.getName()}: ${err}`);
+      }
     });
   }
 
