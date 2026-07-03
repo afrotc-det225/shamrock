@@ -1,6 +1,6 @@
 # SHAMROCK Operator Runbook (Internal)
 
-This runbook describes how operators (admins) provision, deploy, operate, and troubleshoot SHAMROCK.
+This runbook describes how operators and developers deploy, operate, repair, and troubleshoot the established SHAMROCK system.
 
 - Audience: operators and developers.
 - Scope: operational procedures and safety checks.
@@ -25,26 +25,45 @@ IDs and resource references:
 - Store environment-specific IDs in a configuration mechanism designed not to leak secrets.
 - Public docs must never include raw IDs.
 
-## 3. Provisioning (Ensure-Exists)
-Provisioning is a safe, repeatable process.
+## 3. Setup And Repair
+Setup is a safe, repeatable repair process for an existing environment and can also provision a fresh environment when needed.
 
 Operator expectations:
 - Running setup multiple times should never create duplicates.
 - Running setup should repair missing tabs, missing headers, missing validations, or missing triggers.
 
-Provisioning outputs to verify:
+Setup outputs to verify:
 - Frontend workbook contains the expected tabs and formatting.
 - Backend workbook contains the expected tabs and formatting.
 - Forms exist and require verified responder emails.
-- Custom menus appear in the frontend workbook.
+- Custom menus appear in the backend/admin workbook.
+- Admin menus do not appear in the frontend/main workbook.
 - Triggers exist and are correctly bound.
 
 ## 4. Deployment Model
 Deployment is performed from the local repository using clasp.
 
 Operational principles:
-- Treat deployment as a controlled change: publish, then validate.
+- Treat deployment as a controlled change: develop, validate, commit, push to GitHub, deploy, then validate production.
 - Avoid deploying directly from the Apps Script editor.
+- The git history is the edit log for Apps Script source changes. Every production deployment should correspond to a committed and pushed repository state.
+
+Standard deployment workflow:
+1. Develop the code and documentation change locally.
+2. Run `npm run build`.
+3. Run `git diff --check`.
+4. Review changed files for secrets, raw IDs, personal data, and local-only files.
+5. Commit the change with a clear message.
+6. Push the branch to GitHub.
+7. Merge to `main` when approved or requested.
+8. Deploy production SHAMROCK from the committed repository state with `npm run push`.
+9. Run post-deploy validation and record the result in the PR, final response, or follow-up notes.
+
+Do not deploy:
+- Uncommitted local changes.
+- A change that failed local validation.
+- A change whose target Apps Script project is ambiguous.
+- A change that has not been approved/requested for production.
 
 Post-deploy validation checklist:
 - Open the backend/admin workbook and confirm the SHAMROCK category menus load.
@@ -59,19 +78,27 @@ Post-deploy validation checklist:
 ### 5.1 Directory maintenance
 - Directory source of truth is maintained in the backend.
 - Frontend Directory is a mirror.
+- Prefer menu-driven sync/repair actions over ad hoc edits in the frontend.
 
 ### 5.2 Event maintenance
 - Events are maintained in the backend.
 - Frontend Events is a mirror.
+- Event changes may require attendance matrix and form choice refreshes.
 
 ### 5.3 Attendance processing
 - Attendance submissions append to Attendance Backend.
 - Frontend Attendance matrix is derived; rebuild is available via admin menu.
+- Treat frontend attendance as derived state. Rebuild it instead of manually patching formulas or event columns.
 
 ### 5.4 Excusals processing
 - Requests append via form.
 - Decisions are made in Excusals Backend by authorized staff.
 - Decisions drive notifications and attendance effects.
+- Use cleanup/backfill actions only when repairing a known data issue.
+
+### 5.5 Audit review
+- Review Audit Backend after setup, repair, and bulk operator actions.
+- Matching `started` and terminal rows with the same `run_id` indicate a menu action completed, failed, or was cancelled.
 
 ## 6. Troubleshooting
 ### 6.1 Menus not appearing
@@ -115,6 +142,7 @@ Operator checks:
 General rollback principles:
 - Prefer disabling triggers and reverting derived views over deleting data.
 - Avoid deleting backend logs.
+- If an operation is destructive, preserve or export the affected backend state first unless the action is explicitly designed as a permanent cleanup.
 
 Emergency actions:
 - Disable installable triggers.
@@ -126,3 +154,4 @@ For any operational change:
 - Update the public feature entry to describe new operator steps.
 - Update the system spec if invariants changed.
 - Add a validation checklist.
+- Remove stale compatibility notes or migration instructions when the current baseline no longer supports them.

@@ -1,49 +1,42 @@
-# Feature Public Doc Template
+# Operator Feature Catalog Entry Template
 
-Copy this template into `docs/public/README.md` (one section per feature) and fill in all placeholders. Keep it safe for public sharing—never include secrets or raw IDs.
+Use this template when a SHAMROCK change affects operator-visible behavior. Keep entries concise and safe to share. Do not include secrets, raw IDs, personal emails, phone numbers, or cadet data.
 
 ---
 
 ## Feature Name
-- **Owner/POC**: role or team (no emails by default)
-- **Status**: draft/active/deprecated
-- **Last updated**: YYYY-MM-DD
 
-### Overview
-- One-paragraph summary of what the feature does and who uses it.
-- Primary sheet(s)/form(s) involved.
+### Purpose
 
-### User entry points
-- Forms: name, purpose, and where responses land.
-- Manual actions: which tab/button/menu item to use.
-- Triggers: onOpen/onEdit/onFormSubmit/time-driven with frequency.
+One short paragraph describing what the feature does and who uses it.
 
-### Data touched
-- Sheets/Tabs: list each tab, key columns (name, type, required), and derived formulas if relevant.
-- Config: friendly names for IDs/URLs required (use placeholders if not public).
-- External dependencies: other systems/services the feature calls.
+### Operator Entry Points
 
-### Workflow (happy path)
-1) Input -> validation -> sheet write.
-2) Downstream actions (notifications, rollups, formatting, summaries).
-3) Any branching or retries.
+- Backend/admin workbook menu:
+- Form:
+- Trigger:
+- Apps Script function, if operators may need it:
 
-### Error handling and safeguards
-- How invalid inputs are handled.
-- Logging/alerts (if any).
-- Rollback guidance (e.g., revert rows, disable trigger).
+### Data Touched
 
-### Deployment / configuration
-- Prerequisites (sheet ownership, sharing, add-ons, advanced services).
-- Setup steps (copy IDs into config, install triggers, run initializers).
-- How to verify deployment succeeded.
+- Backend tabs:
+- Frontend tabs:
+- Forms:
+- Script Properties or other configuration:
+- Notifications or audit logs:
 
-### Validation checklist
-- Manual steps to confirm the feature works (what to click, what to expect).
-- Sample inputs and expected outputs.
+### Safeguards
 
-### Known limits / open questions
-- Edge cases, performance constraints, or TBD items.
+- Idempotency or repair behavior:
+- Audit/logging behavior:
+- Reversibility or rollback note:
 
-### Change log
-- YYYY-MM-DD: short description of the change.
+### Validation
+
+- Happy path:
+- Failure or edge case:
+- Post-deploy check:
+
+### Known Limits
+
+- Manual UI step, Apps Script limitation, or unsupported case:
