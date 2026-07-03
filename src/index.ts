@@ -619,7 +619,7 @@ function fixAttendanceHeaders() {
     if (eventRange && eventWidth > 0) {
       try {
         eventRange.clearDataValidations();
-        const codesRange = ss ? ss.getRange('Data Legend!$J$3:$J') : null;
+        const codesRange = ss ? (ss.getRangeByName('ATTENDANCE_CODES') || ss.getRange('Data Legend!$K$3:$K')) : null;
         if (codesRange) {
           const validation = SpreadsheetApp.newDataValidation()
             .requireValueInRange(codesRange, true)
