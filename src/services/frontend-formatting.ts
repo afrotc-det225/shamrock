@@ -343,14 +343,21 @@ namespace FrontendFormattingService {
     const dataRange = sheet.getRange(3, 1, Math.max(1, sheet.getMaxRows() - 2), sheet.getLastColumn());
     dataRange.setHorizontalAlignment('left');
     const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0].map((h) => String(h || '').trim());
-    const alignCenter = (key: string) => {
+    const dataRows = Math.max(1, sheet.getMaxRows() - 2);
+    const alignColumn = (key: string, alignment: 'left' | 'center' | 'right') => {
       const idx = headers.indexOf(key);
-      if (idx >= 0) sheet.getRange(3, idx + 1, Math.max(1, sheet.getMaxRows() - 2), 1).setHorizontalAlignment('center');
+      if (idx >= 0) sheet.getRange(3, idx + 1, dataRows, 1).setHorizontalAlignment(alignment);
     };
-    alignCenter('phone');
-    alignCenter('cip_code');
-    const dobIdx = headers.indexOf('dob');
-    if (dobIdx >= 0) sheet.getRange(3, dobIdx + 1, Math.max(1, sheet.getMaxRows() - 2), 1).setHorizontalAlignment('right');
+    alignColumn('phone', 'center');
+    alignColumn('dorm', 'left');
+    alignColumn('cip_code', 'right');
+    alignColumn('desired_assigned_afsc', 'left');
+    alignColumn('home_town', 'left');
+    alignColumn('home_state', 'left');
+    alignColumn('class_year', 'center');
+    alignColumn('dob', 'right');
+    alignColumn('flight_path_status', 'left');
+    alignColumn('photo_link', 'center');
 
     // Freeze name columns
     sheet.setFrozenRows(2);
