@@ -85,15 +85,11 @@ namespace ProtectionService {
     return protection;
   }
 
-  function getAllowedMenuUsers(): string[] {
+  function getMainWorkbookAllowedEditors(): string[] {
     try {
-      const prop = Config.scriptProperties().getProperty('SHAMROCK_MENU_ALLOWED_EMAILS') || '';
-      return prop
-        .split(',')
-        .map((s) => s.trim().toLowerCase())
-        .filter(Boolean);
+      return Config.getCommaSeparatedScriptProperty(Config.PROPERTY_KEYS.MAIN_WORKBOOK_ALLOWED_EDITOR_EMAILS);
     } catch (err) {
-      Log.warn(`Unable to read SHAMROCK_MENU_ALLOWED_EMAILS property: ${err}`);
+      Log.warn(`Unable to read ${Config.PROPERTY_KEYS.MAIN_WORKBOOK_ALLOWED_EDITOR_EMAILS} property: ${err}`);
       return [];
     }
   }
@@ -201,7 +197,7 @@ namespace ProtectionService {
     if (!ss) return;
 
     const allowedEditors = normalizeEditors([
-      ...getAllowedMenuUsers(),
+      ...getMainWorkbookAllowedEditors(),
       ...getLeadershipEmails(ss),
     ]);
 

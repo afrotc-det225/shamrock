@@ -60,7 +60,10 @@ namespace AttendanceService {
     const backendId = Config.getBackendId();
     const sheet = SheetUtils.getSheet(backendId, 'Directory Backend');
     if (!sheet) return [];
-    return SheetUtils.readTable(sheet).rows.filter((row) => DirectoryService.isOperationallyActiveCadet(row));
+    return SheetUtils.readTable(sheet).rows.filter((row) => {
+      const hasIdentity = ['last_name', 'first_name', 'email'].some((h) => String(row[h] || '').trim());
+      return hasIdentity && DirectoryService.isOperationallyActiveCadet(row);
+    });
   }
 
   function readEvents(): EventDef[] {
@@ -297,31 +300,29 @@ namespace AttendanceService {
 
       // Audit per event
       try {
-        const auditSheet = SheetUtils.getSheet(Config.getBackendId(), 'Audit Backend');
-        if (auditSheet) {
-          const headersAudit = Schemas.getTabSchema('Audit Backend')?.machineHeaders || [];
-          const auditRow: any = {};
-          headersAudit.forEach((h) => (auditRow[h] = ''));
-          auditRow['audit_id'] = Utilities.getUuid();
-          auditRow['timestamp'] = timestamp;
-          auditRow['actor_email'] = actor;
-          auditRow['role'] = opts.actorRole || 'frontend_editor';
-          auditRow['action'] = 'bulk_fill_attendance';
-          auditRow['target_sheet'] = 'Attendance Matrix Backend';
-          auditRow['target_table'] = 'attendance_matrix';
-          auditRow['target_key'] = eventName;
-          auditRow['target_range'] = `${eventName}`;
-          auditRow['old_value'] = '';
-          auditRow['new_value'] = opts.code;
-          const cadetNotesParts: string[] = [];
-          if (cadetSet.size) cadetNotesParts.push(`cadets=${cadetSet.size}`);
-          if (flightSet.size) cadetNotesParts.push(`flights=${Array.from(flightSet).join('|')}`);
-          if (universitySet.size) cadetNotesParts.push(`universities=${Array.from(universitySet).join('|')}`);
-          if (asYearSet.size) cadetNotesParts.push(`asYears=${Array.from(asYearSet).join('|')}`);
-          if (cadetSelector.includeAbroad) cadetNotesParts.push('abroad=true');
-          auditRow['notes'] = cadetNotesParts.join('; ');
-          SheetUtils.appendRows(auditSheet, [auditRow]);
-        }
+        const cadetNotesParts: string[] = [];
+        if (cadetSet.size) cadetNotesParts.push(`cadets=${cadetSet.size}`);
+        if (flightSet.size) cadetNotesParts.push(`flights=${Array.from(flightSet).join('|')}`);
+        if (universitySet.size) cadetNotesParts.push(`universities=${Array.from(universitySet).join('|')}`);
+        if (asYearSet.size) cadetNotesParts.push(`asYears=${Array.from(asYearSet).join('|')}`);
+        if (cadetSelector.includeAbroad) cadetNotesParts.push('abroad=true');
+        AuditService.log({
+          action: 'bulk_fill_attendance',
+          result: 'ok',
+          actorEmail: actor,
+          role: opts.actorRole || 'frontend_editor',
+          targetSheet: 'Attendance Matrix Backend',
+          targetTable: 'attendance_matrix',
+          targetKey: eventName,
+          targetRange: `${eventName}`,
+          newValue: opts.code,
+          notes: cadetNotesParts.join('; '),
+          source: 'AttendanceService.fillEventColumn',
+          metadata: {
+            filled,
+            selectedAt: timestamp.toISOString(),
+          },
+        });
       } catch (err) {
         Log.warn(`Unable to append audit for fillEventColumn: ${err}`);
       }
@@ -537,23 +538,26 @@ namespace AttendanceService {
     const machineHeaders = [...ATTENDANCE_MACHINE_HEADERS, ...events.map((e) => e.name)];
     const displayHeaders = [...ATTENDANCE_DISPLAY_HEADERS, ...events.map((e) => e.name)];
     const baseLength = ATTENDANCE_MACHINE_HEADERS.length;
+    const clearRows = Math.max(1, sheet.getMaxRows());
+    const clearCols = Math.max(1, sheet.getMaxColumns());
+    sheet.getRange(1, 1, clearRows, clearCols).clearDataValidations();
     sheet.clear();
     if (machineHeaders.length) sheet.getRange(1, 1, 1, machineHeaders.length).setValues([machineHeaders]);
     if (displayHeaders.length) sheet.getRange(2, 1, 1, displayHeaders.length).setValues([displayHeaders]);
-    if (rows.length) {
-      const sortedRows = sortAttendanceRows(rows);
-      const data = sortedRows.map((r) => machineHeaders.map((h) => (r as any)[h] ?? ''));
+    const sortedRows = sortAttendanceRows(rows);
+    const data = sortedRows.map((r) => machineHeaders.map((h) => (r as any)[h] ?? ''));
+    if (data.length) {
       sheet.getRange(3, 1, data.length, machineHeaders.length).setValues(data);
-      // Trim excess rows to avoid accumulating blank tails
-      const neededRows = Math.max(3, data.length + 2); // 2 header rows + data
-      const currentMax = sheet.getMaxRows();
-      if (currentMax > neededRows) {
-        sheet.deleteRows(neededRows + 1, currentMax - neededRows);
-      } else if (currentMax < neededRows) {
-        sheet.insertRowsAfter(currentMax, neededRows - currentMax);
-      }
-
       applyAttendanceFormulas(sheet, data.length, machineHeaders, baseLength);
+    }
+
+    // Trim excess rows after the write so stale blank tails from prior matrix sizes disappear.
+    const neededRows = Math.max(3, data.length + 2); // 2 header rows + at least 1 body row.
+    const currentMax = sheet.getMaxRows();
+    if (currentMax > neededRows) {
+      sheet.deleteRows(neededRows + 1, currentMax - neededRows);
+    } else if (currentMax < neededRows) {
+      sheet.insertRowsAfter(currentMax, neededRows - currentMax);
     }
   }
 
@@ -658,6 +662,11 @@ namespace AttendanceService {
 
   const EMAIL_SIGNATURE = 'Very respectfully,\nSHAMROCK Automations';
 
+  function matchesFlightRole(role: string, target: string, rowFlight: string): boolean {
+    const roleIncludesFlight = Arrays.FLIGHTS.some((f) => role.includes(f.toLowerCase()) && target === f.toLowerCase());
+    return rowFlight ? rowFlight === target : roleIncludesFlight;
+  }
+
   function getFlightCommanderEmail(flight: string): string {
     const backendId = Config.getBackendId();
     if (!backendId) return '';
@@ -668,11 +677,24 @@ namespace AttendanceService {
     const commander = table.rows.find((row) => {
       const role = String(row['role'] || '').toLowerCase();
       const rowFlight = String((row as any)['flight'] || '').toLowerCase().trim();
-      const roleIncludesFlight = Arrays.FLIGHTS.some((f) => role.includes(f.toLowerCase()) && target === f.toLowerCase());
-      const matchesFlight = rowFlight ? rowFlight === target : roleIncludesFlight;
-      return role.includes('flight commander') && matchesFlight;
+      return role.includes('flight commander') && !role.includes('deputy') && matchesFlightRole(role, target, rowFlight);
     });
     return commander ? String(commander['email'] || '').trim() : '';
+  }
+
+  function getDeputyFlightCommanderEmail(flight: string): string {
+    const backendId = Config.getBackendId();
+    if (!backendId) return '';
+    const leadershipSheet = SheetUtils.getSheet(backendId, 'Leadership Backend');
+    if (!leadershipSheet) return '';
+    const table = SheetUtils.readTable(leadershipSheet);
+    const target = flight.toLowerCase().trim();
+    const deputy = table.rows.find((row) => {
+      const role = String(row['role'] || '').toLowerCase();
+      const rowFlight = String((row as any)['flight'] || '').toLowerCase().trim();
+      return role.includes('deputy') && role.includes('flight commander') && matchesFlightRole(role, target, rowFlight);
+    });
+    return deputy ? String(deputy['email'] || '').trim() : '';
   }
 
   function sendExcusedSummaryEmails(eventType: 'mando' | 'llab') {
@@ -732,6 +754,8 @@ namespace AttendanceService {
         return;
       }
 
+      const deputyEmail = getDeputyFlightCommanderEmail(flight);
+
       const commanderRow = SheetUtils.lookupRowByEmail(Config.getBackendId(), 'Leadership Backend', commanderEmail);
       const commanderLast = String((commanderRow as any)?.['last_name'] || '');
       const greeting = greetingForRecipient(commanderLast);
@@ -745,11 +769,11 @@ namespace AttendanceService {
         : `${greeting}\n\nNo cadets are excused for ${friendly} this week (${eventLabel}). All cadets are expected to be present.\n\n${EMAIL_SIGNATURE}`;
 
       const subject = `Excused cadets for ${friendly} (${eventLabel})`;
+      const emailOpts: GoogleAppsScript.Gmail.GmailAdvancedOptions = { name: 'SHAMROCK Automations' };
+      if (deputyEmail) emailOpts.cc = deputyEmail;
       try {
-        GmailApp.sendEmail(commanderEmail, subject, body, {
-          name: 'SHAMROCK Automations',
-        });
-        Log.info(`Sent ${friendly} excused summary to ${commanderEmail} for flight ${flight}`);
+        GmailApp.sendEmail(commanderEmail, subject, body, emailOpts);
+        Log.info(`Sent ${friendly} excused summary to ${commanderEmail}${deputyEmail ? ` (cc: ${deputyEmail})` : ''} for flight ${flight}`);
       } catch (err) {
         Log.warn(`Failed to send ${friendly} excused summary to ${commanderEmail}: ${err}`);
       }
@@ -894,6 +918,8 @@ namespace AttendanceService {
         return;
       }
 
+      const deputyEmail = getDeputyFlightCommanderEmail(flight);
+
       const commanderRow = SheetUtils.lookupRowByEmail(backendId, 'Leadership Backend', commanderEmail);
       const commanderLast = String((commanderRow as any)?.['last_name'] || '');
       const greeting = greetingForRecipient(commanderLast);
@@ -910,9 +936,11 @@ namespace AttendanceService {
         ? `Unexcused attendance – week of ${weekLabel}`
         : `Perfect attendance – week of ${weekLabel}`;
 
+      const emailOpts: GoogleAppsScript.Gmail.GmailAdvancedOptions = { name: 'SHAMROCK Automations' };
+      if (deputyEmail) emailOpts.cc = deputyEmail;
       try {
-        GmailApp.sendEmail(commanderEmail, subject, body, { name: 'SHAMROCK Automations' });
-        Log.info(`Sent weekly unexcused summary to ${commanderEmail} for flight ${flight}`);
+        GmailApp.sendEmail(commanderEmail, subject, body, emailOpts);
+        Log.info(`Sent weekly unexcused summary to ${commanderEmail}${deputyEmail ? ` (cc: ${deputyEmail})` : ''} for flight ${flight}`);
       } catch (err) {
         Log.warn(`Failed to send weekly unexcused summary to ${commanderEmail}: ${err}`);
       }

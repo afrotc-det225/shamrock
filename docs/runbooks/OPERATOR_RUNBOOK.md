@@ -47,12 +47,13 @@ Operational principles:
 - Avoid deploying directly from the Apps Script editor.
 
 Post-deploy validation checklist:
-- Open the frontend workbook and confirm custom menus load.
+- Open the backend/admin workbook and confirm the SHAMROCK category menus load.
+- Open the frontend/main workbook and confirm the SHAMROCK menu does not load.
 - Confirm that setup actions remain idempotent (re-run once).
 - Submit a test attendance form response and confirm it is recorded in Attendance Backend.
 - Submit a test excusal request and confirm it appears in Excusals Backend.
 - Change an excusal decision and confirm derived attendance updates.
-- Confirm Audit rows are written for key actions.
+- Run a harmless menu action, such as Show menu help, and confirm Audit Backend has matching `started` and `ok` rows with the same `run_id`.
 
 ## 5. Daily Operations
 ### 5.1 Directory maintenance

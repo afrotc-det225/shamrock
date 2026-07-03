@@ -154,8 +154,7 @@ SHAMROCK Automations`;
    * Get or create the excusals management spreadsheet.
    */
   export function ensureManagementSpreadsheet(): string {
-    const props = Config.scriptProperties();
-    const existingId = props.getProperty('EXCUSALS_MANAGEMENT_SHEET_ID');
+    const existingId = Config.getScriptProperty(Config.PROPERTY_KEYS.EXCUSAL_MANAGEMENT_SPREADSHEET_ID);
 
     if (existingId) {
       try {
@@ -178,7 +177,7 @@ SHAMROCK Automations`;
     // Create new management spreadsheet
     const ss = SpreadsheetApp.create('SHAMROCK Excusals Management');
     const newId = ss.getId();
-    props.setProperty('EXCUSALS_MANAGEMENT_SHEET_ID', newId);
+    Config.setScriptProperty(Config.PROPERTY_KEYS.EXCUSAL_MANAGEMENT_SPREADSHEET_ID, newId);
     Log.info(`Created excusals management spreadsheet: ${newId}`);
 
     // Create squadron sheets first (before deleting default)
@@ -234,15 +233,16 @@ SHAMROCK Automations`;
     }
 
     // Set column widths
-    sheet.setColumnWidth(1, 150); // timestamp
-    sheet.setColumnWidth(2, 100); // decision
-    sheet.setColumnWidth(3, 150); // event
-    sheet.setColumnWidth(4, 220); // reason
-    sheet.setColumnWidth(5, 150); // email
-    sheet.setColumnWidth(6, 100); // last_name
-    sheet.setColumnWidth(7, 100); // first_name
-    sheet.setColumnWidth(8, 80);  // flight
-    sheet.setColumnWidth(9, 120); // request_id
+    sheet.setColumnWidth(1, 150);  // timestamp
+    sheet.setColumnWidth(2, 100);  // decision
+    sheet.setColumnWidth(3, 150);  // event
+    sheet.setColumnWidth(4, 220);  // reason
+    sheet.setColumnWidth(5, 100);  // requested_attendance_type
+    sheet.setColumnWidth(6, 150);  // email
+    sheet.setColumnWidth(7, 100);  // last_name
+    sheet.setColumnWidth(8, 100);  // first_name
+    sheet.setColumnWidth(9, 80);   // flight
+    sheet.setColumnWidth(10, 120); // request_id
 
     // Freeze first two rows (machine headers + display headers)
     sheet.setFrozenRows(2);
@@ -267,7 +267,7 @@ SHAMROCK Automations`;
       return;
     }
 
-    const managementId = Config.scriptProperties().getProperty('EXCUSALS_MANAGEMENT_SHEET_ID');
+    const managementId = Config.getScriptProperty(Config.PROPERTY_KEYS.EXCUSAL_MANAGEMENT_SPREADSHEET_ID);
     if (!managementId) {
       Log.warn('Excusals management spreadsheet not found; skipping sync');
       return;
@@ -306,6 +306,7 @@ SHAMROCK Automations`;
         '', // Decision column starts empty
         excusalRow['event'] || '',
         excusalRow['reason'] || excusalRow['notes'] || '',
+        excusalRow['requested_attendance_type'] || '',
         excusalRow['email'] || '',
         excusalRow['last_name'] || '',
         excusalRow['first_name'] || '',
@@ -325,6 +326,263 @@ SHAMROCK Automations`;
     } catch (err) {
       Log.warn(`Failed to sync excusal to management panel: ${err}`);
     }
+  }
+
+  /**
+   * Remove junk rows from Excusals Backend and Management sheets where the event
+   * is a navigation artifact (e.g. "Done selecting events") rather than a real event.
+   */
+  export function purgeJunkExcusalRows() {
+    const JUNK_EVENTS = new Set(['Done selecting events', '(no events)']);
+    let backendPurged = 0;
+    let managementPurged = 0;
+
+    // 1. Clean up Excusals Backend
+    try {
+      const backendSheet = Config.getBackendSheet('Excusals Backend');
+      if (backendSheet) {
+        const table = SheetUtils.readTable(backendSheet);
+        const eventColIdx = table.headers.indexOf('event');
+        if (eventColIdx >= 0) {
+          // Walk rows bottom-up so deletion indices stay stable
+          const allValues = backendSheet.getDataRange().getValues();
+          for (let i = allValues.length - 1; i >= 1; i--) {
+            const eventVal = String(allValues[i][eventColIdx] || '').trim();
+            if (JUNK_EVENTS.has(eventVal)) {
+              backendSheet.deleteRow(i + 1); // sheet rows are 1-indexed
+              backendPurged++;
+            }
+          }
+        }
+      }
+    } catch (err) {
+      Log.warn(`purgeJunkExcusalRows: backend cleanup failed: ${err}`);
+    }
+
+    // 2. Clean up Management sheets (one per squadron)
+    const managementId = Config.getScriptProperty(Config.PROPERTY_KEYS.EXCUSAL_MANAGEMENT_SPREADSHEET_ID);
+    if (managementId) {
+      try {
+        const ss = SpreadsheetApp.openById(managementId);
+        const sheets = ss.getSheets();
+        for (const sheet of sheets) {
+          const lastRow = sheet.getLastRow();
+          if (lastRow < 3) continue; // headers only
+          const allValues = sheet.getDataRange().getValues();
+          // Event is in column 3 (index 2) per management schema
+          for (let i = allValues.length - 1; i >= 2; i--) {
+            const eventVal = String(allValues[i][2] || '').trim();
+            if (JUNK_EVENTS.has(eventVal)) {
+              sheet.deleteRow(i + 1);
+              managementPurged++;
+            }
+          }
+          trimAndSortManagementSheet(sheet);
+        }
+      } catch (err) {
+        Log.warn(`purgeJunkExcusalRows: management cleanup failed: ${err}`);
+      }
+    }
+
+    Log.info(`purgeJunkExcusalRows: removed ${backendPurged} backend rows, ${managementPurged} management rows`);
+    return { backendPurged, managementPurged };
+  }
+
+  /**
+   * Backpopulate requested_attendance_type from Excusals Backend into existing
+   * Management sheet rows. Also refreshes management sheet headers to match
+   * the current schema (adds any new columns).
+   */
+  /**
+   * Fill empty requested_attendance_type cells in Excusals Backend by matching rows
+   * to the Excusals Form Responses sheet (by email + submitted_at timestamp).
+   */
+  function backfillBackendRequestedType(backendSheet: GoogleAppsScript.Spreadsheet.Sheet) {
+    let formSheet: GoogleAppsScript.Spreadsheet.Sheet;
+    try {
+      formSheet = Config.getBackendSheet(Config.RESOURCE_NAMES.EXCUSALS_FORM_SHEET);
+    } catch (err) {
+      Log.warn(`Excusals Form Responses not found; skipping backend backfill: ${err}`);
+      return;
+    }
+
+    const formLastCol = formSheet.getLastColumn();
+    const formLastRow = formSheet.getLastRow();
+    if (formLastCol === 0 || formLastRow < 2) return;
+
+    const formHeaders = formSheet.getRange(1, 1, 1, formLastCol).getValues()[0].map((h) => String(h || '').trim());
+    const formEmailIdx = formHeaders.findIndex((h) => h.toLowerCase().startsWith('email'));
+    const formTsIdx = formHeaders.indexOf('Timestamp');
+    // Find the active "Requested Attendance Type" column (first occurrence)
+    const formReqTypeIdx = formHeaders.indexOf('Requested Attendance Type');
+
+    if (formEmailIdx < 0 || formTsIdx < 0 || formReqTypeIdx < 0) {
+      Log.warn('Excusals Form Responses missing required columns for backfill');
+      return;
+    }
+
+    // Build lookup: email|timestamp → requested_attendance_type from form responses
+    const formData = formSheet.getRange(2, 1, formLastRow - 1, formLastCol).getValues();
+    const typeByKey = new Map<string, string>();
+    const ATT_TYPES = new Set(['E', 'ES', 'MU', 'MRS']);
+    for (const row of formData) {
+      const email = String(row[formEmailIdx] || '').trim().toLowerCase();
+      const ts = String(row[formTsIdx] || '').trim();
+      let reqType = String(row[formReqTypeIdx] || '').trim();
+      if (!email || !ts) continue;
+      if (!reqType || !ATT_TYPES.has(reqType)) continue;
+      // Normalize timestamp to ISO for matching
+      let isoTs = ts;
+      try { isoTs = new Date(ts).toISOString(); } catch {}
+      typeByKey.set(`${email}|${isoTs}`, reqType);
+    }
+
+    if (typeByKey.size === 0) {
+      Log.info('No form response attendance types to backfill');
+      return;
+    }
+
+    // Read backend data and fill empty requested_attendance_type cells
+    const backendHeaders = backendSheet.getRange(1, 1, 1, backendSheet.getLastColumn()).getValues()[0].map((h) => String(h || '').trim());
+    const bEmailIdx = backendHeaders.indexOf('email');
+    const bTsIdx = backendHeaders.indexOf('submitted_at');
+    const bReqTypeIdx = backendHeaders.indexOf('requested_attendance_type');
+    if (bEmailIdx < 0 || bTsIdx < 0 || bReqTypeIdx < 0) return;
+
+    const bLastRow = backendSheet.getLastRow();
+    if (bLastRow < 3) return;
+    const bData = backendSheet.getRange(3, 1, bLastRow - 2, backendHeaders.length).getValues();
+
+    let filled = 0;
+    for (let r = 0; r < bData.length; r++) {
+      const existing = String(bData[r][bReqTypeIdx] || '').trim();
+      if (existing) continue; // already has a value
+
+      const email = String(bData[r][bEmailIdx] || '').trim().toLowerCase();
+      const ts = String(bData[r][bTsIdx] || '').trim();
+      if (!email || !ts) continue;
+
+      const key = `${email}|${ts}`;
+      const formType = typeByKey.get(key);
+      if (formType) {
+        bData[r][bReqTypeIdx] = formType;
+        filled++;
+      }
+    }
+
+    if (filled > 0) {
+      backendSheet.getRange(3, 1, bData.length, backendHeaders.length).setValues(bData);
+      Log.info(`backfillBackendRequestedType: filled ${filled} rows in Excusals Backend`);
+    } else {
+      Log.info('backfillBackendRequestedType: no empty rows matched form responses');
+    }
+  }
+
+  export function backpopulateManagementRequestedType() {
+    const managementId = Config.getScriptProperty(Config.PROPERTY_KEYS.EXCUSAL_MANAGEMENT_SPREADSHEET_ID);
+    if (!managementId) {
+      Log.warn('Excusals management spreadsheet not found; cannot backpopulate');
+      return { updated: 0 };
+    }
+
+    // Ensure Excusals Backend has all schema columns (e.g. requested_attendance_type)
+    const backendSheet = Config.getBackendSheet('Excusals Backend');
+    if (!backendSheet) {
+      Log.warn('Excusals Backend not found; cannot backpopulate');
+      return { updated: 0 };
+    }
+    SheetUtils.ensureSchemaColumns(backendSheet);
+
+    // Backfill requested_attendance_type in the backend from Excusals Form Responses
+    backfillBackendRequestedType(backendSheet);
+
+    // Build a lookup of request_id -> requested_attendance_type from Excusals Backend
+    const backendTable = SheetUtils.readTable(backendSheet);
+    const typeByRequestId = new Map<string, string>();
+    backendTable.rows.forEach((row) => {
+      const rid = String(row['request_id'] || '').trim();
+      const rtype = String(row['requested_attendance_type'] || '').trim();
+      if (rid) typeByRequestId.set(rid, rtype);
+    });
+
+    const schema = Schemas.EXCUSALS_MANAGEMENT_SCHEMA;
+    const machineHeaders = schema.machineHeaders!;
+    const displayHeaders = schema.displayHeaders!;
+    const reqTypeColIdx = machineHeaders.indexOf('requested_attendance_type');
+    const requestIdColIdx = machineHeaders.indexOf('request_id');
+    if (reqTypeColIdx < 0 || requestIdColIdx < 0) {
+      Log.warn('Schema missing expected columns; cannot backpopulate');
+      return { updated: 0 };
+    }
+
+    let totalUpdated = 0;
+
+    try {
+      const ss = SpreadsheetApp.openById(managementId);
+      const sheets = ss.getSheets();
+
+      for (const sheet of sheets) {
+        // Ensure sheet has enough columns for new schema
+        const maxCols = sheet.getMaxColumns();
+        if (maxCols < machineHeaders.length) {
+          sheet.insertColumnsAfter(maxCols, machineHeaders.length - maxCols);
+        }
+
+        // Refresh headers to match current schema
+        sheet.getRange(1, 1, 1, machineHeaders.length).setValues([machineHeaders]);
+        sheet.getRange(2, 1, 1, displayHeaders.length).setValues([displayHeaders]);
+
+        const lastRow = sheet.getLastRow();
+        if (lastRow < 3) continue;
+
+        const dataRange = sheet.getRange(3, 1, lastRow - 2, machineHeaders.length);
+        const data = dataRange.getValues();
+        let sheetUpdated = 0;
+
+        // Old schema (9 cols): timestamp, decision, event, reason, email, last_name, first_name, flight, request_id
+        // New schema (10 cols): timestamp, decision, event, reason, requested_attendance_type, email, last_name, first_name, flight, request_id
+        // Detect old-format rows where col 5 (reqTypeColIdx) contains an email instead of attendance type,
+        // and shift data right to insert the new column.
+        const VALID_ATT_TYPES = new Set(['E', 'ES', 'MU', 'MRS', '']);
+        for (let r = 0; r < data.length; r++) {
+          const col5Val = String(data[r][reqTypeColIdx] || '').trim();
+          // If col 5 looks like an email (contains @), this is an old-format row that needs shifting
+          if (col5Val.includes('@')) {
+            // Shift cols 5..8 right by one to make room for requested_attendance_type
+            for (let c = machineHeaders.length - 1; c > reqTypeColIdx; c--) {
+              data[r][c] = data[r][c - 1] || '';
+            }
+            data[r][reqTypeColIdx] = ''; // new column starts empty
+            sheetUpdated++;
+          }
+        }
+
+        // Now fill in requested_attendance_type from backend data
+        for (let r = 0; r < data.length; r++) {
+          const requestId = String(data[r][requestIdColIdx] || '').trim();
+          if (!requestId) continue;
+
+          const currentVal = String(data[r][reqTypeColIdx] || '').trim();
+          const backendVal = typeByRequestId.get(requestId) || '';
+          if (!currentVal && backendVal) {
+            data[r][reqTypeColIdx] = backendVal;
+            sheetUpdated++;
+          }
+        }
+
+        if (sheetUpdated > 0) {
+          dataRange.setValues(data);
+          totalUpdated += sheetUpdated;
+        }
+
+        trimAndSortManagementSheet(sheet);
+      }
+    } catch (err) {
+      Log.warn(`backpopulateManagementRequestedType failed: ${err}`);
+    }
+
+    Log.info(`backpopulateManagementRequestedType: updated ${totalUpdated} management rows`);
+    return { updated: totalUpdated };
   }
 
   /**
@@ -375,7 +633,7 @@ SHAMROCK Automations`;
    * Get the management spreadsheet URL.
    */
   function getManagementSpreadsheetUrl(): string {
-    const managementId = Config.scriptProperties().getProperty('EXCUSALS_MANAGEMENT_SHEET_ID');
+    const managementId = Config.getScriptProperty(Config.PROPERTY_KEYS.EXCUSAL_MANAGEMENT_SPREADSHEET_ID);
     if (!managementId) return '(Management panel URL unavailable)';
     return `https://docs.google.com/spreadsheets/d/${managementId}`;
   }
@@ -384,7 +642,7 @@ SHAMROCK Automations`;
    * Share management spreadsheet with squadron and flight commanders, apply sheet protections.
    */
   export function shareAndProtectManagementSpreadsheet() {
-    const managementId = Config.scriptProperties().getProperty('EXCUSALS_MANAGEMENT_SHEET_ID');
+    const managementId = Config.getScriptProperty(Config.PROPERTY_KEYS.EXCUSAL_MANAGEMENT_SPREADSHEET_ID);
     if (!managementId) {
       Log.warn('Excusals management spreadsheet not found; cannot share or protect');
       return;
@@ -520,7 +778,7 @@ SHAMROCK Automations`;
    * Handle edits in the Excusals Management spreadsheet (squadron tabs) and mirror decisions to Excusals Backend.
    */
   export function handleExcusalsManagementEdit(e: GoogleAppsScript.Events.SheetsOnEdit) {
-    const mgmtId = Config.scriptProperties().getProperty('EXCUSALS_MANAGEMENT_SHEET_ID');
+    const mgmtId = Config.getScriptProperty(Config.PROPERTY_KEYS.EXCUSAL_MANAGEMENT_SPREADSHEET_ID);
     if (!mgmtId) return;
 
     const range = e?.range;

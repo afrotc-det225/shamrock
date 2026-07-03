@@ -168,7 +168,8 @@ Workflow summary:
 Audit logging is required for key data mutations.
 
 - Audit is append-only.
-- Record actor identity, what changed, where, old/new values (as safe), and result.
+- Record actor identity when available, anonymous actor key, action category/label, what changed, where, old/new values where relevant, result, duration, source, run ID, and structured metadata.
+- Menu actions write paired start and completion rows. Failures include error message/stack so copied logs and Audit Backend rows can be debugged later.
 - Avoid storing unnecessary sensitive data.
 
 ## 10. UX and Formatting Standards

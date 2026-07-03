@@ -237,12 +237,12 @@ namespace DirectoryService {
 
   /**
    * Replays the most recent Directory form response through the handler (useful for debugging ingestion).
-   * Reads the form by DIRECTORY_FORM_ID and constructs a synthetic FormsOnFormSubmit event.
+   * Reads the cadet directory form and constructs a synthetic FormsOnFormSubmit event.
    */
   export function replayLatestDirectoryFormResponse(): boolean {
-    const formId = Config.scriptProperties().getProperty(Config.PROPERTY_KEYS.DIRECTORY_FORM_ID) || '';
+    const formId = Config.getScriptProperty(Config.PROPERTY_KEYS.CADET_DIRECTORY_FORM_ID);
     if (!formId) {
-      Log.warn('Cannot replay Directory form response: DIRECTORY_FORM_ID missing.');
+      Log.warn(`${Config.PROPERTY_KEYS.CADET_DIRECTORY_FORM_ID} missing; cannot replay Directory form response.`);
       return false;
     }
 

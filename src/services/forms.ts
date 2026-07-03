@@ -796,12 +796,17 @@ namespace FormService {
     const reasonItem = addTextItemSafe(workingForm, 'Reason', true);
     workingForm = reasonItem.form;
 
-    // Set each event page to navigate back to Event Category after event selection
+    // Set each event page and the details page to navigate back to Event Category
+    // when reached by linear progression. This ensures that after completing any event
+    // section, the form loops back to category selection rather than falling through.
+    // Users reach Excusal Details via the "Done selecting events" choice (not linear
+    // progression), so this doesn't affect the submit flow.
     mandoEventsPage.item.setGoToPage(eventCategoryPage.item);
     llabEventsPage.item.setGoToPage(eventCategoryPage.item);
     pocEventsPage.item.setGoToPage(eventCategoryPage.item);
     secondaryEventsPage.item.setGoToPage(eventCategoryPage.item);
     otherEventsPage.item.setGoToPage(eventCategoryPage.item);
+    detailsPage.item.setGoToPage(eventCategoryPage.item);
 
     // Populate event lists per category
     const backendId = Config.getBackendId();

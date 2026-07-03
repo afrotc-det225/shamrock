@@ -40,9 +40,9 @@ namespace Debug {
 
   function describeForms(): FormSummary[] {
     const ids = [
-      Config.scriptProperties().getProperty(Config.PROPERTY_KEYS.ATTENDANCE_FORM_ID),
-      Config.scriptProperties().getProperty(Config.PROPERTY_KEYS.EXCUSALS_FORM_ID),
-      Config.scriptProperties().getProperty(Config.PROPERTY_KEYS.DIRECTORY_FORM_ID),
+      Config.getScriptProperty(Config.PROPERTY_KEYS.ATTENDANCE_FORM_ID),
+      Config.getScriptProperty(Config.PROPERTY_KEYS.EXCUSAL_REQUEST_FORM_ID),
+      Config.getScriptProperty(Config.PROPERTY_KEYS.CADET_DIRECTORY_FORM_ID),
     ].filter(Boolean) as string[];
 
     return ids.map((id) => {

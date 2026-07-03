@@ -38,13 +38,9 @@ namespace FrontendEditService {
 
   function getAllowedEditors(): string[] {
     try {
-      const prop = Config.scriptProperties().getProperty('SHAMROCK_MENU_ALLOWED_EMAILS') || '';
-      return prop
-        .split(',')
-        .map((s) => s.trim().toLowerCase())
-        .filter(Boolean);
+      return Config.getCommaSeparatedScriptProperty(Config.PROPERTY_KEYS.MAIN_WORKBOOK_ALLOWED_EDITOR_EMAILS);
     } catch (err) {
-      Log.warn(`Unable to read SHAMROCK_MENU_ALLOWED_EMAILS for edit gate: ${err}`);
+      Log.warn(`Unable to read ${Config.PROPERTY_KEYS.MAIN_WORKBOOK_ALLOWED_EDITOR_EMAILS} for edit gate: ${err}`);
       return [];
     }
   }
@@ -85,47 +81,21 @@ namespace FrontendEditService {
     action?: string;
     result?: string;
   }) {
-    const {
-      backendId,
-      targetRange,
-      targetKey,
-      header,
-      oldValue,
-      newValue,
-      targetSheet,
-      targetTable,
-      role,
-      source,
-      action,
-      result,
-    } = params;
-    const audit = SheetUtils.getSheet(backendId, 'Audit Backend');
-    if (!audit) return;
-
-    const headers = Schemas.BACKEND_TABS.find((t) => t.name === 'Audit Backend')?.machineHeaders || [];
-    const row: any = {};
-    headers.forEach((h) => (row[h] = ''));
-
-    row['audit_id'] = Utilities.getUuid();
-    row['timestamp'] = new Date();
-    row['actor_email'] = actorEmail() || 'unknown';
-    row['role'] = role || 'frontend_editor';
-    row['action'] = action || 'edit';
-    row['target_sheet'] = targetSheet || 'Directory';
-    row['target_table'] = targetTable || 'directory';
-    row['target_key'] = targetKey;
-    row['target_range'] = targetRange;
-    row['header'] = header;
-    row['old_value'] = oldValue;
-    row['new_value'] = newValue;
-    row['result'] = result || 'ok';
-    row['source'] = source || 'onFrontendEdit';
-    row['version'] = 'v1';
-
-    // Append respecting header order
-    const values = headers.map((h) => row[h] ?? '');
-    const nextRow = Math.max(3, audit.getLastRow() + 1);
-    audit.getRange(nextRow, 1, 1, headers.length).setValues([values]);
+    AuditService.log({
+      backendId: params.backendId,
+      action: params.action || 'edit',
+      result: params.result || 'ok',
+      role: params.role || 'frontend_editor',
+      targetSheet: params.targetSheet || 'Directory',
+      targetTable: params.targetTable || 'directory',
+      targetKey: params.targetKey,
+      targetRange: params.targetRange,
+      field: params.header,
+      oldValue: params.oldValue,
+      newValue: params.newValue,
+      source: params.source || 'onFrontendEdit',
+      version: 'v2',
+    });
   }
 
   function applyDirectoryEdit(e: GoogleAppsScript.Events.SheetsOnEdit) {

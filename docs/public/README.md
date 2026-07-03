@@ -37,7 +37,7 @@ No features documented yet.
 Runs an idempotent "ensure-exists" setup that creates/ensures the frontend workbook, backend workbook, required tabs, and the Attendance/Excusal forms. Safe to re-run; avoids duplicates.
 
 ### User entry points
-- Custom menu in frontend sheets: SHAMROCK → "Run setup (ensure-exists)".
+- Custom menu in backend/admin sheets: SHAMROCK → category submenu → action.
 - Script editor (for admins): run global function `setup`.
 
 ### Data touched
@@ -60,20 +60,21 @@ What setup auto-runs
 - Applies frontend formatting/validations (Directory/Leadership/Attendance/Data Legend/FAQs) and creates Sheets “tables” for those tabs.
 - Syncs Data Legend from canonical arrays to frontend; syncs Directory from backend; rebuilds the Attendance matrix.
 - Normalizes form response sheets, trims Attendance response columns, reapplies Attendance Backend formatting.
-- Installs onOpen/onEdit triggers for menus and backend sync; sets up form submit triggers.
+- Installs onOpen/onEdit triggers for backend admin menus and sync; sets up form submit triggers.
 
 ### Error handling and safeguards
 - Idempotent: rerun setup to repair missing resources; it will not intentionally duplicate tabs/forms.
 - If a stored ID is invalid, setup recreates the resource and updates Script Properties.
 - Avoid manual renames of tabs to preserve matching; if renamed, rerun setup to recreate missing tabs.
-- Logging: setup writes INFO/WARN messages to the execution logs (Apps Script console/Logger).
+- Logging: menu actions write INFO/WARN/ERROR messages with a `menu:<run_id>` prefix to Apps Script logs.
+- Audit: menu actions append start and completion/failure/cancel rows to Audit Backend using the same `run_id`; failures include error message/stack and metadata where available.
 
 ### Deployment / configuration
 - Requires Apps Script authorization to create sheets/forms and manage properties.
 - No secrets are stored; resource IDs are saved in Script Properties (environment-specific).
 
 ### Validation checklist
-- After running setup, confirm the SHAMROCK menu appears.
+- After running setup, confirm the SHAMROCK menu appears in the backend/admin workbook and does not appear in the frontend/main workbook.
 - Open the frontend workbook and verify the listed tabs exist with two header rows.
 - Open the backend workbook and verify its tabs exist with two header rows.
 - Open both forms and confirm email collection is enabled and login is required.
@@ -82,7 +83,7 @@ What setup auto-runs
 - Apps Script cannot create or modify Google Sheets “Formatted tables” (typed columns). If you want to use them, you must create/maintain them manually in the Sheets UI (see checklist below).
 - Attendance/Excusal form questions are placeholders; real questions will be added later.
 - The built-in Forms “email a copy of my responses” setting may not be controllable via Apps Script; if needed, a submission-trigger email receipt will be implemented.
-- Apps Script often returns a blank `getActiveUser()` for cross-domain/consumer editors. To avoid misattributing edits to the script owner, SHAMROCK does not fall back to `getEffectiveUser()`. Menu/onEdit allowlists only apply when `SHAMROCK_MENU_ALLOWED_EMAILS` is populated and the active user email is available; leave the allowlist empty if you want everyone with sheet access to see menus and have edits processed.
+- Apps Script often returns a blank `getActiveUser()` for cross-domain/consumer editors. To avoid misattributing edits to the script owner, SHAMROCK does not fall back to `getEffectiveUser()`. Admin menu visibility is controlled by access to the backend/admin workbook, not by active-user email. Main workbook edit allowlists only apply when `MAIN_WORKBOOK_ALLOWED_EDITOR_EMAILS` is populated and the active user email is available.
 
 Notes
 - Some Google Forms features (notably File upload items and certain login requirements) may not be supported by Apps Script in some environments; setup will log warnings and continue.
@@ -101,7 +102,7 @@ Some UI table behaviors are not reliably automated by setup. After running `setu
 
 3) **Style as desired (UI)**
 - Apply table colors, typed columns, and any additional formatting you want.
-- If you want to preserve your look, you may set script property `DISABLE_FRONTEND_FORMATTING=true` (menu: SHAMROCK → Toggle Frontend Formatting), then re-run SHAMROCK → Reapply Frontend Protections.
+- If you want to preserve your look, you may set script property `DISABLE_MAIN_WORKBOOK_FORMATTING=true` (menu: SHAMROCK → Toggle Frontend Formatting), then re-run SHAMROCK → Reapply Frontend Protections.
 
 ### Fresh install / startup steps
 Follow this order to stand up a brand-new environment:
@@ -162,13 +163,27 @@ npm run pull
 - Approve all scopes when prompted (Sheets, Forms, Drive, Gmail). Click `Review permissions`, select your account, clikc `Advanced`, and then `Go to Shamrock (unsafe)`. Select `Select all` and then `Continue`.
 - Run `setup` one more time after auth so it can finish cleanly.
 
-10) Add your email to admins (menu access)
-- In the Apps Script editor: Project Settings → Script properties → Add property `SHAMROCK_MENU_ALLOWED_EMAILS` with your email (comma-separated list for multiple admins). Save.
-- This gate controls who sees the SHAMROCK menu in the spreadsheets.
+10) Share the backend/admin workbook with admins
+- The SHAMROCK menu appears only in the backend/admin workbook. Anyone with access to that workbook gets the menu on open.
+- Optional: in the Apps Script editor, Project Settings → Script properties → add `MAIN_WORKBOOK_ALLOWED_EDITOR_EMAILS` only if you want main workbook edit processing to require known active-user emails.
 
 11) Confirm the Sheets UI entry point
-- Open the generated frontend spreadsheet.
+- Open the generated backend/admin spreadsheet.
 - Use SHAMROCK → “Run setup (ensure-exists)” and confirm it completes.
+
+### Script properties
+Setup creates and maintains these script properties. Legacy names from older SHAMROCK versions are automatically migrated during setup.
+
+- `MAIN_SPREADSHEET_ID`: Google Sheet ID for the main user-facing workbook.
+- `ADMIN_SPREADSHEET_ID`: Google Sheet ID for the admin/source-of-truth workbook.
+- `ATTENDANCE_FORM_ID`: Google Form ID for attendance submissions.
+- `EXCUSAL_REQUEST_FORM_ID`: Google Form ID for cadet excusal requests.
+- `CADET_DIRECTORY_FORM_ID`: Google Form ID for cadet directory updates.
+- `EXCUSAL_MANAGEMENT_SPREADSHEET_ID`: Google Sheet ID for the excusal decision management workbook.
+- `MAIN_WORKBOOK_ALLOWED_EDITOR_EMAILS`: comma-separated emails allowed to edit protected areas in the main workbook, in addition to leadership-derived editors.
+- `DISABLE_MAIN_WORKBOOK_FORMATTING`: set to `true` to stop SHAMROCK from applying visual formatting to the main workbook.
+- `DISABLE_MAIN_WORKBOOK_COLUMN_WIDTHS`: set to `true` to stop SHAMROCK from changing main workbook column widths.
+- `AUTOMATIONS_PAUSED`: internal pause flag set by the SHAMROCK Pause automations menu action.
 
 12) Apply required form settings (manual in Forms UI)
 - Directory Form: Settings → Responses → “Send responders a copy of their response” = Always; “Allow response editing” = On.

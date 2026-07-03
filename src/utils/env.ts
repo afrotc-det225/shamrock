@@ -2,7 +2,7 @@
 
 namespace Config {
   function requireProperty(key: string, resourceLabel: string): string {
-    const value = scriptProperties().getProperty(key) || '';
+    const value = getScriptProperty(key);
     if (!value) {
       const msg = `${resourceLabel} script property '${key}' is missing; run setup to populate it.`;
       Log.error(msg);
@@ -12,11 +12,11 @@ namespace Config {
   }
 
   export function getBackendId(): string {
-    return requireProperty(PROPERTY_KEYS.BACKEND_SHEET_ID, 'Backend sheet ID');
+    return requireProperty(PROPERTY_KEYS.ADMIN_SPREADSHEET_ID, 'Admin workbook ID');
   }
 
   export function getFrontendId(): string {
-    return requireProperty(PROPERTY_KEYS.FRONTEND_SHEET_ID, 'Frontend sheet ID');
+    return requireProperty(PROPERTY_KEYS.MAIN_SPREADSHEET_ID, 'Main workbook ID');
   }
 
   function getSheetOrThrow(spreadsheetId: string, sheetName: string, context: string) {
