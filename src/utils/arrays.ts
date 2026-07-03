@@ -24,6 +24,7 @@ namespace Arrays {
     'Lt Gen',
     'Gen',
   ];
+  export const HONORIFICS = ['Mr.', 'Mrs.', 'Ms.', 'Miss', 'Mx.', 'Dr.', 'Prof.', 'Rev.', 'Fr.', 'Sister', 'Brother'];
   export const FLIGHTS = ['Alpha', 'Bravo', 'Charlie', 'Delta', 'Echo', 'Foxtrot', 'Abroad'];
   export const SQUADRONS = ['Blue', 'Gold', 'Abroad'];
   export const UNIVERSITIES = ['Notre Dame', "St. Mary's", 'Holy Cross', 'Trine', 'Valparaiso'];

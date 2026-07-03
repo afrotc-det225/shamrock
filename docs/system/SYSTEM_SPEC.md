@@ -71,7 +71,8 @@ The backend workbook is authoritative.
 ### 4.3 Cadre & Leadership Ownership
 Default ownership model:
 - Directory Backend is the source of truth for cadet rank and cadet leadership roles.
-- Leadership Backend preserves non-cadet/cadre/manual leadership contacts and receives derived cadet leadership rows from Directory Backend only for command/advisor roles: flight commanders, squadron commanders, operations group commander/deputy, wing commander/deputy wing commander, and senior/deputy GMC advisor.
+- Leadership Backend preserves non-cadet/cadre/manual leadership contacts and receives derived cadet leadership rows from Directory Backend only for command/advisor roles: wing commander, deputy wing commander, operations group commander/deputy, squadron commanders, flight commanders, deputy flight commanders, and senior/deputy GMC advisor.
+- Derived Leadership rows sort by command hierarchy first: wing commander, deputy wing commander, operations group, squadron commanders, flight commanders, deputy flight commanders, then advisor roles and remaining manual rows.
 - Frontend contains a read-only mirror.
 
 Rationale:
@@ -113,7 +114,7 @@ Cell-level dropdown validations must be driven from the Data Legend tab(s) using
 - Validations in other sheets reference Data Legend ranges.
 - Frontend primary sheets use Google Sheets Table objects through the Sheets API advanced service. They must not rely on ordinary `applyRowBanding()` ranges as a substitute for Tables.
 - Table dropdown column types mirror the same canonical option arrays because the Sheets Table API dropdown column type requires a `ONE_OF_LIST` validation rule.
-- Directory `Rank` uses the cadet-only `CADET_RANKS` list. Leadership `Rank` accepts the adjacent Data Legend `CADET_RANKS` and non-cadet `RANKS` ranges.
+- Directory `Rank` uses the cadet-only `CADET_RANKS` list. Leadership `Rank` accepts the adjacent Data Legend `CADET_RANKS`, non-cadet `RANKS`, and `HONORIFICS` ranges.
 - Frontend Attendance code entry is represented by table dropdown columns plus strict Data Legend-backed validation, not conditional-format color rules.
 
 Canonical option sets:

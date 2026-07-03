@@ -20,6 +20,7 @@ These are recommended stable names for the Data Legend workbook ranges.
 - `SQUADRONS`
 - `CADET_RANKS`
 - `RANKS`
+- `HONORIFICS`
 - `UNIVERSITIES`
 - `DORMS`
 - `CIP_BROAD_AREAS`
@@ -81,6 +82,20 @@ Allowed values:
 - Maj Gen
 - Lt Gen
 - Gen
+
+## Honorifics (`HONORIFICS`)
+Allowed values:
+- Mr.
+- Mrs.
+- Ms.
+- Miss
+- Mx.
+- Dr.
+- Prof.
+- Rev.
+- Fr.
+- Sister
+- Brother
 
 ## Flights (`FLIGHTS`)
 Allowed values:

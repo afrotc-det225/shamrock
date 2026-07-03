@@ -30,6 +30,7 @@ namespace FrontendFormattingService {
       as_year_options: 'AS_YEARS',
       cadet_rank_options: 'CADET_RANKS',
       rank_options: 'RANKS',
+      honorific_options: 'HONORIFICS',
       flight_options: 'FLIGHTS',
       squadron_options: 'SQUADRONS',
       university_options: 'UNIVERSITIES',
@@ -125,7 +126,7 @@ namespace FrontendFormattingService {
       const dataRows = Math.max(1, sheet.getMaxRows() - 2);
       const rankIdx = headers.indexOf('rank');
       if (rankIdx < 0) return;
-      const rankRange = getCombinedRankRange(ss);
+      const rankRange = getLeadershipRankRange(ss);
       if (!rankRange) return;
       const dataRange = sheet.getRange(3, rankIdx + 1, dataRows, 1);
       dataRange.clearDataValidations();
@@ -140,16 +141,17 @@ namespace FrontendFormattingService {
     }
   }
 
-  function getCombinedRankRange(ss: GoogleAppsScript.Spreadsheet.Spreadsheet): GoogleAppsScript.Spreadsheet.Range | null {
+  function getLeadershipRankRange(ss: GoogleAppsScript.Spreadsheet.Spreadsheet): GoogleAppsScript.Spreadsheet.Range | null {
     const sheet = ss.getSheetByName('Data Legend');
     if (!sheet) return null;
     const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0].map((h) => String(h || '').trim());
-    const cadetIdx = headers.indexOf('cadet_rank_options');
-    const rankIdx = headers.indexOf('rank_options');
-    if (cadetIdx < 0 || rankIdx < 0) return ss.getRangeByName('RANKS');
+    const indexes = ['cadet_rank_options', 'rank_options', 'honorific_options']
+      .map((header) => headers.indexOf(header))
+      .filter((idx) => idx >= 0);
+    if (!indexes.length) return ss.getRangeByName('RANKS');
 
-    const startCol = Math.min(cadetIdx, rankIdx) + 1;
-    const endCol = Math.max(cadetIdx, rankIdx) + 1;
+    const startCol = Math.min(...indexes) + 1;
+    const endCol = Math.max(...indexes) + 1;
     const values = sheet.getRange(3, startCol, Math.max(1, sheet.getLastRow() - 2), endCol - startCol + 1).getValues();
     let lastNonEmpty = -1;
     values.forEach((row, idx) => {

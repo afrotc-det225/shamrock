@@ -82,7 +82,7 @@ Post-deploy validation checklist:
 - Frontend Directory displays cadet organization before leadership details: `Year`, `Flight`, `Sqdn`, `Rank`, `Role`, then `University` and the remaining fields.
 - Directory Backend uses the same v2 column order as the frontend Directory and no longer includes legacy `source` or freeform Directory `notes`.
 - Use `Inactive`, `Commissioned`, or `Dropped` in `Flight Path` when a cadet should remain in backend records but be removed from operational frontend, leadership, attendance, and form choices.
-- Cadet rank and cadet leadership role are maintained on Directory. Leadership is rebuilt only from active Directory rows with Leadership-eligible command/advisor roles, while non-cadet/cadre/manual Leadership rows are preserved.
+- Cadet rank and cadet leadership role are maintained on Directory. Leadership is rebuilt only from active Directory rows with Leadership-eligible command/advisor roles and sorted as wing commander, deputy wing commander, operations group, squadron commanders, flight commanders, deputy flight commanders, and advisor roles, while non-cadet/cadre/manual Leadership rows are preserved.
 - Sync Directory refreshes the frontend Data Legend first, clears stale frontend Directory dropdown rules, writes the v2 mirror, trims stale blank rows, removes legacy banded ranges, then reapplies v2 dropdowns and Sheets API frontend table column types.
 - Prefer menu-driven sync/repair actions over ad hoc edits in the frontend.
 
@@ -164,9 +164,9 @@ Likely causes:
 Operator checks:
 - Re-run Sync Directory, Rebuild Attendance Matrix, Apply frontend formatting, or setup to recreate validations and frontend tables.
 - Confirm Data Legend is present and populated.
-- Confirm the frontend Data Legend includes the v2 `cadet_rank_options` and `rank_options` columns.
-- Confirm Directory `Rank` validates against cadet rank options, Leadership `Rank` validates against the adjacent cadet rank and non-cadet rank option columns, and Directory `Email` has no dropdown validation.
-- Confirm Data Legend order follows the v2 Directory flow: AS year, flight, squadron, cadet rank, rank, university, dorm, academic options, home state, flight path, attendance codes, excusal decisions, excusal statuses, and excusal requested outcomes.
+- Confirm the frontend Data Legend includes the v2 `cadet_rank_options`, `rank_options`, and `honorific_options` columns.
+- Confirm Directory `Rank` validates against cadet rank options, Leadership `Rank` validates against adjacent cadet rank, non-cadet rank, and honorific option columns, and Directory `Email` has no dropdown validation.
+- Confirm Data Legend order follows the v2 Directory flow: AS year, flight, squadron, cadet rank, rank, honorific, university, dorm, academic options, home state, flight path, attendance codes, excusal decisions, excusal statuses, and excusal requested outcomes.
 
 ### 6.4 Attendance percentages look wrong
 Likely causes:

@@ -265,21 +265,57 @@ namespace DirectoryService {
       .trim();
   }
 
-  function isLeadershipDirectoryRole(roleRaw: string): boolean {
+  function leadershipRolePriority(roleRaw: string): number {
     const role = normalizeRoleForMatch(roleRaw);
-    if (!role) return false;
+    if (!role) return Number.MAX_SAFE_INTEGER;
 
     const isDeputy = role.includes('deputy');
-    if (role.includes('flight commander')) return !isDeputy;
-    if (role.includes('squadron commander')) return !isDeputy;
-    if (role.includes('wing commander')) return !isDeputy || role.includes('deputy wing commander');
-    if (role.includes('operations group commander')) return true;
-    if (role.includes('operations group deputy commander')) return true;
-    if (role.includes('operations group deputy')) return true;
-    if (role.includes('senior gmc advisor')) return true;
-    if (role.includes('deputy gmc advisor')) return true;
+    if (role.includes('wing commander') && !isDeputy) return 10;
+    if (role.includes('deputy wing commander')) return 20;
+    if (role.includes('operations group commander') && !isDeputy) return 30;
+    if (role.includes('operations group deputy commander')) return 35;
+    if (role.includes('operations group deputy')) return 36;
+    if (role.includes('squadron commander') && !isDeputy) return 40;
+    if (role.includes('flight commander') && !isDeputy) return 50;
+    if (role.includes('deputy flight commander')) return 60;
+    if (role.includes('senior gmc advisor')) return 70;
+    if (role.includes('deputy gmc advisor')) return 71;
 
-    return false;
+    return Number.MAX_SAFE_INTEGER;
+  }
+
+  function isLeadershipDirectoryRole(roleRaw: string): boolean {
+    return leadershipRolePriority(roleRaw) < Number.MAX_SAFE_INTEGER;
+  }
+
+  function leadershipRankPriority(rankRaw: string): number {
+    const rank = String(rankRaw || '').trim();
+    if (!rank) return 0;
+    const cadetRanks = ((globalThis as any).Arrays?.CADET_RANKS as string[] | undefined) || [];
+    const militaryRanks = ((globalThis as any).Arrays?.RANKS as string[] | undefined) || [];
+    const orderedRanks = cadetRanks.concat(militaryRanks);
+    const idx = orderedRanks.findIndex((candidate) => candidate.toLowerCase() === rank.toLowerCase());
+    return idx >= 0 ? idx + 1 : 0;
+  }
+
+  function compareLeadershipRows(a: Record<string, any>, b: Record<string, any>): number {
+    const aRolePriority = leadershipRolePriority(String(a.role || ''));
+    const bRolePriority = leadershipRolePriority(String(b.role || ''));
+    if (aRolePriority !== bRolePriority) return aRolePriority - bRolePriority;
+
+    const aRankPriority = leadershipRankPriority(String(a.rank || ''));
+    const bRankPriority = leadershipRankPriority(String(b.rank || ''));
+    if (aRankPriority !== bRankPriority) return bRankPriority - aRankPriority;
+
+    const squadronCmp = String(a.squadron || '').localeCompare(String(b.squadron || ''), undefined, { sensitivity: 'base' });
+    if (squadronCmp !== 0) return squadronCmp;
+    const flightCmp = String(a.flight || '').localeCompare(String(b.flight || ''), undefined, { sensitivity: 'base' });
+    if (flightCmp !== 0) return flightCmp;
+    const roleCmp = String(a.role || '').localeCompare(String(b.role || ''), undefined, { sensitivity: 'base' });
+    if (roleCmp !== 0) return roleCmp;
+    const lastCmp = String(a.last_name || '').localeCompare(String(b.last_name || ''), undefined, { sensitivity: 'base' });
+    if (lastCmp !== 0) return lastCmp;
+    return String(a.first_name || '').localeCompare(String(b.first_name || ''), undefined, { sensitivity: 'base' });
   }
 
   function leadershipRowFromDirectory(row: any): Record<string, any> | null {
@@ -328,15 +364,7 @@ namespace DirectoryService {
       return !isCadetDirectoryRow(row);
     });
 
-    const nextRows = preservedRows.concat(
-      derivedRows.sort((a, b) => {
-        const roleCmp = String(a.role || '').localeCompare(String(b.role || ''), undefined, { sensitivity: 'base' });
-        if (roleCmp !== 0) return roleCmp;
-        const lastCmp = String(a.last_name || '').localeCompare(String(b.last_name || ''), undefined, { sensitivity: 'base' });
-        if (lastCmp !== 0) return lastCmp;
-        return String(a.first_name || '').localeCompare(String(b.first_name || ''), undefined, { sensitivity: 'base' });
-      }),
-    );
+    const nextRows = preservedRows.concat(derivedRows).sort(compareLeadershipRows);
 
     SheetUtils.writeTable(leadershipSheet, nextRows);
   }
