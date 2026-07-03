@@ -78,6 +78,12 @@ namespace DirectoryService {
     return phone;
   }
 
+  function formatPhoneForLeadership(raw: any): string {
+    const value = String(raw || '').trim();
+    if (!value) return '';
+    return formatPhoneDisplay(normalizePhone(value));
+  }
+
   function sortDirectoryRows(rows: any[]): any[] {
     const asPriority = (() => {
       const arr = (globalThis as any).Arrays?.AS_YEARS as string[] | undefined;
@@ -360,7 +366,7 @@ namespace DirectoryService {
       role,
       reports_to: '',
       email: row['email'] || '',
-      cell_phone: normalizePhone(String(row['phone'] || '')),
+      cell_phone: formatPhoneForLeadership(row['phone']),
       office_phone: '',
       office_location: '',
     };
@@ -394,7 +400,11 @@ namespace DirectoryService {
       return !isCadetDirectoryRow(row);
     });
 
-    const nextRows = preservedRows.concat(derivedRows).sort(compareLeadershipRows);
+    const nextRows = preservedRows.concat(derivedRows).map((row) => ({
+      ...row,
+      cell_phone: formatPhoneForLeadership(row['cell_phone']),
+      office_phone: formatPhoneForLeadership(row['office_phone']),
+    })).sort(compareLeadershipRows);
 
     SheetUtils.writeTable(leadershipSheet, nextRows);
   }
