@@ -85,7 +85,7 @@ Rows marked `Inactive`, `Commissioned`, or `Dropped` in `Flight Path` stay in Di
 - Run the directory sync action.
 - Confirm the frontend Directory reflects the backend.
 - Confirm the frontend Directory column order starts `Last Name`, `First Name`, `Year`, `Flight`, `Sqdn`, `Rank`, `Role`, `University`.
-- Confirm the frontend Data Legend includes `cadet_rank_options`, non-cadet `rank_options`, and `honorific_options`; Directory `Rank` is a cadet-rank dropdown; Leadership `Rank` accepts cadet ranks, non-cadet ranks, and honorifics; and Directory `Email` is free text with no stale dropdown.
+- Confirm the frontend Data Legend includes `cadet_rank_options`, non-cadet `rank_options`, and `honorific_options`; Directory `Rank` is strict cadet-rank validation with plain-text display; Leadership `Rank` accepts cadet ranks, non-cadet ranks, and honorifics with plain-text display; and Directory `Email` is free text with no stale dropdown.
 - Confirm `Inactive`, `Commissioned`, and `Dropped` rows are absent from operational frontend views.
 - If the row has a Leadership-eligible role, confirm Leadership reflects rank, role, email, and phone from Directory, and that flight/squadron commander role names include the unit name.
 - Confirm attendance/form rebuild actions use active cadets only.

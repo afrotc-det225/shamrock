@@ -166,7 +166,7 @@ Operator checks:
 - Re-run Sync Directory, Rebuild Attendance Matrix, Apply frontend formatting, or setup to recreate validations and frontend tables.
 - Confirm Data Legend is present and populated.
 - Confirm the frontend Data Legend includes the v2 `cadet_rank_options`, `rank_options`, and `honorific_options` columns.
-- Confirm Directory `Rank` validates against cadet rank options, Leadership `Rank` validates against adjacent cadet rank, non-cadet rank, and honorific option columns, and Directory `Email` has no dropdown validation.
+- Confirm Directory `Rank` validates against cadet rank options with plain-text display, Leadership `Rank` validates against adjacent cadet rank, non-cadet rank, and honorific option columns with plain-text display, and Directory `Email` has no dropdown validation.
 - Confirm Data Legend order follows the v2 Directory flow: AS year, flight, squadron, cadet rank, rank, honorific, university, dorm, academic options, home state, flight path, attendance codes, excusal decisions, excusal statuses, and excusal requested outcomes.
 
 ### 6.4 Attendance percentages look wrong

@@ -390,8 +390,6 @@ namespace SetupService {
           columnType: 'TEXT',
         };
         const dropdownOptions = tableDropdownOptions[machineHeader]
-          || (machineHeader === 'rank' && sheetName === 'Directory' ? Arrays.CADET_RANKS : null)
-          || (machineHeader === 'rank' && sheetName === 'Leadership' ? [...Arrays.CADET_RANKS, ...Arrays.RANKS, ...Arrays.HONORIFICS] : null)
           || (sheetName === 'Attendance' && idx >= attendanceBase.size ? Arrays.ATTENDANCE_CODES : null);
         if (dropdownOptions?.length) {
           prop.columnType = 'DROPDOWN';

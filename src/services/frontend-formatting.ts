@@ -101,8 +101,9 @@ namespace FrontendFormattingService {
         const namedRange = ss.getRangeByName(rangeName);
         if (!namedRange) return;
         const dataRange = sheet.getRange(3, colIdx + 1, dataRows, 1);
+        const showDropdown = field !== 'rank';
         const rule = SpreadsheetApp.newDataValidation()
-          .requireValueInRange(namedRange, true)
+          .requireValueInRange(namedRange, showDropdown)
           .setAllowInvalid(false)
           .build();
         try {
@@ -132,7 +133,7 @@ namespace FrontendFormattingService {
       dataRange.clearDataValidations();
       dataRange.setDataValidation(
         SpreadsheetApp.newDataValidation()
-          .requireValueInRange(rankRange, true)
+          .requireValueInRange(rankRange, false)
           .setAllowInvalid(false)
           .build(),
       );
