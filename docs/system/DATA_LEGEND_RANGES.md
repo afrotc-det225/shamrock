@@ -91,7 +91,7 @@ Allowed values:
 - Alumni Hall
 - Baumer Hall
 - Carroll Hall
-- Coyle Community in Zahm Hall
+- Coyle Hall
 - Dillon Hall
 - Duncan Hall
 - Dunne Hall
@@ -110,7 +110,7 @@ Allowed values:
 - Cavanaugh Hall
 - Farley Hall
 - Flaherty Hall
-- Howard Hall
+- Grojean Hall
 - Johnson Family Hall
 - Lewis Hall
 - Lyons Hall
