@@ -121,6 +121,7 @@ Cell-level dropdown validations must be driven from the Data Legend tab(s) using
 - Table creation/update is split into table object ensure/update and visual style requests with retry/backoff. If Sheets returns a transient internal error for Table object creation, SHAMROCK still applies the visible table-style fallback and logs the table-object failure for retry.
 - Frontend formatting temporarily clears SHAMROCK-managed protections before table creation/update, then reapplies protections after the Sheets API table and style requests complete. Protected ranges must not prevent table repair.
 - Directory `Rank` uses the cadet-only `CADET_RANKS` list. Leadership `Rank` accepts the adjacent Data Legend `CADET_RANKS`, non-cadet `RANKS`, and `HONORIFICS` ranges. Rank validations are strict range validations with plain-text display, not visible dropdown arrows/chips.
+- Directory `Photo Link` uses Google Sheets file smart chips when the mirrored value is a Google Drive file URL or Drive file ID.
 - Frontend Attendance code entry is represented by strict Data Legend-backed validation and normal spreadsheet formatting, not conditional-format color rules or Sheets Table dropdown column types.
 
 Canonical option sets:

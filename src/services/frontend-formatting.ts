@@ -427,6 +427,70 @@ namespace FrontendFormattingService {
     }
   }
 
+  function extractDriveFileChipUri(value: unknown, richText?: GoogleAppsScript.Spreadsheet.RichTextValue | null): string {
+    const linkUrl = richText?.getLinkUrl() || '';
+    const text = String(linkUrl || value || '').trim();
+    if (!text) return '';
+
+    const fileMatch = text.match(/\/file\/d\/([A-Za-z0-9_-]+)/);
+    const idParamMatch = text.match(/[?&]id=([A-Za-z0-9_-]+)/);
+    const rawIdMatch = text.match(/^[A-Za-z0-9_-]{20,}$/);
+    const id = fileMatch?.[1] || idParamMatch?.[1] || rawIdMatch?.[0] || '';
+    return id ? `https://drive.google.com/file/d/${id}/view` : '';
+  }
+
+  function applyDirectoryPhotoFileChips(ss: GoogleAppsScript.Spreadsheet.Spreadsheet, sheet: GoogleAppsScript.Spreadsheet.Sheet) {
+    const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0].map((h) => String(h || '').trim());
+    const photoIdx = headers.indexOf('photo_link');
+    if (photoIdx < 0 || sheet.getLastRow() < 3) return;
+
+    const sheetsService = (globalThis as any).Sheets?.Spreadsheets;
+    if (!sheetsService?.batchUpdate) {
+      Log.warn('Unable to apply Directory Photo Link file chips because the Sheets advanced service is unavailable.');
+      return;
+    }
+
+    const valueRange = sheet.getRange(3, photoIdx + 1, sheet.getLastRow() - 2, 1);
+    const values = valueRange.getValues();
+    const richTextValues = valueRange.getRichTextValues();
+    const requests: Record<string, any>[] = [];
+    values.forEach((row, idx) => {
+      const uri = extractDriveFileChipUri(row[0], richTextValues[idx]?.[0]);
+      if (!uri) return;
+      requests.push({
+        updateCells: {
+          range: {
+            sheetId: sheet.getSheetId(),
+            startRowIndex: idx + 2,
+            endRowIndex: idx + 3,
+            startColumnIndex: photoIdx,
+            endColumnIndex: photoIdx + 1,
+          },
+          rows: [{
+            values: [{
+              userEnteredValue: { stringValue: '@' },
+              chipRuns: [{
+                startIndex: 0,
+                chip: {
+                  richLinkProperties: { uri },
+                },
+              }],
+            }],
+          }],
+          fields: 'userEnteredValue,chipRuns',
+        },
+      });
+    });
+
+    if (!requests.length) return;
+    try {
+      sheetsService.batchUpdate({ requests }, ss.getId());
+      Log.info(`Applied Directory Photo Link file chips to ${requests.length} cell(s).`);
+    } catch (err) {
+      Log.warn(`Unable to apply Directory Photo Link file chips: ${err}`);
+    }
+  }
+
   function applyDirectoryFormatting(ss: GoogleAppsScript.Spreadsheet.Spreadsheet) {
     const sheet = ss.getSheetByName('Directory');
     if (!sheet) return;
@@ -490,6 +554,7 @@ namespace FrontendFormattingService {
     alignColumn('dob', 'right');
     alignColumn('flight_path_status', 'left');
     alignColumn('photo_link', 'center');
+    applyDirectoryPhotoFileChips(ss, sheet);
 
     // Freeze name columns
     sheet.setFrozenRows(2);
