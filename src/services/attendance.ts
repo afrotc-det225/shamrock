@@ -650,9 +650,8 @@ namespace AttendanceService {
 
   const EMAIL_SIGNATURE = 'Very respectfully,\nSHAMROCK Automations';
 
-  function matchesFlightRole(role: string, target: string, rowFlight: string): boolean {
-    const roleIncludesFlight = Arrays.FLIGHTS.some((f) => role.includes(f.toLowerCase()) && target === f.toLowerCase());
-    return rowFlight ? rowFlight === target : roleIncludesFlight;
+  function roleMatchesFlight(role: string, target: string): boolean {
+    return Arrays.FLIGHTS.some((f) => role.includes(f.toLowerCase()) && target === f.toLowerCase());
   }
 
   function getFlightCommanderEmail(flight: string): string {
@@ -664,8 +663,7 @@ namespace AttendanceService {
     const target = flight.toLowerCase().trim();
     const commander = table.rows.find((row) => {
       const role = String(row['role'] || '').toLowerCase();
-      const rowFlight = String((row as any)['flight'] || '').toLowerCase().trim();
-      return role.includes('flight commander') && !role.includes('deputy') && matchesFlightRole(role, target, rowFlight);
+      return role.includes('flight commander') && !role.includes('deputy') && roleMatchesFlight(role, target);
     });
     return commander ? String(commander['email'] || '').trim() : '';
   }
@@ -679,8 +677,7 @@ namespace AttendanceService {
     const target = flight.toLowerCase().trim();
     const deputy = table.rows.find((row) => {
       const role = String(row['role'] || '').toLowerCase();
-      const rowFlight = String((row as any)['flight'] || '').toLowerCase().trim();
-      return role.includes('deputy') && role.includes('flight commander') && matchesFlightRole(role, target, rowFlight);
+      return role.includes('deputy') && role.includes('flight commander') && roleMatchesFlight(role, target);
     });
     return deputy ? String(deputy['email'] || '').trim() : '';
   }

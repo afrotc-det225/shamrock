@@ -60,7 +60,7 @@ The frontend/main workbook intentionally does not expose admin menus.
 
 Directory is the authoritative roster source for cadets and drives attendance, leadership lookups, form choices, and frontend display.
 
-Cadet rank and cadet leadership role live on Directory. The Leadership view is derived from active Directory rows only for command/advisor roles: wing commander, deputy wing commander, operations group commander/deputy, squadron commanders, flight commanders, deputy flight commanders, and senior/deputy GMC advisor. Cadre/manual leadership contacts are preserved, and Leadership sorts non-cadet ranks and honorifics above cadet ranks before applying command hierarchy and name tiebreakers.
+Cadet rank and cadet leadership role live on Directory. The Leadership view is derived from active Directory rows only for command/advisor roles: wing commander, deputy wing commander, operations group commander/deputy, squadron commanders, flight commanders, deputy flight commanders, and senior/deputy GMC advisor. Cadre/manual leadership contacts are preserved, and Leadership sorts non-cadet ranks and honorifics above cadet ranks before applying command hierarchy and name tiebreakers. Leadership does not store separate flight/squadron columns; unit routing comes from role names such as `Alpha Flight Commander` or `Blue Squadron Commander`.
 The frontend and backend Directory v2 order starts with `Last Name`, `First Name`, `Year`, `Flight`, `Sqdn`, `Rank`, `Role`, then `University` and the remaining contact/academic fields. Legacy Directory `source` and freeform Directory `notes` columns are not part of the v2 baseline.
 
 Rows marked `Inactive`, `Commissioned`, or `Dropped` in `Flight Path` stay in Directory Backend for recordkeeping but are excluded from frontend Directory, derived Leadership, Attendance, and form cadet choices.
@@ -87,7 +87,7 @@ Rows marked `Inactive`, `Commissioned`, or `Dropped` in `Flight Path` stay in Di
 - Confirm the frontend Directory column order starts `Last Name`, `First Name`, `Year`, `Flight`, `Sqdn`, `Rank`, `Role`, `University`.
 - Confirm the frontend Data Legend includes `cadet_rank_options`, non-cadet `rank_options`, and `honorific_options`; Directory `Rank` is a cadet-rank dropdown; Leadership `Rank` accepts cadet ranks, non-cadet ranks, and honorifics; and Directory `Email` is free text with no stale dropdown.
 - Confirm `Inactive`, `Commissioned`, and `Dropped` rows are absent from operational frontend views.
-- If the row has a Leadership-eligible role, confirm Leadership reflects rank, role, flight/squadron, email, and phone from Directory.
+- If the row has a Leadership-eligible role, confirm Leadership reflects rank, role, email, and phone from Directory, and that flight/squadron commander role names include the unit name.
 - Confirm attendance/form rebuild actions use active cadets only.
 
 ## Semester And Academic Year Transition

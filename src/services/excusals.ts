@@ -172,13 +172,11 @@ SHAMROCK Automations`;
 
     const commander = table.rows.find((row) => {
       const role = String(row['role'] || '').toLowerCase().trim();
-      const rowSquadron = String(row['squadron'] || '').toLowerCase().trim();
       const roleIncludesSquadron = Arrays.SQUADRONS.some((sq) => {
         const sqLower = sq.toLowerCase();
         return role.includes(sqLower) && squadronNormalized === sqLower;
       });
-      const matchesSquadron = rowSquadron ? rowSquadron === squadronNormalized : roleIncludesSquadron;
-      return role.includes('squadron commander') && matchesSquadron;
+      return role.includes('squadron commander') && roleIncludesSquadron;
     });
 
     return commander ? String(commander['email'] || '') : '';

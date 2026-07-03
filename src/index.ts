@@ -438,10 +438,8 @@ function addLeadershipEntry() {
     if (firstName === null) throw new MenuActionCancelled('Leadership entry cancelled before First Name was provided.');
     const rank = ask('Rank (e.g., C/Col)', true);
     if (rank === null) throw new MenuActionCancelled('Leadership entry cancelled before Rank was provided.');
-    const role = ask('Role (e.g., Commander)', true);
+    const role = ask('Role (e.g., Alpha Flight Commander, Blue Squadron Commander)', true);
     if (role === null) throw new MenuActionCancelled('Leadership entry cancelled before Role was provided.');
-    const flight = ask('Flight (optional)') || '';
-    const squadron = ask('Squadron (optional)') || '';
     const reportsTo = ask('Reports To (optional)') || '';
     const email = ask('Email', true);
     if (email === null) throw new MenuActionCancelled('Leadership entry cancelled before Email was provided.');
@@ -473,9 +471,7 @@ function addLeadershipEntry() {
         };
         setDirectory('rank', rank);
         setDirectory('role', role);
-        if (flight) setDirectory('flight', flight);
-        if (squadron) setDirectory('squadron', squadron);
-        SetupService.refreshDirectoryArtifacts({ rebuildAttendanceMatrix: Boolean(flight || squadron), rebuildAttendanceForm: Boolean(flight) });
+        SetupService.refreshDirectoryArtifacts();
         ui.alert('Directory leadership fields updated and synced to frontend.');
         return;
       }
@@ -493,8 +489,6 @@ function addLeadershipEntry() {
     set('first_name', firstName);
     set('rank', rank);
     set('role', role);
-    set('flight', flight);
-    set('squadron', squadron);
     set('reports_to', reportsTo);
     set('email', email);
     set('cell_phone', cellPhone);
@@ -991,7 +985,6 @@ function addDeputyFlightCommanders() {
 
     set('rank', dep.rank);
     set('role', role);
-    set('flight', dep.flight);
     added++;
     results.push(`${dep.first} ${dep.last}: set as ${role}${cadet['email'] ? ` (${cadet['email']})` : ''}`);
   }

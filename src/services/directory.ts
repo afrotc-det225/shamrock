@@ -265,6 +265,27 @@ namespace DirectoryService {
       .trim();
   }
 
+  function roleContainsUnit(role: string, units: string[]): boolean {
+    const normalizedRole = normalizeRoleForMatch(role);
+    return units.some((unit) => normalizedRole.includes(normalizeRoleForMatch(unit)));
+  }
+
+  function canonicalLeadershipRole(row: any): string {
+    const rawRole = String(row?.['role'] || '').trim();
+    const role = normalizeRoleForMatch(rawRole);
+    if (!rawRole || !role) return rawRole;
+
+    const flight = String(row?.['flight'] || '').trim();
+    const squadron = String(row?.['squadron'] || '').trim();
+    if (role.includes('flight commander') && flight && !roleContainsUnit(rawRole, (((globalThis as any).Arrays?.FLIGHTS as string[] | undefined) || []))) {
+      return `${flight} ${rawRole}`;
+    }
+    if (role.includes('squadron commander') && squadron && !roleContainsUnit(rawRole, (((globalThis as any).Arrays?.SQUADRONS as string[] | undefined) || []))) {
+      return `${squadron} ${rawRole}`;
+    }
+    return rawRole;
+  }
+
   function leadershipRolePriority(roleRaw: string): number {
     const role = normalizeRoleForMatch(roleRaw);
     if (!role) return Number.MAX_SAFE_INTEGER;
@@ -322,10 +343,6 @@ namespace DirectoryService {
     const bRankPriority = leadershipRankPriority(String(b.rank || ''));
     if (aRankPriority !== bRankPriority) return bRankPriority - aRankPriority;
 
-    const squadronCmp = String(a.squadron || '').localeCompare(String(b.squadron || ''), undefined, { sensitivity: 'base' });
-    if (squadronCmp !== 0) return squadronCmp;
-    const flightCmp = String(a.flight || '').localeCompare(String(b.flight || ''), undefined, { sensitivity: 'base' });
-    if (flightCmp !== 0) return flightCmp;
     const roleCmp = String(a.role || '').localeCompare(String(b.role || ''), undefined, { sensitivity: 'base' });
     if (roleCmp !== 0) return roleCmp;
     const lastCmp = String(a.last_name || '').localeCompare(String(b.last_name || ''), undefined, { sensitivity: 'base' });
@@ -334,15 +351,13 @@ namespace DirectoryService {
   }
 
   function leadershipRowFromDirectory(row: any): Record<string, any> | null {
-    const role = String(row?.['role'] || '').trim();
+    const role = canonicalLeadershipRole(row);
     if (!isLeadershipDirectoryRole(role)) return null;
     return {
       last_name: row['last_name'] || '',
       first_name: row['first_name'] || '',
       rank: row['rank'] || '',
       role,
-      flight: row['flight'] || '',
-      squadron: row['squadron'] || '',
       reports_to: '',
       email: row['email'] || '',
       cell_phone: normalizePhone(String(row['phone'] || '')),
