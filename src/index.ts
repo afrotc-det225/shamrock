@@ -535,7 +535,11 @@ function fixAttendanceHeaders() {
     const normalizedHeaders = headers.map((h) => h.trim().toLowerCase().replace(/\s+/g, ''));
 
     try {
-      sheet.getRange(2, 1, 1, lastCol).setHorizontalAlignment('left').setFontWeight('bold');
+      sheet
+        .getRange(2, 1, 1, lastCol)
+        .setHorizontalAlignment('left')
+        .setFontWeight('bold')
+        .setFontSize(10);
     } catch (err) {
       Log.warn(`Unable to format attendance display headers: ${err}`);
     }
@@ -589,7 +593,8 @@ function fixAttendanceHeaders() {
           const rowEnd = rowStart + rg.getNumRows() - 1;
 
           const touchesGradient = gradientColumns.some((col) => col >= colStart && col <= colEnd);
-          return touchesGradient;
+          const touchesDisplayHeader = rowStart <= 2 && rowEnd >= 2;
+          return touchesGradient || touchesDisplayHeader;
         });
       } catch (err) {
         Log.warn(`Skipping rule during conditional formatting rebuild: ${err}`);

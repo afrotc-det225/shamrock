@@ -699,6 +699,11 @@ namespace FrontendFormattingService {
     if (llabIdx >= 0) display[llabIdx] = 'LLAB';
     if (overallIdx >= 0) display[overallIdx] = 'Overall';
     sheet.getRange(2, 1, 1, sheet.getLastColumn()).setValues([display]);
+    sheet
+      .getRange(2, 1, 1, sheet.getLastColumn())
+      .setFontWeight('bold')
+      .setFontSize(10)
+      .setHorizontalAlignment('left');
 
     // Widths and hides
     sheet.autoResizeColumn(1);
@@ -753,10 +758,10 @@ namespace FrontendFormattingService {
       const colCount = Math.abs(llabIdx - overallIdx) + 1;
       rules.push(
         SpreadsheetApp.newConditionalFormatRule()
-          .setGradientMinpointWithValue('0.8', SpreadsheetApp.InterpolationType.NUMBER, '#e67c73')
-          .setGradientMidpointWithValue('0.9', SpreadsheetApp.InterpolationType.NUMBER, '#ffce65')
-          .setGradientMaxpointWithValue('1', SpreadsheetApp.InterpolationType.NUMBER, '#57bb8a')
-          .setRanges([sheet.getRange(1, startCol, maxRows, colCount)])
+          .setGradientMinpointWithValue('#e67c73', SpreadsheetApp.InterpolationType.NUMBER, '0.8')
+          .setGradientMidpointWithValue('#ffce65', SpreadsheetApp.InterpolationType.NUMBER, '0.9')
+          .setGradientMaxpointWithValue('#57bb8a', SpreadsheetApp.InterpolationType.NUMBER, '1')
+          .setRanges([sheet.getRange(3, startCol, maxRows - 2, colCount)])
           .build(),
       );
     }
