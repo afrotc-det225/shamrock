@@ -2172,6 +2172,9 @@ namespace SetupService {
   export function applyFrontendFormatting() {
     const frontendId = Config.getFrontendId();
     ProtectionService.clearManagedFrontendProtections(frontendId);
+    // Old Sheets Table typed columns block normal cell-level validation writes.
+    // Reset table column types before FrontendFormattingService clears/reapplies validations.
+    ensureFrontendTables(frontendId);
     FrontendFormattingService.applyAll(frontendId);
     ensureFrontendTables(frontendId);
     ProtectionService.applyFrontendProtections(frontendId);
