@@ -140,7 +140,7 @@ This section describes the current operational shape of the system so feature wo
 - FAQs: two-column end-user information.
 - Dashboard: links, metrics, charts, rotating upcoming birthdays, rotating “cadets out this week”.
 - Cadre & Leadership: minimal contact directory.
-- Directory: cadet directory with AS year, flight, squadron, rank, role, contact, academic, and status fields (sorted Z-A by AS year, then A-Z by last name) with required formatting constraints. The frontend display order begins `Last Name`, `First Name`, `Year`, `Flight`, `Sqdn`, `Rank`, `Role`, `University`.
+- Directory: cadet directory with AS year, flight, squadron, rank, role, contact, academic, and status fields (sorted Z-A by AS year, then A-Z by last name) with required formatting constraints. The frontend and backend v2 Directory order begins `Last Name`, `First Name`, `Year`, `Flight`, `Sqdn`, `Rank`, `Role`, `University`.
 - Attendance: directory-synced cadet rows + event columns with attendance codes and percentage rollups.
 - Events: event metadata driving attendance columns and dashboard.
 - Excusals: public-facing excusal request log.
@@ -148,7 +148,7 @@ This section describes the current operational shape of the system so feature wo
 - Data Legend: validation option ranges.
 
 ### 7.2 Backend Tabs
-- Directory Backend: authoritative directory source.
+- Directory Backend: authoritative directory source using the same v2 order as the frontend Directory. It does not include legacy `source` or freeform Directory `notes` columns.
 - Events Backend: authoritative events source.
 - Excusals Backend: authoritative excusal workflow table.
 - Attendance Backend: append-only attendance submission log.
@@ -165,6 +165,9 @@ The attendance system is a replayable pipeline.
 Attendance codes:
 - Codes map to credit, no-credit, pending, or excluded status.
 - Blank means not yet taken / not applicable yet.
+
+Roster status:
+- Directory `Flight Path` values `Inactive`, `Commissioned`, and `Dropped` are non-operational statuses. Rows with those statuses remain in Directory Backend for recordkeeping but are excluded from frontend Directory, derived Leadership, Attendance, and form cadet choices.
 
 Percent metrics:
 - LLAB attendance % is based on LLAB event subset.

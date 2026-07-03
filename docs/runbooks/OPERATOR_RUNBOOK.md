@@ -80,6 +80,8 @@ Post-deploy validation checklist:
 - Directory source of truth is maintained in the backend.
 - Frontend Directory is a mirror.
 - Frontend Directory displays cadet organization before leadership details: `Year`, `Flight`, `Sqdn`, `Rank`, `Role`, then `University` and the remaining fields.
+- Directory Backend uses the same v2 column order as the frontend Directory and no longer includes legacy `source` or freeform Directory `notes`.
+- Use `Inactive`, `Commissioned`, or `Dropped` in `Flight Path` when a cadet should remain in backend records but be removed from operational frontend, leadership, attendance, and form choices.
 - Cadet rank and cadet leadership role are maintained on Directory. Leadership is rebuilt from active Directory rows with a role, while non-cadet/cadre/manual Leadership rows are preserved.
 - Sync Directory refreshes the frontend Data Legend first, clears stale frontend Directory dropdown rules, writes the v2 mirror, then reapplies v2 dropdowns from Data Legend named ranges.
 - Prefer menu-driven sync/repair actions over ad hoc edits in the frontend.
@@ -158,6 +160,7 @@ Operator checks:
 - Re-run Sync Directory or setup to recreate validations.
 - Confirm Data Legend is present and populated.
 - Confirm the frontend Data Legend includes the v2 `rank_options` column and that Directory `Rank` validates against cadet rank options while `Email` has no dropdown validation.
+- Confirm Data Legend order follows the v2 Directory flow: AS year, flight, squadron, rank, university, dorm, academic options, home state, flight path, then attendance codes.
 
 ### 6.4 Attendance percentages look wrong
 Likely causes:

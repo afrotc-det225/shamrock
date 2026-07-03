@@ -206,10 +206,45 @@ namespace SetupService {
       const endColIndex = colCount; // zero-based exclusive
       const endRowIndex = Math.max(headerRow + 1, sheet.getLastRow());
 
-      const columnProperties = headerValues.map((name, idx) => ({
-        columnIndex: idx,
-        columnName: String(name || `Column ${idx + 1}`),
-      }));
+      const machineHeaders = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0].map((h) => String(h || '').trim());
+      const tableDropdownOptions: Record<string, string[]> = {
+        as_year: Arrays.AS_YEARS,
+        rank: Arrays.CADET_RANKS,
+        flight: Arrays.FLIGHTS,
+        squadron: Arrays.SQUADRONS,
+        university: Arrays.UNIVERSITIES,
+        dorm: Arrays.DORMS,
+        home_state: Arrays.HOME_STATES,
+        cip_broad_area: Arrays.CIP_BROAD_AREAS,
+        desired_assigned_afsc: Arrays.AFSC_OPTIONS,
+        flight_path_status: Arrays.FLIGHT_PATH_STATUSES,
+      };
+      const attendanceBase = new Set((Schemas.getTabSchema('Attendance')?.machineHeaders || []).map((h) => h.toLowerCase()));
+
+      const columnProperties = headerValues.map((name, idx) => {
+        const machineHeader = machineHeaders[idx] || '';
+        const prop: Record<string, any> = {
+          columnIndex: idx,
+          columnName: String(name || `Column ${idx + 1}`),
+        };
+        const dropdownOptions = tableDropdownOptions[machineHeader]
+          || (sheetName === 'Attendance' && idx >= attendanceBase.size ? Arrays.ATTENDANCE_CODES : null);
+        if (dropdownOptions?.length) {
+          prop.columnType = 'DROPDOWN';
+          prop.dataValidationRule = {
+            condition: {
+              type: 'ONE_OF_LIST',
+              values: dropdownOptions.map((value) => ({ userEnteredValue: value })),
+            },
+            strict: true,
+          };
+        } else if (machineHeader === 'dob' || machineHeader.endsWith('_at') || machineHeader.endsWith('_datetime')) {
+          prop.columnType = 'DATE';
+        } else if (machineHeader.includes('_pct')) {
+          prop.columnType = 'PERCENT';
+        }
+        return prop;
+      });
 
       // Attempt to replace any existing table with the same id.
       try {
@@ -1925,6 +1960,14 @@ namespace SetupService {
   export function applyFrontendFormatting() {
     const frontendId = Config.getFrontendId();
     FrontendFormattingService.applyAll(frontendId);
+    ensureFrontendTables(frontendId);
+  }
+
+  function ensureFrontendTables(frontendId: string) {
+    if (!frontendId) return;
+    ['Directory', 'Leadership', 'Attendance', 'Data Legend'].forEach((name) => {
+      ensureTableForSheet(frontendId, name, name.replace(/\s+/g, '_').toLowerCase());
+    });
   }
 
   export function rebuildDashboard() {
@@ -2033,6 +2076,7 @@ namespace SetupService {
   }
 
   export function syncDirectoryBackendToFrontend() {
+    DataLegendService.refreshLegendFromArrays();
     SyncService.syncByBackendSheetName('Data Legend');
     DirectoryService.syncLeadershipBackendFromDirectory();
     syncDirectoryFrontend();

@@ -61,7 +61,9 @@ The frontend/main workbook intentionally does not expose admin menus.
 Directory is the authoritative roster source for cadets and drives attendance, leadership lookups, form choices, and frontend display.
 
 Cadet rank and cadet leadership role live on Directory. The Leadership view is derived from active Directory rows with a role, plus preserved cadre/manual leadership contacts.
-The frontend Directory starts with `Last Name`, `First Name`, `Year`, `Flight`, `Sqdn`, `Rank`, `Role`, then `University` and the remaining contact/academic fields.
+The frontend and backend Directory v2 order starts with `Last Name`, `First Name`, `Year`, `Flight`, `Sqdn`, `Rank`, `Role`, then `University` and the remaining contact/academic fields. Legacy Directory `source` and freeform Directory `notes` columns are not part of the v2 baseline.
+
+Rows marked `Inactive`, `Commissioned`, or `Dropped` in `Flight Path` stay in Directory Backend for recordkeeping but are excluded from frontend Directory, derived Leadership, Attendance, and form cadet choices.
 
 ### Operator Entry Points
 
@@ -84,6 +86,7 @@ The frontend Directory starts with `Last Name`, `First Name`, `Year`, `Flight`, 
 - Confirm the frontend Directory reflects the backend.
 - Confirm the frontend Directory column order starts `Last Name`, `First Name`, `Year`, `Flight`, `Sqdn`, `Rank`, `Role`, `University`.
 - Confirm the frontend Data Legend includes `rank_options`, Directory `Rank` is a cadet-rank dropdown, and Directory `Email` is free text with no stale dropdown.
+- Confirm `Inactive`, `Commissioned`, and `Dropped` rows are absent from operational frontend views.
 - If the row has a role, confirm Leadership reflects rank, role, flight/squadron, email, and phone from Directory.
 - Confirm attendance/form rebuild actions use active cadets only.
 
@@ -204,6 +207,8 @@ Audit logging records operator actions and key automation outcomes so operators 
 ### Purpose
 
 Formatting and protections keep the frontend usable as an interface while preserving backend/source-of-truth workflows.
+
+Dashboard uses compact spreadsheet-native sections for quick links, roster metrics, attendance summary, and birthdays. FAQ uses a one-column mobile-friendly reading layout instead of a single oversized cell.
 
 ### Operator Entry Points
 

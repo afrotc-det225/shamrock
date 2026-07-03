@@ -17,8 +17,7 @@ namespace FrontendEditService {
     | 'home_state'
     | 'class_year'
     | 'dob'
-    | 'flight_path_status'
-    | 'notes';
+    | 'flight_path_status';
 
   const ALLOWED_FIELDS: AllowedField[] = [
     'as_year',
@@ -37,7 +36,6 @@ namespace FrontendEditService {
     'class_year',
     'dob',
     'flight_path_status',
-    'notes',
   ];
 
   function getAllowedEditors(): string[] {

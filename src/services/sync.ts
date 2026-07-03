@@ -25,14 +25,14 @@ namespace SyncService {
         const lastCol = Math.max(1, frontendSheet.getLastColumn());
         const dataRowCount = Math.max(1, maxRows - 2);
         frontendSheet.getRange(3, 1, dataRowCount, lastCol).clearDataValidations();
-        SheetUtils.writeTable(frontendSheet, data.rows, { clearDataValidationsBeforeWrite: true });
+        SheetUtils.writeTable(frontendSheet, data.rows, { clearDataValidationsBeforeWrite: true, trimBlankRows: true });
         return;
       } catch (err) {
         Log.warn(`Data Legend sync encountered validation issues; falling back to plain write. Error: ${err}`);
       }
     }
 
-    SheetUtils.writeTable(frontendSheet, data.rows);
+    SheetUtils.writeTable(frontendSheet, data.rows, { trimBlankRows: true });
   }
 
   export function syncByBackendSheetName(name: string) {

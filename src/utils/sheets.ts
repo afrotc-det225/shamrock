@@ -8,6 +8,7 @@ namespace SheetUtils {
 
   export interface WriteTableOptions {
     clearDataValidationsBeforeWrite?: boolean;
+    trimBlankRows?: boolean;
   }
 
   export function getSheet(spreadsheetId: string, name: string): GoogleAppsScript.Spreadsheet.Sheet | null {
@@ -163,7 +164,10 @@ namespace SheetUtils {
     if (lastRow >= 3) {
       sheet.getRange(3, 1, lastRow - 2, lastCol).clearContent();
     }
-    if (!rows.length) return;
+    if (!rows.length) {
+      if (opts?.trimBlankRows) trimSheetRowsToData(sheet, 0);
+      return;
+    }
     const output = rows.map((r) => headers.map((h) => r[h] ?? ''));
     const targetRange = sheet.getRange(3, 1, output.length, headers.length);
     try {
@@ -174,6 +178,17 @@ namespace SheetUtils {
       Log.warn(`writeTable validation conflict on ${sheet.getName()}; clearing target data validations and retrying once.`);
       targetRange.clearDataValidations();
       targetRange.setValues(output);
+    }
+    if (opts?.trimBlankRows) trimSheetRowsToData(sheet, rows.length);
+  }
+
+  function trimSheetRowsToData(sheet: GoogleAppsScript.Spreadsheet.Sheet, dataRowCount: number) {
+    const neededRows = Math.max(3, dataRowCount + 2);
+    const currentMax = sheet.getMaxRows();
+    if (currentMax > neededRows) {
+      sheet.deleteRows(neededRows + 1, currentMax - neededRows);
+    } else if (currentMax < neededRows) {
+      sheet.insertRowsAfter(currentMax, neededRows - currentMax);
     }
   }
 

@@ -5,28 +5,26 @@ namespace DirectoryService {
   const FORM_DERIVED_FIELDS = new Set(['first_name', 'last_name', 'as_year', 'flight', 'university', 'flight_path_status']);
 
   interface DirectoryRecord {
-    source: string;
     last_name: string;
     first_name: string;
-    rank: string;
-    role: string;
     as_year: string;
-    class_year: string;
     flight: string;
     squadron: string;
+    rank: string;
+    role: string;
     university: string;
     email: string;
     phone: string;
     dorm: string;
-    home_town: string;
-    home_state: string;
-    dob: string;
     cip_broad_area: string;
     cip_code: string;
     desired_assigned_afsc: string;
+    home_town: string;
+    home_state: string;
+    class_year: string;
+    dob: string;
     flight_path_status: string;
     photo_link: string;
-    notes: string;
   }
 
   function getBackendFrontendSheets() {
@@ -46,7 +44,11 @@ namespace DirectoryService {
   }
 
   export function isOperationallyActiveCadet(row: any): boolean {
-    return normalizeFlightPathStatus(row?.['flight_path_status']) !== 'inactive';
+    const inactiveStatuses = new Set(
+      (((globalThis as any).Arrays?.NON_OPERATIONAL_FLIGHT_PATH_STATUSES as string[] | undefined) || ['Inactive', 'Commissioned', 'Dropped'])
+        .map((status) => normalizeFlightPathStatus(status)),
+    );
+    return !inactiveStatuses.has(normalizeFlightPathStatus(row?.['flight_path_status']));
   }
 
   export function shouldRebuildAttendanceMatrixForField(field: string): boolean {
@@ -107,39 +109,40 @@ namespace DirectoryService {
   export function syncDirectoryFrontend(): void {
     const { backendSheet, frontendSheet } = getBackendFrontendSheets();
     if (!backendSheet || !frontendSheet) return;
+    SheetUtils.ensureSchemaColumns(backendSheet);
     const backend = SheetUtils.readTable(backendSheet);
     SheetUtils.ensureSchemaColumns(frontendSheet);
     const mapped = backend.rows.filter((row) => isOperationallyActiveCadet(row)).map((row) => ({
       last_name: row['last_name'] || '',
       first_name: row['first_name'] || '',
-      rank: row['rank'] || '',
-      role: row['role'] || '',
       as_year: row['as_year'] || '',
-      class_year: row['class_year'] || '',
       flight: row['flight'] || '',
       squadron: row['squadron'] || '',
+      rank: row['rank'] || '',
+      role: row['role'] || '',
       university: row['university'] || '',
       email: row['email'] || '',
       phone: formatPhoneDisplay(normalizePhone(String(row['phone'] || ''))),
       dorm: row['dorm'] || '',
-      home_town: row['home_town'] || '',
-      home_state: row['home_state'] || '',
-      dob: row['dob'] || '',
       cip_broad_area: row['cip_broad_area'] || '',
       cip_code: row['cip_code'] || '',
       desired_assigned_afsc: row['desired_assigned_afsc'] || '',
+      home_town: row['home_town'] || '',
+      home_state: row['home_state'] || '',
+      class_year: row['class_year'] || '',
+      dob: row['dob'] || '',
       flight_path_status: row['flight_path_status'] || '',
       photo_link: row['photo_link'] || '',
-      notes: row['notes'] || '',
     }));
 
     const sorted = sortDirectoryRows(mapped);
-    SheetUtils.writeTable(frontendSheet, sorted, { clearDataValidationsBeforeWrite: true });
+    SheetUtils.writeTable(frontendSheet, sorted, { clearDataValidationsBeforeWrite: true, trimBlankRows: true });
   }
 
   function upsertBackendRecord(record: DirectoryRecord) {
     const { backendSheet } = getBackendFrontendSheets();
     if (!backendSheet) return;
+    SheetUtils.ensureSchemaColumns(backendSheet);
     const table = SheetUtils.readTable(backendSheet);
     const emailKey = String(record.email || '').toLowerCase();
     let updated = false;
@@ -214,28 +217,26 @@ namespace DirectoryService {
       getFirst(nv, 'Email Address');
 
     const record: DirectoryRecord = {
-      source: 'directory_form',
       last_name: pick(['last name', 'last']),
       first_name: pick(['first name', 'first']),
-      rank: pick(['rank', 'cadet rank']),
-      role: pick(['role', 'leadership role']),
       as_year: pick(['as year', 'as-year', 'year']),
-      class_year: pick(['class year (yyyy)', 'class year']),
       flight: pick(['flight']),
       squadron: pick(['squadron']),
+      rank: pick(['rank', 'cadet rank']),
+      role: pick(['role', 'leadership role']),
       university: pick(['university', 'school']),
       email,
       phone: normalizePhone(pick(['phone (+5 (555) 555-5555)', 'phone', 'phone number'])),
       dorm: pick(['dorm']),
-      home_town: pick(['home town', 'hometown']),
-      home_state: pick(['home state', 'state']),
-      dob: pick(['dob (mm/dd/yyyy)', 'dob', 'date of birth']),
       cip_broad_area: pick(['cip broad area', 'cip broad']),
       cip_code: sanitizeCipCode(pick(['cip code (xx.xxxx)', 'cip code'])),
       desired_assigned_afsc: pick(['desired/assigned afsc', 'afsc']),
+      home_town: pick(['home town', 'hometown']),
+      home_state: pick(['home state', 'state']),
+      class_year: pick(['class year (yyyy)', 'class year']),
+      dob: pick(['dob (mm/dd/yyyy)', 'dob', 'date of birth']),
       flight_path_status: pick(['flight path status', 'flight path']),
       photo_link: pick(['photo link (url)', 'photo link', 'photo url']),
-      notes: pick(['notes', 'additional notes']),
     };
 
     upsertBackendRecord(record);
@@ -251,9 +252,8 @@ namespace DirectoryService {
   }
 
   function isCadetDirectoryRow(row: any): boolean {
-    const source = String(row?.['source'] || '').toLowerCase();
     const email = String(row?.['email'] || '').toLowerCase();
-    return source.includes('directory') || source.includes('cadet') || email.includes('@') || Boolean(row?.['as_year']);
+    return email.includes('@') || Boolean(row?.['as_year']);
   }
 
   function leadershipRowFromDirectory(row: any): Record<string, any> | null {
@@ -281,6 +281,7 @@ namespace DirectoryService {
     const leadershipSheet = SheetUtils.getSheet(backendId, 'Leadership Backend');
     if (!directorySheet || !leadershipSheet) return;
 
+    SheetUtils.ensureSchemaColumns(directorySheet);
     SheetUtils.ensureSchemaColumns(leadershipSheet);
     const directoryRows = SheetUtils.readTable(directorySheet).rows;
     const currentLeadership = SheetUtils.readTable(leadershipSheet).rows;

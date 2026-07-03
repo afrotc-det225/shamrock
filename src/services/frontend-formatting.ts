@@ -180,8 +180,8 @@ namespace FrontendFormattingService {
     if (skipFormatting) {
       Log.info(`${Config.PROPERTY_KEYS.DISABLE_MAIN_WORKBOOK_FORMATTING}=true; validations still applied. Running minimal layout for Dashboard/FAQs.`);
       applyDashboardFormatting(ss); // keep layout populated so Dashboard isn’t blank
-      applyFaqsFormatting(ss); // enforce single-row canvas even when formatting is disabled
-      ensureFaqSingleRow(ss);
+      applyFaqsFormatting(ss); // keep the mobile-friendly FAQ layout even when formatting is disabled
+      ensureFaqLayout(ss);
       return;
     }
 
@@ -193,24 +193,22 @@ namespace FrontendFormattingService {
     applyFaqsFormatting(ss);
     applyDataLegendFormatting(ss);
     applyAttendanceFormatting(ss);
-    ensureFaqSingleRow(ss);
+    ensureFaqLayout(ss);
   }
 
-  // Final safety net to guarantee FAQs stays a single-row canvas even if earlier formatting failed.
-  function ensureFaqSingleRow(ss: GoogleAppsScript.Spreadsheet.Spreadsheet) {
+  // Final safety net to keep FAQs as one mobile-friendly column without forcing all content into one cell.
+  function ensureFaqLayout(ss: GoogleAppsScript.Spreadsheet.Spreadsheet) {
     const sheet = ss.getSheetByName('FAQs');
     if (!sheet) return;
     try {
       sheet.setFrozenRows(0);
+      sheet.setFrozenColumns(0);
+      sheet.setColumnWidth(1, 1000);
+      if (sheet.getMaxRows() < 12) sheet.insertRowsAfter(sheet.getMaxRows(), 12 - sheet.getMaxRows());
       const maxRows = sheet.getMaxRows();
-      if (maxRows > 1) sheet.deleteRows(2, maxRows - 1);
-      try {
-        (sheet as any).setMaxRows?.(1);
-      } catch (err) {
-        Log.warn(`Unable to force FAQs max rows to 1: ${err}`);
-      }
+      sheet.getRange(1, 1, maxRows, 1).setWrap(true).setVerticalAlignment('top').setHorizontalAlignment('left');
     } catch (err) {
-      Log.warn(`Unable to enforce single-row FAQs: ${err}`);
+      Log.warn(`Unable to enforce FAQ layout: ${err}`);
     }
   }
 
@@ -342,7 +340,7 @@ namespace FrontendFormattingService {
     });
 
     // Fit-to-data widths where requested.
-    ['last_name', 'first_name', 'email', 'dorm', 'home_town', 'home_state', 'cip_broad_area', 'desired_assigned_afsc', 'photo_link', 'notes'].forEach((h) => {
+    ['last_name', 'first_name', 'email', 'dorm', 'home_town', 'home_state', 'cip_broad_area', 'desired_assigned_afsc', 'photo_link'].forEach((h) => {
       const idx = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0].indexOf(h);
       if (idx >= 0) sheet.autoResizeColumn(idx + 1);
     });
@@ -415,7 +413,7 @@ namespace FrontendFormattingService {
       flight_path_status: 125,
     });
 
-    ['last_name', 'first_name', 'email', 'dorm', 'home_town', 'home_state', 'cip_broad_area', 'desired_assigned_afsc', 'photo_link', 'notes'].forEach((h) => {
+    ['last_name', 'first_name', 'email', 'dorm', 'home_town', 'home_state', 'cip_broad_area', 'desired_assigned_afsc', 'photo_link'].forEach((h) => {
       const idx = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0].indexOf(h);
       if (idx >= 0) sheet.autoResizeColumn(idx + 1);
     });
@@ -461,15 +459,35 @@ namespace FrontendFormattingService {
     const sheet = ss.getSheetByName('Dashboard');
     if (!sheet) return;
     setDefaultFont(sheet);
+    try {
+      (sheet as any).setHiddenGridlines?.(true);
+    } catch (err) {
+      Log.warn(`Unable to hide Dashboard gridlines: ${err}`);
+    }
 
-    // Section titles (row 1)
-    sheet.getRange('A1').setValue('Quick Links');
-    sheet.getRange('D1').setValue('Key Metrics');
-    sheet.getRange('G1').setValue('Attendance Charts');
-    sheet.getRange('I1').setValue('Birthdays (auto from Directory)');
+    if (sheet.getMaxRows() < 36) sheet.insertRowsAfter(sheet.getMaxRows(), 36 - sheet.getMaxRows());
+    if (sheet.getMaxColumns() < 12) sheet.insertColumnsAfter(sheet.getMaxColumns(), 12 - sheet.getMaxColumns());
+    sheet.getRange(1, 1, 36, 12).breakApart().clear();
+    sheet.setFrozenRows(1);
+    sheet.setFrozenColumns(0);
 
-    // Quick links table
-    const quickLinksHeader = [['Name', 'URL']];
+    const section = (title: string, row: number, col: number, rows: number, cols: number) => {
+      const header = sheet.getRange(row, col, 1, cols);
+      header.merge()
+        .setValue(title)
+        .setBackground('#1f4e3d')
+        .setFontColor('#ffffff')
+        .setFontWeight('bold')
+        .setHorizontalAlignment('left');
+      const body = sheet.getRange(row + 1, col, rows - 1, cols);
+      body.setBackground('#f8faf9').setBorder(true, true, true, true, true, true, '#d9e2de', SpreadsheetApp.BorderStyle.SOLID);
+      header.setBorder(true, true, true, true, false, false, '#1f4e3d', SpreadsheetApp.BorderStyle.SOLID_MEDIUM);
+    };
+
+    section('Quick Links', 1, 1, 8, 2);
+    section('Key Metrics', 1, 4, 8, 2);
+    section('Attendance Summary', 1, 7, 8, 3);
+    section('Birthdays', 1, 11, 14, 2);
 
     const makeLink = (url: string, label = 'Open') => (url ? `=HYPERLINK("${url}","${label}")` : '');
     const formUrlFor = (key: keyof typeof Config.PROPERTY_KEYS) => {
@@ -496,33 +514,33 @@ namespace FrontendFormattingService {
       ['Excusals Form', makeLink(formUrlFor('EXCUSAL_REQUEST_FORM_ID'))],
       ['Backend sheet (admin)', makeLink(backendUrl)],
     ];
-    sheet.getRange(2, 1, 1, 2).setValues(quickLinksHeader).setFontWeight('bold');
+    sheet.getRange(2, 1, 1, 2).setValues([['Resource', 'Link']]);
     sheet.getRange(3, 1, quickLinks.length, 2).setValues(quickLinks);
 
-    // Key metrics placeholders
     const metricsHeader = [['Metric', 'Value']];
     const metrics = [
       ['Total Cadets', '=COUNTA(Directory!A3:A)'],
-      ['Pending Excusals (backend-fed later)', ''],
-      ['Upcoming Events (manual)', ''],
-      ['Attendance YTD (manual)', ''],
+      ['POC Cadets', '=COUNTIF(Directory!C3:C,"AS3*")+COUNTIF(Directory!C3:C,"AS4*")+COUNTIF(Directory!C3:C,"AS7*")+COUNTIF(Directory!C3:C,"AS8*")+COUNTIF(Directory!C3:C,"AS9*")'],
+      ['GMC Cadets', '=COUNTIF(Directory!C3:C,"AS1*")+COUNTIF(Directory!C3:C,"AS2*")+COUNTIF(Directory!C3:C,"AS5*")'],
+      ['Leadership Roles', '=COUNTIF(Directory!G3:G,"<>")'],
     ];
     sheet.getRange(2, 4, 1, 2).setValues(metricsHeader).setFontWeight('bold');
     sheet.getRange(3, 4, metrics.length, 2).setValues(metrics);
 
-    // Attendance charts placeholder
-    sheet.getRange('G2').setValue('Add charts here using Attendance data').setFontStyle('italic');
+    const attendanceRows = [
+      ['Metric', 'Value', 'Basis'],
+      ['Events tracked', '=IFERROR(MAX(COUNTA(Attendance!H1:ZZ1),0),0)', 'Attendance event columns'],
+      ['Average overall', '=IFERROR(AVERAGE(FILTER(Attendance!F3:F,Attendance!A3:A<>"")),"")', 'Active roster'],
+      ['Average LLAB', '=IFERROR(AVERAGE(FILTER(Attendance!G3:G,Attendance!A3:A<>"")),"")', 'LLAB rollup'],
+      ['Under 80%', '=IFERROR(COUNTIF(FILTER(Attendance!F3:F,Attendance!A3:A<>""),"<0.8"),0)', 'Accountability watch'],
+    ];
+    sheet.getRange(2, 7, attendanceRows.length, 3).setValues(attendanceRows);
+    sheet.getRange('H4:H5').setNumberFormat('0.0%');
 
-    // Birthdays view sourced from Directory
-    const birthdayHeaders = [['Last Name', 'First Name', 'Birthday', 'Display', 'Group']];
-    sheet.getRange(2, 9, 1, birthdayHeaders[0].length).setValues(birthdayHeaders).setFontWeight('bold');
-
-    // Clear existing birthdays block to allow spills to expand
-    sheet.getRange('I3:M').clearContent();
-
-    // Names + DOB (sorted by calendar order) -> spill into Last/First/Birthday
-    sheet.getRange('I3').setFormula(
-      '=LET(\n' +
+    sheet.getRange(2, 11, 1, 2).setValues([['Cadet', 'Birthday']]).setFontWeight('bold');
+    sheet.getRange('K3:L14').clearContent();
+    sheet.getRange('K3').setFormula(
+      '=IFERROR(LET(\n' +
       'hdr, Directory!1:1,\n' +
       'cLast, IFERROR(MATCH("last_name", hdr, 0), 0),\n' +
       'cFirst, IFERROR(MATCH("first_name", hdr, 0), 0),\n' +
@@ -533,75 +551,39 @@ namespace FrontendFormattingService {
       'parsedDob, IF(data="", "", MAP(INDEX(data,,3), LAMBDA(d, IF(d="", "", IFERROR(TO_DATE(VALUE(d)), IFERROR(DATEVALUE(d), "")))))),\n' +
       'clean, IF(parsedDob="", "", FILTER(HSTACK(INDEX(data,,1), INDEX(data,,2), parsedDob), parsedDob<>"")),\n' +
       'sortKey, IF(clean="", "", MAP(INDEX(clean,,3), LAMBDA(d, IF(d="", "", DATE(YEAR(TODAY()), MONTH(d), DAY(d)))))),\n' +
-      'table, IF(clean="", "", HSTACK(INDEX(clean,,1), INDEX(clean,,2), INDEX(clean,,3), sortKey)),\n' +
-      'sorted, IF(table="", "", SORT(table, 4, TRUE)),\n' +
-      'IF(sorted="", "", HSTACK(INDEX(sorted,,1), INDEX(sorted,,2), INDEX(sorted,,3)))\n' +
-      ')'
+      'labels, IF(clean="", "", MAP(INDEX(clean,,1), INDEX(clean,,2), LAMBDA(last, first, "C/" & last & IF(COUNTIF(INDEX(clean,,1), last)>1, ", " & LEFT(first,1) & ".", "")))),\n' +
+      'table, IF(clean="", "", SORT(HSTACK(labels, INDEX(clean,,3), sortKey), 3, TRUE)),\n' +
+      'IF(table="", "", CHOOSECOLS(table, 1, 2))\n' +
+      '),"")'
     );
 
-    // Display column (duplicate-aware cadet label)
-    sheet.getRange('L3').setFormula(
-      '=ARRAYFORMULA(LET(\n'
-      + '  last, I3:I,\n'
-      + '  first, J3:J,\n'
-      + '  dob, K3:K,\n'
-      + '  dup, IF(last="", 0, COUNTIF(last, last)),\n'
-      + '  label, IF(last="", "", "C/" & IF(dup>1, LEFT(first,1) & ". ", "") & last),\n'
-      + '  IF(label="", "", label & IF(dob="", "", " (" & TEXT(dob, "M/D") & ")"))\n'
-      + '))'
-    );
-
-    // Group column (week grouping from birthdays in column K)
-    sheet.getRange('M3').setFormula(
-      '=ARRAYFORMULA(LET(\n'
-      + '  names, I3:I,\n'
-      + '  dobs, K3:K,\n'
-      + '  mask, (names<>"")*(dobs<>""),\n'
-      + '  wnums, IF(mask, WEEKNUM(DATE(YEAR(TODAY()), MONTH(dobs), DAY(dobs)), 1), ),\n'
-      + '  uniq, FILTER(UNIQUE(wnums), UNIQUE(wnums)<>""),\n'
-      + '  IF(mask, IF(COUNTA(uniq)=0, "", XMATCH(wnums, uniq)), "")\n'
-      + '))'
-    );
-
-    // Alternating shading by group (odd groups grey, even groups default)
-    const cfRange = sheet.getRange('I3:M');
-    const rules = sheet.getConditionalFormatRules().filter((r) => {
-      const f = r.getBooleanCondition()?.getCriteriaValues?.()?.[0] as string | undefined;
-      return f !== '=ISODD($M3)';
+    ['A2:B2', 'D2:E2', 'G2:I2', 'K2:L2'].forEach((a1) => {
+      sheet.getRange(a1).setBackground('#edf3f0').setFontWeight('bold');
     });
-    const oddGroupRule = SpreadsheetApp.newConditionalFormatRule()
-      .whenFormulaSatisfied('=ISODD($M3)')
-      .setBackground('#f0f0f0')
-      .setRanges([cfRange])
-      .build();
-    rules.push(oddGroupRule);
-    sheet.setConditionalFormatRules(rules);
+    sheet.getRange('A1:L36').setFontFamily('Roboto').setFontSize(10);
+    sheet.getRange('A1:L36').setVerticalAlignment('middle');
+    sheet.getRange('B3:B7').setHorizontalAlignment('center');
+    sheet.getRange('E3:E6').setHorizontalAlignment('center');
+    sheet.getRange('H3:H6').setHorizontalAlignment('center');
+    sheet.getRange('I3:I6').setWrap(true).setFontColor('#5f6f69');
+    sheet.getRange('K3:K14').setWrap(true);
+    sheet.getRange('L3:L14').setNumberFormat('M/D').setHorizontalAlignment('center');
+    sheet.setColumnWidth(1, 145);
+    sheet.setColumnWidth(2, 80);
+    sheet.setColumnWidth(3, 18);
+    sheet.setColumnWidth(4, 145);
+    sheet.setColumnWidth(5, 95);
+    sheet.setColumnWidth(6, 18);
+    sheet.setColumnWidth(7, 145);
+    sheet.setColumnWidth(8, 95);
+    sheet.setColumnWidth(9, 145);
+    sheet.setColumnWidth(10, 18);
+    sheet.setColumnWidth(11, 145);
+    sheet.setColumnWidth(12, 90);
+    sheet.setRowHeights(1, 36, 28);
+    sheet.setRowHeight(1, 32);
 
-    // Apply light banding only to the non-birthday block (A:H).
-    sheet.getBandings().forEach((b) => b.remove());
-    const bandRows = Math.max(1, sheet.getLastRow() - 1);
-    sheet.getRange(2, 1, bandRows, Math.min(8, sheet.getLastColumn()))
-      .applyRowBanding(SpreadsheetApp.BandingTheme.LIGHT_GREY);
-
-    // Layout polish
-    sheet.autoResizeColumns(1, 2); // quick links
-    sheet.setColumnWidth(2, 160);
-    sheet.autoResizeColumns(4, 2); // metrics
-    sheet.setColumnWidth(7, 220); // charts note area
-    sheet.setColumnWidth(9, 125); // Last Name
-    sheet.setColumnWidth(10, 125); // First Name
-    sheet.setColumnWidth(11, 100); // Birthday
-    sheet.setColumnWidth(12, 175); // Display
-    sheet.setColumnWidth(13, 75); // Group
-    sheet.getRange('I3:I').setHorizontalAlignment('left');
-    sheet.getRange('J3:J').setHorizontalAlignment('left');
-    sheet.getRange('K3:K').setNumberFormat('M/D/YYYY');
-    sheet.getRange('L3:L').setWrap(true);
-    sheet.getRange('M3:M').setHorizontalAlignment('center');
-    sheet.getRange('M3:M').setNumberFormat('0');
-
-    // Trim unused space to keep the canvas tight.
-    const maxNeededCols = 13; // A-M used for layout
+    const maxNeededCols = 12;
     const maxCols = sheet.getMaxColumns();
     if (maxCols > maxNeededCols) {
       sheet.deleteColumns(maxNeededCols + 1, maxCols - maxNeededCols);
@@ -614,64 +596,58 @@ namespace FrontendFormattingService {
     const sheet = ss.getSheetByName('FAQs');
     if (!sheet) return;
 
-    // Remove old header rows if they match the legacy schema.
     try {
-      const first = String(sheet.getRange(1, 1).getValue() || '').trim().toLowerCase();
-      const second = String(sheet.getRange(2, 1).getValue() || '').trim().toLowerCase();
-      if (first === 'faq' && (!second || second === 'faq')) {
-        const deleteCount = Math.min(2, sheet.getMaxRows());
-        if (deleteCount > 0) sheet.deleteRows(1, deleteCount);
-      }
-    } catch (err) {
-      Log.warn(`Unable to normalize FAQ headers: ${err}`);
-    }
-
-    // Ensure no frozen rows/columns so the page behaves like a blank canvas.
-    // (Sheets can refuse to delete rows if it would remove all non-frozen rows.)
-    try {
+      (sheet as any).setHiddenGridlines?.(true);
       sheet.setFrozenRows(0);
       sheet.setFrozenColumns(0);
     } catch (err) {
-      Log.warn(`Unable to unfreeze FAQ sheet: ${err}`);
+      Log.warn(`Unable to set FAQ sheet chrome: ${err}`);
     }
 
-    // Strip banding and keep a single wide column for freeform text.
     sheet.getBandings().forEach((b) => b.remove());
     const maxCols = sheet.getMaxColumns();
     if (maxCols > 1) {
       sheet.deleteColumns(2, maxCols - 1);
     }
-
-    // Keep a single visible row; explicitly unfreeze before delete to avoid protected last-row issues.
-    try {
-      sheet.setFrozenRows(0);
-      const maxRows = sheet.getMaxRows();
-      if (maxRows > 1) {
-        sheet.deleteRows(2, maxRows - 1);
-      }
-      try {
-        (sheet as any).setMaxRows?.(1);
-      } catch (err2) {
-        Log.warn(`Unable to set FAQ max rows to 1: ${err2}`);
-      }
-    } catch (err) {
-      Log.warn(`Unable to prune FAQ rows: ${err}`);
+    if (sheet.getMaxRows() < 12) {
+      sheet.insertRowsAfter(sheet.getMaxRows(), 12 - sheet.getMaxRows());
     }
 
     setDefaultFont(sheet);
     sheet.setColumnWidth(1, 1000);
-
-    // Fit the single row to content (can be tall for long FAQs).
-    try {
-      sheet.autoResizeRows(1, 1);
-    } catch (err) {
-      Log.warn(`Unable to autoresize FAQ row: ${err}`);
-    }
-
-    // Allow freeform text starting at A1.
     const totalRows = Math.max(1, sheet.getMaxRows());
     const contentRange = sheet.getRange(1, 1, totalRows, 1);
-    contentRange.setWrap(true).setVerticalAlignment('top').setHorizontalAlignment('left');
+    contentRange
+      .setWrap(true)
+      .setVerticalAlignment('top')
+      .setHorizontalAlignment('left')
+      .setBackground('#ffffff')
+      .setBorder(false, false, false, false, false, false);
+
+    const usedRows = Math.max(1, sheet.getLastRow());
+    const values = sheet.getRange(1, 1, usedRows, 1).getDisplayValues();
+    values.forEach((row, idx) => {
+      const text = String(row[0] || '').trim();
+      const range = sheet.getRange(idx + 1, 1);
+      if (!text) {
+        range.setBackground('#ffffff').setFontWeight('normal');
+      } else if (idx === 0 && text.length <= 80) {
+        range.setBackground('#1f4e3d').setFontColor('#ffffff').setFontWeight('bold').setFontSize(12);
+      } else if (text.endsWith('?') && text.length <= 140) {
+        range.setBackground('#edf3f0').setFontColor('#1f1f1f').setFontWeight('bold');
+      } else {
+        range.setBackground('#ffffff').setFontColor('#1f1f1f').setFontWeight('normal');
+      }
+    });
+
+    try {
+      sheet.autoResizeRows(1, usedRows);
+      for (let r = 1; r <= usedRows; r++) {
+        sheet.setRowHeight(r, Math.max(28, sheet.getRowHeight(r)));
+      }
+    } catch (err) {
+      Log.warn(`Unable to autoresize FAQ rows: ${err}`);
+    }
   }
 
   function applyDataLegendFormatting(ss: GoogleAppsScript.Spreadsheet.Spreadsheet) {

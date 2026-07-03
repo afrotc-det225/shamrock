@@ -16,15 +16,15 @@ This document records the canonical option sets used for Google Sheets data vali
 These are recommended stable names for the Data Legend workbook ranges.
 
 - `AS_YEARS`
-- `CADET_RANKS`
 - `FLIGHTS`
 - `SQUADRONS`
+- `CADET_RANKS`
 - `UNIVERSITIES`
 - `DORMS`
-- `HOME_STATES`
 - `CIP_BROAD_AREAS`
 - `CIP_CODES`
 - `AFSC_OPTIONS`
+- `HOME_STATES`
 - `FLIGHT_PATH_STATUSES`
 - `ATTENDANCE_CODES`
 - `EXCUSAL_DECISIONS`
@@ -315,6 +315,13 @@ Allowed values:
 - Active 3/4
 - Ready 4/4
 - Inactive
+- Commissioned
+- Dropped
+
+Non-operational statuses:
+- Inactive
+- Commissioned
+- Dropped
 
 ## Attendance Codes (`ATTENDANCE_CODES`)
 Represent attendance codes as a two-column table in Data Legend:

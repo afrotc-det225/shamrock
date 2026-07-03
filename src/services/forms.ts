@@ -455,7 +455,6 @@ namespace FormService {
     f.addListItem().setTitle('Desired/Assigned AFSC').setChoiceValues(Arrays.AFSC_OPTIONS);
     f.addListItem().setTitle('Flight Path Status').setChoiceValues(Arrays.FLIGHT_PATH_STATUSES);
     f.addTextItem().setTitle('Photo Link (URL)');
-    f.addParagraphTextItem().setTitle('Notes');
   }
 
   export function rebuildDirectoryForm(form: GoogleAppsScript.Forms.Form) {

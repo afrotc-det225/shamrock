@@ -10,27 +10,27 @@ namespace DataLegendService {
   const legendSchema = Schemas.BACKEND_TABS.find((t) => t.name === 'Data Legend');
   const LEGEND_HEADERS = legendSchema?.machineHeaders || [
     'as_year_options',
-    'rank_options',
     'flight_options',
     'squadron_options',
+    'rank_options',
     'university_options',
     'dorm_options',
-    'home_state_options',
     'cip_broad_area_options',
     'afsc_options',
+    'home_state_options',
     'flight_path_status_options',
     'attendance_code_options',
   ];
   const LEGEND_DISPLAY_HEADERS = legendSchema?.displayHeaders || [
     'AS Year Options',
-    'Rank Options',
     'Flight Options',
     'Squadron Options',
+    'Rank Options',
     'University Options',
     'Dorm Options',
-    'Home State Options',
     'CIP Broad Area Options',
     'AFSC Options',
+    'Home State Options',
     'Flight Path Status Options',
     'Attendance Code Options',
   ];

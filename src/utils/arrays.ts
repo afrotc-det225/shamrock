@@ -169,6 +169,7 @@ namespace Arrays {
     '92T2 - Air Battle Manager Trainee',
     '92T3 - Remotely Piloted Aircraft Pilot Trainee',
   ];
-  export const FLIGHT_PATH_STATUSES = ['Participating 1/4', 'Enrolled 2/4', 'Active 3/4', 'Ready 4/4', 'Inactive'];
+  export const FLIGHT_PATH_STATUSES = ['Participating 1/4', 'Enrolled 2/4', 'Active 3/4', 'Ready 4/4', 'Inactive', 'Commissioned', 'Dropped'];
+  export const NON_OPERATIONAL_FLIGHT_PATH_STATUSES = ['Inactive', 'Commissioned', 'Dropped'];
   export const ATTENDANCE_CODES = ['P', 'E', 'ES', 'ER', 'ED', 'T', 'U', 'UR', 'MU', 'MRS', 'N/A'];
 }
