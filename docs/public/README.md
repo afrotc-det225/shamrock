@@ -115,6 +115,7 @@ The v2 transition workflow prepares SHAMROCK for a new semester or academic year
 
 - The wizard saves a draft after each prompt and does not mutate data until final confirmation.
 - Current core frontend sheets are copied, locked, and hidden with term labels. Copied table objects are renamed to match the archive sheet names, such as `Spring 2026 Directory`.
+- Archive term labels are derived from the new target term, not the current Events Backend contents. For example, transferring into `2026-Fall` archives the current frontend tabs as `Spring 2026 Leadership`, `Spring 2026 Directory`, and `Spring 2026 Attendance`.
 - Backend rollback archives are copied, locked, hidden, and registered for deletion after seven days.
 - Attendance/Excusals logs and response rows are cleared only after archive creation and confirmation.
 - After final confirmation, the workflow records phase progress and can resume after an Apps Script timeout. Directory changes are calculated from the rollback archive snapshot so AS-year advancement is not applied twice.

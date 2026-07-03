@@ -128,6 +128,7 @@ During the wizard:
 - The draft is saved after each prompt. Cancelling before final confirmation does not archive or rewrite workbook data.
 - The final confirmation is the destructive boundary. After that point, the workflow archives current sheets, updates roster/events, clears current attendance/excusal logs and form responses, rebuilds forms, and reinstalls triggers.
 - After final confirmation, execution is phase-resumable. If Apps Script stops near its execution limit, wait for the continuation trigger or rerun the same transition menu action to resume remaining phases. Do not start a fresh transition.
+- Frontend archives are named from the new target term: transferring into `YYYY-Fall` creates `Spring YYYY Leadership/Directory/Attendance`; transferring into `YYYY-Spring` creates `Fall YYYY-1 Leadership/Directory/Attendance`.
 - Both semester and academic-year transitions clear Directory `Role`, `Flight`, and `Sqdn` assignments. Leadership roles must be reapplied through the wizard role-update prompt or backend edits after transition.
 - Academic-year transitions mark listed dropped cadets as `Dropped`, advance AS years from the archived pre-transition Directory snapshot, mark only original AS400s as `Commissioned` by default, and reset cadet rank from the resulting AS year.
 

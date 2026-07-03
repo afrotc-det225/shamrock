@@ -325,18 +325,13 @@ namespace TransitionService {
     return Utilities.formatDate(date, Session.getScriptTimeZone(), "yyyy-MM-dd'T'HH:mm:ssXXX");
   }
 
-  function termLabel(term: string): string {
-    const match = String(term || '').match(/^(\d{4})[-\s_]+(Fall|Spring|Summer)$/i);
-    if (!match) return term || 'Previous Term';
-    return `${match[2].charAt(0).toUpperCase()}${match[2].slice(1).toLowerCase()} ${match[1]}`;
-  }
-
-  function currentTermFromEvents(): string {
-    const backendId = Config.getBackendId();
-    const sheet = backendId ? SheetUtils.getSheet(backendId, 'Events Backend') : null;
-    if (!sheet) return '';
-    const rows = SheetUtils.readTable(sheet).rows;
-    return String(rows.find((row) => String(row['term'] || '').trim())?.['term'] || '');
+  function previousTermLabelForArchive(draft: TransitionDraft): string {
+    const match = String(draft.term || '').trim().match(/^(\d{4})[-\s_]+(Fall|Spring)$/i);
+    if (!match) return 'Previous Term';
+    const year = Number(match[1]);
+    const season = match[2].toLowerCase();
+    if (season === 'fall') return `Spring ${year}`;
+    return `Fall ${year - 1}`;
   }
 
   function archiveSheet(
@@ -373,7 +368,7 @@ namespace TransitionService {
 
   function archiveForTransition(draft: TransitionDraft): ArchiveRecord[] {
     const records: ArchiveRecord[] = [];
-    const previousLabel = termLabel(currentTermFromEvents() || 'Previous Term');
+    const previousLabel = previousTermLabelForArchive(draft);
     const stamp = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyyMMdd-HHmmss');
     const frontendId = Config.getFrontendId();
     const backendId = Config.getBackendId();
