@@ -181,14 +181,6 @@ namespace SetupService {
     };
   }
 
-  function apiSolidBorder(hex: string) {
-    return {
-      style: 'SOLID',
-      width: 1,
-      colorStyle: apiColorStyle(hex),
-    };
-  }
-
   function tableVisualStyleRequests(
     sheetId: number,
     startColumnIndex: number,
@@ -197,7 +189,6 @@ namespace SetupService {
     endRowIndex: number,
   ): Record<string, any>[] {
     const headerGreen = '#356854';
-    const headerBorder = '#284E3F';
     const bodyText = '#434343';
     const bodyWhite = '#FFFFFF';
     const bodyBand = '#F6F8F9';
@@ -221,106 +212,73 @@ namespace SetupService {
                 foregroundColorStyle: apiColorStyle('#FFFFFF'),
                 bold: true,
               },
-              borders: {
-                top: apiSolidBorder(headerBorder),
-                bottom: apiSolidBorder(headerBorder),
-                left: apiSolidBorder(headerGreen),
-                right: apiSolidBorder(headerGreen),
-              },
             },
           },
-          fields: 'userEnteredFormat.backgroundColorStyle,userEnteredFormat.horizontalAlignment,userEnteredFormat.verticalAlignment,userEnteredFormat.wrapStrategy,userEnteredFormat.textFormat.foregroundColorStyle,userEnteredFormat.textFormat.bold,userEnteredFormat.borders',
+          fields: 'userEnteredFormat.backgroundColorStyle,userEnteredFormat.horizontalAlignment,userEnteredFormat.verticalAlignment,userEnteredFormat.wrapStrategy,userEnteredFormat.textFormat.foregroundColorStyle,userEnteredFormat.textFormat.bold',
         },
       },
     ];
 
     const dataStartRowIndex = headerRowIndex + 1;
-    if (endRowIndex <= dataStartRowIndex) return requests;
-
-    requests.push({
-      repeatCell: {
-        range: {
-          sheetId,
-          startRowIndex: dataStartRowIndex,
-          endRowIndex,
-          startColumnIndex,
-          endColumnIndex,
-        },
-        cell: {
-          userEnteredFormat: {
-            backgroundColorStyle: apiColorStyle(bodyWhite),
-            verticalAlignment: 'MIDDLE',
-            wrapStrategy: 'CLIP',
-            textFormat: {
-              foregroundColorStyle: apiColorStyle(bodyText),
-              bold: false,
-            },
-            borders: {
-              top: apiSolidBorder(bodyWhite),
-              bottom: apiSolidBorder(bodyWhite),
-              left: apiSolidBorder(bodyWhite),
-              right: apiSolidBorder(bodyWhite),
-            },
-          },
-        },
-        fields: 'userEnteredFormat.backgroundColorStyle,userEnteredFormat.verticalAlignment,userEnteredFormat.wrapStrategy,userEnteredFormat.textFormat.foregroundColorStyle,userEnteredFormat.textFormat.bold,userEnteredFormat.borders',
-      },
-    });
-
-    for (let rowIndex = dataStartRowIndex + 1; rowIndex < endRowIndex; rowIndex += 2) {
+    if (endRowIndex > dataStartRowIndex) {
       requests.push({
         repeatCell: {
           range: {
             sheetId,
-            startRowIndex: rowIndex,
-            endRowIndex: rowIndex + 1,
+            startRowIndex: dataStartRowIndex,
+            endRowIndex,
             startColumnIndex,
             endColumnIndex,
           },
           cell: {
             userEnteredFormat: {
-              backgroundColorStyle: apiColorStyle(bodyBand),
-              borders: {
-                top: apiSolidBorder(bodyBand),
-                bottom: apiSolidBorder(bodyBand),
-                left: apiSolidBorder(bodyBand),
-                right: apiSolidBorder(bodyBand),
+              backgroundColorStyle: apiColorStyle(bodyWhite),
+              verticalAlignment: 'MIDDLE',
+              wrapStrategy: 'CLIP',
+              textFormat: {
+                foregroundColorStyle: apiColorStyle(bodyText),
+                bold: false,
               },
             },
           },
-          fields: 'userEnteredFormat.backgroundColorStyle,userEnteredFormat.borders',
+          fields: 'userEnteredFormat.backgroundColorStyle,userEnteredFormat.verticalAlignment,userEnteredFormat.wrapStrategy,userEnteredFormat.textFormat.foregroundColorStyle,userEnteredFormat.textFormat.bold',
         },
       });
+
+      for (let rowIndex = dataStartRowIndex + 1; rowIndex < endRowIndex; rowIndex += 2) {
+        requests.push({
+          repeatCell: {
+            range: {
+              sheetId,
+              startRowIndex: rowIndex,
+              endRowIndex: rowIndex + 1,
+              startColumnIndex,
+              endColumnIndex,
+            },
+            cell: {
+              userEnteredFormat: {
+                backgroundColorStyle: apiColorStyle(bodyBand),
+              },
+            },
+            fields: 'userEnteredFormat.backgroundColorStyle',
+          },
+        });
+      }
     }
 
-    requests.push(
-      {
-        repeatCell: {
-          range: {
-            sheetId,
-            startRowIndex: dataStartRowIndex,
-            endRowIndex,
-            startColumnIndex,
-            endColumnIndex: startColumnIndex + 1,
-          },
-          cell: { userEnteredFormat: { borders: { left: apiSolidBorder(headerBorder) } } },
-          fields: 'userEnteredFormat.borders.left',
+    requests.push({
+      repeatCell: {
+        range: {
+          sheetId,
+          startRowIndex: headerRowIndex,
+          endRowIndex,
+          startColumnIndex,
+          endColumnIndex,
         },
+        cell: { userEnteredFormat: { borders: {} } },
+        fields: 'userEnteredFormat.borders',
       },
-      {
-        repeatCell: {
-          range: {
-            sheetId,
-            startRowIndex: dataStartRowIndex,
-            endRowIndex,
-            startColumnIndex: endColumnIndex - 1,
-            endColumnIndex,
-          },
-          cell: { userEnteredFormat: { borders: { right: apiSolidBorder(headerBorder) } } },
-          fields: 'userEnteredFormat.borders.right',
-        },
-      },
-    );
+    });
 
     return requests;
   }
