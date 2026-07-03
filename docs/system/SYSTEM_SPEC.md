@@ -115,6 +115,7 @@ Cell-level dropdown validations must be driven from the Data Legend tab(s) using
 - Frontend primary sheets use Google Sheets Table objects through the Sheets API advanced service. They must not rely on ordinary `applyRowBanding()` ranges as a substitute for Tables.
 - Table dropdown column types mirror the same canonical option arrays because the Sheets Table API dropdown column type requires a `ONE_OF_LIST` validation rule.
 - Frontend table creation/update also applies Sheets API cell-format requests for the Fall 2025-style visible table treatment: dark header row, clipped middle-aligned text, and white/light banded body rows. This is not conditional formatting or legacy row banding.
+- Frontend formatting temporarily clears SHAMROCK-managed protections before table creation/update, then reapplies protections after the Sheets API table and style requests complete. Protected ranges must not prevent table repair.
 - Directory `Rank` uses the cadet-only `CADET_RANKS` list. Leadership `Rank` accepts the adjacent Data Legend `CADET_RANKS`, non-cadet `RANKS`, and `HONORIFICS` ranges.
 - Frontend Attendance code entry is represented by table dropdown columns plus strict Data Legend-backed validation, not conditional-format color rules.
 

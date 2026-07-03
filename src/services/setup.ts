@@ -2155,8 +2155,10 @@ namespace SetupService {
 
   export function applyFrontendFormatting() {
     const frontendId = Config.getFrontendId();
+    ProtectionService.clearManagedFrontendProtections(frontendId);
     FrontendFormattingService.applyAll(frontendId);
     ensureFrontendTables(frontendId);
+    ProtectionService.applyFrontendProtections(frontendId);
   }
 
   function ensureFrontendTables(frontendId: string) {

@@ -210,4 +210,45 @@ namespace ProtectionService {
     protectDirectory(ss); // name lock stays owner-only; warning is warning-only (open)
     protectAttendance(ss, allowedEditors);
   }
+
+  export function clearManagedFrontendProtections(frontendId: string) {
+    const ss = openFrontend(frontendId);
+    if (!ss) return;
+
+    const managedDescriptions = new Set([
+      'FAQs:all',
+      'Dashboard:birthdays',
+      'Leadership:all',
+      'Data Legend:all',
+      'Directory:last_first_locked',
+      'Directory:warn_rest',
+      'Directory headers (auto)',
+      'Attendance:fixed_cols',
+      'Attendance:event_cols_with_leadership',
+    ]);
+
+    ss.getSheets().forEach((sheet) => {
+      sheet.getProtections(SpreadsheetApp.ProtectionType.RANGE).forEach((protection) => {
+        const description = protection.getDescription?.() || '';
+        if (managedDescriptions.has(description) || description.endsWith(':header_rows')) {
+          try {
+            protection.remove();
+          } catch (err) {
+            Log.warn(`Unable to remove managed protection ${description}: ${err}`);
+          }
+        }
+      });
+
+      sheet.getProtections(SpreadsheetApp.ProtectionType.SHEET).forEach((protection) => {
+        const description = protection.getDescription?.() || '';
+        if (!description || managedDescriptions.has(description)) {
+          try {
+            protection.remove();
+          } catch (err) {
+            Log.warn(`Unable to remove managed sheet protection ${description}: ${err}`);
+          }
+        }
+      });
+    });
+  }
 }
