@@ -36,9 +36,8 @@ namespace SheetUtils {
   }
 
   /**
-   * Ensure a backend sheet's columns match its schema. Reads all data, remaps columns
-   * to the schema order (inserting blanks for missing columns), and writes everything back.
-   * Preserves all existing data — never drops columns that have content.
+   * Ensure a sheet's columns match its schema. Reads all data, remaps known columns
+   * to the schema order, inserts blanks for missing columns, and writes everything back.
    */
   export function ensureSchemaColumns(sheet: GoogleAppsScript.Spreadsheet.Sheet): string[] {
     const schema = Schemas.getTabSchema(sheet.getName());
@@ -52,11 +51,17 @@ namespace SheetUtils {
       ? sheet.getRange(1, 1, 1, lastCol).getValues()[0].map((h) => String(h || '').trim())
       : [];
 
-    // Check if any columns are missing
-    const missing = expected.filter((h) => !current.includes(h));
-    if (missing.length === 0) return current;
+    const alreadyMatches = current.length === expected.length && expected.every((h, idx) => current[idx] === h);
+    if (alreadyMatches) return current;
 
-    Log.info(`ensureSchemaColumns: ${sheet.getName()} missing columns: ${missing.join(', ')}`);
+    // Remap when columns are missing or when existing columns are in an older order.
+    const missing = expected.filter((h) => !current.includes(h));
+    const orderChanged = missing.length === 0;
+    Log.info(
+      orderChanged
+        ? `ensureSchemaColumns: ${sheet.getName()} column order differs from schema; remapping to current baseline.`
+        : `ensureSchemaColumns: ${sheet.getName()} missing columns: ${missing.join(', ')}`,
+    );
 
     // Read all data (rows 3+)
     const dataRows = lastRow >= 3
@@ -92,7 +97,11 @@ namespace SheetUtils {
       sheet.deleteColumns(expected.length + 1, finalMaxCols - expected.length);
     }
 
-    Log.info(`ensureSchemaColumns: ${sheet.getName()} updated — added ${missing.length} column(s): ${missing.join(', ')}`);
+    Log.info(
+      orderChanged
+        ? `ensureSchemaColumns: ${sheet.getName()} updated - remapped columns to schema order.`
+        : `ensureSchemaColumns: ${sheet.getName()} updated - added ${missing.length} column(s): ${missing.join(', ')}`,
+    );
     return expected.slice();
   }
 

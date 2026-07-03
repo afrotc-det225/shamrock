@@ -14,6 +14,7 @@ namespace SyncService {
     const frontendSheet = SheetUtils.getSheet(frontendId, frontendSheetName);
     if (!backendSheet || !frontendSheet) return;
     const data = SheetUtils.readTable(backendSheet);
+    SheetUtils.ensureSchemaColumns(frontendSheet);
 
     // Data Legend is sometimes customized by operators with self-referential dropdown validations
     // (e.g., A3 has validation "from a range" = Data Legend!A3:A). If we clear values and

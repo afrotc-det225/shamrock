@@ -79,6 +79,7 @@ Post-deploy validation checklist:
 ### 5.1 Directory maintenance
 - Directory source of truth is maintained in the backend.
 - Frontend Directory is a mirror.
+- Frontend Directory displays cadet organization before leadership details: `Year`, `Flight`, `Sqdn`, `Rank`, `Role`, then `University` and the remaining fields.
 - Cadet rank and cadet leadership role are maintained on Directory. Leadership is rebuilt from active Directory rows with a role, while non-cadet/cadre/manual Leadership rows are preserved.
 - Prefer menu-driven sync/repair actions over ad hoc edits in the frontend.
 

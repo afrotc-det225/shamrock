@@ -108,6 +108,7 @@ namespace DirectoryService {
     const { backendSheet, frontendSheet } = getBackendFrontendSheets();
     if (!backendSheet || !frontendSheet) return;
     const backend = SheetUtils.readTable(backendSheet);
+    SheetUtils.ensureSchemaColumns(frontendSheet);
     const mapped = backend.rows.filter((row) => isOperationallyActiveCadet(row)).map((row) => ({
       last_name: row['last_name'] || '',
       first_name: row['first_name'] || '',

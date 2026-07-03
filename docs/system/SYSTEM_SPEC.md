@@ -140,7 +140,7 @@ This section describes the current operational shape of the system so feature wo
 - FAQs: two-column end-user information.
 - Dashboard: links, metrics, charts, rotating upcoming birthdays, rotating “cadets out this week”.
 - Cadre & Leadership: minimal contact directory.
-- Directory: cadet directory with rank, role, AS year, flight, squadron, contact, academic, and status fields (sorted Z-A by AS year, then A-Z by last name) with required formatting constraints.
+- Directory: cadet directory with AS year, flight, squadron, rank, role, contact, academic, and status fields (sorted Z-A by AS year, then A-Z by last name) with required formatting constraints. The frontend display order begins `Last Name`, `First Name`, `Year`, `Flight`, `Sqdn`, `Rank`, `Role`, `University`.
 - Attendance: directory-synced cadet rows + event columns with attendance codes and percentage rollups.
 - Events: event metadata driving attendance columns and dashboard.
 - Excusals: public-facing excusal request log.

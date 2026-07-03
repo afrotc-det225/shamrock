@@ -61,6 +61,7 @@ The frontend/main workbook intentionally does not expose admin menus.
 Directory is the authoritative roster source for cadets and drives attendance, leadership lookups, form choices, and frontend display.
 
 Cadet rank and cadet leadership role live on Directory. The Leadership view is derived from active Directory rows with a role, plus preserved cadre/manual leadership contacts.
+The frontend Directory starts with `Last Name`, `First Name`, `Year`, `Flight`, `Sqdn`, `Rank`, `Role`, then `University` and the remaining contact/academic fields.
 
 ### Operator Entry Points
 
@@ -81,6 +82,7 @@ Cadet rank and cadet leadership role live on Directory. The Leadership view is d
 - Add or update a test-safe directory row in the backend.
 - Run the directory sync action.
 - Confirm the frontend Directory reflects the backend.
+- Confirm the frontend Directory column order starts `Last Name`, `First Name`, `Year`, `Flight`, `Sqdn`, `Rank`, `Role`, `University`.
 - If the row has a role, confirm Leadership reflects rank, role, flight/squadron, email, and phone from Directory.
 - Confirm attendance/form rebuild actions use active cadets only.
 
