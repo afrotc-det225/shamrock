@@ -119,8 +119,15 @@ namespace FrontendFormattingService {
       };
 
       const dataRows = Math.max(1, sheet.getMaxRows() - 2);
-      const dataCols = Math.max(1, sheet.getLastColumn());
-      sheet.getRange(3, 1, dataRows, dataCols).clearDataValidations();
+      ['last_name', 'first_name', 'role', 'email', 'phone', 'class_year', 'dob'].forEach((field) => {
+        const colIdx = headerIndex(field);
+        if (colIdx < 0) return;
+        try {
+          sheet.getRange(3, colIdx + 1, dataRows, 1).clearDataValidations();
+        } catch (err) {
+          Log.warn(`Skipping Directory stale validation clear on ${field}: ${err}`);
+        }
+      });
 
       Object.entries(map).forEach(([field, rangeName]) => {
         const colIdx = headerIndex(field);
@@ -134,6 +141,7 @@ namespace FrontendFormattingService {
           .setAllowInvalid(false)
           .build();
         try {
+          dataRange.clearDataValidations();
           dataRange.setDataValidation(rule);
         } catch (err) {
           Log.warn(`Skipping Directory validation on column ${colIdx + 1} due to typed column/table constraints: ${err}`);

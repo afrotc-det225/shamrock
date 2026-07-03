@@ -121,18 +121,58 @@ namespace ProtectionService {
   }
 
   function getLeadershipEmails(ss: GoogleAppsScript.Spreadsheet.Spreadsheet): string[] {
+    const viaSheetsApi = getLeadershipEmailsViaSheetsApi(ss);
+    if (viaSheetsApi) return viaSheetsApi;
+
     const sheet = ss.getSheetByName('Leadership');
     if (!sheet) return [];
-    const lastRow = sheet.getLastRow();
-    if (lastRow < 3) return [];
-    // Find the machine header 'email' to avoid hardcoded offsets.
-    const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0].map((h) => String(h || '').trim().toLowerCase());
-    const emailColIdx = headers.indexOf('email');
-    if (emailColIdx < 0) return [];
-    const values = sheet.getRange(3, emailColIdx + 1, lastRow - 2, 1).getValues().map((r) => String(r[0] || '').trim());
-    // Filter out obvious non-email entries (e.g., roles accidentally stored here).
-    const emails = values.filter((v) => v.includes('@'));
-    return normalizeEditors(emails);
+    try {
+      const lastRow = sheet.getLastRow();
+      if (lastRow < 3) return [];
+      // Find the machine header 'email' to avoid hardcoded offsets.
+      const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0].map((h) => String(h || '').trim().toLowerCase());
+      const emailColIdx = headers.indexOf('email');
+      if (emailColIdx < 0) return [];
+      const values = sheet.getRange(3, emailColIdx + 1, lastRow - 2, 1).getValues().map((r) => String(r[0] || '').trim());
+      // Filter out obvious non-email entries (e.g., roles accidentally stored here).
+      const emails = values.filter((v) => v.includes('@'));
+      return normalizeEditors(emails);
+    } catch (err) {
+      Log.warn(`Unable to read Leadership emails for protections: ${err}`);
+      return [];
+    }
+  }
+
+  function getLeadershipEmailsViaSheetsApi(ss: GoogleAppsScript.Spreadsheet.Spreadsheet): string[] | null {
+    const valuesService = (globalThis as any).Sheets?.Spreadsheets?.Values;
+    if (!valuesService?.get) return null;
+    try {
+      const response = valuesService.get(ss.getId(), 'Leadership!1:1000', {
+        majorDimension: 'ROWS',
+        valueRenderOption: 'FORMATTED_VALUE',
+      });
+      const rows = (response?.values || []) as unknown[][];
+      if (rows.length < 3) return [];
+      const headers = (rows[0] || []).map((h) => String(h || '').trim().toLowerCase());
+      const emailColIdx = headers.indexOf('email');
+      if (emailColIdx < 0) return [];
+      const emails = rows
+        .slice(2)
+        .map((row) => String(row[emailColIdx] || '').trim())
+        .filter((v) => v.includes('@'));
+      return normalizeEditors(emails);
+    } catch (err) {
+      Log.warn(`Unable to read Leadership emails with Sheets API for protections: ${err}`);
+      return null;
+    }
+  }
+
+  function runProtectionStep(label: string, fn: () => void) {
+    try {
+      fn();
+    } catch (err) {
+      Log.warn(`Skipping frontend protection step ${label}: ${err}`);
+    }
   }
 
   function protectLeadership(ss: GoogleAppsScript.Spreadsheet.Spreadsheet, editors: string[] = []) {
@@ -202,13 +242,13 @@ namespace ProtectionService {
     ]);
 
     // Only broaden protections for FAQs, Leadership, and Attendance (allowlist). Directory warning stays open; others remain owner-only.
-    protectFirstTwoRows(ss);
-    protectFaqs(ss, allowedEditors);
-    protectDashboard(ss);
-    protectLeadership(ss, allowedEditors);
-    protectDataLegend(ss);
-    protectDirectory(ss); // name lock stays owner-only; warning is warning-only (open)
-    protectAttendance(ss, allowedEditors);
+    runProtectionStep('header_rows', () => protectFirstTwoRows(ss));
+    runProtectionStep('FAQs:all', () => protectFaqs(ss, allowedEditors));
+    runProtectionStep('Dashboard:birthdays', () => protectDashboard(ss));
+    runProtectionStep('Leadership:all', () => protectLeadership(ss, allowedEditors));
+    runProtectionStep('Data Legend:all', () => protectDataLegend(ss));
+    runProtectionStep('Directory protections', () => protectDirectory(ss)); // name lock stays owner-only; warning is warning-only (open)
+    runProtectionStep('Attendance protections', () => protectAttendance(ss, allowedEditors));
   }
 
   export function clearManagedFrontendProtections(frontendId: string) {
