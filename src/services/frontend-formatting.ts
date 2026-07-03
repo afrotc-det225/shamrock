@@ -503,8 +503,8 @@ namespace FrontendFormattingService {
   function applyAttendanceColumnWidths(ss: GoogleAppsScript.Spreadsheet.Spreadsheet) {
     const sheet = ss.getSheetByName('Attendance');
     if (!sheet) return;
-    sheet.autoResizeColumn(1);
-    sheet.autoResizeColumn(2);
+    sheet.setColumnWidth(1, 125);
+    sheet.setColumnWidth(2, 125);
     const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0].map((h) => String(h || '').trim());
     const baseCount = ATTENDANCE_BASE_HEADERS.length;
     const headerToIndex = new Map(headers.map((h, idx) => [h.toLowerCase(), idx] as const));
