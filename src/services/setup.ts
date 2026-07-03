@@ -169,6 +169,162 @@ namespace SetupService {
     sheet.getRange(2, 1, 1, headerWidth).setValues([display]);
   }
 
+  function apiColorStyle(hex: string) {
+    const clean = hex.replace('#', '');
+    const n = parseInt(clean, 16);
+    return {
+      rgbColor: {
+        red: ((n >> 16) & 255) / 255,
+        green: ((n >> 8) & 255) / 255,
+        blue: (n & 255) / 255,
+      },
+    };
+  }
+
+  function apiSolidBorder(hex: string) {
+    return {
+      style: 'SOLID',
+      width: 1,
+      colorStyle: apiColorStyle(hex),
+    };
+  }
+
+  function tableVisualStyleRequests(
+    sheetId: number,
+    startColumnIndex: number,
+    endColumnIndex: number,
+    headerRowIndex: number,
+    endRowIndex: number,
+  ): Record<string, any>[] {
+    const headerGreen = '#356854';
+    const headerBorder = '#284E3F';
+    const bodyText = '#434343';
+    const bodyWhite = '#FFFFFF';
+    const bodyBand = '#F6F8F9';
+    const requests: Record<string, any>[] = [
+      {
+        repeatCell: {
+          range: {
+            sheetId,
+            startRowIndex: headerRowIndex,
+            endRowIndex: headerRowIndex + 1,
+            startColumnIndex,
+            endColumnIndex,
+          },
+          cell: {
+            userEnteredFormat: {
+              backgroundColorStyle: apiColorStyle(headerGreen),
+              horizontalAlignment: 'LEFT',
+              verticalAlignment: 'MIDDLE',
+              wrapStrategy: 'CLIP',
+              textFormat: {
+                foregroundColorStyle: apiColorStyle('#FFFFFF'),
+                bold: true,
+              },
+              borders: {
+                top: apiSolidBorder(headerBorder),
+                bottom: apiSolidBorder(headerBorder),
+                left: apiSolidBorder(headerGreen),
+                right: apiSolidBorder(headerGreen),
+              },
+            },
+          },
+          fields: 'userEnteredFormat.backgroundColorStyle,userEnteredFormat.horizontalAlignment,userEnteredFormat.verticalAlignment,userEnteredFormat.wrapStrategy,userEnteredFormat.textFormat.foregroundColorStyle,userEnteredFormat.textFormat.bold,userEnteredFormat.borders',
+        },
+      },
+    ];
+
+    const dataStartRowIndex = headerRowIndex + 1;
+    if (endRowIndex <= dataStartRowIndex) return requests;
+
+    requests.push({
+      repeatCell: {
+        range: {
+          sheetId,
+          startRowIndex: dataStartRowIndex,
+          endRowIndex,
+          startColumnIndex,
+          endColumnIndex,
+        },
+        cell: {
+          userEnteredFormat: {
+            backgroundColorStyle: apiColorStyle(bodyWhite),
+            verticalAlignment: 'MIDDLE',
+            wrapStrategy: 'CLIP',
+            textFormat: {
+              foregroundColorStyle: apiColorStyle(bodyText),
+              bold: false,
+            },
+            borders: {
+              top: apiSolidBorder(bodyWhite),
+              bottom: apiSolidBorder(bodyWhite),
+              left: apiSolidBorder(bodyWhite),
+              right: apiSolidBorder(bodyWhite),
+            },
+          },
+        },
+        fields: 'userEnteredFormat.backgroundColorStyle,userEnteredFormat.verticalAlignment,userEnteredFormat.wrapStrategy,userEnteredFormat.textFormat.foregroundColorStyle,userEnteredFormat.textFormat.bold,userEnteredFormat.borders',
+      },
+    });
+
+    for (let rowIndex = dataStartRowIndex + 1; rowIndex < endRowIndex; rowIndex += 2) {
+      requests.push({
+        repeatCell: {
+          range: {
+            sheetId,
+            startRowIndex: rowIndex,
+            endRowIndex: rowIndex + 1,
+            startColumnIndex,
+            endColumnIndex,
+          },
+          cell: {
+            userEnteredFormat: {
+              backgroundColorStyle: apiColorStyle(bodyBand),
+              borders: {
+                top: apiSolidBorder(bodyBand),
+                bottom: apiSolidBorder(bodyBand),
+                left: apiSolidBorder(bodyBand),
+                right: apiSolidBorder(bodyBand),
+              },
+            },
+          },
+          fields: 'userEnteredFormat.backgroundColorStyle,userEnteredFormat.borders',
+        },
+      });
+    }
+
+    requests.push(
+      {
+        repeatCell: {
+          range: {
+            sheetId,
+            startRowIndex: dataStartRowIndex,
+            endRowIndex,
+            startColumnIndex,
+            endColumnIndex: startColumnIndex + 1,
+          },
+          cell: { userEnteredFormat: { borders: { left: apiSolidBorder(headerBorder) } } },
+          fields: 'userEnteredFormat.borders.left',
+        },
+      },
+      {
+        repeatCell: {
+          range: {
+            sheetId,
+            startRowIndex: dataStartRowIndex,
+            endRowIndex,
+            startColumnIndex: endColumnIndex - 1,
+            endColumnIndex,
+          },
+          cell: { userEnteredFormat: { borders: { right: apiSolidBorder(headerBorder) } } },
+          fields: 'userEnteredFormat.borders.right',
+        },
+      },
+    );
+
+    return requests;
+  }
+
   function ensureTableForSheet(spreadsheetId: string, sheetName: string, tableId: string) {
     // Sheets advanced service may be disabled in some environments; skip gracefully if absent.
     if (typeof (globalThis as any).Sheets === 'undefined') {
@@ -226,18 +382,6 @@ namespace SetupService {
       };
       const attendanceBase = new Set((Schemas.getTabSchema('Attendance')?.machineHeaders || []).map((h) => h.toLowerCase()));
 
-      const colorStyle = (hex: string) => {
-        const clean = hex.replace('#', '');
-        const n = parseInt(clean, 16);
-        return {
-          rgbColor: {
-            red: ((n >> 16) & 255) / 255,
-            green: ((n >> 8) & 255) / 255,
-            blue: (n & 255) / 255,
-          },
-        };
-      };
-
       const columnProperties = headerValues.map((name, idx) => {
         const machineHeader = machineHeaders[idx] || '';
         const prop: Record<string, any> = {
@@ -276,9 +420,9 @@ namespace SetupService {
           endRowIndex,
         },
         rowsProperties: {
-          headerColorStyle: colorStyle('#E8EAED'),
-          firstBandColorStyle: colorStyle('#FFFFFF'),
-          secondBandColorStyle: colorStyle('#F8F9FA'),
+          headerColorStyle: apiColorStyle('#356854'),
+          firstBandColorStyle: apiColorStyle('#FFFFFF'),
+          secondBandColorStyle: apiColorStyle('#F6F8F9'),
         },
         columnProperties,
       };
@@ -299,7 +443,10 @@ namespace SetupService {
 
       svc.batchUpdate(
         {
-          requests: [request as any],
+          requests: [
+            request as any,
+            ...tableVisualStyleRequests(sheetId, 0, endColIndex, headerRow - 1, endRowIndex),
+          ],
         },
         spreadsheetId,
       );

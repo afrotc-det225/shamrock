@@ -391,13 +391,20 @@ namespace FrontendFormattingService {
 
     // Alignments
     const dataRange = sheet.getRange(3, 1, Math.max(1, sheet.getMaxRows() - 2), sheet.getLastColumn());
-    dataRange.setHorizontalAlignment('left');
+    dataRange
+      .setHorizontalAlignment('left')
+      .setVerticalAlignment('middle')
+      .setWrapStrategy(SpreadsheetApp.WrapStrategy.CLIP)
+      .setFontColor('#434343');
     const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0].map((h) => String(h || '').trim());
     const dataRows = Math.max(1, sheet.getMaxRows() - 2);
     const alignColumn = (key: string, alignment: 'left' | 'center' | 'right') => {
       const idx = headers.indexOf(key);
       if (idx >= 0) sheet.getRange(3, idx + 1, dataRows, 1).setHorizontalAlignment(alignment);
     };
+    alignColumn('as_year', 'center');
+    alignColumn('flight', 'center');
+    alignColumn('squadron', 'center');
     alignColumn('phone', 'center');
     alignColumn('dorm', 'left');
     alignColumn('cip_code', 'right');
