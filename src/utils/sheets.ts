@@ -88,7 +88,9 @@ namespace SheetUtils {
 
     // Write remapped data
     if (newData.length > 0) {
-      sheet.getRange(3, 1, newData.length, expected.length).setValues(newData);
+      const dataRange = sheet.getRange(3, 1, newData.length, expected.length);
+      dataRange.clearDataValidations();
+      dataRange.setValues(newData);
     }
 
     // Trim extra columns beyond schema width
@@ -153,7 +155,16 @@ namespace SheetUtils {
     }
     if (!rows.length) return;
     const output = rows.map((r) => headers.map((h) => r[h] ?? ''));
-    sheet.getRange(3, 1, output.length, headers.length).setValues(output);
+    const targetRange = sheet.getRange(3, 1, output.length, headers.length);
+    try {
+      targetRange.setValues(output);
+    } catch (err) {
+      const message = String(err || '').toLowerCase();
+      if (!message.includes('validation') && !message.includes('violates')) throw err;
+      Log.warn(`writeTable validation conflict on ${sheet.getName()}; clearing target data validations and retrying once.`);
+      targetRange.clearDataValidations();
+      targetRange.setValues(output);
+    }
   }
 
   // Appends rows to the table starting at the first empty row after header rows.
