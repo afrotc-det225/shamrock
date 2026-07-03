@@ -256,9 +256,35 @@ namespace DirectoryService {
     return email.includes('@') || Boolean(row?.['as_year']);
   }
 
+  function normalizeRoleForMatch(role: string): string {
+    return role
+      .toLowerCase()
+      .replace(/&/g, ' and ')
+      .replace(/[^a-z0-9]+/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+
+  function isLeadershipDirectoryRole(roleRaw: string): boolean {
+    const role = normalizeRoleForMatch(roleRaw);
+    if (!role) return false;
+
+    const isDeputy = role.includes('deputy');
+    if (role.includes('flight commander')) return !isDeputy;
+    if (role.includes('squadron commander')) return !isDeputy;
+    if (role.includes('wing commander')) return !isDeputy || role.includes('deputy wing commander');
+    if (role.includes('operations group commander')) return true;
+    if (role.includes('operations group deputy commander')) return true;
+    if (role.includes('operations group deputy')) return true;
+    if (role.includes('senior gmc advisor')) return true;
+    if (role.includes('deputy gmc advisor')) return true;
+
+    return false;
+  }
+
   function leadershipRowFromDirectory(row: any): Record<string, any> | null {
     const role = String(row?.['role'] || '').trim();
-    if (!role) return null;
+    if (!isLeadershipDirectoryRole(role)) return null;
     return {
       last_name: row['last_name'] || '',
       first_name: row['first_name'] || '',

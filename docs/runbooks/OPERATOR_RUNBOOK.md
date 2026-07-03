@@ -82,7 +82,7 @@ Post-deploy validation checklist:
 - Frontend Directory displays cadet organization before leadership details: `Year`, `Flight`, `Sqdn`, `Rank`, `Role`, then `University` and the remaining fields.
 - Directory Backend uses the same v2 column order as the frontend Directory and no longer includes legacy `source` or freeform Directory `notes`.
 - Use `Inactive`, `Commissioned`, or `Dropped` in `Flight Path` when a cadet should remain in backend records but be removed from operational frontend, leadership, attendance, and form choices.
-- Cadet rank and cadet leadership role are maintained on Directory. Leadership is rebuilt from active Directory rows with a role, while non-cadet/cadre/manual Leadership rows are preserved.
+- Cadet rank and cadet leadership role are maintained on Directory. Leadership is rebuilt only from active Directory rows with Leadership-eligible command/advisor roles, while non-cadet/cadre/manual Leadership rows are preserved.
 - Sync Directory refreshes the frontend Data Legend first, clears stale frontend Directory dropdown rules, writes the v2 mirror, trims stale blank rows, removes legacy banded ranges, then reapplies v2 dropdowns and Sheets API frontend table column types.
 - Prefer menu-driven sync/repair actions over ad hoc edits in the frontend.
 

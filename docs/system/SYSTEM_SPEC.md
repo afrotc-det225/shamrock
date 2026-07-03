@@ -71,7 +71,7 @@ The backend workbook is authoritative.
 ### 4.3 Cadre & Leadership Ownership
 Default ownership model:
 - Directory Backend is the source of truth for cadet rank and cadet leadership roles.
-- Leadership Backend preserves non-cadet/cadre/manual leadership contacts and receives derived cadet leadership rows from Directory Backend.
+- Leadership Backend preserves non-cadet/cadre/manual leadership contacts and receives derived cadet leadership rows from Directory Backend only for command/advisor roles: flight commanders, squadron commanders, operations group commander/deputy, wing commander/deputy wing commander, and senior/deputy GMC advisor.
 - Frontend contains a read-only mirror.
 
 Rationale:
