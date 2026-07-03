@@ -298,7 +298,22 @@ namespace DirectoryService {
     return idx >= 0 ? idx + 1 : 0;
   }
 
+  function leadershipRankGroupPriority(rankRaw: string): number {
+    const rank = String(rankRaw || '').trim().toLowerCase();
+    if (!rank) return 2;
+    const cadetRanks = (((globalThis as any).Arrays?.CADET_RANKS as string[] | undefined) || []).map((value) => value.toLowerCase());
+    const militaryRanks = (((globalThis as any).Arrays?.RANKS as string[] | undefined) || []).map((value) => value.toLowerCase());
+    const honorifics = (((globalThis as any).Arrays?.HONORIFICS as string[] | undefined) || []).map((value) => value.toLowerCase());
+    if (militaryRanks.includes(rank) || honorifics.includes(rank)) return 0;
+    if (cadetRanks.includes(rank)) return 1;
+    return 2;
+  }
+
   function compareLeadershipRows(a: Record<string, any>, b: Record<string, any>): number {
+    const aRankGroup = leadershipRankGroupPriority(String(a.rank || ''));
+    const bRankGroup = leadershipRankGroupPriority(String(b.rank || ''));
+    if (aRankGroup !== bRankGroup) return aRankGroup - bRankGroup;
+
     const aRolePriority = leadershipRolePriority(String(a.role || ''));
     const bRolePriority = leadershipRolePriority(String(b.role || ''));
     if (aRolePriority !== bRolePriority) return aRolePriority - bRolePriority;

@@ -60,7 +60,7 @@ The frontend/main workbook intentionally does not expose admin menus.
 
 Directory is the authoritative roster source for cadets and drives attendance, leadership lookups, form choices, and frontend display.
 
-Cadet rank and cadet leadership role live on Directory. The Leadership view is derived from active Directory rows only for command/advisor roles: wing commander, deputy wing commander, operations group commander/deputy, squadron commanders, flight commanders, deputy flight commanders, and senior/deputy GMC advisor. Cadre/manual leadership contacts are preserved, and Leadership sorts by that command hierarchy before name tiebreakers.
+Cadet rank and cadet leadership role live on Directory. The Leadership view is derived from active Directory rows only for command/advisor roles: wing commander, deputy wing commander, operations group commander/deputy, squadron commanders, flight commanders, deputy flight commanders, and senior/deputy GMC advisor. Cadre/manual leadership contacts are preserved, and Leadership sorts non-cadet ranks and honorifics above cadet ranks before applying command hierarchy and name tiebreakers.
 The frontend and backend Directory v2 order starts with `Last Name`, `First Name`, `Year`, `Flight`, `Sqdn`, `Rank`, `Role`, then `University` and the remaining contact/academic fields. Legacy Directory `source` and freeform Directory `notes` columns are not part of the v2 baseline.
 
 Rows marked `Inactive`, `Commissioned`, or `Dropped` in `Flight Path` stay in Directory Backend for recordkeeping but are excluded from frontend Directory, derived Leadership, Attendance, and form cadet choices.

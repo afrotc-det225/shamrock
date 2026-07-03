@@ -72,7 +72,7 @@ The backend workbook is authoritative.
 Default ownership model:
 - Directory Backend is the source of truth for cadet rank and cadet leadership roles.
 - Leadership Backend preserves non-cadet/cadre/manual leadership contacts and receives derived cadet leadership rows from Directory Backend only for command/advisor roles: wing commander, deputy wing commander, operations group commander/deputy, squadron commanders, flight commanders, deputy flight commanders, and senior/deputy GMC advisor.
-- Derived Leadership rows sort by command hierarchy first: wing commander, deputy wing commander, operations group, squadron commanders, flight commanders, deputy flight commanders, then advisor roles and remaining manual rows.
+- Leadership rows sort non-cadet ranks and honorifics above cadet ranks, then by command hierarchy: wing commander, deputy wing commander, operations group, squadron commanders, flight commanders, deputy flight commanders, then advisor roles and remaining manual rows.
 - Frontend contains a read-only mirror.
 
 Rationale:
