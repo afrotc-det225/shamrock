@@ -221,11 +221,24 @@ namespace SetupService {
       };
       const attendanceBase = new Set((Schemas.getTabSchema('Attendance')?.machineHeaders || []).map((h) => h.toLowerCase()));
 
+      const colorStyle = (hex: string) => {
+        const clean = hex.replace('#', '');
+        const n = parseInt(clean, 16);
+        return {
+          rgbColor: {
+            red: ((n >> 16) & 255) / 255,
+            green: ((n >> 8) & 255) / 255,
+            blue: (n & 255) / 255,
+          },
+        };
+      };
+
       const columnProperties = headerValues.map((name, idx) => {
         const machineHeader = machineHeaders[idx] || '';
         const prop: Record<string, any> = {
           columnIndex: idx,
           columnName: String(name || `Column ${idx + 1}`),
+          columnType: 'TEXT',
         };
         const dropdownOptions = tableDropdownOptions[machineHeader]
           || (sheetName === 'Attendance' && idx >= attendanceBase.size ? Arrays.ATTENDANCE_CODES : null);
@@ -236,7 +249,6 @@ namespace SetupService {
               type: 'ONE_OF_LIST',
               values: dropdownOptions.map((value) => ({ userEnteredValue: value })),
             },
-            strict: true,
           };
         } else if (machineHeader === 'dob' || machineHeader.endsWith('_at') || machineHeader.endsWith('_datetime')) {
           prop.columnType = 'DATE';
@@ -256,6 +268,11 @@ namespace SetupService {
           startRowIndex: headerRow - 1, // zero-based (row 2)
           endRowIndex,
         },
+        rowsProperties: {
+          headerColorStyle: colorStyle('#E8EAED'),
+          firstBandColorStyle: colorStyle('#FFFFFF'),
+          secondBandColorStyle: colorStyle('#F8F9FA'),
+        },
         columnProperties,
       };
 
@@ -264,7 +281,7 @@ namespace SetupService {
         ? {
             updateTable: {
               table: { ...table, tableId: existingTable.tableId },
-              fields: 'name,range,columnProperties',
+              fields: 'name,range,rowsProperties,columnProperties',
             },
           }
         : {

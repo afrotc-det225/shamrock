@@ -83,7 +83,7 @@ Post-deploy validation checklist:
 - Directory Backend uses the same v2 column order as the frontend Directory and no longer includes legacy `source` or freeform Directory `notes`.
 - Use `Inactive`, `Commissioned`, or `Dropped` in `Flight Path` when a cadet should remain in backend records but be removed from operational frontend, leadership, attendance, and form choices.
 - Cadet rank and cadet leadership role are maintained on Directory. Leadership is rebuilt from active Directory rows with a role, while non-cadet/cadre/manual Leadership rows are preserved.
-- Sync Directory refreshes the frontend Data Legend first, clears stale frontend Directory dropdown rules, writes the v2 mirror, trims stale blank rows, then reapplies v2 dropdowns and frontend table column types.
+- Sync Directory refreshes the frontend Data Legend first, clears stale frontend Directory dropdown rules, writes the v2 mirror, trims stale blank rows, removes legacy banded ranges, then reapplies v2 dropdowns and Sheets API frontend table column types.
 - Prefer menu-driven sync/repair actions over ad hoc edits in the frontend.
 
 ### 5.2 Event maintenance
@@ -154,7 +154,7 @@ Operator checks:
 Likely causes:
 - Data Legend ranges missing or renamed.
 - Named ranges missing.
-- Sheets advanced service unavailable, which prevents SHAMROCK from applying frontend table column types.
+- Sheets advanced service unavailable, which prevents SHAMROCK from creating/updating Sheets API Table objects and their column types.
 - Data validation can be applied by SHAMROCK from Data Legend ranges. Frontend Attendance code styling is handled by table dropdown columns, not conditional-format color rules.
 
 Operator checks:

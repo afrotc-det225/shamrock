@@ -1,4 +1,4 @@
-// Frontend formatting: band tables and apply data validations from Data Legend.
+// Frontend formatting: apply Data Legend validations and table-adjacent layout.
 
 namespace FrontendFormattingService {
   interface NamedRangeDef {
@@ -62,20 +62,6 @@ namespace FrontendFormattingService {
       defs.push({ name: rangeName, range });
     });
     return defs;
-  }
-
-  function applyBandingToFrontendTables(ss: GoogleAppsScript.Spreadsheet.Spreadsheet) {
-    Schemas.FRONTEND_TABS.forEach((tab) => {
-      if (tab.name === 'FAQs' || tab.name === 'Dashboard') return; // FAQs is freeform text; Dashboard handled separately
-      const sheet = ss.getSheetByName(tab.name);
-      if (!sheet) return;
-      const lastRow = Math.max(sheet.getLastRow(), 3);
-      const lastCol = Math.max(sheet.getLastColumn(), 1);
-      sheet.getBandings().forEach((b) => b.remove());
-      const bandWidth = tab.name === 'Dashboard' ? Math.min(8, lastCol) : lastCol; // limit Dashboard banding to A:H
-      const bandRange = sheet.getRange(2, 1, Math.max(1, lastRow - 1), bandWidth);
-      bandRange.applyRowBanding(SpreadsheetApp.BandingTheme.LIGHT_GREY);
-    });
   }
 
   function applyDirectoryValidations(ss: GoogleAppsScript.Spreadsheet.Spreadsheet) {
@@ -154,6 +140,18 @@ namespace FrontendFormattingService {
     applyToSheet('Attendance Matrix Backend');
   }
 
+  function clearLegacyBandingFromFrontendTables(ss: GoogleAppsScript.Spreadsheet.Spreadsheet) {
+    ['Directory', 'Leadership', 'Attendance', 'Data Legend'].forEach((name) => {
+      const sheet = ss.getSheetByName(name);
+      if (!sheet) return;
+      try {
+        sheet.getBandings().forEach((banding) => banding.remove());
+      } catch (err) {
+        Log.warn(`Unable to remove legacy banding on ${name}: ${err}`);
+      }
+    });
+  }
+
   export function applyAll(frontendId: string) {
     const ss = openFrontend(frontendId);
     if (!ss) return;
@@ -168,6 +166,7 @@ namespace FrontendFormattingService {
 
     applyDirectoryValidations(ss);
     applyAttendanceValidations(ss);
+    clearLegacyBandingFromFrontendTables(ss);
 
     if (!shouldSkipColumnWidths()) {
       applyDirectoryColumnWidths(ss);
@@ -186,7 +185,6 @@ namespace FrontendFormattingService {
     }
 
     freezeTopTwoRowsAllSheets(ss); // Skip freezing rows on FAQs
-    applyBandingToFrontendTables(ss);
     applyDirectoryFormatting(ss);
     applyLeadershipFormatting(ss);
     applyDashboardFormatting(ss);

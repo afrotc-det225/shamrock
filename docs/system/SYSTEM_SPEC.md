@@ -111,7 +111,8 @@ Cell-level dropdown validations must be driven from the Data Legend tab(s) using
 
 - The Data Legend acts as the canonical option registry.
 - Validations in other sheets reference Data Legend ranges.
-- Frontend primary sheets use Google Sheets Tables where available. Table dropdown column types mirror the same canonical option arrays because the Sheets Table API dropdown column type requires a `ONE_OF_LIST` validation rule.
+- Frontend primary sheets use Google Sheets Table objects through the Sheets API advanced service. They must not rely on ordinary `applyRowBanding()` ranges as a substitute for Tables.
+- Table dropdown column types mirror the same canonical option arrays because the Sheets Table API dropdown column type requires a `ONE_OF_LIST` validation rule.
 - Frontend Attendance code entry is represented by table dropdown columns plus strict Data Legend-backed validation, not conditional-format color rules.
 
 Canonical option sets:
