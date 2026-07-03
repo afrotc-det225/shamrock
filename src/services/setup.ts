@@ -2102,12 +2102,24 @@ namespace SetupService {
 
   export function applyFrontendFormatting() {
     const frontendId = Config.getFrontendId();
-    ProtectionService.clearManagedFrontendProtections(frontendId);
-    FrontendFormattingService.applyAll(frontendId);
-    ensureFrontendTables(frontendId);
-    FrontendFormattingService.applyValidations(frontendId);
-    FrontendFormattingService.applyPostTableFormatting(frontendId);
-    ProtectionService.applyFrontendProtections(frontendId);
+    runFrontendFormattingStage('clear managed protections', () => ProtectionService.clearManagedFrontendProtections(frontendId));
+    runFrontendFormattingStage('apply pre-table frontend formatting', () => FrontendFormattingService.applyAll(frontendId));
+    runFrontendFormattingStage('ensure frontend tables', () => ensureFrontendTables(frontendId));
+    runFrontendFormattingStage('reapply validations after table ensure', () => FrontendFormattingService.applyValidations(frontendId));
+    runFrontendFormattingStage('apply post-table formatting', () => FrontendFormattingService.applyPostTableFormatting(frontendId));
+    runFrontendFormattingStage('apply frontend protections', () => ProtectionService.applyFrontendProtections(frontendId));
+  }
+
+  function runFrontendFormattingStage(label: string, fn: () => void) {
+    const started = Date.now();
+    Log.info(`applyFrontendFormatting stage start: ${label}`);
+    try {
+      fn();
+      Log.info(`applyFrontendFormatting stage ok: ${label} durationMs=${Date.now() - started}`);
+    } catch (err) {
+      Log.error(`applyFrontendFormatting stage failed: ${label} durationMs=${Date.now() - started} error="${err}"`);
+      throw err;
+    }
   }
 
   function ensureFrontendTables(frontendId: string) {

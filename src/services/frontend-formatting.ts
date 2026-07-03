@@ -345,7 +345,11 @@ namespace FrontendFormattingService {
 
   function pruneTrailingRows(sheet: GoogleAppsScript.Spreadsheet.Sheet | null) {
     if (!sheet) return;
-    SheetUtils.trimTrailingBlankRows(sheet);
+    try {
+      SheetUtils.trimTrailingBlankRows(sheet);
+    } catch (err) {
+      Log.warn(`Unable to prune trailing rows on ${sheet.getName()}: ${err}`);
+    }
   }
 
   function setDefaultFont(sheet: GoogleAppsScript.Spreadsheet.Sheet | null) {
@@ -976,9 +980,142 @@ namespace FrontendFormattingService {
 
   }
 
+  function applyAttendancePostTableFormatting(ss: GoogleAppsScript.Spreadsheet.Spreadsheet) {
+    const sheet = ss.getSheetByName('Attendance');
+    if (!sheet) return;
+
+    const sheetsService = (globalThis as any).Sheets?.Spreadsheets;
+    if (!sheetsService?.batchUpdate) {
+      Log.warn('Unable to apply post-table Attendance formatting because the Sheets advanced service is unavailable.');
+      return;
+    }
+
+    const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0].map((h) => String(h || '').trim().toLowerCase());
+    const headerToIndex = new Map(headers.map((h, idx) => [h, idx] as const));
+    const baseCount = ATTENDANCE_BASE_HEADERS.length;
+    const eventStartIdx = baseCount;
+    const lastCol = sheet.getLastColumn();
+    const endRowIndex = Math.max(3, sheet.getLastRow());
+    const requests: Record<string, any>[] = [];
+
+    if (lastCol > eventStartIdx && endRowIndex > 2) {
+      requests.push({
+        repeatCell: {
+          range: {
+            sheetId: sheet.getSheetId(),
+            startRowIndex: 2,
+            endRowIndex,
+            startColumnIndex: eventStartIdx,
+            endColumnIndex: lastCol,
+          },
+          cell: {
+            userEnteredFormat: {
+              numberFormat: { type: 'TEXT' },
+              horizontalAlignment: 'CENTER',
+              textFormat: { bold: true },
+            },
+          },
+          fields: 'userEnteredFormat(numberFormat,horizontalAlignment,textFormat.bold)',
+        },
+      });
+      requests.push({
+        repeatCell: {
+          range: {
+            sheetId: sheet.getSheetId(),
+            startRowIndex: 1,
+            endRowIndex: 2,
+            startColumnIndex: eventStartIdx,
+            endColumnIndex: lastCol,
+          },
+          cell: {
+            userEnteredFormat: {
+              horizontalAlignment: 'CENTER',
+              wrapStrategy: 'WRAP',
+              textFormat: { bold: true, fontSize: 5 },
+            },
+          },
+          fields: 'userEnteredFormat(horizontalAlignment,wrapStrategy,textFormat.bold,textFormat.fontSize)',
+        },
+      });
+    }
+
+    [ATT_HEADER_OVERALL, ATT_HEADER_LLAB].forEach((header) => {
+      const idx = headerToIndex.get(header.toLowerCase());
+      if (idx === undefined) return;
+      requests.push({
+        repeatCell: {
+          range: {
+            sheetId: sheet.getSheetId(),
+            startRowIndex: 1,
+            endRowIndex,
+            startColumnIndex: idx,
+            endColumnIndex: idx + 1,
+          },
+          cell: {
+            userEnteredFormat: { horizontalAlignment: 'CENTER' },
+          },
+          fields: 'userEnteredFormat.horizontalAlignment',
+        },
+      });
+    });
+
+    if (!requests.length) return;
+    try {
+      sheetsService.batchUpdate({ requests }, ss.getId());
+      Log.info(`Applied post-table Attendance formatting requests=${requests.length}.`);
+    } catch (err) {
+      Log.warn(`Unable to apply post-table Attendance formatting: ${err}`);
+    }
+  }
+
+  function applyLeadershipPostTableFormatting(ss: GoogleAppsScript.Spreadsheet.Spreadsheet) {
+    const sheet = ss.getSheetByName('Leadership');
+    if (!sheet) return;
+
+    const sheetsService = (globalThis as any).Sheets?.Spreadsheets;
+    if (!sheetsService?.batchUpdate) {
+      Log.warn('Unable to apply post-table Leadership formatting because the Sheets advanced service is unavailable.');
+      return;
+    }
+
+    const machineHeaders = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0].map((h) => String(h || '').trim().toLowerCase());
+    const displayHeaders = sheet.getRange(2, 1, 1, sheet.getLastColumn()).getValues()[0].map((h) => String(h || '').trim().toLowerCase());
+    const centerHeaders = new Set(['overall', 'llab', 'overall_attendance_pct', 'llab_attendance_pct']);
+    const endRowIndex = Math.max(3, sheet.getLastRow());
+    const requests: Record<string, any>[] = [];
+
+    machineHeaders.forEach((header, idx) => {
+      if (!centerHeaders.has(header) && !centerHeaders.has(displayHeaders[idx])) return;
+      requests.push({
+        repeatCell: {
+          range: {
+            sheetId: sheet.getSheetId(),
+            startRowIndex: 1,
+            endRowIndex,
+            startColumnIndex: idx,
+            endColumnIndex: idx + 1,
+          },
+          cell: {
+            userEnteredFormat: { horizontalAlignment: 'CENTER' },
+          },
+          fields: 'userEnteredFormat.horizontalAlignment',
+        },
+      });
+    });
+
+    if (!requests.length) return;
+    try {
+      sheetsService.batchUpdate({ requests }, ss.getId());
+      Log.info(`Applied post-table Leadership formatting requests=${requests.length}.`);
+    } catch (err) {
+      Log.warn(`Unable to apply post-table Leadership formatting: ${err}`);
+    }
+  }
+
   export function applyPostTableFormatting(frontendId: string) {
     const ss = openFrontend(frontendId);
     if (!ss) return;
-    applyAttendanceFormatting(ss);
+    applyLeadershipPostTableFormatting(ss);
+    applyAttendancePostTableFormatting(ss);
   }
 }
