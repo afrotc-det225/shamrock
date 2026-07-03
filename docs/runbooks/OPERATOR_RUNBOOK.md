@@ -114,8 +114,8 @@ Post-deploy validation checklist:
 ### 5.6 Semester and academic-year transition
 Use the backend/admin workbook SHAMROCK menu:
 
-- `Transfer to new semester (v2)` when cadet AS years and graduation removal should not run.
-- `Transfer to new academic year (v2)` when cadets should advance AS years and graduating/commissioning years should roll off unless explicitly overridden.
+- `Transfer to new semester (v2)` when cadet AS years should not advance.
+- `Transfer to new academic year (v2)` when cadets should advance AS years and original AS400s should be marked `Commissioned` unless explicitly overridden.
 
 Before starting:
 - Confirm the backend Directory has current rank, role, AS year, flight, squadron, email, and phone data.
@@ -127,11 +127,15 @@ Before starting:
 During the wizard:
 - The draft is saved after each prompt. Cancelling before final confirmation does not archive or rewrite workbook data.
 - The final confirmation is the destructive boundary. After that point, the workflow archives current sheets, updates roster/events, clears current attendance/excusal logs and form responses, rebuilds forms, and reinstalls triggers.
+- After final confirmation, execution is phase-resumable. If Apps Script stops near its execution limit, wait for the continuation trigger or rerun the same transition menu action to resume remaining phases. Do not start a fresh transition.
+- Both semester and academic-year transitions clear Directory `Role`, `Flight`, and `Sqdn` assignments. Leadership roles must be reapplied through the wizard role-update prompt or backend edits after transition.
+- Academic-year transitions mark listed dropped cadets as `Dropped`, advance AS years from the archived pre-transition Directory snapshot, mark only original AS400s as `Commissioned` by default, and reset cadet rank from the resulting AS year.
 
 After completion:
 - Confirm hidden frontend archives exist for Leadership, Directory, and Attendance using the prior term label.
 - Confirm hidden backend rollback archives exist. They are automatically eligible for deletion after seven days.
 - Confirm Events Backend has the new term and the expected training-week sequence.
+- Confirm Directory AS-year advancement happened exactly once, role/flight/squadron are blank unless explicitly updated, and default ranks match AS year.
 - Confirm Attendance and Excusals forms list only current-term events.
 - Run one controlled attendance/excusal validation if this is a production transition.
 

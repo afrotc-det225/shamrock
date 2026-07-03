@@ -225,6 +225,10 @@ function transferToNewAcademicYearV2() {
   });
 }
 
+function continueTransitionV2() {
+  TransitionService.continueTransition();
+}
+
 function exportEventsCsv() {
   runMenuAction({ label: 'Export Events CSV', category: 'Imports & Exports', action: 'menu.export_events_csv', targetSheet: 'Events Backend' }, () => AdminService.exportEventsCsv());
 }

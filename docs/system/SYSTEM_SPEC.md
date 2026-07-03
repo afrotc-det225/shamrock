@@ -122,6 +122,7 @@ Cell-level dropdown validations must be driven from the Data Legend tab(s) using
 - Frontend formatting temporarily clears SHAMROCK-managed protections before table creation/update, then reapplies protections after the Sheets API table and style requests complete. Protected ranges must not prevent table repair.
 - Directory `Rank` uses the cadet-only `CADET_RANKS` list. Leadership `Rank` accepts the adjacent Data Legend `CADET_RANKS`, non-cadet `RANKS`, and `HONORIFICS` ranges. Rank validations are strict range validations with plain-text display, not visible dropdown arrows/chips.
 - Directory `Photo Link` uses Google Sheets file smart chips when the mirrored value is a Google Drive file URL or Drive file ID.
+- Directory frontend sync must not write the typed `Photo Link` table column through broad `SpreadsheetApp.setValues()` ranges. It writes normal Directory columns separately and applies `Photo Link` chips through the Sheets API.
 - Frontend Attendance code entry is represented by strict Data Legend-backed validation and normal spreadsheet formatting, not conditional-format color rules or Sheets Table dropdown column types.
 
 Canonical option sets:
@@ -231,6 +232,8 @@ Operators should not run scripts from the editor.
 - Trigger installation must be idempotent.
 - v2 operator workflows that replace earlier behavior must use explicit v2 menu/global names. Current transition entry points are `transferToNewSemesterV2` and `transferToNewAcademicYearV2`.
 - Semester/year transitions must be interactive, auditable, archive-before-write, and resumable until the final confirmation.
+- After final confirmation, v2 transitions must also be phase-resumable. A retry must continue incomplete phases, not reapply Directory advancement from the already-mutated backend.
+- Academic-year Directory advancement is calculated from the archived pre-transition Directory snapshot. It clears role, flight, and squadron assignments; marks listed dropped cadets as `Dropped`; marks original AS400s as `Commissioned` unless overridden; advances remaining AS years once; and resets cadet rank from the resulting AS year.
 
 ## 13. Document Policy
 - Public docs: explain how features work operationally without sensitive IDs.

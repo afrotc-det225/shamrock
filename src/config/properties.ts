@@ -13,6 +13,7 @@ namespace Config {
     DISABLE_MAIN_WORKBOOK_COLUMN_WIDTHS: 'DISABLE_MAIN_WORKBOOK_COLUMN_WIDTHS',
     AUTOMATIONS_PAUSED: 'AUTOMATIONS_PAUSED',
     V2_TRANSITION_DRAFT: 'V2_TRANSITION_DRAFT',
+    V2_TRANSITION_STATE: 'V2_TRANSITION_STATE',
     V2_BACKEND_ARCHIVES: 'V2_BACKEND_ARCHIVES',
   } as const;
 
@@ -28,6 +29,7 @@ namespace Config {
     { key: PROPERTY_KEYS.DISABLE_MAIN_WORKBOOK_COLUMN_WIDTHS, description: 'Set to true to stop SHAMROCK from changing main workbook column widths.' },
     { key: PROPERTY_KEYS.AUTOMATIONS_PAUSED, description: 'Internal pause flag set by the SHAMROCK Pause automations menu action.' },
     { key: PROPERTY_KEYS.V2_TRANSITION_DRAFT, description: 'Internal resumable draft for the v2 semester/year transition wizard.' },
+    { key: PROPERTY_KEYS.V2_TRANSITION_STATE, description: 'Internal resumable execution state for an applied v2 semester/year transition.' },
     { key: PROPERTY_KEYS.V2_BACKEND_ARCHIVES, description: 'Internal registry of temporary backend transition archives pending deletion.' },
   ];
 

@@ -117,12 +117,14 @@ The v2 transition workflow prepares SHAMROCK for a new semester or academic year
 - Current core frontend sheets are copied, locked, and hidden with term labels. Copied table objects are renamed to match the archive sheet names, such as `Spring 2026 Directory`.
 - Backend rollback archives are copied, locked, hidden, and registered for deletion after seven days.
 - Attendance/Excusals logs and response rows are cleared only after archive creation and confirmation.
+- After final confirmation, the workflow records phase progress and can resume after an Apps Script timeout. Directory changes are calculated from the rollback archive snapshot so AS-year advancement is not applied twice.
+- Transitions clear Directory role, flight, and squadron assignments. Academic-year transitions mark listed dropped cadets as `Dropped`, mark only original AS400s as `Commissioned` unless overridden, advance remaining AS years once, and reset cadet rank from the resulting AS year.
 
 ### Validation
 
 - Confirm archived frontend tabs exist, are hidden, use the previous term label, and have matching table names.
 - Confirm Events Backend contains the new term, expected training weeks, and Mando/LLAB/Secondary/POC events.
-- Confirm Directory removed dropped/graduated cadets and applied AS-year overrides when applicable.
+- Confirm Directory marks dropped/commissioned cadets inactive, applies AS-year overrides when applicable, clears role/flight/squadron, and resets default ranks.
 - Confirm Leadership reflects Directory roles plus cadre/manual contacts.
 - Confirm Attendance matrix and both Attendance/Excusals forms were rebuilt from the new Events Backend.
 

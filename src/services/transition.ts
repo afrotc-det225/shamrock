@@ -36,6 +36,31 @@ namespace TransitionService {
     expiresAt: string;
   }
 
+  type TransitionPhase =
+    | 'archive'
+    | 'directory'
+    | 'logs'
+    | 'events'
+    | 'leadership'
+    | 'responses'
+    | 'directory_artifacts'
+    | 'events_artifacts'
+    | 'directory_form'
+    | 'attendance_form'
+    | 'excusals_form'
+    | 'triggers'
+    | 'reorder'
+    | 'audit';
+
+  interface TransitionState {
+    id: string;
+    draft: TransitionDraft;
+    archives: ArchiveRecord[];
+    completedPhases: TransitionPhase[];
+    startedAt: string;
+    updatedAt: string;
+  }
+
   const WEEKDAY_INDEX: Record<string, number> = {
     sunday: 0,
     sun: 0,
@@ -54,6 +79,24 @@ namespace TransitionService {
     saturday: 6,
     sat: 6,
   };
+  const TRANSITION_PHASES: TransitionPhase[] = [
+    'archive',
+    'directory',
+    'logs',
+    'events',
+    'leadership',
+    'responses',
+    'directory_artifacts',
+    'events_artifacts',
+    'directory_form',
+    'attendance_form',
+    'excusals_form',
+    'triggers',
+    'reorder',
+    'audit',
+  ];
+  const CONTINUATION_HANDLER = 'continueTransitionV2';
+  const TRANSITION_CONTINUATION_BUDGET_MS = 4 * 60 * 1000;
 
   function ui(): GoogleAppsScript.Base.Ui {
     return SpreadsheetApp.getUi();
@@ -81,6 +124,61 @@ namespace TransitionService {
       Config.deleteScriptProperty(Config.PROPERTY_KEYS.V2_TRANSITION_DRAFT);
       return null;
     }
+  }
+
+  function saveState(state: TransitionState) {
+    state.updatedAt = new Date().toISOString();
+    Config.setScriptProperty(Config.PROPERTY_KEYS.V2_TRANSITION_STATE, JSON.stringify(state));
+  }
+
+  function loadState(): TransitionState | null {
+    const raw = Config.getScriptProperty(Config.PROPERTY_KEYS.V2_TRANSITION_STATE);
+    if (!raw) return null;
+    try {
+      return JSON.parse(raw) as TransitionState;
+    } catch (err) {
+      Log.warn(`Unable to parse saved transition execution state; discarding. Error: ${err}`);
+      Config.deleteScriptProperty(Config.PROPERTY_KEYS.V2_TRANSITION_STATE);
+      return null;
+    }
+  }
+
+  function createState(draft: TransitionDraft): TransitionState {
+    return {
+      id: Utilities.getUuid(),
+      draft,
+      archives: [],
+      completedPhases: [],
+      startedAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+  }
+
+  function phaseComplete(state: TransitionState, phase: TransitionPhase): boolean {
+    return state.completedPhases.includes(phase);
+  }
+
+  function completePhase(state: TransitionState, phase: TransitionPhase) {
+    if (!phaseComplete(state, phase)) state.completedPhases.push(phase);
+    saveState(state);
+  }
+
+  function clearContinuationTriggers() {
+    ScriptApp.getProjectTriggers()
+      .filter((trigger) => trigger.getHandlerFunction() === CONTINUATION_HANDLER)
+      .forEach((trigger) => {
+        try {
+          ScriptApp.deleteTrigger(trigger);
+        } catch (err) {
+          Log.warn(`Unable to delete transition continuation trigger: ${err}`);
+        }
+      });
+  }
+
+  function scheduleContinuation() {
+    clearContinuationTriggers();
+    ScriptApp.newTrigger(CONTINUATION_HANDLER).timeBased().after(60 * 1000).create();
+    Log.info('Scheduled v2 transition continuation trigger.');
   }
 
   function promptValue(title: string, message: string, fallback: string): string {
@@ -315,6 +413,50 @@ namespace TransitionService {
     Config.setScriptProperty(Config.PROPERTY_KEYS.V2_BACKEND_ARCHIVES, JSON.stringify(existing.concat(records)));
   }
 
+  function archiveTimestampMs(record: ArchiveRecord): number {
+    const joined = record.sheetNames.join(' ');
+    const match = joined.match(/Rollback\s+(\d{8})-(\d{6})/);
+    if (!match) return 0;
+    const [, datePart, timePart] = match;
+    return new Date(
+      Number(datePart.slice(0, 4)),
+      Number(datePart.slice(4, 6)) - 1,
+      Number(datePart.slice(6, 8)),
+      Number(timePart.slice(0, 2)),
+      Number(timePart.slice(2, 4)),
+      Number(timePart.slice(4, 6)),
+    ).getTime();
+  }
+
+  function latestRegisteredBackendArchive(draft: TransitionDraft): ArchiveRecord[] {
+    const raw = Config.getScriptProperty(Config.PROPERTY_KEYS.V2_BACKEND_ARCHIVES);
+    if (!raw) return [];
+    try {
+      const records = JSON.parse(raw) as ArchiveRecord[];
+      const backendId = Config.getBackendId();
+      const draftCreatedAt = new Date(draft.createdAt).getTime();
+      const latest = records
+        .filter((record) => (
+          record.spreadsheetId === backendId
+          && record.sheetNames.some((name) => name.endsWith('Directory Backend'))
+          && archiveTimestampMs(record) >= draftCreatedAt - 5 * 60 * 1000
+        ))
+        .pop();
+      return latest ? [latest] : [];
+    } catch {
+      return [];
+    }
+  }
+
+  function backendArchiveSheet(state: TransitionState, suffix: string): GoogleAppsScript.Spreadsheet.Sheet | null {
+    const backendId = Config.getBackendId();
+    const record = state.archives.find((entry) => entry.spreadsheetId === backendId);
+    if (!backendId || !record) return null;
+    const name = record.sheetNames.find((sheetName) => sheetName.endsWith(suffix));
+    if (!name) return null;
+    return SheetUtils.getSheet(backendId, name);
+  }
+
   function normalizeIdentity(value: string): string {
     return String(value || '').trim().toLowerCase();
   }
@@ -341,30 +483,55 @@ namespace TransitionService {
     return map[normalized] || '';
   }
 
-  function applyDirectoryTransition(draft: TransitionDraft) {
+  function defaultRankForAsYear(asYear: string): string {
+    const normalized = String(asYear || '').trim().toUpperCase().replace(/\s+/g, '');
+    if (normalized === 'AS100' || normalized === 'AS150') return 'C/4C';
+    if (normalized === 'AS200' || normalized === 'AS250') return 'C/3C';
+    if (normalized === 'AS300' || normalized === 'AS400' || normalized === 'AS500') return 'C/2d Lt';
+    return '';
+  }
+
+  function applyDirectoryTransition(state: TransitionState) {
+    const draft = state.draft;
     const backendId = Config.getBackendId();
     const sheet = backendId ? SheetUtils.getSheet(backendId, 'Directory Backend') : null;
     if (!sheet) throw new Error('Directory Backend not found.');
     SheetUtils.ensureSchemaColumns(sheet);
-    const table = SheetUtils.readTable(sheet);
+    const sourceSheet = backendArchiveSheet(state, 'Directory Backend') || sheet;
+    const table = SheetUtils.readTable(sourceSheet);
     const removed = draft.removedCadets.map(normalizeIdentity);
     const overrideEntries = Object.entries(draft.asYearOverrides);
     const roleEntries = Object.entries(draft.roleUpdates);
 
     const rows = table.rows
-      .filter((row) => !removed.some((id) => rowMatchesIdentifier(row, id)))
       .map((row) => {
         const next = { ...row };
+        const originalAsYear = String(row['as_year'] || '').trim().toUpperCase().replace(/\s+/g, '');
+        const isDropped = removed.some((id) => rowMatchesIdentifier(row, id));
+        const override = overrideEntries.find(([id]) => rowMatchesIdentifier(row, id));
+
+        next['role'] = '';
+        next['flight'] = '';
+        next['squadron'] = '';
+
+        if (isDropped) {
+          next['flight_path_status'] = 'Dropped';
+        }
+
         if (draft.kind === 'academic_year') {
-          const override = overrideEntries.find(([id]) => rowMatchesIdentifier(row, id));
           if (override) {
             next['as_year'] = override[1];
+          } else if (!isDropped && originalAsYear === 'AS400') {
+            next['as_year'] = row['as_year'] || 'AS400';
+            next['flight_path_status'] = 'Commissioned';
           } else {
             const advanced = nextAsYear(String(row['as_year'] || ''));
-            if (!advanced) return null;
-            next['as_year'] = advanced;
+            if (advanced) next['as_year'] = advanced;
           }
         }
+
+        const defaultRank = defaultRankForAsYear(String(next['as_year'] || ''));
+        next['rank'] = defaultRank || '';
 
         const roleUpdate = roleEntries.find(([id]) => rowMatchesIdentifier(row, id));
         if (roleUpdate) {
@@ -498,19 +665,148 @@ namespace TransitionService {
     SheetUtils.writeTable(sheet, rows);
   }
 
-  export function runTransition(kind: TransitionKind) {
-    const draft = buildDraft(kind);
-    const summary = [
-      `Type: ${kind === 'academic_year' ? 'New academic year' : 'New semester'}`,
+  function runPhase(state: TransitionState, phase: TransitionPhase) {
+    const draft = state.draft;
+    if (phase === 'archive') {
+      if (!state.archives.length) {
+        const reusableArchives = latestRegisteredBackendArchive(draft);
+        state.archives = reusableArchives.length ? reusableArchives : archiveForTransition(draft);
+        saveState(state);
+      }
+      return;
+    }
+    if (phase === 'directory') {
+      applyDirectoryTransition(state);
+      return;
+    }
+    if (phase === 'logs') {
+      resetSchemaSheet('Attendance Backend');
+      resetSchemaSheet('Excusals Backend');
+      return;
+    }
+    if (phase === 'events') {
+      const eventsSheet = Config.getBackendSheet('Events Backend');
+      SheetUtils.ensureSchemaColumns(eventsSheet);
+      SheetUtils.writeTable(eventsSheet, generateEvents(draft));
+      return;
+    }
+    if (phase === 'leadership') {
+      DirectoryService.syncLeadershipBackendFromDirectory();
+      applyRemovedLeadership(draft);
+      return;
+    }
+    if (phase === 'responses') {
+      clearResponseSheet(Config.RESOURCE_NAMES.DIRECTORY_FORM_SHEET);
+      clearResponseSheet(Config.RESOURCE_NAMES.ATTENDANCE_FORM_SHEET);
+      clearResponseSheet(Config.RESOURCE_NAMES.EXCUSALS_FORM_SHEET);
+      return;
+    }
+    if (phase === 'directory_artifacts') {
+      SetupService.refreshDirectoryArtifacts({ rebuildAttendanceMatrix: true, rebuildAttendanceForm: false });
+      return;
+    }
+    if (phase === 'events_artifacts') {
+      SetupService.refreshEventsArtifacts();
+      return;
+    }
+    if (phase === 'directory_form') {
+      SetupService.rebuildDirectoryForm();
+      return;
+    }
+    if (phase === 'attendance_form') {
+      SetupService.rebuildAttendanceForm();
+      return;
+    }
+    if (phase === 'excusals_form') {
+      SetupService.refreshExcusalsForm();
+      return;
+    }
+    if (phase === 'triggers') {
+      SetupService.reinstallAllTriggers();
+      return;
+    }
+    if (phase === 'reorder') {
+      SetupService.reorderFrontendSheets();
+      SetupService.reorderBackendSheets();
+      return;
+    }
+    if (phase === 'audit') {
+      AuditService.log({
+        action: draft.kind === 'academic_year' ? 'transition_new_academic_year_v2' : 'transition_new_semester_v2',
+        result: 'ok',
+        role: 'menu_operator',
+        targetSheet: 'Directory Backend',
+        targetTable: 'transition',
+        source: 'TransitionService.runTransition',
+        version: 'v2',
+        metadata: { term: draft.term, weeks: draft.trainingWeeks },
+      });
+    }
+  }
+
+  function applyTransitionState(state: TransitionState, interactive: boolean) {
+    clearContinuationTriggers();
+    const started = Date.now();
+    for (const phase of TRANSITION_PHASES) {
+      if (phaseComplete(state, phase)) continue;
+      if (Date.now() - started > TRANSITION_CONTINUATION_BUDGET_MS) {
+        scheduleContinuation();
+        const message = `Transition for ${state.draft.term} paused before phase ${phase}; a continuation trigger will resume it shortly.`;
+        if (interactive) alert(message);
+        else Log.info(message);
+        return;
+      }
+      Log.info(`Transition ${state.id}: starting phase ${phase}`);
+      runPhase(state, phase);
+      completePhase(state, phase);
+      Log.info(`Transition ${state.id}: completed phase ${phase}`);
+      if (Date.now() - started > TRANSITION_CONTINUATION_BUDGET_MS) {
+        scheduleContinuation();
+        const message = `Transition for ${state.draft.term} paused after phase ${phase}; a continuation trigger will resume it shortly.`;
+        if (interactive) alert(message);
+        else Log.info(message);
+        return;
+      }
+    }
+
+    Config.deleteScriptProperty(Config.PROPERTY_KEYS.V2_TRANSITION_DRAFT);
+    Config.deleteScriptProperty(Config.PROPERTY_KEYS.V2_TRANSITION_STATE);
+    clearContinuationTriggers();
+    alert(`Transition complete for ${state.draft.term}. Backend rollback archives are hidden and scheduled for deletion after seven days.`);
+  }
+
+  function transitionSummary(draft: TransitionDraft): string {
+    return [
+      `Type: ${draft.kind === 'academic_year' ? 'New academic year' : 'New semester'}`,
       `Term: ${draft.term}`,
       `Training weeks: ${draft.firstTrainingWeek} through ${draft.firstTrainingWeek + draft.trainingWeeks - 1}`,
       `First week starts: ${draft.firstWeekSunday}`,
-      `Removed cadets: ${draft.removedCadets.length}`,
+      `Dropped cadets marked inactive: ${draft.removedCadets.length}`,
       `AS overrides: ${Object.keys(draft.asYearOverrides).length}`,
       `Leadership updates: ${Object.keys(draft.roleUpdates).length}`,
       `Removed cadre/manual leadership rows: ${draft.removedLeadership.length}`,
       '',
       'This will archive current core tabs, update Directory/Leadership/Events, clear Attendance and Excusals logs and form responses, rebuild forms, and refresh derived sheets.',
+    ].join('\n');
+  }
+
+  export function runTransition(kind: TransitionKind) {
+    const inProgress = loadState();
+    if (inProgress) {
+      const resume = ui().alert(
+        'Resume transition already in progress?',
+        `A transition for ${inProgress.draft.term} is already applying. Resume remaining phases now?`,
+        ui().ButtonSet.YES_NO,
+      );
+      if (resume === ui().Button.YES) applyTransitionState(inProgress, true);
+      return;
+    }
+
+    const draft = buildDraft(kind);
+    const summary = [
+      transitionSummary(draft),
+      '',
+      'After confirmation, this transition becomes phase-resumable. If Apps Script times out, do not start a new transition; rerun this action or wait for the continuation trigger.',
     ].join('\n');
     const confirmed = ui().alert('Apply SHAMROCK v2 transition?', summary, ui().ButtonSet.OK_CANCEL);
     if (confirmed !== ui().Button.OK) {
@@ -518,42 +814,19 @@ namespace TransitionService {
       return;
     }
 
-    archiveForTransition(draft);
-    applyDirectoryTransition(draft);
-    resetSchemaSheet('Attendance Backend');
-    resetSchemaSheet('Excusals Backend');
-    const eventsSheet = Config.getBackendSheet('Events Backend');
-    SheetUtils.ensureSchemaColumns(eventsSheet);
-    SheetUtils.writeTable(eventsSheet, generateEvents(draft));
-    DirectoryService.syncLeadershipBackendFromDirectory();
-    applyRemovedLeadership(draft);
+    const state = createState(draft);
+    saveState(state);
+    applyTransitionState(state, true);
+  }
 
-    clearResponseSheet(Config.RESOURCE_NAMES.DIRECTORY_FORM_SHEET);
-    clearResponseSheet(Config.RESOURCE_NAMES.ATTENDANCE_FORM_SHEET);
-    clearResponseSheet(Config.RESOURCE_NAMES.EXCUSALS_FORM_SHEET);
-
-    SetupService.refreshDirectoryArtifacts({ rebuildAttendanceMatrix: true, rebuildAttendanceForm: true });
-    SetupService.refreshEventsArtifacts();
-    SetupService.rebuildDirectoryForm();
-    SetupService.rebuildAttendanceForm();
-    SetupService.refreshExcusalsForm();
-    SetupService.reinstallAllTriggers();
-    SetupService.reorderFrontendSheets();
-    SetupService.reorderBackendSheets();
-    Config.deleteScriptProperty(Config.PROPERTY_KEYS.V2_TRANSITION_DRAFT);
-
-    AuditService.log({
-      action: kind === 'academic_year' ? 'transition_new_academic_year_v2' : 'transition_new_semester_v2',
-      result: 'ok',
-      role: 'menu_operator',
-      targetSheet: 'Directory Backend',
-      targetTable: 'transition',
-      source: 'TransitionService.runTransition',
-      version: 'v2',
-      metadata: { term: draft.term, weeks: draft.trainingWeeks },
-    });
-
-    alert(`Transition complete for ${draft.term}. Backend rollback archives are hidden and scheduled for deletion after seven days.`);
+  export function continueTransition() {
+    const state = loadState();
+    if (!state) {
+      clearContinuationTriggers();
+      Log.info('No v2 transition execution state found; continuation skipped.');
+      return;
+    }
+    applyTransitionState(state, false);
   }
 
   export function cleanupExpiredBackendArchives() {

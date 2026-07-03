@@ -112,9 +112,48 @@ namespace DirectoryService {
     return match ? match[0] : cleaned;
   }
 
+  function contiguousSegments(indexes: number[]): { start: number; end: number }[] {
+    const sorted = indexes.slice().sort((a, b) => a - b);
+    const segments: { start: number; end: number }[] = [];
+    sorted.forEach((idx) => {
+      const last = segments[segments.length - 1];
+      if (!last || idx !== last.end + 1) {
+        segments.push({ start: idx, end: idx });
+      } else {
+        last.end = idx;
+      }
+    });
+    return segments;
+  }
+
+  function writeFrontendDirectoryRows(frontendId: string, frontendSheet: GoogleAppsScript.Spreadsheet.Sheet, rows: Record<string, any>[]) {
+    const headers = frontendSheet.getRange(1, 1, 1, frontendSheet.getLastColumn()).getValues()[0].map((h) => String(h || '').trim());
+    const photoIdx = headers.indexOf('photo_link');
+    if (photoIdx < 0) {
+      SheetUtils.writeTable(frontendSheet, rows, { trimBlankRows: true });
+      return;
+    }
+
+    const writableIndexes = headers.map((_, idx) => idx).filter((idx) => idx !== photoIdx);
+    const existingRows = Math.max(1, frontendSheet.getLastRow() - 2);
+    contiguousSegments(writableIndexes).forEach((segment) => {
+      const width = segment.end - segment.start + 1;
+      const clearRange = frontendSheet.getRange(3, segment.start + 1, existingRows, width);
+      clearRange.clearContent();
+      if (!rows.length) return;
+      const values = rows.map((row) => headers.slice(segment.start, segment.end + 1).map((header) => row[header] ?? ''));
+      frontendSheet.getRange(3, segment.start + 1, rows.length, width).setValues(values);
+    });
+
+    SheetUtils.trimRowsToDataCount(frontendSheet, rows.length);
+    FrontendFormattingService.applyDirectoryPhotoFileChips(frontendId, rows.map((row) => row['photo_link'] || ''));
+  }
+
   export function syncDirectoryFrontend(): void {
     const { backendSheet, frontendSheet } = getBackendFrontendSheets();
     if (!backendSheet || !frontendSheet) return;
+    const frontendId = Config.getFrontendId();
+    if (!frontendId) return;
     SheetUtils.ensureSchemaColumns(backendSheet);
     const backend = SheetUtils.readTable(backendSheet);
     SheetUtils.ensureSchemaColumns(frontendSheet);
@@ -142,7 +181,7 @@ namespace DirectoryService {
     }));
 
     const sorted = sortDirectoryRows(mapped);
-    SheetUtils.writeTable(frontendSheet, sorted, { clearDataValidationsBeforeWrite: true, trimBlankRows: true });
+    writeFrontendDirectoryRows(frontendId, frontendSheet, sorted);
   }
 
   function upsertBackendRecord(record: DirectoryRecord) {

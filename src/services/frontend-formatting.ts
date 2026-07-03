@@ -451,7 +451,11 @@ namespace FrontendFormattingService {
     return id ? `https://drive.google.com/file/d/${id}/view` : '';
   }
 
-  function applyDirectoryPhotoFileChips(ss: GoogleAppsScript.Spreadsheet.Spreadsheet, sheet: GoogleAppsScript.Spreadsheet.Sheet) {
+  function applyDirectoryPhotoFileChipsToSheet(
+    ss: GoogleAppsScript.Spreadsheet.Spreadsheet,
+    sheet: GoogleAppsScript.Spreadsheet.Sheet,
+    sourceValues?: unknown[],
+  ) {
     const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0].map((h) => String(h || '').trim());
     const photoIdx = headers.indexOf('photo_link');
     if (photoIdx < 0 || sheet.getLastRow() < 3) return;
@@ -463,12 +467,31 @@ namespace FrontendFormattingService {
     }
 
     const valueRange = sheet.getRange(3, photoIdx + 1, sheet.getLastRow() - 2, 1);
-    const values = valueRange.getValues();
-    const richTextValues = valueRange.getRichTextValues();
+    const values = sourceValues ? sourceValues.map((value) => [value]) : valueRange.getValues();
+    const richTextValues = sourceValues ? [] : valueRange.getRichTextValues();
     const requests: Record<string, any>[] = [];
     values.forEach((row, idx) => {
       const uri = extractDriveFileChipUri(row[0], richTextValues[idx]?.[0]);
-      if (!uri) return;
+      const text = String(row[0] || '').trim();
+      const cell = uri
+        ? {
+            userEnteredValue: { stringValue: '@' },
+            chipRuns: [{
+              startIndex: 0,
+              chip: {
+                richLinkProperties: { uri },
+              },
+            }],
+          }
+        : (text
+          ? {
+              userEnteredValue: { stringValue: text },
+              chipRuns: [],
+            }
+          : {
+              userEnteredValue: { stringValue: '' },
+              chipRuns: [],
+            });
       requests.push({
         updateCells: {
           range: {
@@ -479,15 +502,7 @@ namespace FrontendFormattingService {
             endColumnIndex: photoIdx + 1,
           },
           rows: [{
-            values: [{
-              userEnteredValue: { stringValue: '@' },
-              chipRuns: [{
-                startIndex: 0,
-                chip: {
-                  richLinkProperties: { uri },
-                },
-              }],
-            }],
+            values: [cell],
           }],
           fields: 'userEnteredValue,chipRuns',
         },
@@ -506,6 +521,14 @@ namespace FrontendFormattingService {
       }
     }
     if (applied) Log.info(`Applied Directory Photo Link file chips to ${applied} cell(s).`);
+  }
+
+  export function applyDirectoryPhotoFileChips(frontendId: string, sourceValues?: unknown[]) {
+    const ss = openFrontend(frontendId);
+    if (!ss) return;
+    const sheet = ss.getSheetByName('Directory');
+    if (!sheet) return;
+    applyDirectoryPhotoFileChipsToSheet(ss, sheet, sourceValues);
   }
 
   function applyDirectoryFormatting(ss: GoogleAppsScript.Spreadsheet.Spreadsheet) {
@@ -571,7 +594,7 @@ namespace FrontendFormattingService {
     alignColumn('dob', 'right');
     alignColumn('flight_path_status', 'left');
     alignColumn('photo_link', 'center');
-    applyDirectoryPhotoFileChips(ss, sheet);
+    applyDirectoryPhotoFileChipsToSheet(ss, sheet);
 
     // Freeze name columns
     sheet.setFrozenRows(2);
