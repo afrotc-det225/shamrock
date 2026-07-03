@@ -355,6 +355,85 @@ namespace SetupService {
       .replace(/^_+|_+$/g, '') || 'table';
   }
 
+  function listTablesOnSheet(svc: any, spreadsheetId: string, sheetId: number): any[] {
+    try {
+      if (!svc.get) return [];
+      const spreadsheet = svc.get(spreadsheetId, {
+        fields: 'sheets(properties(sheetId),tables(tableId,name,range))',
+      });
+      const targetSheet = (spreadsheet.sheets || []).find((sh: any) => sh?.properties?.sheetId === sheetId);
+      return targetSheet?.tables || [];
+    } catch (err) {
+      Log.warn(`Unable to inspect tables on sheetId=${sheetId}: ${err}`);
+      return [];
+    }
+  }
+
+  function ensureGridSize(sheet: GoogleAppsScript.Spreadsheet.Sheet, rows: number, cols: number) {
+    if (sheet.getMaxRows() < rows) sheet.insertRowsAfter(sheet.getMaxRows(), rows - sheet.getMaxRows());
+    if (sheet.getMaxColumns() < cols) sheet.insertColumnsAfter(sheet.getMaxColumns(), cols - sheet.getMaxColumns());
+  }
+
+  function deleteTablesPreservingGrid(spreadsheetId: string, sheetName: string): boolean {
+    if (typeof (globalThis as any).Sheets === 'undefined') {
+      Log.warn(`Sheets advanced service unavailable; cannot delete tables for ${sheetName}`);
+      return false;
+    }
+
+    const ss = SpreadsheetApp.openById(spreadsheetId);
+    const sheet = Config.getBackendId() === spreadsheetId
+      ? Config.getBackendSheet(sheetName)
+      : Config.getFrontendId() === spreadsheetId
+        ? Config.getFrontendSheet(sheetName)
+        : ss.getSheetByName(sheetName);
+    if (!sheet) return false;
+
+    const svc = (Sheets as any)?.Spreadsheets;
+    if (!svc?.batchUpdate) {
+      Log.warn('Sheets advanced service unavailable; cannot delete tables');
+      return false;
+    }
+
+    const tables = listTablesOnSheet(svc, spreadsheetId, sheet.getSheetId()).filter((table) => table?.tableId);
+    if (!tables.length) return true;
+
+    const rows = Math.max(1, sheet.getLastRow());
+    const cols = Math.max(1, sheet.getLastColumn());
+    const snapshotName = `_shamrock_table_snapshot_${Utilities.getUuid().slice(0, 8)}`;
+    const snapshot = ss.insertSheet(snapshotName);
+    snapshot.hideSheet();
+    try {
+      ensureGridSize(snapshot, rows, cols);
+      sheet.getRange(1, 1, rows, cols).copyTo(snapshot.getRange(1, 1, rows, cols));
+
+      const ok = sheetsBatchUpdateWithRetry(
+        svc,
+        spreadsheetId,
+        tables.map((table) => ({ deleteTable: { tableId: table.tableId } })),
+        `Delete existing table objects on ${sheetName}`,
+      );
+
+      ensureGridSize(sheet, rows, cols);
+      snapshot.getRange(1, 1, rows, cols).copyTo(sheet.getRange(1, 1, rows, cols));
+      if (ok) Log.info(`Deleted ${tables.length} table object(s) on ${sheetName} while preserving grid data.`);
+      return ok;
+    } catch (err) {
+      Log.warn(`Unable to delete table object(s) on ${sheetName} while preserving grid data: ${err}`);
+      return false;
+    } finally {
+      try {
+        ss.deleteSheet(snapshot);
+      } catch (err) {
+        Log.warn(`Unable to delete temporary table snapshot ${snapshotName}: ${err}`);
+      }
+    }
+  }
+
+  function clearFrontendTables(frontendId: string) {
+    if (!frontendId) return;
+    FRONTEND_TABLE_SHEETS.forEach((name) => deleteTablesPreservingGrid(frontendId, name));
+  }
+
   function ensureTableForSheet(spreadsheetId: string, sheetName: string, tableName = sheetName) {
     const tableId = tableIdForName(tableName);
     const displayTableName = String(tableName || sheetName).trim() || sheetName;
@@ -394,14 +473,6 @@ namespace SetupService {
       const endColIndex = colCount; // zero-based exclusive
       const endRowIndex = Math.max(headerRow + 1, sheet.getLastRow());
 
-      const columnProperties = headerValues.map((name, idx) => {
-        return {
-          columnIndex: idx,
-          columnName: String(name || `Column ${idx + 1}`),
-          columnType: 'COLUMN_TYPE_UNSPECIFIED',
-        };
-      });
-
       const tableRange = {
         sheetId,
         startColumnIndex: 0,
@@ -421,11 +492,6 @@ namespace SetupService {
         },
       };
 
-      const table = {
-        ...baseTable,
-        columnProperties,
-      };
-
       const existingTable = findExistingTable(svc, spreadsheetId, sheetId, tableId, displayTableName);
       const baseRequest = existingTable
         ? {
@@ -443,20 +509,6 @@ namespace SetupService {
       const baseOk = sheetsBatchUpdateWithRetry(svc, spreadsheetId, [baseRequest as any], `Ensure table ${tableId} on ${sheetName}`);
       if (!baseOk) {
         Log.warn(`Unable to ensure table ${displayTableName} on sheet ${sheetName}; applying visual formatting fallback only.`);
-      } else {
-        const currentTable = findExistingTable(svc, spreadsheetId, sheetId, tableId, displayTableName) || existingTable;
-        const updateTableId = currentTable?.tableId || tableId;
-        sheetsBatchUpdateWithRetry(
-          svc,
-          spreadsheetId,
-          [{
-            updateTable: {
-              table: { ...table, tableId: updateTableId },
-              fields: 'columnProperties',
-            },
-          } as any],
-          `Reset table column types ${tableId} on ${sheetName}`,
-        );
       }
 
       sheetsBatchUpdateWithRetry(
@@ -2173,9 +2225,11 @@ namespace SetupService {
     const frontendId = Config.getFrontendId();
     ProtectionService.clearManagedFrontendProtections(frontendId);
     // Old Sheets Table typed columns block normal cell-level validation writes.
-    // Reset table column types before FrontendFormattingService clears/reapplies validations.
-    ensureFrontendTables(frontendId);
+    // Rebuild the table objects around validation so the final state has both real Tables and cell validations.
+    clearFrontendTables(frontendId);
     FrontendFormattingService.applyAll(frontendId);
+    ensureFrontendTables(frontendId);
+    FrontendFormattingService.applyValidations(frontendId);
     ProtectionService.applyFrontendProtections(frontendId);
   }
 
@@ -2337,6 +2391,8 @@ namespace SetupService {
       // Re-apply Attendance header formatting and validations after matrix rebuild.
       fixAttendanceHeaders();
       if (frontendId) {
+        deleteTablesPreservingGrid(frontendId, 'Attendance');
+        FrontendFormattingService.applyValidations(frontendId);
         ensureTableForSheet(frontendId, 'Attendance', 'Attendance');
         FrontendFormattingService.applyValidations(frontendId);
       }
