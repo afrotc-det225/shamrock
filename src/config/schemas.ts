@@ -309,6 +309,7 @@ namespace Schemas {
         'target_range',
         'event_id',
         'request_id',
+        'field',
         'old_value',
         'new_value',
         'result',
@@ -317,6 +318,16 @@ namespace Schemas {
         'source',
         'version',
         'run_id',
+        'action_label',
+        'category',
+        'actor_key',
+        'duration_ms',
+        'severity',
+        'error_message',
+        'error_stack',
+        'metadata_json',
+        'spreadsheet_id',
+        'spreadsheet_name',
       ],
       displayHeaders: [
         'Audit ID',
@@ -330,6 +341,7 @@ namespace Schemas {
         'Target Range',
         'Event ID',
         'Request ID',
+        'Field',
         'Old Value',
         'New Value',
         'Result',
@@ -338,6 +350,16 @@ namespace Schemas {
         'Source',
         'Version',
         'Run ID',
+        'Action Label',
+        'Category',
+        'Actor Key',
+        'Duration Ms',
+        'Severity',
+        'Error Message',
+        'Error Stack',
+        'Metadata JSON',
+        'Spreadsheet ID',
+        'Spreadsheet Name',
       ],
     },
     {
@@ -371,8 +393,8 @@ namespace Schemas {
 
   export const EXCUSALS_MANAGEMENT_SCHEMA: Types.TabSchema = {
     name: 'Excusals Management',
-    machineHeaders: ['timestamp', 'decision', 'event', 'reason', 'email', 'last_name', 'first_name', 'flight', 'request_id'],
-    displayHeaders: ['Timestamp', 'Decision', 'Event', 'Reason', 'Email', 'Last Name', 'First Name', 'Flight', 'Request ID'],
+    machineHeaders: ['timestamp', 'decision', 'event', 'reason', 'requested_attendance_type', 'email', 'last_name', 'first_name', 'flight', 'request_id'],
+    displayHeaders: ['Timestamp', 'Decision', 'Event', 'Reason', 'Requested Type', 'Email', 'Last Name', 'First Name', 'Flight', 'Request ID'],
   };
 
   export function getTabSchema(name: string): Types.TabSchema | undefined {

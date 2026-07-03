@@ -19,28 +19,32 @@ namespace FormService {
       }
     });
 
-    for (let i = items.length - 1; i >= 0; i--) {
+    for (let i = form.getItems().length - 1; i >= 0; i--) {
+      const currentItems = form.getItems();
+      const item = currentItems[i];
+      const title = (item?.getTitle && item.getTitle()) || '';
       try {
-        form.deleteItem(items[i]);
+        form.deleteItem(i);
       } catch (err) {
-        Log.warn(`Unable to delete form item '${items[i].getTitle?.() || ''}': ${err}`);
+        Log.warn(`Unable to delete form item '${title}': ${err}`);
       }
     }
   }
 
   function removeItemsByTitle(form: GoogleAppsScript.Forms.Form, titles: string[]) {
     const titleSet = new Set(titles.map((t) => t.toLowerCase()));
-    form.getItems().forEach((item) => {
-      const t = (item.getTitle && item.getTitle()) || '';
+    for (let i = form.getItems().length - 1; i >= 0; i--) {
+      const item = form.getItems()[i];
+      const t = (item?.getTitle && item.getTitle()) || '';
       if (titleSet.has(String(t).toLowerCase())) {
         try {
-          form.deleteItem(item);
+          form.deleteItem(i);
           Log.info(`Removed redundant form item titled '${t}'`);
         } catch (err) {
           Log.warn(`Unable to remove item titled '${t}'. Error: ${err}`);
         }
       }
-    });
+    }
   }
 
   function seedIfEmpty(form: GoogleAppsScript.Forms.Form, builder: (f: GoogleAppsScript.Forms.Form) => void, label: string) {
@@ -81,9 +85,13 @@ namespace FormService {
     title: string,
     goTo: GoogleAppsScript.Forms.PageNavigationType,
   ): { form: GoogleAppsScript.Forms.Form; item: GoogleAppsScript.Forms.PageBreakItem } {
-    const { form: nextForm, result } = withFormRetry(form, `addPageBreakItem ${title}`, (f) => f.addPageBreakItem());
-    result.setTitle(title);
-    result.setGoToPage(goTo);
+    const { form: nextForm, result } = withFormRetry(form, `addPageBreakItem ${title}`, (f) => {
+      const result = f.addPageBreakItem();
+      result.setTitle(title);
+      result.setGoToPage(goTo);
+      if (String(result.getTitle() || '').trim() !== title) throw new Error(`Page break title mismatch after setTitle("${title}")`);
+      return result;
+    });
     return { form: nextForm, item: result };
   }
 
@@ -92,9 +100,13 @@ namespace FormService {
     title: string,
     required = false,
   ): { form: GoogleAppsScript.Forms.Form; item: GoogleAppsScript.Forms.TextItem } {
-    const { form: nextForm, result } = withFormRetry(form, `addTextItem ${title}`, (f) => f.addTextItem());
-    result.setTitle(title);
-    if (required) result.setRequired(true);
+    const { form: nextForm, result } = withFormRetry(form, `addTextItem ${title}`, (f) => {
+      const result = f.addTextItem();
+      result.setTitle(title);
+      if (required) result.setRequired(true);
+      if (String(result.getTitle() || '').trim() !== title) throw new Error(`Text item title mismatch after setTitle("${title}")`);
+      return result;
+    });
     return { form: nextForm, item: result };
   }
 
@@ -104,10 +116,14 @@ namespace FormService {
     choices?: string[],
     required = false,
   ): { form: GoogleAppsScript.Forms.Form; item: GoogleAppsScript.Forms.ListItem } {
-    const { form: nextForm, result } = withFormRetry(form, `addListItem ${title}`, (f) => f.addListItem());
-    result.setTitle(title);
-    if (choices && choices.length) result.setChoiceValues(choices);
-    if (required) result.setRequired(true);
+    const { form: nextForm, result } = withFormRetry(form, `addListItem ${title}`, (f) => {
+      const result = f.addListItem();
+      result.setTitle(title);
+      if (choices && choices.length) result.setChoiceValues(choices);
+      if (required) result.setRequired(true);
+      if (String(result.getTitle() || '').trim() !== title) throw new Error(`List item title mismatch after setTitle("${title}")`);
+      return result;
+    });
     return { form: nextForm, item: result };
   }
 
@@ -116,9 +132,13 @@ namespace FormService {
     title: string,
     required = false,
   ): { form: GoogleAppsScript.Forms.Form; item: GoogleAppsScript.Forms.MultipleChoiceItem } {
-    const { form: nextForm, result } = withFormRetry(form, `addMultipleChoiceItem ${title}`, (f) => f.addMultipleChoiceItem());
-    result.setTitle(title);
-    if (required) result.setRequired(true);
+    const { form: nextForm, result } = withFormRetry(form, `addMultipleChoiceItem ${title}`, (f) => {
+      const result = f.addMultipleChoiceItem();
+      result.setTitle(title);
+      if (required) result.setRequired(true);
+      if (String(result.getTitle() || '').trim() !== title) throw new Error(`Multiple choice title mismatch after setTitle("${title}")`);
+      return result;
+    });
     return { form: nextForm, item: result };
   }
 
@@ -127,12 +147,103 @@ namespace FormService {
     title: string,
     choices: string[],
   ): { form: GoogleAppsScript.Forms.Form; item: GoogleAppsScript.Forms.CheckboxItem } {
-    const { form: nextForm, result } = withFormRetry(form, `addCheckboxItem ${title}`, (f) => f.addCheckboxItem());
-    result.setTitle(title);
-    if (choices.length > 0) {
-      result.setChoiceValues(choices);
-    }
+    const { form: nextForm, result } = withFormRetry(form, `addCheckboxItem ${title}`, (f) => {
+      const result = f.addCheckboxItem();
+      result.setTitle(title);
+      if (choices.length > 0) {
+        result.setChoiceValues(choices);
+      }
+      if (String(result.getTitle() || '').trim() !== title) throw new Error(`Checkbox item title mismatch after setTitle("${title}")`);
+      return result;
+    });
     return { form: nextForm, item: result };
+  }
+
+  function findPageBreakItem(form: GoogleAppsScript.Forms.Form, title: string): GoogleAppsScript.Forms.PageBreakItem | null {
+    const match = form.getItems(FormApp.ItemType.PAGE_BREAK).find((item) => {
+      try {
+        return String(item.getTitle() || '').trim() === title;
+      } catch {
+        return false;
+      }
+    });
+    return match ? match.asPageBreakItem() : null;
+  }
+
+  function findListItem(form: GoogleAppsScript.Forms.Form, title: string): GoogleAppsScript.Forms.ListItem | null {
+    const match = form.getItems(FormApp.ItemType.LIST).find((item) => {
+      try {
+        return String(item.getTitle() || '').trim() === title;
+      } catch {
+        return false;
+      }
+    });
+    return match ? match.asListItem() : null;
+  }
+
+  function findMultipleChoiceItem(form: GoogleAppsScript.Forms.Form, title: string): GoogleAppsScript.Forms.MultipleChoiceItem | null {
+    const match = form.getItems(FormApp.ItemType.MULTIPLE_CHOICE).find((item) => {
+      try {
+        return String(item.getTitle() || '').trim() === title;
+      } catch {
+        return false;
+      }
+    });
+    return match ? match.asMultipleChoiceItem() : null;
+  }
+
+  function countDefaultQuestionTitles(form: GoogleAppsScript.Forms.Form): number {
+    return form.getItems().filter((item) => {
+      try {
+        const type = item.getType && item.getType();
+        if (
+          type !== FormApp.ItemType.TEXT &&
+          type !== FormApp.ItemType.PARAGRAPH_TEXT &&
+          type !== FormApp.ItemType.LIST &&
+          type !== FormApp.ItemType.MULTIPLE_CHOICE &&
+          type !== FormApp.ItemType.CHECKBOX
+        ) {
+          return false;
+        }
+        return String(item.getTitle() || '').trim().toLowerCase() === 'question';
+      } catch {
+        return false;
+      }
+    }).length;
+  }
+
+  function readAttendanceEventBuckets(): {
+    mando: string[];
+    llab: string[];
+    poc: string[];
+    secondary: string[];
+    other: string[];
+  } {
+    const buckets = { mando: [] as string[], llab: [] as string[], poc: [] as string[], secondary: [] as string[], other: [] as string[] };
+    try {
+      const backendId = Config.getBackendId();
+      const eventsSheet = backendId ? SheetUtils.getSheet(backendId, 'Events Backend') : null;
+      if (!eventsSheet) return buckets;
+
+      const eventsTable = SheetUtils.readTable(eventsSheet);
+      eventsTable.rows.forEach((r) => {
+        const name = String(r['display_name'] || r['attendance_column_label'] || r['event_id'] || '').trim();
+        if (!name) return;
+        const type = String(r['event_type'] || '').toLowerCase();
+        const expectedGroup = String(r['expected_group'] || '').toLowerCase();
+        const nameLc = name.toLowerCase();
+
+        if (type.includes('llab')) buckets.llab.push(name);
+        else if (type.includes('mando')) buckets.mando.push(name);
+        else if (type.includes('secondary')) buckets.secondary.push(name);
+        else if (expectedGroup.includes('poc') || type.includes('third hour') || nameLc.includes('poc third hour')) buckets.poc.push(name);
+        else buckets.other.push(name);
+      });
+    } catch (err) {
+      Log.warn(`Unable to read attendance events: ${err}`);
+    }
+
+    return buckets;
   }
 
   interface CadetOption {
@@ -176,7 +287,7 @@ namespace FormService {
         if (!match) return 0;
         return Number(match[1] || 0) || 0;
       };
-      table.rows.forEach((r) => {
+      table.rows.filter((r) => DirectoryService.isOperationallyActiveCadet(r)).forEach((r) => {
         const as = String(r['as_year'] || '').trim() || 'Unknown';
         const flightRaw = String(r['flight'] || '').trim();
         const normalizedFlight = normalizeToList(flightRaw, Arrays.FLIGHTS);
@@ -470,6 +581,7 @@ namespace FormService {
         const result = addCheckboxItemSafe(workingForm, `Cadets (POC) AS ${as}`, opts);
         workingForm = result.form;
       });
+    Log.info(`Attendance form: POC groups=${Object.keys(cadets.pocByAs).length}`);
 
     // Section 7: Secondary branch (non-abroad) -> submit
     const secondaryPage = addPageBreakItemSafe(workingForm, 'Secondary Branch', FormApp.PageNavigationType.SUBMIT);
@@ -483,6 +595,7 @@ namespace FormService {
         const result = addCheckboxItemSafe(workingForm, `Cadets (Secondary) AS ${as}`, opts);
         workingForm = result.form;
       });
+    Log.info(`Attendance form: Secondary groups=${Object.keys(cadets.nonAbroadByAs).length}`);
 
     // Section 8: Other branch (all cadets) -> submit
     const fallbackPage = addPageBreakItemSafe(workingForm, 'Attendance Branch', FormApp.PageNavigationType.SUBMIT);
@@ -496,40 +609,20 @@ namespace FormService {
         const result = addCheckboxItemSafe(workingForm, `Cadets (All) AS ${as}`, opts);
         workingForm = result.form;
       });
+    Log.info(`Attendance form: Other/all groups=${Object.keys(cadets.allByAs).length}`);
 
     // Populate event lists per category and wire navigation
-    const backendId = Config.getBackendId();
-    const eventsSheet = backendId ? SheetUtils.getSheet(backendId, 'Events Backend') : null;
-
     const mandoEventChoices: GoogleAppsScript.Forms.Choice[] = [];
     const llabEventChoices: GoogleAppsScript.Forms.Choice[] = [];
     const pocEventChoices: GoogleAppsScript.Forms.Choice[] = [];
     const secondaryEventChoices: GoogleAppsScript.Forms.Choice[] = [];
     const otherEventChoices: GoogleAppsScript.Forms.Choice[] = [];
-
-    if (eventsSheet) {
-      const eventsTable = SheetUtils.readTable(eventsSheet);
-      eventsTable.rows.forEach((r) => {
-        const name = r['display_name'] || r['attendance_column_label'] || r['event_id'];
-        if (!name) return;
-        const type = String(r['event_type'] || '').toLowerCase();
-        const expectedGroup = String(r['expected_group'] || '').toLowerCase();
-        const nameLc = String(name || '').toLowerCase();
-
-        // Categorize event and determine target branch
-        if (type.includes('llab')) {
-          llabEventChoices.push(llabEventList.item.createChoice(name, llabBranch.item));
-        } else if (type.includes('mando')) {
-          mandoEventChoices.push(mandoEventList.item.createChoice(name, mandoBranch.item));
-        } else if (type.includes('secondary')) {
-          secondaryEventChoices.push(secondaryEventList.item.createChoice(name, secondaryPage.item));
-        } else if (expectedGroup.includes('poc') || type.includes('third hour') || nameLc.includes('poc third hour')) {
-          pocEventChoices.push(pocEventList.item.createChoice(name, pocPage.item));
-        } else {
-          otherEventChoices.push(otherEventList.item.createChoice(name, fallbackPage.item));
-        }
-      });
-    }
+    const eventBuckets = readAttendanceEventBuckets();
+    eventBuckets.llab.forEach((name) => llabEventChoices.push(llabEventList.item.createChoice(name, llabBranch.item)));
+    eventBuckets.mando.forEach((name) => mandoEventChoices.push(mandoEventList.item.createChoice(name, mandoBranch.item)));
+    eventBuckets.secondary.forEach((name) => secondaryEventChoices.push(secondaryEventList.item.createChoice(name, secondaryPage.item)));
+    eventBuckets.poc.forEach((name) => pocEventChoices.push(pocEventList.item.createChoice(name, pocPage.item)));
+    eventBuckets.other.forEach((name) => otherEventChoices.push(otherEventList.item.createChoice(name, fallbackPage.item)));
 
     // Set choices for each event list (with fallback if empty)
     if (mandoEventChoices.length) mandoEventList.item.setChoices(mandoEventChoices);
@@ -567,96 +660,82 @@ namespace FormService {
       Log.warn('Attendance form: no events found to populate categories');
     }
 
+    const defaultQuestionTitles = countDefaultQuestionTitles(workingForm);
+    if (defaultQuestionTitles) {
+      Log.warn(`Attendance form: detected ${defaultQuestionTitles} item(s) still titled "Question" after rebuild`);
+    }
+
     Log.info('Attendance form: completed rebuild');
   }
 
   export function refreshAttendanceFormEventChoices(form: GoogleAppsScript.Forms.Form) {
-    let eventQuestion: GoogleAppsScript.Forms.ListItem | GoogleAppsScript.Forms.MultipleChoiceItem | null = null;
+    const eventTypeItem = findMultipleChoiceItem(form, 'Event Type');
+    const mandoEventList = findListItem(form, 'Select Event (Mando)');
+    const llabEventList = findListItem(form, 'Select Event (LLAB)');
+    const pocEventList = findListItem(form, 'Select Event (POC Third Hour)');
+    const secondaryEventList = findListItem(form, 'Select Event (Secondary)');
+    const otherEventList = findListItem(form, 'Select Event (Other)');
 
-    const listItems = form.getItems(FormApp.ItemType.LIST);
-    for (const item of listItems) {
-      try {
-        if (String(item.getTitle() || '').trim() === 'Event') {
-          eventQuestion = item.asListItem();
-          break;
-        }
-      } catch {
-        // ignore
-      }
-    }
-
-    if (!eventQuestion) {
-      const mcItems = form.getItems(FormApp.ItemType.MULTIPLE_CHOICE);
-      for (const item of mcItems) {
-        try {
-          if (String(item.getTitle() || '').trim() === 'Event') {
-            eventQuestion = item.asMultipleChoiceItem();
-            break;
-          }
-        } catch {
-          // ignore
-        }
-      }
-    }
-
-    if (!eventQuestion) {
-      Log.warn('Attendance form: cannot refresh events; no list/multiple-choice item titled "Event"');
+    if (!eventTypeItem || !mandoEventList || !llabEventList || !pocEventList || !secondaryEventList || !otherEventList) {
+      Log.warn('Attendance form: cannot refresh events; expected multi-page attendance items are missing');
       return;
     }
 
-    const pages = form.getItems(FormApp.ItemType.PAGE_BREAK);
-    const findPage = (title: string) => {
-      const match = pages.find((p) => {
-        try {
-          return String(p.getTitle() || '').trim() === title;
-        } catch {
-          return false;
-        }
-      });
-      return match ? match.asPageBreakItem() : null;
+    const mandoEventsPage = findPageBreakItem(form, 'Mando Events');
+    const llabEventsPage = findPageBreakItem(form, 'LLAB Events');
+    const pocEventsPage = findPageBreakItem(form, 'Third Hour Events');
+    const secondaryEventsPage = findPageBreakItem(form, 'Secondary Events');
+    const otherEventsPage = findPageBreakItem(form, 'Other Events');
+    const mandoStart = findPageBreakItem(form, 'Mando Branch');
+    const llabStart = findPageBreakItem(form, 'LLAB Branch');
+    const pocStart = findPageBreakItem(form, 'POC Branch');
+    const secondaryStart = findPageBreakItem(form, 'Secondary Branch');
+    const otherStart = findPageBreakItem(form, 'Attendance Branch');
+
+    const eventBuckets = readAttendanceEventBuckets();
+
+    const setListChoices = (
+      item: GoogleAppsScript.Forms.ListItem,
+      names: string[],
+      target: GoogleAppsScript.Forms.PageBreakItem | null,
+    ) => {
+      if (names.length && target) {
+        item.setChoices(names.map((name) => item.createChoice(name, target)));
+        return names.length;
+      }
+      const fallback = target || FormApp.PageNavigationType.SUBMIT;
+      item.setChoices([item.createChoice('(no events)', fallback as any)]);
+      return 0;
     };
 
-    const mandoStart = findPage('Mando Branch');
-    const llabStart = findPage('LLAB Branch');
-    const pocStart = findPage('POC Branch');
-    const secondaryStart = findPage('Secondary Branch');
-    const fallbackStart = findPage('Attendance Branch');
+    const mandoCount = setListChoices(mandoEventList, eventBuckets.mando, mandoStart);
+    const llabCount = setListChoices(llabEventList, eventBuckets.llab, llabStart);
+    const pocCount = setListChoices(pocEventList, eventBuckets.poc, pocStart);
+    const secondaryCount = setListChoices(secondaryEventList, eventBuckets.secondary, secondaryStart);
+    const otherCount = setListChoices(otherEventList, eventBuckets.other, otherStart);
 
-    const eventChoices: GoogleAppsScript.Forms.Choice[] = [];
-    try {
-      const backendId = Config.getBackendId();
-      const eventsSheet = backendId ? SheetUtils.getSheet(backendId, 'Events Backend') : null;
-      if (eventsSheet) {
-        const eventsTable = SheetUtils.readTable(eventsSheet);
-        eventsTable.rows.forEach((r) => {
-          const name = r['display_name'] || r['attendance_column_label'] || r['event_id'];
-          if (!name) return;
-          const type = String(r['event_type'] || '').toLowerCase();
-          const expectedGroup = String(r['expected_group'] || '').toLowerCase();
-          const nameLc = String(name || '').toLowerCase();
-          let target: GoogleAppsScript.Forms.PageBreakItem | GoogleAppsScript.Forms.PageNavigationType | null = fallbackStart;
-          if (type.includes('llab')) target = llabStart;
-          else if (type.includes('mando')) target = mandoStart;
-          else if (type.includes('secondary')) target = secondaryStart;
-          else if (expectedGroup.includes('poc') || type.includes('third hour') || nameLc.includes('poc third hour')) target = pocStart;
+    const categoryChoices: GoogleAppsScript.Forms.Choice[] = [];
+    if (mandoCount && mandoEventsPage) categoryChoices.push(eventTypeItem.createChoice('Mando PT', mandoEventsPage));
+    if (llabCount && llabEventsPage) categoryChoices.push(eventTypeItem.createChoice('LLAB', llabEventsPage));
+    if (pocCount && pocEventsPage) categoryChoices.push(eventTypeItem.createChoice('POC Third Hour', pocEventsPage));
+    if (secondaryCount && secondaryEventsPage) categoryChoices.push(eventTypeItem.createChoice('Secondary', secondaryEventsPage));
+    if (otherCount && otherEventsPage) categoryChoices.push(eventTypeItem.createChoice('Other', otherEventsPage));
 
-          if (target) {
-            eventChoices.push((eventQuestion as any).createChoice(name, target));
-          } else {
-            eventChoices.push((eventQuestion as any).createChoice(name, FormApp.PageNavigationType.SUBMIT));
-          }
-        });
-      }
-    } catch (err) {
-      Log.warn(`Unable to populate attendance form events: ${err}`);
+    if (categoryChoices.length) {
+      eventTypeItem.setChoices(categoryChoices);
+      Log.info(
+        `Attendance form: refreshed event choices mando=${mandoCount} llab=${llabCount} poc=${pocCount} secondary=${secondaryCount} other=${otherCount}`
+      );
+      return;
     }
 
-    if (!eventChoices.length) {
-      if (fallbackStart) eventChoices.push(eventQuestion.createChoice('(set up events first)', fallbackStart));
-      else eventChoices.push(eventQuestion.createChoice('(set up events first)', FormApp.PageNavigationType.SUBMIT));
+    const fallbackPage = otherEventsPage || otherStart;
+    if (fallbackPage) {
+      eventTypeItem.setChoices([eventTypeItem.createChoice('(set up events first)', fallbackPage)]);
+    } else {
+      eventTypeItem.setChoiceValues(['(set up events first)']);
     }
-    (eventQuestion as any).setChoices(eventChoices);
-    Log.info(`Attendance form: refreshed event choices count=${eventChoices.length}`);
+    Log.warn('Attendance form: refreshed event choices but found no categorized events');
   }
 
   export function ensureExcusalsForm(form: GoogleAppsScript.Forms.Form) {
@@ -717,12 +796,17 @@ namespace FormService {
     const reasonItem = addTextItemSafe(workingForm, 'Reason', true);
     workingForm = reasonItem.form;
 
-    // Set each event page to navigate back to Event Category after event selection
+    // Set each event page and the details page to navigate back to Event Category
+    // when reached by linear progression. This ensures that after completing any event
+    // section, the form loops back to category selection rather than falling through.
+    // Users reach Excusal Details via the "Done selecting events" choice (not linear
+    // progression), so this doesn't affect the submit flow.
     mandoEventsPage.item.setGoToPage(eventCategoryPage.item);
     llabEventsPage.item.setGoToPage(eventCategoryPage.item);
     pocEventsPage.item.setGoToPage(eventCategoryPage.item);
     secondaryEventsPage.item.setGoToPage(eventCategoryPage.item);
     otherEventsPage.item.setGoToPage(eventCategoryPage.item);
+    detailsPage.item.setGoToPage(eventCategoryPage.item);
 
     // Populate event lists per category
     const backendId = Config.getBackendId();
@@ -820,7 +904,108 @@ namespace FormService {
   }
 
   export function refreshExcusalsFormEventChoices(form: GoogleAppsScript.Forms.Form) {
-    // Legacy function - now handled by rebuildExcusalsForm
-    Log.info('refreshExcusalsFormEventChoices: use rebuildExcusalsForm instead');
+    const eventTypeItem = findMultipleChoiceItem(form, 'Select Event Type (or Done to continue)');
+    const mandoEventList = form
+      .getItems(FormApp.ItemType.CHECKBOX)
+      .find((item) => {
+        try {
+          return String(item.getTitle() || '').trim() === 'Select Event(s) (Mando)';
+        } catch {
+          return false;
+        }
+      })
+      ?.asCheckboxItem() || null;
+    const llabEventList = form
+      .getItems(FormApp.ItemType.CHECKBOX)
+      .find((item) => {
+        try {
+          return String(item.getTitle() || '').trim() === 'Select Event(s) (LLAB)';
+        } catch {
+          return false;
+        }
+      })
+      ?.asCheckboxItem() || null;
+    const pocEventList = form
+      .getItems(FormApp.ItemType.CHECKBOX)
+      .find((item) => {
+        try {
+          return String(item.getTitle() || '').trim() === 'Select Event(s) (POC Third Hour)';
+        } catch {
+          return false;
+        }
+      })
+      ?.asCheckboxItem() || null;
+    const secondaryEventList = form
+      .getItems(FormApp.ItemType.CHECKBOX)
+      .find((item) => {
+        try {
+          return String(item.getTitle() || '').trim() === 'Select Event(s) (Secondary)';
+        } catch {
+          return false;
+        }
+      })
+      ?.asCheckboxItem() || null;
+    const otherEventList = form
+      .getItems(FormApp.ItemType.CHECKBOX)
+      .find((item) => {
+        try {
+          return String(item.getTitle() || '').trim() === 'Select Event(s) (Other)';
+        } catch {
+          return false;
+        }
+      })
+      ?.asCheckboxItem() || null;
+
+    if (!eventTypeItem || !mandoEventList || !llabEventList || !pocEventList || !secondaryEventList || !otherEventList) {
+      Log.warn('Excusals form: cannot refresh events; expected multi-page excusals items are missing');
+      return;
+    }
+
+    const mandoEventsPage = findPageBreakItem(form, 'Mando Events');
+    const llabEventsPage = findPageBreakItem(form, 'LLAB Events');
+    const pocEventsPage = findPageBreakItem(form, 'Third Hour Events');
+    const secondaryEventsPage = findPageBreakItem(form, 'Secondary Events');
+    const otherEventsPage = findPageBreakItem(form, 'Other Events');
+    const detailsPage = findPageBreakItem(form, 'Excusal Details');
+
+    const eventBuckets = readAttendanceEventBuckets();
+
+    const setCheckboxChoices = (item: GoogleAppsScript.Forms.CheckboxItem, names: string[]) => {
+      if (names.length) {
+        item.setChoiceValues(names);
+        return names.length;
+      }
+      item.setChoices([item.createChoice('(no events)')]);
+      return 0;
+    };
+
+    const mandoCount = setCheckboxChoices(mandoEventList, eventBuckets.mando);
+    const llabCount = setCheckboxChoices(llabEventList, eventBuckets.llab);
+    const pocCount = setCheckboxChoices(pocEventList, eventBuckets.poc);
+    const secondaryCount = setCheckboxChoices(secondaryEventList, eventBuckets.secondary);
+    const otherCount = setCheckboxChoices(otherEventList, eventBuckets.other);
+
+    const categoryChoices: GoogleAppsScript.Forms.Choice[] = [];
+    if (mandoCount && mandoEventsPage) categoryChoices.push(eventTypeItem.createChoice('Mando PT', mandoEventsPage));
+    if (llabCount && llabEventsPage) categoryChoices.push(eventTypeItem.createChoice('LLAB', llabEventsPage));
+    if (pocCount && pocEventsPage) categoryChoices.push(eventTypeItem.createChoice('POC Third Hour', pocEventsPage));
+    if (secondaryCount && secondaryEventsPage) categoryChoices.push(eventTypeItem.createChoice('Secondary', secondaryEventsPage));
+    if (otherCount && otherEventsPage) categoryChoices.push(eventTypeItem.createChoice('Other', otherEventsPage));
+    if (detailsPage) categoryChoices.push(eventTypeItem.createChoice('Done selecting events', detailsPage));
+
+    if (categoryChoices.length) {
+      eventTypeItem.setChoices(categoryChoices);
+      Log.info(
+        `Excusals form: refreshed event choices mando=${mandoCount} llab=${llabCount} poc=${pocCount} secondary=${secondaryCount} other=${otherCount}`
+      );
+      return;
+    }
+
+    if (detailsPage) {
+      eventTypeItem.setChoices([eventTypeItem.createChoice('Done selecting events', detailsPage)]);
+    } else {
+      eventTypeItem.setChoiceValues(['Done selecting events']);
+    }
+    Log.warn('Excusals form: refreshed event choices but found no categorized events');
   }
 }

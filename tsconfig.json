@@ -1,7 +1,7 @@
 {
   "compilerOptions": {
-    "target": "ES5",
-    "module": "None",
+    "target": "ES2019",
+    "module": "preserve",
     "lib": ["ES2019"],
     "types": ["google-apps-script"],
     "rootDir": "src",

@@ -26,8 +26,7 @@ namespace SetupService {
 
   function ensureSpreadsheet(role: Types.WorkbookRole, name: string, propertyKey: string): Types.EnsureSpreadsheetResult {
     Log.info(`Ensuring spreadsheet for role=${role}`);
-    const props = Config.scriptProperties();
-    const existingId = props.getProperty(propertyKey);
+    const existingId = Config.getScriptProperty(propertyKey);
     let spreadsheet: GoogleAppsScript.Spreadsheet.Spreadsheet | null = null;
     let created = false;
 
@@ -42,7 +41,7 @@ namespace SetupService {
 
     if (!spreadsheet) {
       spreadsheet = SpreadsheetApp.create(name);
-      props.setProperty(propertyKey, spreadsheet.getId());
+      Config.setScriptProperty(propertyKey, spreadsheet.getId());
       created = true;
       Log.info(`Created spreadsheet name=${name} id=${spreadsheet.getId()}`);
     }
@@ -250,10 +249,9 @@ namespace SetupService {
 
   function isFrontendFormattingDisabled(): boolean {
     try {
-      const prop = Config.scriptProperties().getProperty('DISABLE_FRONTEND_FORMATTING');
-      return String(prop || '').toLowerCase() === 'true';
+      return Config.getBooleanScriptProperty(Config.PROPERTY_KEYS.DISABLE_MAIN_WORKBOOK_FORMATTING);
     } catch (err) {
-      Log.warn(`Unable to read DISABLE_FRONTEND_FORMATTING property: ${err}`);
+      Log.warn(`Unable to read ${Config.PROPERTY_KEYS.DISABLE_MAIN_WORKBOOK_FORMATTING} property: ${err}`);
       return false;
     }
   }
@@ -685,117 +683,112 @@ namespace SetupService {
     normalizeAttendanceBackendHeaders();
   }
 
-  function pruneExcusalsResponseColumnsExplicit(verbose = true) {
-    const vlog = (msg: string) => {
-      if (verbose) Log.info(`[excusal-prune] ${msg}`);
-    };
-    let sheet: GoogleAppsScript.Spreadsheet.Sheet | null = null;
+  /**
+   * Safely remove duplicate columns from the Excusals Form Responses sheet.
+   * Processes ONE duplicate at a time, re-reading headers after each deletion
+   * to avoid index shifting corruption.
+   */
+  function safeDeduplicateExcusalsResponseColumns() {
+    let sheet: GoogleAppsScript.Spreadsheet.Sheet;
     try {
       sheet = Config.getBackendSheet(Config.RESOURCE_NAMES.EXCUSALS_FORM_SHEET);
     } catch (err) {
-      Log.warn(`Excusals response sheet missing; skipping prune. Error: ${err}`);
+      Log.warn(`Excusals response sheet missing; skipping dedup. Error: ${err}`);
       return;
     }
 
-    for (let attempt = 0; attempt < 3; attempt++) {
+    let totalDeleted = 0;
+
+    // Outer loop: keep going until no more duplicates can be removed
+    for (let round = 0; round < 50; round++) {
       const lastCol = sheet.getLastColumn();
-      if (lastCol === 0) return;
-      let changed = false;
-      const headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0].map((h) => String(h || ''));
-      if (verbose) {
-        vlog(`Attempt ${attempt + 1}: lastCol=${lastCol}`);
-        headers.forEach((h, idx) => vlog(`  Col ${idx + 1}: '${h}'`));
+      const lastRow = sheet.getLastRow();
+      if (lastCol === 0) break;
+
+      const headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0].map((h) => String(h || '').trim());
+
+      // Find the FIRST duplicate header pair
+      let dupHeader = '';
+      let cols: number[] = [];
+      const seen = new Map<string, number>();
+      for (let i = 0; i < headers.length; i++) {
+        const h = headers[i];
+        if (!h || /^Column \d+$/i.test(h)) continue;
+        if (seen.has(h)) {
+          dupHeader = h;
+          cols = [seen.get(h)! + 1, i + 1]; // 1-based
+          break;
+        }
+        seen.set(h, i);
       }
 
-      const normalizeHeader = (raw: string) => {
-        const orig = raw || '';
-        const h = orig.trim().toLowerCase();
-        if (
-          h === 'event' ||
-          /^event\s*\d+$/i.test(orig) ||
-          /^event\s*\(\d+\)$/i.test(orig) ||
-          /^event\b.*other/i.test(orig) ||
-          h.startsWith('other event')
-        ) {
-          return 'event';
-        }
-        return orig.trim();
-      };
-
-      const indicesByHeader = new Map<string, number[]>();
-      headers.forEach((h, idx) => {
-        const key = normalizeHeader(h);
-        if (!key) return;
-        const arr = indicesByHeader.get(key) || [];
-        arr.push(idx + 1);
-        indicesByHeader.set(key, arr);
-      });
-
-      indicesByHeader.forEach((cols, header) => {
-        if (cols.length <= 1) return;
-        const sorted = cols.slice().sort((a, b) => a - b); // Sort ascending by column position
-        vlog(`Header '${header}' has ${sorted.length} columns: ${sorted.join(', ')}`);
-
-        // Keep the LAST (rightmost) column as the survivor - it's typically the newest form-linked column
-        const survivorCol = sorted[sorted.length - 1];
-        const columnsToDelete = sorted.slice(0, -1); // All except the last one
-        
-        vlog(`  Survivor: column ${survivorCol}, will delete: ${columnsToDelete.join(', ')}`);
-
-        const lastRow = sheet.getLastRow();
-        if (lastRow > 1) {
-          // Merge data from all columns into the survivor
-          const survivorData = sheet.getRange(2, survivorCol, lastRow - 1, 1).getValues();
-          
-          // For each column that will be deleted, merge its data into survivor
-          columnsToDelete.forEach((col) => {
-            const currentMax = sheet.getMaxColumns();
-            if (col > currentMax) return;
-            
-            try {
-              const sourceData = sheet.getRange(2, col, lastRow - 1, 1).getValues();
-              
-              // Merge: copy non-empty cells from source to survivor where survivor is empty
-              for (let i = 0; i < sourceData.length; i++) {
-                const sourceValue = sourceData[i][0];
-                const survivorValue = survivorData[i][0];
-                
-                if ((!survivorValue || String(survivorValue).trim() === '') && sourceValue && String(sourceValue).trim() !== '') {
-                  survivorData[i][0] = sourceValue;
-                  vlog(`  Merged data from col ${col} row ${i + 2} to survivor col ${survivorCol}`);
-                }
-              }
-            } catch (err) {
-              Log.warn(`Unable to read data from column ${col} for merging: ${err}`);
+      if (!dupHeader) {
+        // No more duplicates — now delete empty "Column N" columns
+        for (let i = headers.length - 1; i >= 0; i--) {
+          if (/^Column \d+$/i.test(headers[i])) {
+            // Check if empty
+            let empty = true;
+            if (lastRow > 1) {
+              const colData = sheet.getRange(2, i + 1, lastRow - 1, 1).getValues();
+              empty = colData.every((r) => !String(r[0] || '').trim());
             }
-          });
-          
-          // Write merged data back to survivor
-          try {
-            sheet.getRange(2, survivorCol, lastRow - 1, 1).setValues(survivorData);
-            vlog(`  Wrote merged data to survivor column ${survivorCol}`);
-          } catch (err) {
-            Log.warn(`Unable to write merged data to survivor column ${survivorCol}: ${err}`);
+            if (empty) {
+              try {
+                sheet.deleteColumn(i + 1);
+                totalDeleted++;
+                Log.info(`[excusal-dedup] Deleted empty Column N at position ${i + 1}`);
+              } catch {}
+            }
           }
         }
+        break;
+      }
 
-        // Delete columns in reverse order to preserve indices during deletion
-        columnsToDelete.reverse().forEach((col) => {
-          const currentMax = sheet.getMaxColumns();
-          if (col > currentMax) return;
-          
-          try {
-            sheet.deleteColumn(col);
-            changed = true;
-            vlog(`  Deleted column ${col} for header '${header}'`);
-          } catch (err) {
-            Log.warn(`Unable to delete column ${col} for '${header}' in ${Config.RESOURCE_NAMES.EXCUSALS_FORM_SHEET}: ${err}`);
-          }
-        });
-      });
+      Log.info(`[excusal-dedup] Round ${round + 1}: deduping "${dupHeader}" at cols ${cols.join(', ')}`);
 
-      if (!changed) break;
+      // Merge data: fill empty cells in each column from the other
+      if (lastRow > 1) {
+        const dataA = sheet.getRange(2, cols[0], lastRow - 1, 1).getValues();
+        const dataB = sheet.getRange(2, cols[1], lastRow - 1, 1).getValues();
+        for (let r = 0; r < lastRow - 1; r++) {
+          const a = String(dataA[r][0] || '').trim();
+          const b = String(dataB[r][0] || '').trim();
+          if (!a && b) dataA[r][0] = b;
+          if (!b && a) dataB[r][0] = a;
+        }
+        sheet.getRange(2, cols[0], lastRow - 1, 1).setValues(dataA);
+        sheet.getRange(2, cols[1], lastRow - 1, 1).setValues(dataB);
+      }
+
+      // Try to delete one of them (right one first, then left)
+      let deleted = false;
+      for (const col of [cols[1], cols[0]]) {
+        try {
+          sheet.deleteColumn(col);
+          totalDeleted++;
+          deleted = true;
+          Log.info(`[excusal-dedup] Deleted col ${col} for "${dupHeader}"`);
+          break;
+        } catch {
+          Log.info(`[excusal-dedup] Col ${col} is form-linked for "${dupHeader}", trying other`);
+        }
+      }
+
+      if (!deleted) {
+        Log.info(`[excusal-dedup] Both columns for "${dupHeader}" are form-linked; hiding col ${cols[1]}`);
+        try { sheet.hideColumns(cols[1]); } catch {}
+        break; // Can't make progress, stop
+      }
     }
+
+    Log.info(`[excusal-dedup] Done: ${totalDeleted} columns removed`);
+  }
+
+  /**
+   * @deprecated Use safeDeduplicateExcusalsResponseColumns instead.
+   */
+  function pruneExcusalsResponseColumnsExplicit(_verbose = true) {
+    safeDeduplicateExcusalsResponseColumns();
   }
 
   // Verbose debug entrypoint to inspect and prune excusals Event columns; callable from Apps Script.
@@ -816,14 +809,249 @@ namespace SetupService {
   }
 
   /**
+   * Deep-clean the Excusals Form Responses sheet:
+   * 1. Merge same-name duplicate columns into their active counterpart
+   * 2. Distribute legacy "Column 23" event data into category-specific event columns
+   * 3. Merge "Column 27" attendance type data into Requested Attendance Type
+   * 4. Merge "Column 24" last names into Last Name (if active is empty)
+   * 5. Delete empty/redundant orphan columns
+   */
+  export function deepCleanExcusalsFormResponses(): { merged: number; deleted: number } {
+    let sheet: GoogleAppsScript.Spreadsheet.Sheet;
+    try {
+      sheet = Config.getBackendSheet(Config.RESOURCE_NAMES.EXCUSALS_FORM_SHEET);
+    } catch (err) {
+      Log.warn(`Excusals response sheet missing; skipping deep clean. Error: ${err}`);
+      return { merged: 0, deleted: 0 };
+    }
+
+    const lastCol = sheet.getLastColumn();
+    const lastRow = sheet.getLastRow();
+    if (lastCol === 0 || lastRow < 2) return { merged: 0, deleted: 0 };
+
+    const headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0].map((h) => String(h || '').trim());
+    const dataRows = lastRow - 1;
+    const data = sheet.getRange(2, 1, dataRows, lastCol).getValues();
+
+    Log.info(`[deep-clean-excusals] Starting: ${lastCol} cols, ${dataRows} data rows`);
+    headers.forEach((h, i) => Log.info(`  Col ${i + 1}: "${h}"`));
+
+    // Map of canonical header → active column index (0-based)
+    const ACTIVE_COLS: Record<string, number> = {};
+    const CANONICAL = [
+      'Timestamp', 'Email Address', 'Name', 'Last Name', 'First Name',
+      'Select Event Type (or Done to continue)',
+      'Select Event(s) (Mando)', 'Select Event(s) (LLAB)', 'Select Event(s) (POC Third Hour)',
+      'Select Event(s) (Secondary)', 'Select Event(s) (Other)',
+      'Requested Attendance Type', 'Reason',
+    ];
+    CANONICAL.forEach((name) => {
+      const idx = headers.indexOf(name);
+      if (idx >= 0) ACTIVE_COLS[name] = idx;
+    });
+
+    let mergedCells = 0;
+
+    // Helper: merge source col data into target col (only fill empty target cells)
+    const mergeCol = (srcIdx: number, tgtIdx: number) => {
+      for (let r = 0; r < dataRows; r++) {
+        const tgtVal = String(data[r][tgtIdx] || '').trim();
+        const srcVal = String(data[r][srcIdx] || '').trim();
+        if (!tgtVal && srcVal) {
+          data[r][tgtIdx] = srcVal;
+          mergedCells++;
+        }
+      }
+    };
+
+    // Helper: append value to target col (comma-separated, avoiding duplicates)
+    const appendToCol = (row: number, tgtIdx: number, value: string) => {
+      const existing = String(data[row][tgtIdx] || '').trim();
+      const existingParts = existing ? existing.split(',').map((s) => s.trim()).filter(Boolean) : [];
+      if (!existingParts.includes(value)) {
+        existingParts.push(value);
+        data[row][tgtIdx] = existingParts.join(', ');
+        mergedCells++;
+      }
+    };
+
+    // 1. Merge same-name duplicate columns (cols beyond the first 13 active ones)
+    for (let ci = CANONICAL.length; ci < headers.length; ci++) {
+      const header = headers[ci];
+      if (!header || header.startsWith('Column ')) continue;
+      const activeIdx = ACTIVE_COLS[header];
+      if (activeIdx !== undefined && activeIdx !== ci) {
+        Log.info(`[deep-clean-excusals] Merging duplicate col ${ci + 1} "${header}" → active col ${activeIdx + 1}`);
+        mergeCol(ci, activeIdx);
+      }
+    }
+
+    // 2. Distribute "Column 23" legacy event data into category-specific columns
+    const col23Idx = headers.findIndex((h) => h === 'Column 23');
+    if (col23Idx >= 0) {
+      const mandoIdx = ACTIVE_COLS['Select Event(s) (Mando)'];
+      const llabIdx = ACTIVE_COLS['Select Event(s) (LLAB)'];
+      const pocIdx = ACTIVE_COLS['Select Event(s) (POC Third Hour)'];
+      const secIdx = ACTIVE_COLS['Select Event(s) (Secondary)'];
+      const otherIdx = ACTIVE_COLS['Select Event(s) (Other)'];
+
+      for (let r = 0; r < dataRows; r++) {
+        const raw = String(data[r][col23Idx] || '').trim();
+        if (!raw) continue;
+        const events = raw.split(',').map((e) => e.trim()).filter(Boolean);
+        for (const ev of events) {
+          const evLower = ev.toLowerCase();
+          if (evLower.includes('mando') && mandoIdx !== undefined) {
+            appendToCol(r, mandoIdx, ev);
+          } else if (evLower.includes('llab') && llabIdx !== undefined) {
+            appendToCol(r, llabIdx, ev);
+          } else if (evLower.includes('poc') && pocIdx !== undefined) {
+            appendToCol(r, pocIdx, ev);
+          } else if (evLower.includes('secondary') && secIdx !== undefined) {
+            appendToCol(r, secIdx, ev);
+          } else if (otherIdx !== undefined) {
+            appendToCol(r, otherIdx, ev);
+          }
+        }
+      }
+      Log.info(`[deep-clean-excusals] Distributed Column 23 legacy events to active category columns`);
+    }
+
+    // 3. Merge "Column 27" — mostly attendance types, some POC events
+    const col27Idx = headers.findIndex((h) => h === 'Column 27');
+    if (col27Idx >= 0) {
+      const reqTypeIdx = ACTIVE_COLS['Requested Attendance Type'];
+      const pocIdx = ACTIVE_COLS['Select Event(s) (POC Third Hour)'];
+      const ATT_TYPES = new Set(['E', 'ES', 'MU', 'MRS']);
+
+      for (let r = 0; r < dataRows; r++) {
+        const raw = String(data[r][col27Idx] || '').trim();
+        if (!raw) continue;
+        if (ATT_TYPES.has(raw) && reqTypeIdx !== undefined) {
+          const existing = String(data[r][reqTypeIdx] || '').trim();
+          if (!existing) {
+            data[r][reqTypeIdx] = raw;
+            mergedCells++;
+          }
+        } else if (raw.toLowerCase().includes('poc') && pocIdx !== undefined) {
+          const events = raw.split(',').map((e) => e.trim()).filter(Boolean);
+          for (const ev of events) {
+            appendToCol(r, pocIdx, ev);
+          }
+        }
+      }
+      Log.info(`[deep-clean-excusals] Merged Column 27 data`);
+    }
+
+    // 4. Merge "Column 24" last names into active Last Name (if empty)
+    const col24Idx = headers.findIndex((h) => h === 'Column 24');
+    const lastNameIdx = ACTIVE_COLS['Last Name'];
+    if (col24Idx >= 0 && lastNameIdx !== undefined) {
+      mergeCol(col24Idx, lastNameIdx);
+      Log.info(`[deep-clean-excusals] Merged Column 24 into Last Name`);
+    }
+
+    // Write merged data back
+    sheet.getRange(2, 1, dataRows, lastCol).setValues(data);
+    Log.info(`[deep-clean-excusals] Wrote back data; ${mergedCells} cells merged`);
+
+    // 5. Delete orphan columns (right-to-left to keep indices stable)
+    // Orphans are anything beyond the first 13 canonical columns
+    let deletedCols = 0;
+    for (let ci = headers.length - 1; ci >= CANONICAL.length; ci--) {
+      try {
+        sheet.deleteColumn(ci + 1);
+        deletedCols++;
+        Log.info(`[deep-clean-excusals] Deleted col ${ci + 1} "${headers[ci]}"`);
+      } catch (err) {
+        // Form-linked column — can't delete, skip
+        Log.info(`[deep-clean-excusals] Cannot delete col ${ci + 1} "${headers[ci]}" (likely form-linked)`);
+      }
+    }
+
+    Log.info(`[deep-clean-excusals] Done: ${mergedCells} cells merged, ${deletedCols} columns deleted`);
+    return { merged: mergedCells, deleted: deletedCols };
+  }
+
+  /**
+   * Deep-clean the Attendance Form Responses sheet:
+   * Delete all empty "Column N" junk columns that have no data.
+   */
+  export function deepCleanAttendanceFormResponses(): { deleted: number } {
+    let sheet: GoogleAppsScript.Spreadsheet.Sheet;
+    try {
+      sheet = Config.getBackendSheet(Config.RESOURCE_NAMES.ATTENDANCE_FORM_SHEET);
+    } catch (err) {
+      Log.warn(`Attendance response sheet missing; skipping deep clean. Error: ${err}`);
+      return { deleted: 0 };
+    }
+
+    const lastCol = sheet.getLastColumn();
+    const lastRow = sheet.getLastRow();
+    if (lastCol === 0) return { deleted: 0 };
+
+    const headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0].map((h) => String(h || '').trim());
+    Log.info(`[deep-clean-attendance] Starting: ${lastCol} cols, ${lastRow} rows`);
+
+    // Find all "Column N" indices
+    const junkCols: number[] = [];
+    headers.forEach((h, i) => {
+      if (/^Column \d+$/i.test(h)) junkCols.push(i);
+    });
+
+    if (junkCols.length === 0) {
+      Log.info(`[deep-clean-attendance] No Column N junk found`);
+      return { deleted: 0 };
+    }
+
+    // Verify they're actually empty before deleting
+    const dataRows = Math.max(0, lastRow - 1);
+    let emptyJunk: number[] = [];
+    if (dataRows > 0) {
+      for (const ci of junkCols) {
+        const colData = sheet.getRange(2, ci + 1, dataRows, 1).getValues();
+        const hasData = colData.some((row) => String(row[0] || '').trim() !== '');
+        if (!hasData) {
+          emptyJunk.push(ci);
+        } else {
+          Log.warn(`[deep-clean-attendance] Column N col ${ci + 1} "${headers[ci]}" has data; skipping`);
+        }
+      }
+    } else {
+      emptyJunk = [...junkCols];
+    }
+
+    // Delete right-to-left
+    let deleted = 0;
+    emptyJunk.sort((a, b) => b - a);
+    for (const ci of emptyJunk) {
+      try {
+        sheet.deleteColumn(ci + 1);
+        deleted++;
+      } catch (err) {
+        Log.warn(`[deep-clean-attendance] Cannot delete col ${ci + 1} "${headers[ci]}": ${err}`);
+      }
+    }
+
+    Log.info(`[deep-clean-attendance] Done: deleted ${deleted} of ${junkCols.length} Column N columns`);
+    return { deleted };
+  }
+
+  /**
+   * Run deep clean on both form response sheets. Callable from menu.
+   */
+  export function deepCleanFormResponseSheets() {
+    const excusals = deepCleanExcusalsFormResponses();
+    const attendance = deepCleanAttendanceFormResponses();
+    return { excusals, attendance };
+  }
+
+  /**
    * Process any existing rows in the Excusals Form Responses sheet that haven't been
    * inserted into Excusals Backend yet (pre-online submissions/backfill).
    */
   export function processExcusalsFormBacklog() {
     try {
-      // Normalize response headers first to ensure single 'Event' column.
-      pruneExcusalsResponseColumnsExplicit(false);
-
       const respSheet = Config.getBackendSheet(Config.RESOURCE_NAMES.EXCUSALS_FORM_SHEET);
       const lastCol = respSheet.getLastColumn();
       const lastRow = respSheet.getLastRow();
@@ -862,10 +1090,10 @@ namespace SetupService {
       const firstIdx = headerIndex('First Name');
       const reasonIdx = headerIndex('Reason');
       const eventIdx = headers.map((h) => normalizeEventHeader(h)).indexOf('event');
+      const reqTypeIdx = headerIndex('Requested Attendance Type');
 
       if (eventIdx < 0 || emailIdx < 0) {
-        Log.warn('Excusals responses missing required headers (Event/Email); cannot backfill.');
-        return;
+        throw new Error('Excusals responses missing required headers (Event/Email); cannot backfill.');
       }
 
       // Build existing key set from Excusals Backend to avoid duplicates.
@@ -906,6 +1134,7 @@ namespace SetupService {
         const lastName = lastIdx >= 0 ? String(row[lastIdx] || '').trim() : '';
         const firstName = firstIdx >= 0 ? String(row[firstIdx] || '').trim() : '';
         const reason = reasonIdx >= 0 ? String(row[reasonIdx] || '').trim() : '';
+        const requestedType = reqTypeIdx >= 0 ? String(row[reqTypeIdx] || '').trim() : '';
         const tsVal = tsIdx >= 0 ? row[tsIdx] : '';
         const submittedAt = (() => {
           try { return new Date(tsVal).toISOString(); } catch { return new Date().toISOString(); }
@@ -938,6 +1167,7 @@ namespace SetupService {
             decision: '',
             decided_by: '',
             decided_at: '',
+            requested_attendance_type: requestedType || 'E',
             attendance_effect: '',
             submitted_at: submittedAt,
             last_updated_at: submittedAt,
@@ -963,6 +1193,7 @@ namespace SetupService {
       Log.info(`Processed excusals form backlog: appended ${toAppend.length} event rows.`);
     } catch (err) {
       Log.warn(`Failed to process excusals form backlog: ${err}`);
+      throw err;
     }
   }
 
@@ -990,7 +1221,7 @@ namespace SetupService {
       return headers;
     } catch (err) {
       Log.warn(`debugAttendanceResponseSheet failed: ${err}`);
-      return [];
+      throw err;
     }
   }
 
@@ -1035,8 +1266,7 @@ namespace SetupService {
       });
 
       if (selectEventIndices.length === 0) {
-        Log.warn('Attendance responses missing "Select Event" columns; cannot backfill.');
-        return;
+        throw new Error('Attendance responses missing "Select Event" columns; cannot backfill.');
       }
 
       Log.info(`Found ${selectEventIndices.length} "Select Event" columns and ${cadetColumnIndices.length} cadet columns`);
@@ -1213,6 +1443,7 @@ namespace SetupService {
       Log.info(`Processed attendance form backlog: appended ${toAppend.length} event rows, updated matrix.`);
     } catch (err) {
       Log.warn(`Failed to process attendance form backlog: ${err}`);
+      throw err;
     }
   }
 
@@ -1495,10 +1726,11 @@ namespace SetupService {
       }
     });
 
-    // Recreate spreadsheet triggers (onOpen/onEdit) for frontend, backend, and excusals management.
+    // Recreate spreadsheet triggers. Frontend onOpen is intentionally a no-op;
+    // backend onOpen adds the admin menu for anyone with access to that sheet.
     const frontendId = Config.getFrontendId();
     const backendId = Config.getBackendId();
-    const managementId = Config.scriptProperties().getProperty('EXCUSALS_MANAGEMENT_SHEET_ID') || '';
+    const managementId = Config.getScriptProperty(Config.PROPERTY_KEYS.EXCUSAL_MANAGEMENT_SPREADSHEET_ID);
     ensureSpreadsheetTrigger('onFrontendOpen', frontendId, 'open');
     ensureSpreadsheetTrigger('onFrontendEdit', frontendId, 'edit');
     ensureSpreadsheetTrigger('onBackendOpen', backendId, 'open');
@@ -1509,19 +1741,18 @@ namespace SetupService {
     ensurePeriodicTrigger('reconcilePendingDirectoryEdits', 10);
 
     // Recreate form submit triggers for attendance/excusal/directory.
-    const props = Config.scriptProperties();
-    const attendanceFormId = props.getProperty(Config.PROPERTY_KEYS.ATTENDANCE_FORM_ID) || '';
-    const excusalFormId = props.getProperty(Config.PROPERTY_KEYS.EXCUSALS_FORM_ID) || '';
-    const directoryFormId = props.getProperty(Config.PROPERTY_KEYS.DIRECTORY_FORM_ID) || '';
+    const attendanceFormId = Config.getScriptProperty(Config.PROPERTY_KEYS.ATTENDANCE_FORM_ID);
+    const excusalFormId = Config.getScriptProperty(Config.PROPERTY_KEYS.EXCUSAL_REQUEST_FORM_ID);
+    const directoryFormId = Config.getScriptProperty(Config.PROPERTY_KEYS.CADET_DIRECTORY_FORM_ID);
 
     if (attendanceFormId) ensureFormTrigger('onAttendanceFormSubmit', attendanceFormId);
     else Log.warn('Cannot reinstall attendance form trigger: ATTENDANCE_FORM_ID missing. Run setup first.');
 
     if (excusalFormId) ensureFormTrigger('onExcusalsFormSubmit', excusalFormId);
-    else Log.warn('Cannot reinstall excusals form trigger: EXCUSAL_FORM_ID missing. Run setup first.');
+    else Log.warn(`${Config.PROPERTY_KEYS.EXCUSAL_REQUEST_FORM_ID} missing; cannot reinstall excusals form trigger. Run setup first.`);
 
     if (directoryFormId) ensureFormTrigger('onDirectoryFormSubmit', directoryFormId);
-    else Log.warn('Cannot reinstall directory form trigger: DIRECTORY_FORM_ID missing. Run setup first.');
+    else Log.warn(`${Config.PROPERTY_KEYS.CADET_DIRECTORY_FORM_ID} missing; cannot reinstall directory form trigger. Run setup first.`);
 
     // Time-driven reminders
     ensureTimeTrigger('sendWeeklyMandoExcusedSummary', ScriptApp.WeekDay.THURSDAY, 5);
@@ -1547,10 +1778,10 @@ namespace SetupService {
     name: string,
     propertyKey: string,
     destinationSpreadsheetId?: string,
+    opts?: { syncQuestions?: boolean },
   ): Types.EnsureFormResult {
     Log.info(`Ensuring form kind=${kind}`);
-    const props = Config.scriptProperties();
-    const existingId = props.getProperty(propertyKey);
+    const existingId = Config.getScriptProperty(propertyKey);
     let form: GoogleAppsScript.Forms.Form | null = null;
     let created = false;
 
@@ -1566,7 +1797,7 @@ namespace SetupService {
     if (!form) {
       form = FormApp.create(name);
       created = true;
-      props.setProperty(propertyKey, form.getId());
+      Config.setScriptProperty(propertyKey, form.getId());
       Log.info(`Created form name=${name} id=${form.getId()}`);
     }
 
@@ -1575,6 +1806,19 @@ namespace SetupService {
       if (form.getTitle() !== name) form.setTitle(name);
     } catch (err) {
       Log.warn(`Unable to set form title. Error: ${err}`);
+    }
+
+    try {
+      if (kind === 'excusals') {
+        form.setDescription(
+          [
+            'If you do not use the same email as the one in the directory (your school email) your excusal will not automatically be tracked.',
+            'Please ensure you have properly selected an event and use the right email.',
+          ].join('\n'),
+        );
+      }
+    } catch (err) {
+      Log.warn(`Unable to set form description. Error: ${err}`);
     }
 
     // Enforce responder email collection and login requirement (verified identity).
@@ -1643,10 +1887,12 @@ namespace SetupService {
       }
     }
 
-    // Seed questions if empty.
-    if (kind === 'attendance') FormService.ensureAttendanceForm(form);
-    if (kind === 'excusals') FormService.ensureExcusalsForm(form);
-    if (kind === 'directory') FormService.ensureDirectoryForm(form);
+    // Seed/refresh questions unless the caller is about to do a dedicated rebuild.
+    if (opts?.syncQuestions !== false) {
+      if (kind === 'attendance') FormService.ensureAttendanceForm(form);
+      if (kind === 'excusals') FormService.ensureExcusalsForm(form);
+      if (kind === 'directory') FormService.ensureDirectoryForm(form);
+    }
 
     // Ensure the real response sheet exists and is named correctly (avoid dummy placeholders).
     if (destinationSpreadsheetId) {
@@ -1670,7 +1916,7 @@ namespace SetupService {
   export function applyFrontendFormatting() {
     const frontendId = Config.getFrontendId();
     if (isFrontendFormattingDisabled()) {
-      Log.info('Frontend formatting skipped because DISABLE_FRONTEND_FORMATTING is true.');
+      Log.info(`${Config.PROPERTY_KEYS.DISABLE_MAIN_WORKBOOK_FORMATTING}=true; skipping main workbook formatting.`);
       return;
     }
     FrontendFormattingService.applyAll(frontendId);
@@ -1679,7 +1925,7 @@ namespace SetupService {
   export function rebuildDashboard() {
     const frontendId = Config.getFrontendId();
     if (isFrontendFormattingDisabled()) {
-      Log.info('Dashboard rebuild skipped because DISABLE_FRONTEND_FORMATTING is true.');
+      Log.info(`${Config.PROPERTY_KEYS.DISABLE_MAIN_WORKBOOK_FORMATTING}=true; skipping dashboard rebuild.`);
       return;
     }
     FrontendFormattingService.applyDashboardOnly(frontendId);
@@ -1691,10 +1937,9 @@ namespace SetupService {
   }
 
   export function toggleFrontendFormatting() {
-    const props = Config.scriptProperties();
-    const current = String(props.getProperty('DISABLE_FRONTEND_FORMATTING') || '').toLowerCase();
-    const next = current === 'true' ? '' : 'true';
-    props.setProperty('DISABLE_FRONTEND_FORMATTING', next);
+    const current = Config.getBooleanScriptProperty(Config.PROPERTY_KEYS.DISABLE_MAIN_WORKBOOK_FORMATTING);
+    const next = current ? '' : 'true';
+    Config.setScriptProperty(Config.PROPERTY_KEYS.DISABLE_MAIN_WORKBOOK_FORMATTING, next);
     const status = next === 'true' ? 'OFF (disabled)' : 'ON (enabled)';
     const msg = `Frontend formatting is now ${status}.`;
     try {
@@ -1732,10 +1977,9 @@ namespace SetupService {
   }
 
   export function toggleFrontendColumnWidths() {
-    const props = Config.scriptProperties();
-    const current = String(props.getProperty('DISABLE_FRONTEND_COLUMN_WIDTHS') || '').toLowerCase();
-    const next = current === 'true' ? '' : 'true';
-    props.setProperty('DISABLE_FRONTEND_COLUMN_WIDTHS', next);
+    const current = Config.getBooleanScriptProperty(Config.PROPERTY_KEYS.DISABLE_MAIN_WORKBOOK_COLUMN_WIDTHS);
+    const next = current ? '' : 'true';
+    Config.setScriptProperty(Config.PROPERTY_KEYS.DISABLE_MAIN_WORKBOOK_COLUMN_WIDTHS, next);
     const status = next === 'true' ? 'OFF (disabled)' : 'ON (enabled)';
     const msg = `Frontend column width formatting is now ${status}.`;
     try {
@@ -1813,6 +2057,12 @@ namespace SetupService {
     DirectoryService.syncDirectoryFrontend();
   }
 
+  export function refreshDirectoryArtifacts(opts?: { rebuildAttendanceMatrix?: boolean; rebuildAttendanceForm?: boolean }) {
+    syncDirectoryFrontend();
+    if (opts?.rebuildAttendanceMatrix) rebuildAttendanceMatrix();
+    if (opts?.rebuildAttendanceForm) rebuildAttendanceForm();
+  }
+
   export function rebuildAttendanceMatrix() {
     AttendanceService.rebuildMatrix();
     try {
@@ -1831,20 +2081,28 @@ namespace SetupService {
     pruneAttendanceResponseColumnsExplicit();
     normalizeAttendanceBackendHeaders();
     applyAttendanceBackendFormatting();
-    pruneExcusalsResponseColumnsExplicit();
   }
 
   export function refreshExcusalsForm() {
     const backendId = Config.getBackendId();
-    const ensured = ensureForm('excusals', Config.RESOURCE_NAMES.EXCUSALS_FORM, Config.PROPERTY_KEYS.EXCUSALS_FORM_ID, backendId);
+    // syncQuestions: false prevents a full form rebuild — only refreshes event choices.
+    // A rebuild clears all items and recreates them, which creates duplicate columns
+    // in the response sheet every time.
+    const ensured = ensureForm('excusals', Config.RESOURCE_NAMES.EXCUSALS_FORM, Config.PROPERTY_KEYS.EXCUSAL_REQUEST_FORM_ID, backendId, { syncQuestions: false });
     const form = FormApp.openById(ensured.id);
     FormService.refreshExcusalsFormEventChoices(form);
-    pruneExcusalsResponseColumnsExplicit();
+    safeDeduplicateExcusalsResponseColumns();
   }
 
   export function rebuildAttendanceForm() {
     const backendId = Config.getBackendId();
-    const ensured = ensureForm('attendance', Config.RESOURCE_NAMES.ATTENDANCE_FORM, Config.PROPERTY_KEYS.ATTENDANCE_FORM_ID, backendId);
+    const ensured = ensureForm(
+      'attendance',
+      Config.RESOURCE_NAMES.ATTENDANCE_FORM,
+      Config.PROPERTY_KEYS.ATTENDANCE_FORM_ID,
+      backendId,
+      { syncQuestions: false },
+    );
     const form = FormApp.openById(ensured.id);
     FormService.rebuildAttendanceForm(form);
     // After rebuilding questions, refresh event list and clean up response artifacts.
@@ -1888,7 +2146,7 @@ namespace SetupService {
 
   export function refreshExcusalsFormEventChoices() {
     const backendId = Config.getBackendId();
-    const ensured = ensureForm('excusals', Config.RESOURCE_NAMES.EXCUSALS_FORM, Config.PROPERTY_KEYS.EXCUSALS_FORM_ID, backendId);
+    const ensured = ensureForm('excusals', Config.RESOURCE_NAMES.EXCUSALS_FORM, Config.PROPERTY_KEYS.EXCUSAL_REQUEST_FORM_ID, backendId);
     const form = FormApp.openById(ensured.id);
     FormService.refreshExcusalsFormEventChoices(form);
   }
@@ -1943,7 +2201,7 @@ namespace SetupService {
       if (!isFrontendFormattingDisabled()) {
         FrontendFormattingService.applyAll(frontendId);
       } else {
-        Log.info('Skipping frontend formatting during archive because DISABLE_FRONTEND_FORMATTING is true.');
+        Log.info(`${Config.PROPERTY_KEYS.DISABLE_MAIN_WORKBOOK_FORMATTING}=true; skipping main workbook formatting during archive.`);
       }
       ProtectionService.applyFrontendProtections(frontendId);
     }
@@ -1969,7 +2227,7 @@ namespace SetupService {
       if (!isFrontendFormattingDisabled()) {
         FrontendFormattingService.applyAll(frontendId);
       } else {
-        Log.info('Skipping frontend formatting during restore because DISABLE_FRONTEND_FORMATTING is true.');
+        Log.info(`${Config.PROPERTY_KEYS.DISABLE_MAIN_WORKBOOK_FORMATTING}=true; skipping main workbook formatting during restore.`);
       }
       ProtectionService.applyFrontendProtections(frontendId);
     }
@@ -1981,13 +2239,14 @@ namespace SetupService {
 
   export function runSetup(): Types.SetupSummary {
     Log.info('Starting setup (ensure-exists)');
+    Config.migrateLegacyScriptProperties();
     const spreadsheetResults: Types.EnsureSpreadsheetResult[] = [];
     const sheetResults: Types.EnsureSheetResult[] = [];
     const formResults: Types.EnsureFormResult[] = [];
 
     // Ensure spreadsheets.
-    const frontend = ensureSpreadsheet('frontend', Config.RESOURCE_NAMES.FRONTEND_SPREADSHEET, Config.PROPERTY_KEYS.FRONTEND_SHEET_ID);
-    const backend = ensureSpreadsheet('backend', Config.RESOURCE_NAMES.BACKEND_SPREADSHEET, Config.PROPERTY_KEYS.BACKEND_SHEET_ID);
+    const frontend = ensureSpreadsheet('frontend', Config.RESOURCE_NAMES.FRONTEND_SPREADSHEET, Config.PROPERTY_KEYS.MAIN_SPREADSHEET_ID);
+    const backend = ensureSpreadsheet('backend', Config.RESOURCE_NAMES.BACKEND_SPREADSHEET, Config.PROPERTY_KEYS.ADMIN_SPREADSHEET_ID);
     spreadsheetResults.push(frontend, backend);
 
     // Ensure excusals management spreadsheet.
@@ -2016,8 +2275,8 @@ namespace SetupService {
 
     // Ensure forms.
     const attendanceForm = ensureForm('attendance', Config.RESOURCE_NAMES.ATTENDANCE_FORM, Config.PROPERTY_KEYS.ATTENDANCE_FORM_ID, backend.id);
-    const excusalForm = ensureForm('excusals', Config.RESOURCE_NAMES.EXCUSALS_FORM, Config.PROPERTY_KEYS.EXCUSALS_FORM_ID, backend.id);
-    const directoryForm = ensureForm('directory', Config.RESOURCE_NAMES.DIRECTORY_FORM, Config.PROPERTY_KEYS.DIRECTORY_FORM_ID, backend.id);
+    const excusalForm = ensureForm('excusals', Config.RESOURCE_NAMES.EXCUSALS_FORM, Config.PROPERTY_KEYS.EXCUSAL_REQUEST_FORM_ID, backend.id);
+    const directoryForm = ensureForm('directory', Config.RESOURCE_NAMES.DIRECTORY_FORM, Config.PROPERTY_KEYS.CADET_DIRECTORY_FORM_ID, backend.id);
     formResults.push(attendanceForm, excusalForm, directoryForm);
 
     // Normalize response sheet names based on the form actually linked to each sheet.
@@ -2052,7 +2311,7 @@ namespace SetupService {
     if (!isFrontendFormattingDisabled()) {
       FrontendFormattingService.applyAll(frontend.id);
     } else {
-      Log.info('Skipping frontend formatting during setup because DISABLE_FRONTEND_FORMATTING is true.');
+      Log.info(`${Config.PROPERTY_KEYS.DISABLE_MAIN_WORKBOOK_FORMATTING}=true; skipping main workbook formatting during setup.`);
     }
 
     // Create structured tables on key frontend sheets via Sheets API (skip if formatting disabled).
@@ -2061,7 +2320,7 @@ namespace SetupService {
         ensureTableForSheet(frontend.id, name, name.replace(/\s+/g, '_').toLowerCase());
       });
     } else {
-      Log.info('Skipping table creation because DISABLE_FRONTEND_FORMATTING is true.');
+      Log.info(`${Config.PROPERTY_KEYS.DISABLE_MAIN_WORKBOOK_FORMATTING}=true; skipping table creation.`);
     }
 
     // Build attendance matrix initially.
@@ -2071,7 +2330,8 @@ namespace SetupService {
     reorderFrontendSheets();
     reorderBackendSheets();
 
-    // Install onOpen triggers for menus and onEdit trigger for backend directory sync.
+    // Install spreadsheet triggers. Frontend onOpen is intentionally a no-op;
+    // backend onOpen adds the admin menu for anyone with access to that sheet.
     ensureSpreadsheetTrigger('onFrontendOpen', frontend.id, 'open');
     ensureSpreadsheetTrigger('onFrontendEdit', frontend.id, 'edit');
     ensureSpreadsheetTrigger('onBackendOpen', backend.id, 'open');

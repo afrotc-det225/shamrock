@@ -73,9 +73,8 @@ namespace AdminService {
   }
 
   function resolveSpreadsheetId(info: CategoryInfo): string | null {
-    const props = Config.scriptProperties();
-    const key = info.location === 'backend' ? Config.PROPERTY_KEYS.BACKEND_SHEET_ID : Config.PROPERTY_KEYS.FRONTEND_SHEET_ID;
-    return props.getProperty(key);
+    const key = info.location === 'backend' ? Config.PROPERTY_KEYS.ADMIN_SPREADSHEET_ID : Config.PROPERTY_KEYS.MAIN_SPREADSHEET_ID;
+    return Config.getScriptProperty(key);
   }
 
   function requireSpreadsheetId(info: CategoryInfo): string | null {
@@ -275,12 +274,12 @@ namespace AdminService {
     if (!category) return;
     const info = CATEGORY_MAP[category];
     const spreadsheetId = requireSpreadsheetId(info);
-    if (!spreadsheetId) return;
+    if (!spreadsheetId) throw new Error(`${info.location === 'backend' ? 'Backend' : 'Frontend'} sheet ID not set. Run setup first.`);
     const sheet = SheetUtils.getSheet(spreadsheetId, info.sheetName);
     const locationLabel = info.location === 'backend' ? 'backend' : 'frontend';
     if (!sheet) {
       alertOrLog(`Sheet ${info.sheetName} not found in ${locationLabel}.`);
-      return;
+      throw new Error(`Sheet ${info.sheetName} not found in ${locationLabel}.`);
     }
 
     const data = SheetUtils.readTable(sheet);
@@ -307,12 +306,12 @@ namespace AdminService {
 
     const info = CATEGORY_MAP[category];
     const spreadsheetId = requireSpreadsheetId(info);
-    if (!spreadsheetId) return;
+    if (!spreadsheetId) throw new Error(`${info.location === 'backend' ? 'Backend' : 'Frontend'} sheet ID not set. Run setup first.`);
     const sheet = SheetUtils.getSheet(spreadsheetId, info.sheetName);
     const locationLabel = info.location === 'backend' ? 'backend' : 'frontend';
     if (!sheet) {
       alertOrLog(`Sheet ${info.sheetName} not found in ${locationLabel}.`);
-      return;
+      throw new Error(`Sheet ${info.sheetName} not found in ${locationLabel}.`);
     }
 
     let content = '';
@@ -320,7 +319,7 @@ namespace AdminService {
       content = DriveApp.getFileById(fileId).getBlob().getDataAsString();
     } catch (err) {
       alertOrLog(`Unable to read file: ${err}`);
-      return;
+      throw err;
     }
 
     const expectedHeaders = sheet
@@ -333,7 +332,7 @@ namespace AdminService {
       rows = parseCsvToObjects(content, expectedHeaders);
     } catch (err) {
       alertOrLog(String(err));
-      return;
+      throw err;
     }
 
     if (category === 'events') {
@@ -377,6 +376,14 @@ namespace AdminService {
     if (info.location === 'backend') {
       // Keep frontend view in sync for mapped backend tables (e.g., Leadership).
       SyncService.syncByBackendSheetName(info.sheetName);
+    }
+    if (category === 'events') {
+      try {
+        SetupService.refreshEventsArtifacts();
+      } catch (err) {
+        Log.warn(`Unable to refresh events artifacts after CSV import: ${err}`);
+        throw err;
+      }
     }
 
     alertOrLog(`CSV import complete into ${info.sheetName}. Rows written: ${rows.length}`);

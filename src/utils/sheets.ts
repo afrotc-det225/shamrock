@@ -35,6 +35,74 @@ namespace SheetUtils {
     return { headers, rows };
   }
 
+  /**
+   * Ensure a backend sheet's columns match its schema. Reads all data, remaps columns
+   * to the schema order (inserting blanks for missing columns), and writes everything back.
+   * Preserves all existing data — never drops columns that have content.
+   */
+  export function ensureSchemaColumns(sheet: GoogleAppsScript.Spreadsheet.Sheet): string[] {
+    const schema = Schemas.getTabSchema(sheet.getName());
+    if (!schema?.machineHeaders) return readHeaders(sheet);
+
+    const expected = schema.machineHeaders;
+    const display = schema.displayHeaders || expected;
+    const lastCol = sheet.getLastColumn();
+    const lastRow = sheet.getLastRow();
+    const current = lastCol > 0
+      ? sheet.getRange(1, 1, 1, lastCol).getValues()[0].map((h) => String(h || '').trim())
+      : [];
+
+    // Check if any columns are missing
+    const missing = expected.filter((h) => !current.includes(h));
+    if (missing.length === 0) return current;
+
+    Log.info(`ensureSchemaColumns: ${sheet.getName()} missing columns: ${missing.join(', ')}`);
+
+    // Read all data (rows 3+)
+    const dataRows = lastRow >= 3
+      ? sheet.getRange(3, 1, lastRow - 2, lastCol).getValues()
+      : [];
+
+    // Build column mapping: for each expected header, find its index in current headers
+    const colMap = expected.map((h) => current.indexOf(h)); // -1 means new/missing
+
+    // Remap data rows to new column order
+    const newData = dataRows.map((row) =>
+      colMap.map((oldIdx) => (oldIdx >= 0 ? row[oldIdx] : ''))
+    );
+
+    // Resize sheet to fit new schema
+    const maxCols = sheet.getMaxColumns();
+    if (maxCols < expected.length) {
+      sheet.insertColumnsAfter(maxCols, expected.length - maxCols);
+    }
+
+    // Write headers
+    sheet.getRange(1, 1, 1, expected.length).setValues([expected]);
+    sheet.getRange(2, 1, 1, display.length).setValues([display]);
+
+    // Write remapped data
+    if (newData.length > 0) {
+      sheet.getRange(3, 1, newData.length, expected.length).setValues(newData);
+    }
+
+    // Trim extra columns beyond schema width
+    const finalMaxCols = sheet.getMaxColumns();
+    if (finalMaxCols > expected.length) {
+      sheet.deleteColumns(expected.length + 1, finalMaxCols - expected.length);
+    }
+
+    Log.info(`ensureSchemaColumns: ${sheet.getName()} updated — added ${missing.length} column(s): ${missing.join(', ')}`);
+    return expected.slice();
+  }
+
+  function readHeaders(sheet: GoogleAppsScript.Spreadsheet.Sheet): string[] {
+    const lastCol = sheet.getLastColumn();
+    return lastCol > 0
+      ? sheet.getRange(1, 1, 1, lastCol).getValues()[0].map((h) => String(h || '').trim())
+      : [];
+  }
+
   function restoreHeadersIfMissing(sheet: GoogleAppsScript.Spreadsheet.Sheet): string[] {
     let lastCol = sheet.getLastColumn();
     let headers = sheet.getRange(1, 1, 1, Math.max(1, lastCol)).getValues()[0].map((h) => String(h || '').trim());

@@ -15,6 +15,9 @@ dist/
 !.vscode/settings.json
 !.vscode/extensions.json
 
+# Local agent/tool settings
+.claude/
+
 # clasp local state (optional safety)
 .clasp-dev.json
 

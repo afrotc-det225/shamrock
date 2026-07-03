@@ -14,19 +14,19 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/declanhuggins/shamrock.git"
+    "url": "git+https://github.com/afrotc-det225/shamrock.git"
   },
   "keywords": [],
   "author": "",
   "license": "MIT",
   "type": "commonjs",
   "bugs": {
-    "url": "https://github.com/declanhuggins/shamrock/issues"
+    "url": "https://github.com/afrotc-det225/shamrock/issues"
   },
-  "homepage": "https://github.com/declanhuggins/shamrock#readme",
+  "homepage": "https://github.com/afrotc-det225/shamrock#readme",
   "devDependencies": {
     "@types/google-apps-script": "^2.0.8",
-    "npm-check-updates": "^19.3.1",
-    "typescript": "^5.9.3"
+    "npm-check-updates": "^19.6.5",
+    "typescript": "^6.0.2"
   }
 }

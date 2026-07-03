@@ -172,7 +172,7 @@ namespace FrontendFormattingService {
 
     const skipFormatting = shouldSkipSheetFormatting();
     if (skipFormatting) {
-      Log.info('Sheet formatting skipped due to DISABLE_FRONTEND_FORMATTING property. Validations still applied. Running minimal layout for Dashboard/FAQs.');
+      Log.info(`${Config.PROPERTY_KEYS.DISABLE_MAIN_WORKBOOK_FORMATTING}=true; validations still applied. Running minimal layout for Dashboard/FAQs.`);
       applyDashboardFormatting(ss); // keep layout populated so Dashboard isn’t blank
       applyFaqsFormatting(ss); // enforce single-row canvas even when formatting is disabled
       ensureFaqSingleRow(ss);
@@ -259,20 +259,18 @@ namespace FrontendFormattingService {
 
   function shouldSkipSheetFormatting(): boolean {
     try {
-      const prop = Config.scriptProperties().getProperty('DISABLE_FRONTEND_FORMATTING');
-      return String(prop || '').toLowerCase() === 'true';
+      return Config.getBooleanScriptProperty(Config.PROPERTY_KEYS.DISABLE_MAIN_WORKBOOK_FORMATTING);
     } catch (err) {
-      Log.warn(`Unable to read DISABLE_FRONTEND_FORMATTING property: ${err}`);
+      Log.warn(`Unable to read ${Config.PROPERTY_KEYS.DISABLE_MAIN_WORKBOOK_FORMATTING} property: ${err}`);
       return false;
     }
   }
 
   function shouldSkipColumnWidths(): boolean {
     try {
-      const prop = Config.scriptProperties().getProperty('DISABLE_FRONTEND_COLUMN_WIDTHS');
-      return String(prop || '').toLowerCase() === 'true';
+      return Config.getBooleanScriptProperty(Config.PROPERTY_KEYS.DISABLE_MAIN_WORKBOOK_COLUMN_WIDTHS);
     } catch (err) {
-      Log.warn(`Unable to read DISABLE_FRONTEND_COLUMN_WIDTHS property: ${err}`);
+      Log.warn(`Unable to read ${Config.PROPERTY_KEYS.DISABLE_MAIN_WORKBOOK_COLUMN_WIDTHS} property: ${err}`);
       return false;
     }
   }
@@ -467,10 +465,9 @@ namespace FrontendFormattingService {
     // Quick links table
     const quickLinksHeader = [['Name', 'URL']];
 
-    const props = Config.scriptProperties();
     const makeLink = (url: string, label = 'Open') => (url ? `=HYPERLINK("${url}","${label}")` : '');
     const formUrlFor = (key: keyof typeof Config.PROPERTY_KEYS) => {
-      const id = props.getProperty(Config.PROPERTY_KEYS[key]) || '';
+      const id = Config.getScriptProperty(Config.PROPERTY_KEYS[key]);
       if (!id) {
         Log.warn(`Dashboard quick link missing property for ${key}`);
         return '';
@@ -483,14 +480,14 @@ namespace FrontendFormattingService {
       }
     };
 
-    const backendId = props.getProperty(Config.PROPERTY_KEYS.BACKEND_SHEET_ID) || '';
+    const backendId = Config.getScriptProperty(Config.PROPERTY_KEYS.ADMIN_SPREADSHEET_ID);
     const backendUrl = backendId ? `https://docs.google.com/spreadsheets/d/${backendId}/edit` : '';
 
     const quickLinks = [
       ['Github', makeLink('https://github.com/declanhuggins/shamrock')],
-      ['Directory Form', makeLink(formUrlFor('DIRECTORY_FORM_ID'))],
+      ['Directory Form', makeLink(formUrlFor('CADET_DIRECTORY_FORM_ID'))],
       ['Attendance Form', makeLink(formUrlFor('ATTENDANCE_FORM_ID'))],
-      ['Excusals Form', makeLink(formUrlFor('EXCUSALS_FORM_ID'))],
+      ['Excusals Form', makeLink(formUrlFor('EXCUSAL_REQUEST_FORM_ID'))],
       ['Backend sheet (admin)', makeLink(backendUrl)],
     ];
     sheet.getRange(2, 1, 1, 2).setValues(quickLinksHeader).setFontWeight('bold');

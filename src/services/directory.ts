@@ -1,6 +1,9 @@
 // Directory sync and form upsert helpers.
 
 namespace DirectoryService {
+  const MATRIX_DERIVED_FIELDS = new Set(['first_name', 'last_name', 'as_year', 'flight', 'squadron', 'flight_path_status']);
+  const FORM_DERIVED_FIELDS = new Set(['first_name', 'last_name', 'as_year', 'flight', 'university', 'flight_path_status']);
+
   interface DirectoryRecord {
     source: string;
     last_name: string;
@@ -30,6 +33,26 @@ namespace DirectoryService {
     const backendSheet = backendId ? SheetUtils.getSheet(backendId, 'Directory Backend') : null;
     const frontendSheet = frontendId ? SheetUtils.getSheet(frontendId, 'Directory') : null;
     return { backendSheet, frontendSheet };
+  }
+
+  function normalizeDirectoryFieldName(field: string): string {
+    return String(field || '').trim().toLowerCase();
+  }
+
+  function normalizeFlightPathStatus(status: any): string {
+    return String(status || '').trim().toLowerCase();
+  }
+
+  export function isOperationallyActiveCadet(row: any): boolean {
+    return normalizeFlightPathStatus(row?.['flight_path_status']) !== 'inactive';
+  }
+
+  export function shouldRebuildAttendanceMatrixForField(field: string): boolean {
+    return MATRIX_DERIVED_FIELDS.has(normalizeDirectoryFieldName(field));
+  }
+
+  export function shouldRebuildAttendanceFormForField(field: string): boolean {
+    return FORM_DERIVED_FIELDS.has(normalizeDirectoryFieldName(field));
   }
 
   function normalizePhone(raw: string): string {
@@ -83,7 +106,7 @@ namespace DirectoryService {
     const { backendSheet, frontendSheet } = getBackendFrontendSheets();
     if (!backendSheet || !frontendSheet) return;
     const backend = SheetUtils.readTable(backendSheet);
-    const mapped = backend.rows.map((row) => ({
+    const mapped = backend.rows.filter((row) => isOperationallyActiveCadet(row)).map((row) => ({
       last_name: row['last_name'] || '',
       first_name: row['first_name'] || '',
       as_year: row['as_year'] || '',
@@ -209,17 +232,17 @@ namespace DirectoryService {
     };
 
     upsertBackendRecord(record);
-    syncDirectoryFrontend();
+    SetupService.refreshDirectoryArtifacts({ rebuildAttendanceMatrix: true, rebuildAttendanceForm: true });
   }
 
   /**
    * Replays the most recent Directory form response through the handler (useful for debugging ingestion).
-   * Reads the form by DIRECTORY_FORM_ID and constructs a synthetic FormsOnFormSubmit event.
+   * Reads the cadet directory form and constructs a synthetic FormsOnFormSubmit event.
    */
   export function replayLatestDirectoryFormResponse(): boolean {
-    const formId = Config.scriptProperties().getProperty(Config.PROPERTY_KEYS.DIRECTORY_FORM_ID) || '';
+    const formId = Config.getScriptProperty(Config.PROPERTY_KEYS.CADET_DIRECTORY_FORM_ID);
     if (!formId) {
-      Log.warn('Cannot replay Directory form response: DIRECTORY_FORM_ID missing.');
+      Log.warn(`${Config.PROPERTY_KEYS.CADET_DIRECTORY_FORM_ID} missing; cannot replay Directory form response.`);
       return false;
     }
 
