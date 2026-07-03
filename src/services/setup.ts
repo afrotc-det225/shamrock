@@ -325,6 +325,26 @@ namespace SetupService {
     return requests;
   }
 
+  function sheetsBatchUpdateWithRetry(svc: any, spreadsheetId: string, requests: Record<string, any>[], label: string): boolean {
+    const maxAttempts = 3;
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      try {
+        svc.batchUpdate({ requests: requests as any[] }, spreadsheetId);
+        return true;
+      } catch (err) {
+        const message = String(err || '');
+        const transient = message.includes('Internal error') || message.includes('Service unavailable') || message.includes('Rate Limit') || message.includes('Quota');
+        if (!transient || attempt === maxAttempts) {
+          Log.warn(`${label} failed after ${attempt} attempt(s): ${err}`);
+          return false;
+        }
+        Log.warn(`${label} transient failure on attempt ${attempt}; retrying: ${err}`);
+        Utilities.sleep(500 * attempt);
+      }
+    }
+    return false;
+  }
+
   function ensureTableForSheet(spreadsheetId: string, sheetName: string, tableId: string) {
     // Sheets advanced service may be disabled in some environments; skip gracefully if absent.
     if (typeof (globalThis as any).Sheets === 'undefined') {
@@ -407,48 +427,70 @@ namespace SetupService {
         return prop;
       });
 
-      const table = {
+      const tableRange = {
+        sheetId,
+        startColumnIndex: 0,
+        endColumnIndex: endColIndex,
+        startRowIndex: headerRow - 1, // zero-based (row 2)
+        endRowIndex,
+      };
+
+      const baseTable = {
         name: tableId,
         tableId,
-        range: {
-          sheetId,
-          startColumnIndex: 0,
-          endColumnIndex: endColIndex,
-          startRowIndex: headerRow - 1, // zero-based (row 2)
-          endRowIndex,
-        },
+        range: tableRange,
         rowsProperties: {
           headerColorStyle: apiColorStyle('#356854'),
           firstBandColorStyle: apiColorStyle('#FFFFFF'),
           secondBandColorStyle: apiColorStyle('#F6F8F9'),
         },
+      };
+
+      const table = {
+        ...baseTable,
         columnProperties,
       };
 
       const existingTable = findExistingTable(svc, spreadsheetId, sheetId, tableId);
-      const request = existingTable
+      const baseRequest = existingTable
         ? {
             updateTable: {
-              table: { ...table, tableId: existingTable.tableId },
-              fields: 'name,range,rowsProperties,columnProperties',
+              table: { ...baseTable, tableId: existingTable.tableId },
+              fields: 'name,range,rowsProperties',
             },
           }
         : {
             addTable: {
-              table,
+              table: baseTable,
             },
           };
 
-      svc.batchUpdate(
-        {
-          requests: [
-            request as any,
-            ...tableVisualStyleRequests(sheetId, 0, endColIndex, headerRow - 1, endRowIndex),
-          ],
-        },
+      const baseOk = sheetsBatchUpdateWithRetry(svc, spreadsheetId, [baseRequest as any], `Ensure table ${tableId} on ${sheetName}`);
+      if (!baseOk) {
+        Log.warn(`Unable to ensure table ${tableId} on sheet ${sheetName}; applying visual formatting fallback only.`);
+      } else {
+        const currentTable = findExistingTable(svc, spreadsheetId, sheetId, tableId) || existingTable;
+        const updateTableId = currentTable?.tableId || tableId;
+        sheetsBatchUpdateWithRetry(
+          svc,
+          spreadsheetId,
+          [{
+            updateTable: {
+              table: { ...table, tableId: updateTableId },
+              fields: 'columnProperties',
+            },
+          } as any],
+          `Update table column types ${tableId} on ${sheetName}`,
+        );
+      }
+
+      sheetsBatchUpdateWithRetry(
+        svc,
         spreadsheetId,
+        tableVisualStyleRequests(sheetId, 0, endColIndex, headerRow - 1, endRowIndex),
+        `Apply table visual style ${tableId} on ${sheetName}`,
       );
-      Log.info(`Ensured table ${tableId} on sheet ${sheetName}`);
+      Log.info(`Ensured table styling path completed for ${tableId} on sheet ${sheetName}`);
     } catch (err) {
       Log.warn(`Unable to ensure table ${tableId} on sheet ${sheetName}: ${err}`);
     }
