@@ -16,39 +16,16 @@ namespace SyncService {
     const data = SheetUtils.readTable(backendSheet);
     SheetUtils.ensureSchemaColumns(frontendSheet);
 
-    // Data Legend is sometimes customized by operators with self-referential dropdown validations
-    // (e.g., A3 has validation "from a range" = Data Legend!A3:A). If we clear values and
-    // re-write them while the validation is active, Sheets can reject the first write because
-    // the allowed-range is temporarily empty.
+    // Data Legend drives downstream dropdowns and must not preserve stale self-validations
+    // after schema changes. Rebuild the values from the backend and leave validations to
+    // the consuming sheets.
     if (frontendSheetName === 'Data Legend') {
       try {
         const maxRows = frontendSheet.getMaxRows();
         const lastCol = Math.max(1, frontendSheet.getLastColumn());
-        const hasDataArea = maxRows >= 3;
-        const dataRow = 3;
         const dataRowCount = Math.max(1, maxRows - 2);
-
-        const validationsByCol: Array<GoogleAppsScript.Spreadsheet.DataValidation | null> = [];
-        if (hasDataArea) {
-          for (let c = 1; c <= lastCol; c++) {
-            validationsByCol.push(frontendSheet.getRange(dataRow, c).getDataValidation());
-          }
-          frontendSheet.getRange(dataRow, 1, dataRowCount, lastCol).clearDataValidations();
-        }
-
-        SheetUtils.writeTable(frontendSheet, data.rows);
-
-        // Restore validations (column-level) after content is present.
-        if (hasDataArea) {
-          validationsByCol.forEach((dv, idx) => {
-            if (!dv) return;
-            try {
-              frontendSheet.getRange(dataRow, idx + 1, dataRowCount, 1).setDataValidation(dv);
-            } catch (err) {
-              Log.warn(`Unable to restore Data Legend validation for col=${idx + 1}: ${err}`);
-            }
-          });
-        }
+        frontendSheet.getRange(3, 1, dataRowCount, lastCol).clearDataValidations();
+        SheetUtils.writeTable(frontendSheet, data.rows, { clearDataValidationsBeforeWrite: true });
         return;
       } catch (err) {
         Log.warn(`Data Legend sync encountered validation issues; falling back to plain write. Error: ${err}`);

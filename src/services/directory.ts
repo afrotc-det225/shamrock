@@ -134,7 +134,7 @@ namespace DirectoryService {
     }));
 
     const sorted = sortDirectoryRows(mapped);
-    SheetUtils.writeTable(frontendSheet, sorted);
+    SheetUtils.writeTable(frontendSheet, sorted, { clearDataValidationsBeforeWrite: true });
   }
 
   function upsertBackendRecord(record: DirectoryRecord) {

@@ -1924,10 +1924,6 @@ namespace SetupService {
 
   export function applyFrontendFormatting() {
     const frontendId = Config.getFrontendId();
-    if (isFrontendFormattingDisabled()) {
-      Log.info(`${Config.PROPERTY_KEYS.DISABLE_MAIN_WORKBOOK_FORMATTING}=true; skipping main workbook formatting.`);
-      return;
-    }
     FrontendFormattingService.applyAll(frontendId);
   }
 
@@ -2037,6 +2033,7 @@ namespace SetupService {
   }
 
   export function syncDirectoryBackendToFrontend() {
+    SyncService.syncByBackendSheetName('Data Legend');
     DirectoryService.syncLeadershipBackendFromDirectory();
     syncDirectoryFrontend();
     applyFrontendFormatting();
@@ -2211,11 +2208,7 @@ namespace SetupService {
       ['Directory', 'Leadership', 'Attendance', 'Data Legend'].forEach((name) => {
         ensureTableForSheet(frontendId, name, name.replace(/\s+/g, '_').toLowerCase());
       });
-      if (!isFrontendFormattingDisabled()) {
-        FrontendFormattingService.applyAll(frontendId);
-      } else {
-        Log.info(`${Config.PROPERTY_KEYS.DISABLE_MAIN_WORKBOOK_FORMATTING}=true; skipping main workbook formatting during archive.`);
-      }
+      FrontendFormattingService.applyAll(frontendId);
       ProtectionService.applyFrontendProtections(frontendId);
     }
 
@@ -2237,11 +2230,7 @@ namespace SetupService {
       ['Directory', 'Leadership', 'Attendance', 'Data Legend'].forEach((name) => {
         ensureTableForSheet(frontendId, name, name.replace(/\s+/g, '_').toLowerCase());
       });
-      if (!isFrontendFormattingDisabled()) {
-        FrontendFormattingService.applyAll(frontendId);
-      } else {
-        Log.info(`${Config.PROPERTY_KEYS.DISABLE_MAIN_WORKBOOK_FORMATTING}=true; skipping main workbook formatting during restore.`);
-      }
+      FrontendFormattingService.applyAll(frontendId);
       ProtectionService.applyFrontendProtections(frontendId);
     }
 
@@ -2317,12 +2306,8 @@ namespace SetupService {
     DirectoryService.syncDirectoryFrontend();
     SyncService.syncByBackendSheetName('Leadership Backend');
 
-    // Apply frontend validations/banding after syncs.
-    if (!isFrontendFormattingDisabled()) {
-      FrontendFormattingService.applyAll(frontend.id);
-    } else {
-      Log.info(`${Config.PROPERTY_KEYS.DISABLE_MAIN_WORKBOOK_FORMATTING}=true; skipping main workbook formatting during setup.`);
-    }
+    // Apply frontend validations, plus visual formatting unless disabled.
+    FrontendFormattingService.applyAll(frontend.id);
 
     // Create structured tables on key frontend sheets via Sheets API (skip if formatting disabled).
     if (!isFrontendFormattingDisabled()) {

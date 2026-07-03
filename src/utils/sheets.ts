@@ -6,6 +6,10 @@ namespace SheetUtils {
     rows: any[];
   }
 
+  export interface WriteTableOptions {
+    clearDataValidationsBeforeWrite?: boolean;
+  }
+
   export function getSheet(spreadsheetId: string, name: string): GoogleAppsScript.Spreadsheet.Sheet | null {
     try {
       const ss = SpreadsheetApp.openById(spreadsheetId);
@@ -141,13 +145,19 @@ namespace SheetUtils {
   }
 
   // Writes table data (array of objects) starting at row 3, preserving existing headers.
-  export function writeTable(sheet: GoogleAppsScript.Spreadsheet.Sheet, rows: Record<string, any>[]) {
+  export function writeTable(sheet: GoogleAppsScript.Spreadsheet.Sheet, rows: Record<string, any>[], opts?: WriteTableOptions) {
     const headers = restoreHeadersIfMissing(sheet);
     if (headers.every((h) => !h)) {
       Log.warn(`writeTable called on ${sheet.getName()} with empty headers; skipping write to avoid data/header loss.`);
       return;
     }
     const lastCol = headers.length;
+
+    if (opts?.clearDataValidationsBeforeWrite) {
+      const dataRows = Math.max(1, sheet.getMaxRows() - 2);
+      sheet.getRange(3, 1, dataRows, lastCol).clearDataValidations();
+    }
+
     // Clear existing data rows (row 3 onward)
     const lastRow = sheet.getLastRow();
     if (lastRow >= 3) {

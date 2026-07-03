@@ -100,12 +100,16 @@ namespace FrontendFormattingService {
         flight_path_status: 'FLIGHT_PATH_STATUSES',
       };
 
+      const dataRows = Math.max(1, sheet.getMaxRows() - 2);
+      const dataCols = Math.max(1, sheet.getLastColumn());
+      sheet.getRange(3, 1, dataRows, dataCols).clearDataValidations();
+
       Object.entries(map).forEach(([field, rangeName]) => {
         const colIdx = headerIndex(field);
         if (colIdx < 0) return;
         const namedRange = ss.getRangeByName(rangeName);
         if (!namedRange) return;
-        const dataRange = sheet.getRange(3, colIdx + 1, Math.max(1, sheet.getMaxRows() - 2), 1);
+        const dataRange = sheet.getRange(3, colIdx + 1, dataRows, 1);
         const rule = SpreadsheetApp.newDataValidation()
           .requireValueInRange(namedRange, true)
           .setAllowInvalid(false)

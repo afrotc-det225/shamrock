@@ -81,6 +81,7 @@ Post-deploy validation checklist:
 - Frontend Directory is a mirror.
 - Frontend Directory displays cadet organization before leadership details: `Year`, `Flight`, `Sqdn`, `Rank`, `Role`, then `University` and the remaining fields.
 - Cadet rank and cadet leadership role are maintained on Directory. Leadership is rebuilt from active Directory rows with a role, while non-cadet/cadre/manual Leadership rows are preserved.
+- Sync Directory refreshes the frontend Data Legend first, clears stale frontend Directory dropdown rules, writes the v2 mirror, then reapplies v2 dropdowns from Data Legend named ranges.
 - Prefer menu-driven sync/repair actions over ad hoc edits in the frontend.
 
 ### 5.2 Event maintenance
@@ -154,8 +155,9 @@ Likely causes:
 - Dropdown option validation and conditional formatting can be applied by SHAMROCK, but per-option dropdown chip colors/display styling may require manual/template maintenance because SHAMROCK does not have a supported Apps Script field for those visual details.
 
 Operator checks:
-- Re-run setup to recreate validations.
+- Re-run Sync Directory or setup to recreate validations.
 - Confirm Data Legend is present and populated.
+- Confirm the frontend Data Legend includes the v2 `rank_options` column and that Directory `Rank` validates against cadet rank options while `Email` has no dropdown validation.
 
 ### 6.4 Attendance percentages look wrong
 Likely causes:

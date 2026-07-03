@@ -67,7 +67,7 @@ The frontend Directory starts with `Last Name`, `First Name`, `Year`, `Flight`, 
 
 - Backend/admin workbook Directory Backend edits.
 - Directory Form submissions.
-- Backend SHAMROCK menu sync and repair actions.
+- Backend SHAMROCK menu sync and repair actions. Sync Directory also refreshes the frontend Data Legend dependency and reapplies v2 dropdown validation rules.
 
 ### Data Touched
 
@@ -83,6 +83,7 @@ The frontend Directory starts with `Last Name`, `First Name`, `Year`, `Flight`, 
 - Run the directory sync action.
 - Confirm the frontend Directory reflects the backend.
 - Confirm the frontend Directory column order starts `Last Name`, `First Name`, `Year`, `Flight`, `Sqdn`, `Rank`, `Role`, `University`.
+- Confirm the frontend Data Legend includes `rank_options`, Directory `Rank` is a cadet-rank dropdown, and Directory `Email` is free text with no stale dropdown.
 - If the row has a role, confirm Leadership reflects rank, role, flight/squadron, email, and phone from Directory.
 - Confirm attendance/form rebuild actions use active cadets only.
 
