@@ -839,8 +839,8 @@ namespace FrontendFormattingService {
       .setHorizontalAlignment('left');
 
     // Widths and hides
-    sheet.autoResizeColumn(1);
-    sheet.autoResizeColumn(2);
+    sheet.setColumnWidth(1, 115);
+    sheet.setColumnWidth(2, 115);
     sheet.hideColumns(3, 3);
     const eventStartCol = baseCount + 1;
     if (sheet.getLastColumn() >= eventStartCol) {
@@ -862,6 +862,10 @@ namespace FrontendFormattingService {
     sheet.getRange(3, 1, dataRows, sheet.getLastColumn()).setHorizontalAlignment('left');
     if (sheet.getLastColumn() >= eventStartCol) {
       sheet.getRange(3, eventStartCol, dataRows, sheet.getLastColumn() - baseCount).setHorizontalAlignment('center');
+      sheet.getRange(3, eventStartCol, dataRows, sheet.getLastColumn() - baseCount)
+        .setNumberFormat('@')
+        .setHorizontalAlignment('center')
+        .setFontWeight('bold');
     }
     // Explicitly center LLAB/Overall data columns (not just percentages) to avoid left drift.
     if (llabIdx >= 0) sheet.getRange(3, llabIdx + 1, dataRows, 1).setHorizontalAlignment('center');
