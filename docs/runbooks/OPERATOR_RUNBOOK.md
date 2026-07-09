@@ -136,7 +136,7 @@ After completion:
 - Confirm hidden frontend archives exist for Leadership, Directory, and Attendance using the prior term label.
 - Confirm hidden backend rollback archives exist. They are automatically eligible for deletion after seven days.
 - Confirm Events Backend has the new term and the expected training-week sequence.
-- Confirm Directory AS-year advancement happened exactly once, role/flight/squadron are blank unless explicitly updated, and default ranks match AS year.
+- Confirm Directory AS-year advancement happened exactly once, role/flight/squadron are blank unless explicitly updated, and default ranks match AS year. AS500 remains GMC and resets to `C/3C`.
 - Confirm Attendance and Excusals forms list only current-term events.
 - Run one controlled attendance/excusal validation if this is a production transition.
 

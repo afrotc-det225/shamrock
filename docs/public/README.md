@@ -61,7 +61,7 @@ The frontend/main workbook intentionally does not expose admin menus.
 Directory is the authoritative roster source for cadets and drives attendance, leadership lookups, form choices, and frontend display.
 
 Cadet rank and cadet leadership role live on Directory. The Leadership view is derived from active Directory rows only for command/advisor roles: wing commander, deputy wing commander, operations group commander/deputy, squadron commanders, flight commanders, deputy flight commanders, and senior/deputy GMC advisor. Cadre/manual leadership contacts are preserved, and Leadership sorts non-cadet ranks and honorifics above cadet ranks before applying command hierarchy and name tiebreakers. Leadership does not store separate flight/squadron columns; unit routing comes from role names such as `Alpha Flight Commander` or `Blue Squadron Commander`.
-The frontend and backend Directory v2 order starts with `Last Name`, `First Name`, `Year`, `Flight`, `Sqdn`, `Rank`, `Role`, then `University` and the remaining contact/academic fields. Legacy Directory `source` and freeform Directory `notes` columns are not part of the v2 baseline. Frontend `Photo Link` cells render Google Drive file links as file smart chips and keep the column at 100 px.
+The frontend and backend Directory v2 order starts with `Last Name`, `First Name`, `Year`, `Flight`, `Sqdn`, `Rank`, `Role`, then `University` and the remaining contact/academic fields. Cadet rows use the canonical senior-to-junior display order, with AS500 below AS300 and above AS250. Legacy Directory `source` and freeform Directory `notes` columns are not part of the v2 baseline. Frontend `Photo Link` cells render Google Drive file links as file smart chips and keep the column at 100 px.
 
 Rows marked `Inactive`, `Commissioned`, or `Dropped` in `Flight Path` stay in Directory Backend for recordkeeping but are excluded from frontend Directory, derived Leadership, Attendance, and form cadet choices.
 
@@ -135,6 +135,7 @@ The v2 transition workflow prepares SHAMROCK for a new semester or academic year
 
 Attendance records form submissions in backend logs and derives the frontend attendance matrix from attendance events, excusals, and directory state.
 The v2 code set is `P`, `T`, `A`, `R`, `D`, `U`, `E`, `ES`, `MED`, and `N/A`.
+AS500 is a GMC year. AS500 cadets are excluded from POC Third Hour form groups and receive `N/A` for POC Third Hour in the matrix unless an explicit attendance entry exists. Year-grouped cadet lists place AS500 below AS300 and above AS250.
 
 ### Operator Entry Points
 
@@ -154,6 +155,7 @@ The v2 code set is `P`, `T`, `A`, `R`, `D`, `U`, `E`, `ES`, `MED`, and `N/A`.
 - Submit a controlled attendance response.
 - Confirm the response is appended to Attendance Backend.
 - Rebuild attendance and confirm the frontend matrix updates deterministically.
+- Confirm AS500 cadets are counted as GMC, are absent from POC Third Hour choices, receive `N/A` for POC Third Hour when no entry exists, and sort between AS300 and AS250.
 - Confirm attendance codes validate against Data Legend options while frontend table column types remain unset.
 - Confirm stale blank rows are removed from the frontend matrix after cadets are removed or marked non-operational.
 

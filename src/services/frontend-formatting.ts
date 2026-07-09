@@ -781,11 +781,13 @@ namespace FrontendFormattingService {
     sheet.getRange(2, 1, 1, 2).setValues([['Resource', 'Link']]);
     sheet.getRange(3, 1, quickLinks.length, 2).setValues(quickLinks);
 
+    const countCadetsByAsYear = (asYears: string[]): string =>
+      `=${asYears.map((asYear) => `COUNTIF(Directory!C3:C,"${asYear}")`).join('+')}`;
     const metricsHeader = [['Metric', 'Value']];
     const metrics = [
       ['Total Cadets', '=COUNTA(Directory!A3:A)'],
-      ['POC Cadets', '=COUNTIF(Directory!C3:C,"AS3*")+COUNTIF(Directory!C3:C,"AS4*")+COUNTIF(Directory!C3:C,"AS7*")+COUNTIF(Directory!C3:C,"AS8*")+COUNTIF(Directory!C3:C,"AS9*")'],
-      ['GMC Cadets', '=COUNTIF(Directory!C3:C,"AS1*")+COUNTIF(Directory!C3:C,"AS2*")+COUNTIF(Directory!C3:C,"AS5*")'],
+      ['POC Cadets', countCadetsByAsYear(Arrays.POC_AS_YEARS)],
+      ['GMC Cadets', countCadetsByAsYear(Arrays.GMC_AS_YEARS)],
       ['Leadership Roles', '=COUNTIF(Directory!G3:G,"<>")'],
     ];
     sheet.getRange(2, 4, 1, 2).setValues(metricsHeader).setFontWeight('bold');

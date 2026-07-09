@@ -481,8 +481,8 @@ namespace TransitionService {
   function defaultRankForAsYear(asYear: string): string {
     const normalized = String(asYear || '').trim().toUpperCase().replace(/\s+/g, '');
     if (normalized === 'AS100' || normalized === 'AS150') return 'C/4C';
-    if (normalized === 'AS200' || normalized === 'AS250') return 'C/3C';
-    if (normalized === 'AS300' || normalized === 'AS400' || normalized === 'AS500') return 'C/2d Lt';
+    if (normalized === 'AS200' || normalized === 'AS250' || normalized === 'AS500') return 'C/3C';
+    if (normalized === 'AS300' || normalized === 'AS400') return 'C/2d Lt';
     return '';
   }
 

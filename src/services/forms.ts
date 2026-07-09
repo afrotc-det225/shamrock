@@ -259,7 +259,7 @@ namespace FormService {
     byCrosstown: Record<string, Record<string, string[]>>; // university -> AS -> labels
     allByAs: Record<string, string[]>; // AS -> labels
     nonAbroadByAs: Record<string, string[]>; // AS -> labels (exclude flight Abroad)
-    pocByAs: Record<string, string[]>; // AS -> labels (AS300+ only)
+    pocByAs: Record<string, string[]>; // AS -> labels (POC years only)
   }
 
   function normalizeToList(value: string, options: string[]): string {
@@ -282,11 +282,6 @@ namespace FormService {
       const sheet = SheetUtils.getSheet(backendId, 'Directory Backend');
       if (!sheet) return groups;
       const table = SheetUtils.readTable(sheet);
-      const asYearNumber = (raw: string): number => {
-        const match = String(raw || '').toUpperCase().match(/AS\s*(\d+)/);
-        if (!match) return 0;
-        return Number(match[1] || 0) || 0;
-      };
       table.rows.filter((r) => DirectoryService.isOperationallyActiveCadet(r)).forEach((r) => {
         const as = String(r['as_year'] || '').trim() || 'Unknown';
         const flightRaw = String(r['flight'] || '').trim();
@@ -305,8 +300,8 @@ namespace FormService {
           groups.nonAbroadByAs[as].push(label);
         }
 
-        // POC Third Hour: AS300+ only, exclude Abroad cadets
-        if (asYearNumber(as) >= 300 && !isAbroad) {
+        // POC Third Hour: explicit POC years only; AS500 remains GMC. Exclude Abroad cadets.
+        if (Arrays.isPocAsYear(as) && !isAbroad) {
           groups.pocByAs[as] = groups.pocByAs[as] || [];
           groups.pocByAs[as].push(label);
         }
@@ -542,7 +537,7 @@ namespace FormService {
       }
 
       Object.keys(groupMap)
-        .sort((a, b) => b.localeCompare(a, undefined, { sensitivity: 'base' }))
+        .sort(Arrays.compareAsYearsForDisplay)
         .forEach((as) => {
           const opts = groupMap[as];
           if (!opts || !opts.length) return;
@@ -569,7 +564,7 @@ namespace FormService {
 
       const groupMap = cadets.byFlightAll[fName] || cadets.byFlight[fName] || {};
       Object.keys(groupMap)
-        .sort((a, b) => b.localeCompare(a, undefined, { sensitivity: 'base' }))
+        .sort(Arrays.compareAsYearsForDisplay)
         .forEach((as) => {
           const opts = groupMap[as];
           if (!opts || !opts.length) return;
@@ -580,12 +575,12 @@ namespace FormService {
     llabFlightItem.setChoices(llabFlights.map((f) => llabFlightItem.createChoice(f, llabFlightPages[f])));
     Log.info(`Attendance form: LLAB flight pages=${llabFlights.length}`);
 
-    // Section 6: POC Third Hour branch (AS300+ only, excludes Abroad)
+    // Section 6: POC Third Hour branch (explicit POC years only, excludes Abroad)
     const pocPage = addPageBreakItemSafe(workingForm, 'POC Branch', FormApp.PageNavigationType.SUBMIT);
     workingForm = pocPage.form;
     const pocStart = pocPage.item;
     Object.keys(cadets.pocByAs)
-      .sort((a, b) => b.localeCompare(a, undefined, { sensitivity: 'base' }))
+      .sort(Arrays.compareAsYearsForDisplay)
       .forEach((as) => {
         const opts = cadets.pocByAs[as];
         if (!opts || !opts.length) return;
@@ -599,7 +594,7 @@ namespace FormService {
     workingForm = secondaryPage.form;
     const secondaryStart = secondaryPage.item;
     Object.keys(cadets.nonAbroadByAs)
-      .sort((a, b) => b.localeCompare(a, undefined, { sensitivity: 'base' }))
+      .sort(Arrays.compareAsYearsForDisplay)
       .forEach((as) => {
         const opts = cadets.nonAbroadByAs[as];
         if (!opts || !opts.length) return;
@@ -613,7 +608,7 @@ namespace FormService {
     workingForm = fallbackPage.form;
     const fallbackStart = fallbackPage.item;
     Object.keys(cadets.allByAs)
-      .sort((a, b) => b.localeCompare(a, undefined, { sensitivity: 'base' }))
+      .sort(Arrays.compareAsYearsForDisplay)
       .forEach((as) => {
         const opts = cadets.allByAs[as];
         if (!opts || !opts.length) return;

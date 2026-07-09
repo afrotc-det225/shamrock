@@ -152,7 +152,7 @@ This section describes the current operational shape of the system so feature wo
 - FAQs: two-column end-user information.
 - Dashboard: links, metrics, charts, rotating upcoming birthdays, rotating “cadets out this week”.
 - Cadre & Leadership: minimal contact directory.
-- Directory: cadet directory with AS year, flight, squadron, rank, role, contact, academic, and status fields (sorted Z-A by AS year, then A-Z by last name) with required formatting constraints. The frontend and backend v2 Directory order begins `Last Name`, `First Name`, `Year`, `Flight`, `Sqdn`, `Rank`, `Role`, `University`.
+- Directory: cadet directory with AS year, flight, squadron, rank, role, contact, academic, and status fields (sorted by the canonical senior-to-junior display order, then A-Z by last name) with required formatting constraints. AS500 displays below AS300 and above AS250 because it remains a GMC year. The frontend and backend v2 Directory order begins `Last Name`, `First Name`, `Year`, `Flight`, `Sqdn`, `Rank`, `Role`, `University`.
 - Attendance: directory-synced cadet rows + event columns with attendance codes and percentage rollups.
 - Events: event metadata driving attendance columns and dashboard.
 - Excusals: public-facing excusal request log.
@@ -184,6 +184,11 @@ Attendance codes:
 
 Roster status:
 - Directory `Flight Path` values `Inactive`, `Commissioned`, and `Dropped` are non-operational statuses. Rows with those statuses remain in Directory Backend for recordkeeping but are excluded from frontend Directory, derived Leadership, Attendance, and form cadet choices.
+
+Cadet groups and display order:
+- GMC years are `AS100`, `AS150`, `AS200`, `AS250`, and `AS500`; AS500 is not eligible for POC Third Hour and receives `N/A` for those events when no explicit attendance log exists.
+- POC years are `AS300`, `AS400`, `AS700`, `AS800`, and `AS900`.
+- Cadet lists grouped by AS year display in this order: `AS900`, `AS800`, `AS700`, `AS400`, `AS300`, `AS500`, `AS250`, `AS200`, `AS150`, `AS100`.
 
 Percent metrics:
 - LLAB attendance % is based on LLAB event subset.

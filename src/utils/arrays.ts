@@ -2,6 +2,34 @@
 
 namespace Arrays {
   export const AS_YEARS = ['AS100', 'AS150', 'AS200', 'AS250', 'AS300', 'AS400', 'AS500', 'AS700', 'AS800', 'AS900'];
+  export const GMC_AS_YEARS = ['AS100', 'AS150', 'AS200', 'AS250', 'AS500'];
+  export const POC_AS_YEARS = AS_YEARS.filter((asYear) => !GMC_AS_YEARS.includes(asYear));
+  export const AS_YEAR_DISPLAY_ORDER = ['AS900', 'AS800', 'AS700', 'AS400', 'AS300', 'AS500', 'AS250', 'AS200', 'AS150', 'AS100'];
+
+  export function normalizeAsYear(raw: any): string {
+    return String(raw || '').trim().toUpperCase().replace(/\s+/g, '');
+  }
+
+  export function isGmcAsYear(raw: any): boolean {
+    return GMC_AS_YEARS.includes(normalizeAsYear(raw));
+  }
+
+  export function isPocAsYear(raw: any): boolean {
+    return POC_AS_YEARS.includes(normalizeAsYear(raw));
+  }
+
+  export function compareAsYearsForDisplay(a: any, b: any): number {
+    const normalizedA = normalizeAsYear(a);
+    const normalizedB = normalizeAsYear(b);
+    const indexA = AS_YEAR_DISPLAY_ORDER.indexOf(normalizedA);
+    const indexB = AS_YEAR_DISPLAY_ORDER.indexOf(normalizedB);
+
+    if (indexA >= 0 && indexB >= 0) return indexA - indexB;
+    if (indexA >= 0) return -1;
+    if (indexB >= 0) return 1;
+    return normalizedB.localeCompare(normalizedA, undefined, { sensitivity: 'base' });
+  }
+
   export const CADET_RANKS = ['C/4C', 'C/3C', 'C/2d Lt', 'C/1st Lt', 'C/Capt', 'C/Maj', 'C/Lt Col', 'C/Col'];
   export const RANKS = [
     'AB',

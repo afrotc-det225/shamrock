@@ -427,24 +427,17 @@ namespace AttendanceService {
       });
     });
 
-    const asYearNumber = (raw: string): number => {
-      const match = String(raw || '').toUpperCase().match(/AS\s*(\d+)/);
-      if (!match) return 0;
-      return Number(match[1] || 0) || 0;
-    };
-
     const isPocThirdHour = (ev: EventDef): boolean => {
       if (ev.expectedGroup.includes('poc')) return true;
       if (ev.eventType.includes('third hour')) return true;
       return ev.name.toLowerCase().includes('poc third hour');
     };
 
-    // Auto-fill N/A for GMC cadets for POC Third Hour events (AS < 300) when no log entry exists.
+    // Auto-fill N/A for GMC cadets, including AS500, for POC Third Hour events when no log entry exists.
     events.forEach((ev) => {
       if (!isPocThirdHour(ev)) return;
       rows.forEach((row: any) => {
-        const asNum = asYearNumber(String(row['as_year'] || ''));
-        if (asNum >= 300) return;
+        if (!Arrays.isGmcAsYear(row['as_year'])) return;
         if (row[ev.name] === '' || row[ev.name] === null || row[ev.name] === undefined) {
           row[ev.name] = 'N/A';
         }
@@ -554,20 +547,9 @@ namespace AttendanceService {
   }
 
   function sortAttendanceRows(rows: any[]): any[] {
-    const asPriority = (() => {
-      const arr = Arrays.AS_YEARS;
-      const base = arr && arr.length ? arr.slice().reverse() : ['AS900', 'AS800', 'AS700', 'AS500', 'AS400', 'AS300', 'AS250', 'AS200', 'AS150', 'AS100'];
-      const map = new Map<string, number>();
-      base.forEach((v, idx) => map.set(String(v), base.length - idx));
-      return map;
-    })();
-
-    const rank = (asYear: string): number => asPriority.get(String(asYear || '').trim()) || 0;
-
     return rows.slice().sort((a, b) => {
-      const aRank = rank(a['as_year']);
-      const bRank = rank(b['as_year']);
-      if (aRank !== bRank) return aRank > bRank ? -1 : 1; // higher AS rank first (Z->A)
+      const asYearCmp = Arrays.compareAsYearsForDisplay(a['as_year'], b['as_year']);
+      if (asYearCmp !== 0) return asYearCmp;
 
       const lastCmp = String(a[ATT_HEADER_LAST] || '').localeCompare(String(b[ATT_HEADER_LAST] || ''), undefined, { sensitivity: 'base' });
       if (lastCmp !== 0) return lastCmp;

@@ -85,20 +85,9 @@ namespace DirectoryService {
   }
 
   function sortDirectoryRows(rows: any[]): any[] {
-    const asPriority = (() => {
-      const arr = (globalThis as any).Arrays?.AS_YEARS as string[] | undefined;
-      const base = arr && arr.length ? arr.slice().reverse() : ['AS900', 'AS800', 'AS700', 'AS500', 'AS400', 'AS300', 'AS250', 'AS200', 'AS150', 'AS100'];
-      const map = new Map<string, number>();
-      base.forEach((v, idx) => map.set(String(v), base.length - idx));
-      return map;
-    })();
-
-    const rank = (asYear: string): number => asPriority.get(String(asYear || '').trim()) || 0;
-
     return rows.slice().sort((a, b) => {
-      const aRank = rank(a.as_year);
-      const bRank = rank(b.as_year);
-      if (aRank !== bRank) return aRank > bRank ? -1 : 1; // higher AS rank first (Z->A)
+      const asYearCmp = Arrays.compareAsYearsForDisplay(a.as_year, b.as_year);
+      if (asYearCmp !== 0) return asYearCmp;
 
       const lastCmp = String(a.last_name || '').localeCompare(String(b.last_name || ''), undefined, { sensitivity: 'base' });
       if (lastCmp !== 0) return lastCmp;
