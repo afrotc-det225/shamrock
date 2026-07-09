@@ -2241,9 +2241,7 @@ namespace SetupService {
   }
 
   export function syncLeadershipBackendToFrontend() {
-    DirectoryService.syncLeadershipBackendFromDirectory();
     SyncService.syncByBackendSheetName('Leadership Backend');
-    applyFrontendFormatting();
   }
 
   export function syncDataLegendBackendToFrontend() {
