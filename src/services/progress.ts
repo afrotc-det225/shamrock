@@ -107,6 +107,33 @@ namespace ProgressService {
     if (state.events.length > MAX_EVENTS) state.events = state.events.slice(-MAX_EVENTS);
   }
 
+  function friendlyFormattingStage(label: string): string {
+    const labels: Record<string, string> = {
+      'clear managed protections': 'Managed protections cleared',
+      'apply pre-table frontend formatting': 'Base frontend formatting applied',
+      'ensure frontend tables': 'Frontend tables checked',
+      'reapply validations after table ensure': 'Validation rules checked',
+      'apply post-table formatting': 'Table-aware formatting applied',
+      'apply frontend protections': 'Frontend protections restored',
+    };
+    const normalized = String(label || '').trim().toLowerCase();
+    if (labels[normalized]) return labels[normalized];
+    const words = normalized.replace(/[_-]+/g, ' ');
+    return words ? `${words.charAt(0).toUpperCase()}${words.slice(1)}` : 'Formatting stage finished';
+  }
+
+  function appendLiveActivity(
+    state: ProgressState,
+    kind: ProgressEvent['kind'],
+    title: string,
+    detail: string,
+  ): void {
+    const timestamp = nowIso();
+    addEvent(state, { at: timestamp, kind, title, detail });
+    state.updatedAt = timestamp;
+    write(state);
+  }
+
   function defaultHint(descriptor: ActionDescriptor): string {
     const label = descriptor.label.toLowerCase();
     if (label.includes('transition')) return 'SHAMROCK saves transition checkpoints so a long run can resume safely.';
@@ -267,7 +294,10 @@ namespace ProgressService {
       const output = HtmlService.createHtmlOutput(dialogHtml(descriptor, runId)).setWidth(460).setHeight(590);
       SpreadsheetApp.getUi().showModelessDialog(output, 'SHAMROCK Live Progress');
       return true;
-    } catch {
+    } catch (err) {
+      try {
+        console.warn(`[WARN] Live progress window unavailable; running synchronously. Error: ${err}`);
+      } catch {}
       return false;
     }
   }
@@ -427,14 +457,78 @@ namespace ProgressService {
   }
 
   export function captureTechnicalLog(level: 'INFO' | 'WARN' | 'ERROR', message: string): void {
-    if (!executionContext || level !== 'WARN') return;
+    if (!executionContext) return;
     const state = read(executionContext.runId);
-    if (!state || state.status !== 'running') return;
+    if (!state || (state.status !== 'running' && state.status !== 'waiting')) return;
 
     const lower = message.toLowerCase();
+    if (level === 'INFO') {
+      const chips = message.match(/^Applied Directory Photo Link file chips to (\d+) cell\(s\)\.$/i);
+      if (chips) {
+        appendLiveActivity(
+          state,
+          'success',
+          'Directory photo links restored',
+          `Applied Google Drive file chips to ${chips[1]} Directory cell(s).`,
+        );
+        return;
+      }
+
+      const table = message.match(/^Ensured table styling path completed for .+ on sheet (.+)$/i);
+      if (table) {
+        appendLiveActivity(state, 'success', `${table[1]} table ready`, 'Checked the table object and visible table styling.');
+        return;
+      }
+
+      const stageOk = message.match(/^applyFrontendFormatting stage ok: (.+) durationMs=(\d+)$/i);
+      if (stageOk) {
+        const seconds = Math.round((Number(stageOk[2]) / 1000) * 10) / 10;
+        appendLiveActivity(state, 'success', friendlyFormattingStage(stageOk[1]), `Finished in ${seconds} second(s).`);
+        return;
+      }
+
+      const postTable = message.match(/^Applied post-table (Attendance|Leadership) formatting requests=(\d+)\.$/i);
+      if (postTable) {
+        appendLiveActivity(
+          state,
+          'success',
+          `${postTable[1]} table formatting finished`,
+          `Applied ${postTable[2]} typed-table-safe formatting request(s).`,
+        );
+        return;
+      }
+
+      if (lower === 'leadership sync: deriving backend rows from directory.') {
+        appendLiveActivity(state, 'info', 'Deriving Leadership from Directory', 'Refreshing cadet leadership rows from authoritative Directory roles.');
+        return;
+      }
+      if (lower === 'leadership sync: backend write flushed; mirroring to frontend.') {
+        appendLiveActivity(state, 'info', 'Publishing Leadership', 'The authoritative Leadership update is saved and is now being mirrored to the frontend.');
+        return;
+      }
+      return;
+    }
+
+    if (level === 'ERROR') {
+      const stageFailed = message.match(/^applyFrontendFormatting stage failed: (.+?) durationMs=(\d+)/i);
+      if (stageFailed) {
+        const seconds = Math.round((Number(stageFailed[2]) / 1000) * 10) / 10;
+        appendLiveActivity(
+          state,
+          'error',
+          `${friendlyFormattingStage(stageFailed[1])} failed`,
+          `The stage stopped after ${seconds} second(s); SHAMROCK is recording the failure details.`,
+        );
+      }
+      return;
+    }
+
     let title = '';
     let detail = '';
-    if (lower.includes('validation')) {
+    if (lower.includes('typed column')) {
+      title = 'A typed-column operation needed a safe fallback';
+      detail = 'SHAMROCK skipped the incompatible Spreadsheet operation and continued with its table-safe path.';
+    } else if (lower.includes('validation')) {
       title = 'A validation rule needed a fallback';
       detail = 'SHAMROCK continued with a safe alternative and will verify the final surface.';
     } else if (lower.includes('protection')) {
@@ -449,10 +543,6 @@ namespace ProgressService {
     } else {
       return;
     }
-
-    const timestamp = nowIso();
-    addEvent(state, { at: timestamp, kind: 'warning', title, detail });
-    state.updatedAt = timestamp;
-    write(state);
+    appendLiveActivity(state, 'warning', title, detail);
   }
 }

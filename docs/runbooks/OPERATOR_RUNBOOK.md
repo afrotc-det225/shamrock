@@ -82,6 +82,7 @@ Post-deploy validation checklist:
 ### 5.0 Reading live menu progress
 
 - Every backend SHAMROCK menu action opens a modeless progress window and then starts the actual work.
+- After a deployment that adds or changes the progress UI authorization scope, Google may ask the operator to authorize SHAMROCK again on the first menu action. Complete that authorization, return to the admin workbook, and rerun the action once.
 - Leave the window open to see current stage, distilled activity, elapsed time, and stage count where available. The percentage represents completed workflow stages, not an estimated Google API row count.
 - If the window says `Waiting for you`, return to the spreadsheet and answer the visible confirmation or data-entry prompt.
 - You may close the progress window without stopping the action. Do not assume closing it cancels server-side work.

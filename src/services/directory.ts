@@ -170,7 +170,16 @@ namespace DirectoryService {
     }));
 
     const sorted = sortDirectoryRows(mapped);
+    ProgressService.report({
+      title: 'Writing the frontend Directory',
+      detail: `Publishing ${sorted.length} active cadet row(s) while preserving typed Photo Link cells.`,
+      hint: 'Photo links are written separately as Google Drive file chips after the regular columns.',
+    });
     writeFrontendDirectoryRows(frontendId, frontendSheet, sorted);
+    ProgressService.report({
+      title: 'Frontend Directory synced',
+      detail: `Published ${sorted.length} active cadet row(s) and restored supported photo chips.`,
+    });
   }
 
   function upsertBackendRecord(record: DirectoryRecord) {
@@ -434,6 +443,10 @@ namespace DirectoryService {
       office_phone: formatPhoneForLeadership(row['office_phone']),
     })).sort(compareLeadershipRows);
 
+    ProgressService.report({
+      title: 'Writing authoritative Leadership rows',
+      detail: `Preserving ${preservedRows.length} cadre/manual row(s) and publishing ${derivedRows.length} active cadet leadership row(s).`,
+    });
     SheetUtils.writeTable(leadershipSheet, nextRows);
   }
 

@@ -24,6 +24,7 @@ Confirm explicitly:
 - Frontend tables are protected; edits flow through forms/logic.
 - Every new operator menu action uses `runMenuAction(...)` and the shared live-progress window.
 - Long or prompt-driven operator workflows define meaningful plain-language progress stages, hints, waiting states, and continuation states without false row-level precision or sensitive details.
+- Every useful operator-facing milestone added to technical logs is mirrored through an explicit progress report or a safe `captureTechnicalLog(...)` translation, including completion durations and recoverable warnings where helpful.
 - The change targets the current supported baseline, not retired CSV/sheet/property formats.
 
 ## 3. Document The Operational Delta

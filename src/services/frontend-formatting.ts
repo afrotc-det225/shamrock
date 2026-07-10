@@ -48,10 +48,56 @@ namespace FrontendFormattingService {
     }
   }
 
+  function readSheetValuesViaApi(
+    ss: GoogleAppsScript.Spreadsheet.Spreadsheet,
+    sheetName: string,
+    a1Range: string,
+  ): unknown[][] | null {
+    const valuesService = (globalThis as any).Sheets?.Spreadsheets?.Values;
+    if (!valuesService?.get) return null;
+    const escapedName = sheetName.replace(/'/g, "''");
+    try {
+      const response = valuesService.get(ss.getId(), `'${escapedName}'!${a1Range}`, {
+        majorDimension: 'ROWS',
+        valueRenderOption: 'FORMATTED_VALUE',
+      });
+      return (response?.values || []) as unknown[][];
+    } catch (err) {
+      Log.warn(`Unable to read ${sheetName}!${a1Range} with Sheets API: ${err}`);
+      return null;
+    }
+  }
+
+  function columnNumberToA1(column: number): string {
+    let value = Math.max(1, Math.floor(column));
+    let result = '';
+    while (value > 0) {
+      const remainder = (value - 1) % 26;
+      result = String.fromCharCode(65 + remainder) + result;
+      value = Math.floor((value - 1) / 26);
+    }
+    return result;
+  }
+
+  function readHeaderRows(
+    ss: GoogleAppsScript.Spreadsheet.Spreadsheet,
+    sheet: GoogleAppsScript.Spreadsheet.Sheet,
+  ): { machine: string[]; display: string[] } {
+    const apiRows = readSheetValuesViaApi(ss, sheet.getName(), '1:2');
+    if (apiRows) {
+      return {
+        machine: (apiRows[0] || []).map((h) => String(h || '').trim()),
+        display: (apiRows[1] || []).map((h) => String(h || '').trim()),
+      };
+    }
+    Log.warn(`Unable to read ${sheet.getName()} headers through the typed-table-safe Sheets API path; skipping this header-driven step.`);
+    return { machine: [], display: [] };
+  }
+
   function buildNamedRanges(ss: GoogleAppsScript.Spreadsheet.Spreadsheet): NamedRangeDef[] {
     const sheet = ss.getSheetByName('Data Legend');
     if (!sheet) return [];
-    const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0].map((h) => String(h || '').trim());
+    const headers = readHeaderRows(ss, sheet).machine;
 
     const mapping: Record<string, string> = {
       as_year_options: 'AS_YEARS',
@@ -80,7 +126,10 @@ namespace FrontendFormattingService {
       const col = idx + 1;
       const rowsCount = Math.max(0, lastRow - 2);
       if (rowsCount === 0) return;
-      const values = sheet.getRange(3, col, rowsCount, 1).getValues().map((r) => String(r[0] || ''));
+      const columnLetter = columnNumberToA1(col);
+      const apiValues = readSheetValuesViaApi(ss, sheet.getName(), `${columnLetter}3:${columnLetter}${lastRow}`);
+      if (!apiValues) return;
+      const values = apiValues.map((r) => String(r[0] || ''));
       let nonEmpty = -1;
       for (let i = values.length - 1; i >= 0; i--) {
         if (values[i].trim() !== '') {
@@ -101,7 +150,7 @@ namespace FrontendFormattingService {
     if (!sheet) return;
 
     try {
-      const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0].map((h) => String(h || ''));
+      const headers = readHeaderRows(ss, sheet).machine;
       const headerIndex = (name: string) => headers.indexOf(name);
 
       const map: Record<string, string> = {
@@ -158,7 +207,7 @@ namespace FrontendFormattingService {
     if (!sheet) return;
 
     try {
-      const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0].map((h) => String(h || ''));
+      const headers = readHeaderRows(ss, sheet).machine;
       const dataRows = Math.max(1, sheet.getMaxRows() - 2);
       const rankIdx = headers.indexOf('rank');
       if (rankIdx < 0) return;
@@ -180,7 +229,7 @@ namespace FrontendFormattingService {
   function getLeadershipRankRange(ss: GoogleAppsScript.Spreadsheet.Spreadsheet): GoogleAppsScript.Spreadsheet.Range | null {
     const sheet = ss.getSheetByName('Data Legend');
     if (!sheet) return null;
-    const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0].map((h) => String(h || '').trim());
+    const headers = readHeaderRows(ss, sheet).machine;
     const indexes = ['cadet_rank_options', 'rank_options', 'honorific_options']
       .map((header) => headers.indexOf(header))
       .filter((idx) => idx >= 0);
@@ -188,7 +237,11 @@ namespace FrontendFormattingService {
 
     const startCol = Math.min(...indexes) + 1;
     const endCol = Math.max(...indexes) + 1;
-    const values = sheet.getRange(3, startCol, Math.max(1, sheet.getLastRow() - 2), endCol - startCol + 1).getValues();
+    const lastRow = Math.max(3, sheet.getLastRow());
+    const startLetter = columnNumberToA1(startCol);
+    const endLetter = columnNumberToA1(endCol);
+    const values = readSheetValuesViaApi(ss, sheet.getName(), `${startLetter}3:${endLetter}${lastRow}`);
+    if (!values) return null;
     let lastNonEmpty = -1;
     values.forEach((row, idx) => {
       if (row.some((cell) => String(cell || '').trim())) lastNonEmpty = idx;
@@ -204,7 +257,7 @@ namespace FrontendFormattingService {
     const applyToSheet = (sheetName: string) => {
       const sheet = ss.getSheetByName(sheetName);
       if (!sheet) return;
-      const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0].map((h) => String(h || '').trim().toLowerCase());
+      const headers = readHeaderRows(ss, sheet).machine.map((h) => h.toLowerCase());
       if (!headers.length) return;
       const fixed = new Set(ATTENDANCE_BASE_HEADERS.map((h) => h.toLowerCase()));
       const startRow = 3;
@@ -1015,7 +1068,7 @@ namespace FrontendFormattingService {
       return;
     }
 
-    const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0].map((h) => String(h || '').trim().toLowerCase());
+    const headers = readHeaderRows(ss, sheet).machine.map((h) => h.toLowerCase());
     const headerToIndex = new Map(headers.map((h, idx) => [h, idx] as const));
     const baseCount = ATTENDANCE_BASE_HEADERS.length;
     const eventStartIdx = baseCount;
@@ -1103,8 +1156,9 @@ namespace FrontendFormattingService {
       return;
     }
 
-    const machineHeaders = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0].map((h) => String(h || '').trim().toLowerCase());
-    const displayHeaders = sheet.getRange(2, 1, 1, sheet.getLastColumn()).getValues()[0].map((h) => String(h || '').trim().toLowerCase());
+    const headerRows = readHeaderRows(ss, sheet);
+    const machineHeaders = headerRows.machine.map((h) => h.toLowerCase());
+    const displayHeaders = headerRows.display.map((h) => h.toLowerCase());
     const centerHeaders = new Set(['overall', 'llab', 'overall_attendance_pct', 'llab_attendance_pct']);
     const endRowIndex = Math.max(3, sheet.getLastRow());
     const requests: Record<string, any>[] = [];

@@ -105,7 +105,7 @@ Use placeholders and runtime prompts for operational data. If a one-time admin a
 - Keep Apps Script global functions in `src/index.ts` so menus and triggers can call them.
 - Keep orchestration in `src/services/`.
 - Keep raw Apps Script IO localized and make business rules easy to read.
-- Use `ProgressService.report(...)`, `ProgressService.waiting(...)`, and `ProgressService.background(...)` for operator-visible milestones, prompts, and saved continuations. Progress copy must be non-technical and must not expose resource IDs, emails, personal data, or stack details.
+- Use `ProgressService.report(...)`, `ProgressService.waiting(...)`, and `ProgressService.background(...)` for operator-visible milestones, prompts, and saved continuations. Meaningful technical milestones that appear in `Log` output must also have an explicit operator report or a safe translation in `ProgressService.captureTechnicalLog(...)` so the live activity view does not lag behind the useful execution log. Progress copy must be non-technical and must not expose resource IDs, emails, personal data, or stack details.
 - Prefer existing helpers:
   - `Config.getScriptProperty`, `Config.setScriptProperty`, and related property helpers.
   - `Config.getBackendId`, `Config.getFrontendId`, `Config.getBackendSheet`, `Config.getFrontendSheet`.

@@ -340,13 +340,18 @@ namespace SetupService {
       const sheetId = sheet.getSheetId();
 
       const svc = (Sheets as any)?.Spreadsheets;
-      if (!svc || !svc.batchUpdate) {
+      if (!svc || !svc.batchUpdate || !svc.Values?.get) {
         Log.warn('Sheets advanced service unavailable; cannot create tables');
         return;
       }
 
       const headerRow = 2; // display headers live on row 2
-      const headerValues = sheet.getRange(headerRow, 1, 1, sheet.getLastColumn()).getValues()[0];
+      const escapedSheetName = sheetName.replace(/'/g, "''");
+      const headerResponse = svc.Values.get(spreadsheetId, `'${escapedSheetName}'!${headerRow}:${headerRow}`, {
+        majorDimension: 'ROWS',
+        valueRenderOption: 'FORMATTED_VALUE',
+      });
+      const headerValues = ((headerResponse?.values || [])[0] || []).map((value: unknown) => String(value || '').trim());
       const colCount = headerValues.length;
       if (colCount === 0) return;
       const endColIndex = colCount; // zero-based exclusive
@@ -369,6 +374,11 @@ namespace SetupService {
           firstBandColorStyle: apiColorStyle('#FFFFFF'),
           secondBandColorStyle: apiColorStyle('#F6F8F9'),
         },
+        columnProperties: headerValues.map((columnName: string, columnIndex: number) => ({
+          columnIndex,
+          columnName,
+          columnType: 'COLUMN_TYPE_UNSPECIFIED',
+        })),
       };
 
       const existingTable = findExistingTable(svc, spreadsheetId, sheetId, tableId, displayTableName);
@@ -376,7 +386,7 @@ namespace SetupService {
         ? {
             updateTable: {
               table: { ...baseTable, tableId: existingTable.tableId },
-              fields: 'name,range,rowsProperties',
+              fields: 'name,range,rowsProperties,columnProperties',
             },
           }
         : {

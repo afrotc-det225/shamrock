@@ -37,6 +37,11 @@ namespace SyncService {
       `${backendSheetName} -> ${frontendSheetName}`,
       () => SheetUtils.readTable(backendSheet),
     );
+    ProgressService.report({
+      title: `Syncing ${frontendSheetName}`,
+      detail: `Read ${data.rows.length} authoritative row(s) from ${backendSheetName}; preparing the frontend table.`,
+      hint: 'The backend remains authoritative while the user-facing copy is replaced.',
+    });
     withStorageReadRetry(
       `${frontendSheetName} schema preparation`,
       () => SheetUtils.ensureSchemaColumns(frontendSheet),
@@ -52,6 +57,10 @@ namespace SyncService {
         const dataRowCount = Math.max(1, maxRows - 2);
         frontendSheet.getRange(3, 1, dataRowCount, lastCol).clearDataValidations();
         SheetUtils.writeTable(frontendSheet, data.rows, { clearDataValidationsBeforeWrite: true, trimBlankRows: true });
+        ProgressService.report({
+          title: `${frontendSheetName} synced`,
+          detail: `Published ${data.rows.length} row(s) and cleared stale self-validations.`,
+        });
         return;
       } catch (err) {
         Log.warn(`Data Legend sync encountered validation issues; falling back to plain write. Error: ${err}`);
@@ -62,6 +71,10 @@ namespace SyncService {
       `${frontendSheetName} table write`,
       () => SheetUtils.writeTable(frontendSheet, data.rows, { trimBlankRows: true }),
     );
+    ProgressService.report({
+      title: `${frontendSheetName} synced`,
+      detail: `Published ${data.rows.length} row(s) to the frontend table.`,
+    });
   }
 
   export function syncByBackendSheetName(name: string) {
@@ -85,10 +98,18 @@ namespace SyncService {
   }
 
   export function syncAllMapped() {
+    ProgressService.report({
+      title: 'Deriving current Leadership rows',
+      detail: 'Refreshing cadet command assignments from authoritative Directory roles while preserving cadre/manual contacts.',
+    });
     withStorageReadRetry(
       'Sync all mapped backend Leadership derivation',
       () => DirectoryService.syncLeadershipBackendFromDirectory(),
     );
+    ProgressService.report({
+      title: 'Syncing the Directory',
+      detail: 'Filtering to operationally active cadets and publishing the protected frontend roster.',
+    });
     DirectoryService.syncDirectoryFrontend();
     SpreadsheetApp.flush();
     MAPPINGS.forEach((m) => copyTable(m.backend, m.frontend));

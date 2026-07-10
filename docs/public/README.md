@@ -209,7 +209,7 @@ Every backend SHAMROCK menu action opens a modeless live-progress window instead
 - The selected action starts from the progress window and continues server-side.
 - Confirmation and data-entry prompts are reflected as `Waiting for you`; answer the prompt in the spreadsheet to continue.
 - Long workflows report real milestones. Percentages are stage-based and do not claim row-by-row precision when the underlying Google API does not expose it.
-- Non-critical validation, formatting, protection, or transient-retry warnings are distilled into operator-safe activity entries; full technical details remain in Apps Script logs.
+- Meaningful execution milestones—such as synced row counts, restored photo chips, table readiness, completed formatting phases and durations, and recoverable warnings—are distilled into operator-safe activity entries; full technical details remain in Apps Script logs.
 - Closing the progress window does not cancel the action.
 - Success, cancellation, background continuation, and failure are terminal states. Failures include the run ID needed to locate the matching Audit Backend and technical-log entries.
 - Installable triggers and form-submit automations do not open an interactive window because no operator is waiting in a spreadsheet UI; they continue to use technical and audit logging.
