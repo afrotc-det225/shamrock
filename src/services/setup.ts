@@ -1782,24 +1782,47 @@ namespace SetupService {
     throw new Error(`Unable to allocate a unique response archive sheet name for '${desired}'`);
   }
 
-  function waitForNewLinkedResponseSheet(
+  interface FreshSheetProperties {
+    sheetId: number;
+    title: string;
+    index?: number;
+    hidden?: boolean;
+    gridProperties?: { rowCount?: number; columnCount?: number; frozenRowCount?: number };
+  }
+
+  function getFreshSheetProperties(spreadsheetId: string): FreshSheetProperties[] {
+    const service = (globalThis as any).Sheets?.Spreadsheets;
+    if (!service?.get) {
+      throw new Error('Sheets advanced service is required to verify a newly linked Form response tab');
+    }
+    const response = service.get(spreadsheetId, {
+      fields: 'sheets(properties(sheetId,title,index,hidden,gridProperties(rowCount,columnCount,frozenRowCount)))',
+    });
+    return (response?.sheets || [])
+      .map((sheet: any) => sheet?.properties as FreshSheetProperties)
+      .filter((properties: FreshSheetProperties | undefined): properties is FreshSheetProperties => (
+        Boolean(properties) && typeof properties?.sheetId === 'number'
+      ));
+  }
+
+  function waitForNewResponseSheetMetadata(
     spreadsheetId: string,
-    formId: string,
     priorSheetIds: Set<number>,
     timeoutMs = 120000,
-  ): GoogleAppsScript.Spreadsheet.Sheet | null {
+  ): FreshSheetProperties | null {
     const startedAt = Date.now();
     let attempt = 0;
     while (Date.now() - startedAt < timeoutMs) {
       if (attempt > 0) Utilities.sleep(2000);
-      const spreadsheet = SpreadsheetApp.openById(spreadsheetId);
-      const linked = findLinkedResponseSheet(spreadsheet, formId);
-      if (linked && !priorSheetIds.has(linked.getSheetId())) return linked;
-
-      const newResponseSheet = spreadsheet.getSheets().find((sheet) => (
-        !priorSheetIds.has(sheet.getSheetId()) && RESPONSE_SHEET_REGEX.test(sheet.getName())
+      const candidates = getFreshSheetProperties(spreadsheetId).filter((sheet) => (
+        !priorSheetIds.has(sheet.sheetId) && RESPONSE_SHEET_REGEX.test(sheet.title)
       ));
-      if (newResponseSheet) return newResponseSheet;
+      if (candidates.length === 1) return candidates[0];
+      if (candidates.length > 1) {
+        throw new Error(
+          `Multiple new Form response tabs appeared during Attendance rebuild: ${candidates.map((sheet) => `${sheet.title} (${sheet.sheetId})`).join(', ')}`,
+        );
+      }
 
       attempt += 1;
       if (attempt % 5 === 0) {
@@ -1809,6 +1832,63 @@ namespace SetupService {
       }
     }
     return null;
+  }
+
+  function renameResponseSheetViaSheetsApi(
+    spreadsheetId: string,
+    sheetId: number,
+    title: string,
+  ) {
+    const service = (globalThis as any).Sheets?.Spreadsheets;
+    if (!service?.batchUpdate) {
+      throw new Error('Sheets advanced service is required to rename a newly linked Form response tab');
+    }
+    service.batchUpdate({
+      requests: [{
+        updateSheetProperties: {
+          properties: {
+            sheetId,
+            title,
+            hidden: false,
+            gridProperties: { frozenRowCount: 1 },
+          },
+          fields: 'title,hidden,gridProperties.frozenRowCount',
+        },
+      }],
+    }, spreadsheetId);
+  }
+
+  function responseSheetDiagnosticsViaSheetsApi(
+    spreadsheetId: string,
+    sheetTitle: string,
+    rowCount: number,
+  ) {
+    const valuesService = (globalThis as any).Sheets?.Spreadsheets?.Values;
+    if (!valuesService?.get) {
+      throw new Error('Sheets advanced service is required to inspect the new Form response headers');
+    }
+    const escapedTitle = sheetTitle.replace(/'/g, "''");
+    const response = valuesService.get(spreadsheetId, `'${escapedTitle}'!1:1`, {
+      majorDimension: 'ROWS',
+      valueRenderOption: 'FORMATTED_VALUE',
+    });
+    const headers = ((response?.values || [])[0] || []).map((header: unknown) => String(header || '').trim());
+    const counts = new Map<string, number>();
+    headers.forEach((header: string) => {
+      if (!header) return;
+      counts.set(header, (counts.get(header) || 0) + 1);
+    });
+    const duplicates = Array.from(counts.entries())
+      .filter(([, count]) => count > 1)
+      .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+    return {
+      columnCount: headers.filter(Boolean).length,
+      rowCount,
+      uniqueHeaderCount: counts.size,
+      duplicateHeaderCount: duplicates.length,
+      maxHeaderOccurrences: duplicates.length ? duplicates[0][1] : 1,
+      duplicateHeaders: duplicates,
+    };
   }
 
   function responseSheetDiagnostics(sheet: GoogleAppsScript.Spreadsheet.Sheet) {
@@ -1862,7 +1942,9 @@ namespace SetupService {
       const formId = form.getId();
       wasAcceptingResponses = form.isAcceptingResponses();
       const spreadsheet = SpreadsheetApp.openById(destinationSpreadsheetId);
-      const priorSheetIds = new Set(spreadsheet.getSheets().map((sheet) => sheet.getSheetId()));
+      // Verify the Advanced Sheets API before any destructive form mutation and
+      // snapshot sheet IDs through its uncached metadata surface.
+      const priorSheetIds = new Set(getFreshSheetProperties(destinationSpreadsheetId).map((sheet) => sheet.sheetId));
       const originalDestinationId = getFormDestinationSpreadsheetId(form);
       const priorResponseSheet = findLinkedResponseSheet(spreadsheet, formId)
         || (originalDestinationId === destinationSpreadsheetId ? spreadsheet.getSheetByName(desiredSheetName) : null);
@@ -1888,23 +1970,31 @@ namespace SetupService {
       FormService.rebuildAttendanceForm(form);
       form.setDestination(FormApp.DestinationType.SPREADSHEET, destinationSpreadsheetId);
 
-      const newResponseSheet = waitForNewLinkedResponseSheet(destinationSpreadsheetId, formId, priorSheetIds);
+      const newResponseSheet = waitForNewResponseSheetMetadata(destinationSpreadsheetId, priorSheetIds);
       if (!newResponseSheet) {
         throw new Error(
-          'Attendance form was rebuilt and its destination was set, but Google did not expose the new linked response tab within 120 seconds. No placeholder tab was created.',
+          'Attendance form was rebuilt and its destination was set, but the Sheets API did not expose the new linked response tab within 120 seconds. No placeholder tab was created.',
         );
       }
-      if (newResponseSheet.getName() !== desiredSheetName) newResponseSheet.setName(desiredSheetName);
-      newResponseSheet.showSheet();
-      newResponseSheet.setFrozenRows(1);
-      const diagnostics = logAttendanceResponseSheetHealth(newResponseSheet);
+      renameResponseSheetViaSheetsApi(destinationSpreadsheetId, newResponseSheet.sheetId, desiredSheetName);
+      const diagnostics = responseSheetDiagnosticsViaSheetsApi(
+        destinationSpreadsheetId,
+        desiredSheetName,
+        newResponseSheet.gridProperties?.rowCount || 0,
+      );
+      const healthSummary =
+        `Attendance response sheet health sheet='${desiredSheetName}' sheetId=${newResponseSheet.sheetId} `
+        + `columns=${diagnostics.columnCount} rows=${diagnostics.rowCount} uniqueHeaders=${diagnostics.uniqueHeaderCount} `
+        + `duplicateHeaders=${diagnostics.duplicateHeaderCount} maxHeaderOccurrences=${diagnostics.maxHeaderOccurrences}`;
+      if (diagnostics.duplicateHeaderCount) Log.warn(healthSummary);
+      else Log.info(healthSummary);
       if (diagnostics.duplicateHeaderCount) {
         throw new Error(
           `Fresh Attendance response sheet still has ${diagnostics.duplicateHeaderCount} duplicate header name(s); preserved archive='${archivedSheetName || 'none'}'`,
         );
       }
       Log.info(
-        `Attendance form: rebuild completed with fresh linked response sheet '${desiredSheetName}' columns=${diagnostics.columnCount} archive='${archivedSheetName || 'none'}'`,
+        `Attendance form: rebuild completed with fresh linked response sheet '${desiredSheetName}' sheetId=${newResponseSheet.sheetId} originalTitle='${newResponseSheet.title}' columns=${diagnostics.columnCount} archive='${archivedSheetName || 'none'}'`,
       );
     } catch (err) {
       Log.error(`Attendance form: protected rebuild failed: ${err}`);
