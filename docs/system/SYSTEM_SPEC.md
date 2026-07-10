@@ -156,8 +156,9 @@ All system forms must require verified responder emails.
 This section describes the current operational shape of the system so feature work stays consistent.
 
 ### 7.1 Frontend Tabs
-- FAQs: two-column end-user information.
-- Dashboard: links, metrics, charts, rotating upcoming birthdays, rotating “cadets out this week”.
+- Dashboard: the single frontend home page for end-user guidance, quick links, roster and attendance metrics, current-versus-historical charts, and the full birthday calendar. The retired FAQs tab must not be recreated.
+- Dashboard birthday rows contain `Last Name`, `First Name`, `Birthday`, `Display`, and `Group`. Display values use `C/Last` for unique last names and `C/F. Last` when a first initial is needed to disambiguate a duplicate last name. Groups are sequential occupied Sunday-through-Saturday birthday weeks in the current calendar year; group parity drives alternating white/gray backgrounds.
+- `_Dashboard Data`: hidden formula-backed helper tab used only as the source for managed Dashboard charts. Dashboard rebuilds may recreate its contents, and it must remain hidden from end users.
 - Cadre & Leadership: minimal contact directory.
 - Directory: cadet directory with AS year, flight, squadron, rank, role, contact, academic, and status fields (sorted by the canonical senior-to-junior display order, then A-Z by last name) with required formatting constraints. AS500 displays below AS300 and above AS250 because it remains a GMC year. The frontend and backend v2 Directory order begins `Last Name`, `First Name`, `Year`, `Flight`, `Sqdn`, `Rank`, `Role`, `University`.
 - Attendance: directory-synced cadet rows + event columns with attendance codes and percentage rollups.

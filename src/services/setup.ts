@@ -2355,10 +2355,21 @@ namespace SetupService {
     }
     ProgressService.report({
       title: 'Rebuilding the Dashboard',
-      detail: 'Refreshing quick links, roster summaries, attendance highlights, and the mobile-friendly layout.',
-      percent: 45,
+      detail: 'Refreshing quick actions, roster metrics, historical attendance charts, birthday groups, and end-user guidance.',
+      hint: 'Historical comparisons use the two newest archived Attendance tabs and update through hidden formula-backed chart data.',
+      percent: 35,
+      step: 1,
+      totalSteps: 2,
     });
     FrontendFormattingService.applyDashboardOnly(frontendId);
+    ProgressService.report({
+      title: 'Protecting the generated Dashboard',
+      detail: 'Locking the birthday output and restoring the standard frontend safeguards after the rebuild.',
+      percent: 82,
+      step: 2,
+      totalSteps: 2,
+    });
+    ProtectionService.applyFrontendProtections(frontendId);
   }
 
   export function reapplyFrontendProtections() {
@@ -2773,7 +2784,7 @@ namespace SetupService {
 
   export function reorderFrontendSheets() {
     const frontendId = Config.getFrontendId();
-    const desired = ['FAQs', 'Dashboard', 'Leadership', 'Directory', 'Attendance', 'Data Legend'];
+    const desired = ['Dashboard', 'Leadership', 'Directory', 'Attendance', 'Data Legend'];
     ProgressService.report({
       title: 'Ordering frontend sheets',
       detail: 'Moving user-facing tabs into the standard navigation order.',

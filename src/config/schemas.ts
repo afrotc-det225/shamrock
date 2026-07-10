@@ -3,7 +3,6 @@
 namespace Schemas {
   // Minimal machine headers for key tables. Display headers default to machine headers if not provided.
   export const FRONTEND_TABS: Types.TabSchema[] = [
-    { name: 'FAQs' },
     { name: 'Dashboard' },
     {
       name: 'Leadership',

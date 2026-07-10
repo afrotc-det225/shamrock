@@ -35,6 +35,8 @@ Operator expectations:
 
 Setup outputs to verify:
 - Frontend workbook contains the expected tabs and formatting.
+- Dashboard is the first frontend tab, the retired FAQs tab is absent, all four managed charts render, and the hidden `_Dashboard Data` helper remains hidden.
+- Dashboard birthdays show Last Name, First Name, full Birthday, Display, and Group; duplicate last names use a first initial and Sunday-through-Saturday groups alternate white/gray backgrounds.
 - Backend workbook contains the expected tabs and formatting.
 - Forms exist and require verified responder emails.
 - Custom menus appear in the backend/admin workbook.

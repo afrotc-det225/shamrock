@@ -252,7 +252,7 @@ Audit logging records operator actions and key automation outcomes so operators 
 
 Formatting and protections keep the frontend usable as an interface while preserving backend/source-of-truth workflows.
 
-Dashboard uses compact spreadsheet-native sections for quick links, roster metrics, attendance summary, and birthdays. FAQ uses a one-column mobile-friendly reading layout instead of a single oversized cell.
+Dashboard is the single frontend home page. It combines end-user guidance with quick actions, roster and attendance metrics, current-versus-historical charts, and a full birthday calendar. Birthday rows are grouped by Sunday-through-Saturday week for the current year and use alternating group backgrounds; duplicate last names gain a first initial in the display label. The retired FAQ tab is removed rather than maintained as a separate reading surface.
 
 ### Operator Entry Points
 

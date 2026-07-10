@@ -97,7 +97,7 @@ namespace ProtectionService {
   function protectFirstTwoRows(ss: GoogleAppsScript.Spreadsheet.Spreadsheet, editors: string[] = []) {
     ss.getSheets().forEach((sheet) => {
       const name = sheet.getName();
-      if (name === 'FAQs' || name === 'Dashboard') return; // handled separately
+      if (name === 'Dashboard') return; // handled separately
       try {
         const lastCol = Math.max(1, sheet.getLastColumn());
         const range = sheet.getRange(1, 1, 2, lastCol);
@@ -108,19 +108,12 @@ namespace ProtectionService {
     });
   }
 
-  function protectFaqs(ss: GoogleAppsScript.Spreadsheet.Spreadsheet, editors: string[] = []) {
-    const sheet = ss.getSheetByName('FAQs');
-    if (!sheet) return;
-    const range = sheet.getRange(1, 1, sheet.getMaxRows(), sheet.getMaxColumns());
-    ensureRangeProtection(sheet, range, 'FAQs:all', { warningOnly: false, editors });
-  }
-
   function protectDashboard(ss: GoogleAppsScript.Spreadsheet.Spreadsheet, editors: string[] = []) {
     const sheet = ss.getSheetByName('Dashboard');
     if (!sheet) return;
-    const lastRow = Math.max(3, sheet.getMaxRows());
-    // Protect birthdays block (headers + data) in columns I:M
-    const birthdayRange = sheet.getRange(3, 9, lastRow - 2, 5);
+    const lastRow = Math.max(50, sheet.getMaxRows());
+    // Protect the generated birthday table (headers + data) in columns A:E.
+    const birthdayRange = sheet.getRange(50, 1, lastRow - 49, 5);
     ensureRangeProtection(sheet, birthdayRange, 'Dashboard:birthdays', { warningOnly: false, editors });
   }
 
@@ -245,9 +238,8 @@ namespace ProtectionService {
       ...getLeadershipEmails(ss),
     ]);
 
-    // Only broaden protections for FAQs, Leadership, and Attendance (allowlist). Directory warning stays open; others remain owner-only.
+    // Only broaden protections for Leadership and Attendance (allowlist). Directory warning stays open; others remain owner-only.
     runProtectionStep('header_rows', () => protectFirstTwoRows(ss));
-    runProtectionStep('FAQs:all', () => protectFaqs(ss, allowedEditors));
     runProtectionStep('Dashboard:birthdays', () => protectDashboard(ss));
     runProtectionStep('Leadership:all', () => protectLeadership(ss, allowedEditors));
     runProtectionStep('Data Legend:all', () => protectDataLegend(ss));
@@ -260,7 +252,7 @@ namespace ProtectionService {
     if (!ss) return;
 
     const managedDescriptions = new Set([
-      'FAQs:all',
+      'FAQs:all', // retired surface; retained here so its old protection can be removed before sheet deletion
       'Dashboard:birthdays',
       'Leadership:all',
       'Data Legend:all',
