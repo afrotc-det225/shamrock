@@ -28,15 +28,52 @@ function errorDetails(err: any): string {
   return String(err);
 }
 
+function menuActionStartDetail(opts: MenuActionOptions): string {
+  const label = opts.label.toLowerCase();
+  if (opts.action === 'menu.setup') return 'Checking established SHAMROCK workbooks, sheets, forms, triggers, formatting, and derived views.';
+  if (label.includes('transition')) return 'Loading the saved draft/checkpoints or opening the guided transition questions.';
+  if (label.startsWith('sync')) return 'Reading authoritative admin data and preparing the matching user-facing view.';
+  if (label.startsWith('import')) return 'Waiting to validate a Drive CSV before changing the selected admin table.';
+  if (label.startsWith('export')) return 'Reading the selected admin table and preparing a new CSV file in Drive.';
+  if (label.includes('attendance form')) return 'Checking the form, current response destination, and preserved response-history safeguards.';
+  if (label.startsWith('rebuild') || label.startsWith('refresh')) return 'Reading current authoritative inputs before regenerating the requested derived surface.';
+  if (label.includes('format') || label.includes('protection')) return 'Inspecting the frontend presentation and managed edit protections.';
+  if (label.startsWith('reorder')) return 'Opening the target workbook and comparing its tabs with the standard SHAMROCK order.';
+  if (label.startsWith('debug') || label.startsWith('dump')) return 'Inspecting the current structure and preparing a non-technical diagnostic summary.';
+  if (label.includes('cleanup') || label.includes('clean up')) return 'Reviewing housekeeping state and identifying only expired or unsupported entries.';
+  if (label.startsWith('add')) return 'Collecting the requested operator input before matching and updating authoritative records.';
+  if (label.includes('attendance')) return 'Inspecting attendance headers, selectors, codes, and current derived data.';
+  if (label.includes('excusals')) return 'Checking the Excusals management surface, sharing rules, and protected workflow state.';
+  if (label.includes('pause') || label.includes('resume')) return 'Checking the current automation state and any deferred synchronization work.';
+  if (label.includes('trigger')) return 'Comparing installed automations with the supported SHAMROCK trigger set.';
+  if (label.includes('help')) return 'Preparing the current operator-facing menu and data-flow guidance.';
+  return 'Checking permissions, configuration, and the active workbook before the first work stage.';
+}
+
 function confirmMenuAction(title: string, message: string) {
+  ProgressService.waiting(
+    'Waiting for confirmation',
+    message,
+    'Review the confirmation in the spreadsheet, then choose OK to continue or Cancel to stop.',
+  );
   const ui = SpreadsheetApp.getUi();
   const result = ui.alert(title, message, ui.ButtonSet.OK_CANCEL);
   if (result !== ui.Button.OK) {
     throw new MenuActionCancelled(`User cancelled "${title}"`);
   }
+  ProgressService.report({
+    title: 'Confirmation received',
+    detail: 'The action can now continue with the requested changes.',
+    percent: 10,
+  });
 }
 
 function promptDriveFileId(title: string): string {
+  ProgressService.waiting(
+    'Waiting for the CSV file',
+    'Paste the Google Drive file ID into the spreadsheet prompt.',
+    'SHAMROCK will validate the file headers before it writes any imported rows.',
+  );
   const ui = SpreadsheetApp.getUi();
   const response = ui.prompt(title, 'Enter the Drive file ID for the CSV file to import.', ui.ButtonSet.OK_CANCEL);
   if (response.getSelectedButton() !== ui.Button.OK) {
@@ -47,12 +84,27 @@ function promptDriveFileId(title: string): string {
   if (!fileId) {
     throw new Error(`${title} requires a Drive file ID.`);
   }
+  ProgressService.report({
+    title: 'CSV file selected',
+    detail: 'Opening the file from Drive and preparing to validate it.',
+    percent: 18,
+  });
   return fileId;
 }
 
 /** Wrap every menu action with consistent UI, execution logs, and Audit Backend rows. */
 function runMenuAction<T>(opts: MenuActionOptions, fn: () => T): T | undefined {
-  const runId = Utilities.getUuid();
+  const activeRunId = ProgressService.currentRunId(opts.action);
+  if (!activeRunId) {
+    const preparedRunId = Utilities.getUuid();
+    if (ProgressService.prepareAndShow(opts, preparedRunId)) return undefined;
+
+    // Script-editor and clasp executions do not have a spreadsheet dialog host.
+    // Preserve the same audit/error behavior and run synchronously in that case.
+    return ProgressService.withExecutionContext(preparedRunId, opts.action, () => runMenuAction(opts, fn));
+  }
+
+  const runId = activeRunId;
   const startedAt = Date.now();
   const actorEmail = AuditService.actorEmail();
   const auditBase = {
@@ -69,6 +121,11 @@ function runMenuAction<T>(opts: MenuActionOptions, fn: () => T): T | undefined {
   };
 
   Log.info(`[menu:${runId}] START category="${opts.category}" action="${opts.action}" label="${opts.label}" actor="${actorEmail}"`);
+  ProgressService.begin({
+    title: `Starting ${opts.label}`,
+    detail: menuActionStartDetail(opts),
+    percent: 5,
+  });
   AuditService.log({ ...auditBase, result: 'started' });
   toast(`${opts.label}...`, 'Starting');
 
@@ -77,25 +134,101 @@ function runMenuAction<T>(opts: MenuActionOptions, fn: () => T): T | undefined {
     const durationMs = Date.now() - startedAt;
     Log.info(`[menu:${runId}] OK action="${opts.action}" durationMs=${durationMs}`);
     AuditService.log({ ...auditBase, result: 'ok', durationMs });
+    ProgressService.complete(`${opts.label} finished in ${Math.max(1, Math.round(durationMs / 1000))} second(s).`);
     toast(`${opts.label} — done.`, 'Complete', 3);
     return result;
   } catch (err) {
     const durationMs = Date.now() - startedAt;
-    if (err instanceof MenuActionCancelled) {
+    if (err instanceof MenuActionCancelled || (err instanceof Error && err.name === 'MenuActionCancelled')) {
       Log.info(`[menu:${runId}] CANCELLED action="${opts.action}" durationMs=${durationMs} reason="${err.message}"`);
       AuditService.log({ ...auditBase, result: 'cancelled', durationMs, reason: err.message });
+      ProgressService.cancel(err.message);
       toast(`${opts.label} — cancelled.`, 'Cancelled', 3);
       return undefined;
     }
 
     Log.error(`[menu:${runId}] FAILED action="${opts.action}" durationMs=${durationMs} error="${errorDetails(err)}"`);
     AuditService.log({ ...auditBase, result: 'failed', durationMs, error: err, severity: 'ERROR' });
+    ProgressService.fail(errorDetails(err));
     toast(`${opts.label} — failed. Check logs.`, 'Error', 10);
     try {
       SpreadsheetApp.getUi().alert(`${opts.label} failed.\n\nRun ID: ${runId}\n\n${errorDetails(err)}`);
     } catch {}
     throw err;
   }
+}
+
+/** Called only by the live-progress dialog after it claims a prepared run. */
+function runShamrockProgressAction(action: string, runId: string) {
+  if (!ProgressService.claim(action, runId)) {
+    throw new Error('This progress run is invalid, expired, or already started. Select the menu action again.');
+  }
+
+  try {
+    return ProgressService.withExecutionContext(runId, action, () => {
+    switch (action) {
+      case 'menu.setup': return setup();
+      case 'menu.transfer_new_semester_v2': return transferToNewSemesterV2();
+      case 'menu.transfer_new_academic_year_v2': return transferToNewAcademicYearV2();
+      case 'menu.export_events_csv': return exportEventsCsv();
+      case 'menu.import_events_csv': return importEventsCsv();
+      case 'menu.export_attendance_csv': return exportAttendanceCsv();
+      case 'menu.import_attendance_csv': return importAttendanceCsv();
+      case 'menu.export_leadership_csv': return exportLeadershipCsv();
+      case 'menu.import_leadership_csv': return importLeadershipCsv();
+      case 'menu.export_cadets_csv': return exportCadetsCsv();
+      case 'menu.import_cadets_csv': return importCadetsCsv();
+      case 'menu.sync_directory': return syncDirectoryBackendToFrontend();
+      case 'menu.sync_leadership': return syncLeadershipBackendToFrontend();
+      case 'menu.sync_data_legend': return syncDataLegendBackendToFrontend();
+      case 'menu.sync_all_mapped': return syncAllBackendToFrontend();
+      case 'menu.refresh_data_legend': return refreshDataLegendAndFrontend();
+      case 'menu.refresh_events_artifacts': return refreshEventsArtifacts();
+      case 'menu.rebuild_dashboard': return rebuildDashboard();
+      case 'menu.rebuild_attendance_matrix': return rebuildAttendanceMatrix();
+      case 'menu.rebuild_attendance_form': return rebuildAttendanceForm();
+      case 'menu.reorder_frontend_sheets': return reorderFrontendSheets();
+      case 'menu.reorder_backend_sheets': return reorderBackendSheets();
+      case 'menu.apply_frontend_formatting': return applyFrontendFormatting();
+      case 'menu.pause_automations': return pauseAutomations();
+      case 'menu.resume_automations': return resumeAutomations();
+      case 'menu.toggle_frontend_formatting': return toggleFrontendFormatting();
+      case 'menu.toggle_column_widths': return toggleFrontendColumnWidths();
+      case 'menu.reapply_frontend_protections': return reapplyFrontendProtections();
+      case 'menu.archive_core_sheets': return archiveCoreSheets();
+      case 'menu.restore_core_sheets': return restoreCoreSheetsFromArchive();
+      case 'menu.refresh_excusals_form': return refreshExcusalsForm();
+      case 'menu.debug_attendance_response_sheet': return debugAttendanceResponseSheet();
+      case 'menu.setup_excusals_management': return setupExcusalsManagementSpreadsheet();
+      case 'menu.share_excusals_management': return shareExcusalsManagementSpreadsheet();
+      case 'menu.reinitialize_excusals_management': return reinitializeExcusalsManagementSheets();
+      case 'menu.debug_excusals_response_columns': return debugExcusalsResponseColumnsVerbose();
+      case 'menu.reinstall_triggers': return reinstallAllTriggers();
+      case 'menu.add_leadership_entry': return addLeadershipEntry();
+      case 'menu.fix_attendance_headers': return fixAttendanceHeaders();
+      case 'menu.show_help': return showMenuHelp();
+      case 'menu.fill_attendance_event': return fillAttendanceEventPrompt();
+      case 'menu.dump_structure': return dumpShamrockStructure();
+      case 'menu.dump_structure_to_drive': return dumpShamrockStructureToDrive();
+      case 'menu.cleanup_script_properties': return cleanupScriptProperties();
+      case 'menu.cleanup_transition_archives_v2': return cleanupExpiredTransitionArchivesV2();
+      case 'menu.replay_latest_directory_response': return replayLatestDirectoryFormResponse();
+      case 'menu.add_deputy_flight_commanders': return addDeputyFlightCommanders();
+      default:
+        ProgressService.fail(`Unknown menu action: ${action}`);
+        throw new Error(`Unknown SHAMROCK menu action: ${action}`);
+    }
+    });
+  } catch {
+    // runMenuAction already recorded/audited the failure and updated the live
+    // progress state. Do not echo raw server details into the HTML client.
+    return undefined;
+  }
+}
+
+/** Lightweight polling endpoint used by the live-progress dialog. */
+function getShamrockProgress(runId: string) {
+  return ProgressService.get(runId);
 }
 
 function addShamrockMenu() {
@@ -391,6 +524,11 @@ function refreshExcusalsForm() {
 
 function debugAttendanceResponseSheet() {
   runMenuAction({ label: 'Debug Attendance response columns', category: 'Attendance', action: 'menu.debug_attendance_response_sheet', targetSheet: Config.RESOURCE_NAMES.ATTENDANCE_FORM_SHEET }, () => {
+    ProgressService.report({
+      title: 'Inspecting Attendance response columns',
+      detail: 'Counting headers, duplicate names, and the current linked-response structure without changing response data.',
+      percent: 55,
+    });
     const diagnostics = SetupService.debugAttendanceResponseSheet();
     SpreadsheetApp.getUi().alert(
       `Attendance Form Responses: ${diagnostics.columnCount} columns, ${diagnostics.uniqueHeaderCount} unique headers, `
@@ -402,7 +540,21 @@ function debugAttendanceResponseSheet() {
 function setupExcusalsManagementSpreadsheet() {
   runMenuAction({ label: 'Setup Excusals management spreadsheet', category: 'Excusals', action: 'menu.setup_excusals_management' }, () => {
     confirmMenuAction('Setup Excusals management spreadsheet', 'This ensures the management spreadsheet exists, is formatted, shared, and protected. Continue?');
+    ProgressService.report({
+      title: 'Ensuring the Excusals management workbook',
+      detail: 'Creating or repairing the commander-facing sheets and supported structure.',
+      percent: 38,
+      step: 1,
+      totalSteps: 2,
+    });
     const managementId = ExcusalsService.ensureManagementSpreadsheet();
+    ProgressService.report({
+      title: 'Applying sharing and protections',
+      detail: 'Granting intended commander access and protecting managed ranges.',
+      percent: 75,
+      step: 2,
+      totalSteps: 2,
+    });
     ExcusalsService.shareAndProtectManagementSpreadsheet();
     const url = `https://docs.google.com/spreadsheets/d/${managementId}`;
     SpreadsheetApp.getUi().alert(`Excusals management spreadsheet ready and shared:\n${url}`);
@@ -411,6 +563,11 @@ function setupExcusalsManagementSpreadsheet() {
 
 function shareExcusalsManagementSpreadsheet() {
   runMenuAction({ label: 'Share Excusals management spreadsheet', category: 'Excusals', action: 'menu.share_excusals_management' }, () => {
+    ProgressService.report({
+      title: 'Refreshing Excusals access',
+      detail: 'Deriving intended commander access and reapplying workbook/range protections.',
+      percent: 58,
+    });
     ExcusalsService.shareAndProtectManagementSpreadsheet();
     const managementId = Config.getScriptProperty(Config.PROPERTY_KEYS.EXCUSAL_MANAGEMENT_SPREADSHEET_ID);
     const url = managementId ? `https://docs.google.com/spreadsheets/d/${managementId}` : 'N/A';
@@ -421,7 +578,21 @@ function shareExcusalsManagementSpreadsheet() {
 function reinitializeExcusalsManagementSheets() {
   runMenuAction({ label: 'Reinitialize Excusals management sheets', category: 'Excusals', action: 'menu.reinitialize_excusals_management' }, () => {
     confirmMenuAction('Reinitialize Excusals management sheets', 'This refreshes the management spreadsheet structure and protections. Continue?');
+    ProgressService.report({
+      title: 'Reinitializing management sheets',
+      detail: 'Repairing the supported Excusals management structure and current workflow rows.',
+      percent: 40,
+      step: 1,
+      totalSteps: 2,
+    });
     ExcusalsService.ensureManagementSpreadsheet();
+    ProgressService.report({
+      title: 'Restoring management access',
+      detail: 'Reapplying commander sharing and protected ranges after the structural refresh.',
+      percent: 75,
+      step: 2,
+      totalSteps: 2,
+    });
     ExcusalsService.shareAndProtectManagementSpreadsheet();
     const managementId = Config.getScriptProperty(Config.PROPERTY_KEYS.EXCUSAL_MANAGEMENT_SPREADSHEET_ID);
     const url = managementId ? `https://docs.google.com/spreadsheets/d/${managementId}` : 'N/A';
@@ -430,7 +601,14 @@ function reinitializeExcusalsManagementSheets() {
 }
 
 function debugExcusalsResponseColumnsVerbose() {
-  runMenuAction({ label: 'Debug Excusals response columns', category: 'Excusals', action: 'menu.debug_excusals_response_columns', targetSheet: Config.RESOURCE_NAMES.EXCUSALS_FORM_SHEET }, () => SetupService.debugExcusalsResponseColumnsVerbose());
+  runMenuAction({ label: 'Debug Excusals response columns', category: 'Excusals', action: 'menu.debug_excusals_response_columns', targetSheet: Config.RESOURCE_NAMES.EXCUSALS_FORM_SHEET }, () => {
+    ProgressService.report({
+      title: 'Inspecting Excusals response columns',
+      detail: 'Reviewing the linked response headers and duplicate-column structure without changing response data.',
+      percent: 55,
+    });
+    SetupService.debugExcusalsResponseColumnsVerbose();
+  });
 }
 
 function reinstallAllTriggers() {
@@ -444,6 +622,11 @@ function addLeadershipEntry() {
   runMenuAction({ label: 'Add Leadership entry', category: 'Leadership & Directory', action: 'menu.add_leadership_entry', targetSheet: 'Leadership Backend' }, () => {
     const ui = SpreadsheetApp.getUi();
     const ask = (label: string, required = false): string | null => {
+      ProgressService.waiting(
+        `Waiting for: ${label}`,
+        required ? 'Enter the required leadership value in the spreadsheet prompt.' : 'Enter an optional value, or leave it blank to continue.',
+        'No Directory or Leadership row is changed until all prompts are complete.',
+      );
       const res = ui.prompt(label, SpreadsheetApp.getUi().ButtonSet.OK_CANCEL);
       if (res.getSelectedButton() !== SpreadsheetApp.getUi().Button.OK) return null;
       const value = String(res.getResponseText() || '').trim();
@@ -466,6 +649,13 @@ function addLeadershipEntry() {
     const officePhone = ask('Office Phone (optional)') || '';
     const officeLocation = ask('Office Location (optional)') || '';
 
+    ProgressService.report({
+      title: 'Matching the person to Directory',
+      detail: 'Looking for an existing cadet record so rank and role remain owned by Directory when appropriate.',
+      percent: 48,
+      step: 1,
+      totalSteps: 2,
+    });
     const backendId = Config.getBackendId();
     const leadershipSheet = backendId ? SpreadsheetApp.openById(backendId).getSheetByName('Leadership Backend') : null;
     const directorySheet = backendId ? SpreadsheetApp.openById(backendId).getSheetByName('Directory Backend') : null;
@@ -516,6 +706,13 @@ function addLeadershipEntry() {
 
     leadershipSheet.getRange(targetRow, 1, 1, row.length).setValues([row]);
     // Sync to frontend after adding.
+    ProgressService.report({
+      title: 'Publishing the Leadership update',
+      detail: 'Saving the authoritative row and refreshing the frontend Leadership view.',
+      percent: 82,
+      step: 2,
+      totalSteps: 2,
+    });
     try {
       SetupService.syncLeadershipBackendToFrontend();
     } catch (err) {
@@ -526,7 +723,22 @@ function addLeadershipEntry() {
 }
 
 function fixAttendanceHeaders() {
-  runMenuAction({ label: 'Fix Attendance headers', category: 'Attendance', action: 'menu.fix_attendance_headers', targetSheet: 'Attendance' }, () => {
+  runMenuAction(
+    { label: 'Fix Attendance headers', category: 'Attendance', action: 'menu.fix_attendance_headers', targetSheet: 'Attendance' },
+    () => applyAttendanceHeaderFix(true),
+  );
+}
+
+/** Shared implementation used by both the menu action and matrix rebuilds. */
+function applyAttendanceHeaderFix(showCompletionAlert = false) {
+    ProgressService.report({
+      title: 'Inspecting the Attendance layout',
+      detail: 'Locating summary and event columns by their stable headers.',
+      hint: 'Column positions are discovered from headers rather than assumed.',
+      percent: 25,
+      step: 1,
+      totalSteps: 4,
+    });
     const frontendId = Config.getFrontendId();
     const ss = frontendId ? SpreadsheetApp.openById(frontendId) : null;
     const sheet = ss ? ss.getSheetByName('Attendance') : null;
@@ -566,6 +778,13 @@ function fixAttendanceHeaders() {
     const overallIdx = overallDisplayIdx >= 0 ? overallDisplayIdx : findMachineIdx('overall_attendance_pct');
 
     const dataRows = Math.max(1, sheet.getLastRow() - 2);
+    ProgressService.report({
+      title: 'Formatting summary columns',
+      detail: 'Centering the LLAB and Overall results and styling visible headers.',
+      percent: 45,
+      step: 2,
+      totalSteps: 4,
+    });
     const centerCol = (idx: number) => {
       if (idx < 0) return;
       const col = idx + 1;
@@ -601,6 +820,14 @@ function fixAttendanceHeaders() {
 
     // Data validation + formatting for event columns.
     if (eventRange && eventWidth > 0) {
+      ProgressService.report({
+        title: 'Restoring attendance-code rules',
+        detail: `Applying validation and readable formatting to ${eventWidth} event column(s).`,
+        hint: 'Attendance choices continue to come from the Data Legend.',
+        percent: 70,
+        step: 3,
+        totalSteps: 4,
+      });
       try {
         eventRange.clearDataValidations();
         const codesRange = ss ? ss.getRangeByName('ATTENDANCE_CODES') : null;
@@ -624,13 +851,26 @@ function fixAttendanceHeaders() {
     }
 
     SpreadsheetApp.flush();
+    ProgressService.report({
+      title: 'Saving the updated layout',
+      detail: 'Flushing the final header, alignment, and validation changes to Google Sheets.',
+      percent: 92,
+      step: 4,
+      totalSteps: 4,
+    });
 
-    SpreadsheetApp.getUi().alert('Attendance headers updated.');
-  });
+    if (showCompletionAlert) SpreadsheetApp.getUi().alert('Attendance headers updated.');
 }
 
 function showMenuHelp() {
-  runMenuAction({ label: 'Show menu help', category: 'Help', action: 'menu.show_help' }, () => SetupService.showMenuHelp());
+  runMenuAction({ label: 'Show menu help', category: 'Help', action: 'menu.show_help' }, () => {
+    ProgressService.report({
+      title: 'Preparing current menu guidance',
+      detail: 'Summarizing the supported data flow and operator purpose of each action group.',
+      percent: 70,
+    });
+    SetupService.showMenuHelp();
+  });
 }
 
 // Installable onOpen for frontend spreadsheet
@@ -661,6 +901,11 @@ function fillAttendanceEventPrompt() {
       .map((s) => s.trim())
       .filter(Boolean);
 
+  ProgressService.waiting(
+    'Waiting for event selection',
+    'Choose which event columns should receive the attendance code.',
+    'The selector can target exact names, prefixes, suffixes, contains-text, or all events.',
+  );
   const eventResp = ui.prompt(
     'Fill attendance events',
     [
@@ -707,6 +952,11 @@ function fillAttendanceEventPrompt() {
     return selector;
   })();
 
+  ProgressService.waiting(
+    'Waiting for cadet selection',
+    'Choose the cadets who should be updated, or leave the prompt blank for all eligible cadets.',
+    'You can combine names, flights, universities, AS years, and study-abroad status.',
+  );
   const cadetResp = ui.prompt(
     'Target cadets',
     [
@@ -746,6 +996,11 @@ function fillAttendanceEventPrompt() {
     return selector;
   })();
 
+  ProgressService.waiting(
+    'Waiting for attendance code',
+    'Enter the single supported attendance code that should be written to every matched cadet-event cell.',
+    'SHAMROCK validates the code before changing the matrix.',
+  );
   const codeResp = ui.prompt('Attendance code', 'Enter attendance code to set (e.g., P, T, A, R, D, U, E, ES, MED, N/A):', ui.ButtonSet.OK_CANCEL);
   if (codeResp.getSelectedButton() !== ui.Button.OK) throw new MenuActionCancelled('Attendance fill cancelled before attendance code was provided.');
   const code = codeResp.getResponseText().trim();
@@ -753,7 +1008,22 @@ function fillAttendanceEventPrompt() {
     throw new Error('Attendance code is required.');
   }
 
+  ProgressService.report({
+    title: 'Matching events and cadets',
+    detail: 'Resolving the selectors, validating the code, and preparing the exact cells to update.',
+    hint: 'Only matched cadet-event intersections are changed; each mutation is auditable.',
+    percent: 55,
+    step: 1,
+    totalSteps: 2,
+  });
   const filled = AttendanceService.fillEventColumn({ eventSelector, code, cadetSelector, actorEmail: email, actorRole: 'menu_bulk_fill' });
+  ProgressService.report({
+    title: 'Attendance cells updated',
+    detail: `Wrote ${filled} matched cadet-event cell(s) and refreshed the frontend result.`,
+    percent: 92,
+    step: 2,
+    totalSteps: 2,
+  });
   ui.alert(`Filled ${filled} cadet-event cells with code '${code}'.`);
   });
 }
@@ -876,16 +1146,35 @@ function onBackendEdit(e: GoogleAppsScript.Events.SheetsOnEdit) {
 
 // Debug helper: logs current sheet headers, sizes, and form destinations.
 function dumpShamrockStructure() {
-  runMenuAction({ label: 'Dump structure to logs', category: 'Maintenance', action: 'menu.dump_structure' }, () => Debug.dumpShamrockStructure());
+  runMenuAction({ label: 'Dump structure to logs', category: 'Maintenance', action: 'menu.dump_structure' }, () => {
+    ProgressService.report({
+      title: 'Reading SHAMROCK structure',
+      detail: 'Inspecting workbook tabs, headers, sizes, forms, and destinations for the technical execution log.',
+      percent: 55,
+    });
+    Debug.dumpShamrockStructure();
+  });
 }
 
 // Debug helper: saves structure snapshot to Drive as JSON and logs the file ID.
 function dumpShamrockStructureToDrive() {
-  runMenuAction({ label: 'Save structure snapshot to Drive', category: 'Maintenance', action: 'menu.dump_structure_to_drive' }, () => Debug.dumpShamrockStructureToDrive());
+  runMenuAction({ label: 'Save structure snapshot to Drive', category: 'Maintenance', action: 'menu.dump_structure_to_drive' }, () => {
+    ProgressService.report({
+      title: 'Building a structure snapshot',
+      detail: 'Inspecting current resources and serializing a diagnostic JSON snapshot for Drive.',
+      percent: 55,
+    });
+    Debug.dumpShamrockStructureToDrive();
+  });
 }
 
 function cleanupScriptProperties() {
   runMenuAction({ label: 'Clean up script properties', category: 'Maintenance', action: 'menu.cleanup_script_properties' }, () => {
+    ProgressService.report({
+      title: 'Reviewing supported Script Properties',
+      detail: 'Preparing the current operator-readable property catalog without exposing stored values.',
+      percent: 70,
+    });
     const lines = Config.SCRIPT_PROPERTY_HELP.map((entry) => `${entry.key}: ${entry.description}`);
     Log.info(`Current SHAMROCK script properties:\n${lines.join('\n')}`);
     try {
@@ -898,6 +1187,11 @@ function cleanupScriptProperties() {
 
 function cleanupExpiredTransitionArchivesV2() {
   runMenuAction({ label: 'Cleanup expired transition archives', category: 'Maintenance', action: 'menu.cleanup_transition_archives_v2' }, () => {
+    ProgressService.report({
+      title: 'Checking transition archive expirations',
+      detail: 'Removing only registered backend rollback tabs whose seven-day retention period has ended.',
+      percent: 55,
+    });
     TransitionService.cleanupExpiredBackendArchives();
   });
 }
@@ -911,7 +1205,21 @@ function onDirectoryFormSubmit(e: GoogleAppsScript.Events.FormsOnFormSubmit) {
 function replayLatestDirectoryFormResponse() {
   runMenuAction({ label: 'Replay latest Directory form response', category: 'Leadership & Directory', action: 'menu.replay_latest_directory_response', targetSheet: Config.RESOURCE_NAMES.DIRECTORY_FORM_SHEET }, () => {
     confirmMenuAction('Replay latest Directory form response', 'This reprocesses the latest Directory Form response through the form handler. Continue?');
+    ProgressService.report({
+      title: 'Loading the latest Directory response',
+      detail: 'Reading the newest saved form response and replaying the supported Directory processing path.',
+      percent: 55,
+      step: 1,
+      totalSteps: 2,
+    });
     const ok = DirectoryService.replayLatestDirectoryFormResponse();
+    ProgressService.report({
+      title: ok ? 'Directory response replayed' : 'No response was available to replay',
+      detail: ok ? 'Directory and its dependent views were processed through the normal submission workflow.' : 'No Directory data was changed.',
+      percent: 90,
+      step: 2,
+      totalSteps: 2,
+    });
     SpreadsheetApp.getUi().alert(ok ? 'Replayed latest Directory form response.' : 'No Directory form response replayed.');
   });
 }
@@ -942,6 +1250,11 @@ function addDeputyFlightCommanders() {
     throw new Error('Directory Backend sheet not found.');
   }
 
+  ProgressService.waiting(
+    'Waiting for deputy commander entries',
+    'Enter one or more names, flights, and optional ranks in the spreadsheet prompt.',
+    'SHAMROCK matches each person to Directory before changing rank or role.',
+  );
   const deputyResp = ui.prompt(
     'Deputy flight commanders',
     [
@@ -982,6 +1295,13 @@ function addDeputyFlightCommanders() {
   const results: string[] = [];
   let added = 0;
 
+  ProgressService.report({
+    title: 'Matching deputies to Directory',
+    detail: `Checking ${deputies.length} requested deputy assignment(s) against authoritative cadet rows.`,
+    percent: 45,
+    step: 1,
+    totalSteps: 2,
+  });
   for (const dep of deputies) {
     const matchIdx = directoryTable.rows.findIndex((r) => {
       const rLast = String(r['last_name'] || '').toLowerCase().trim();
@@ -1009,6 +1329,13 @@ function addDeputyFlightCommanders() {
   }
 
   // Sync to frontend
+  ProgressService.report({
+    title: 'Publishing deputy assignments',
+    detail: `Saved ${added} matched assignment(s); refreshing Directory, Leadership, Attendance, and form choices.`,
+    percent: 78,
+    step: 2,
+    totalSteps: 2,
+  });
   try {
     SetupService.refreshDirectoryArtifacts({ rebuildAttendanceMatrix: true, refreshAttendanceForm: true });
   } catch (err) {

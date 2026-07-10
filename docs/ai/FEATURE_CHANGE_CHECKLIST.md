@@ -22,6 +22,8 @@ Confirm explicitly:
 - Dropdowns and validations reference Data Legend ranges.
 - Forms require verified responder emails.
 - Frontend tables are protected; edits flow through forms/logic.
+- Every new operator menu action uses `runMenuAction(...)` and the shared live-progress window.
+- Long or prompt-driven operator workflows define meaningful plain-language progress stages, hints, waiting states, and continuation states without false row-level precision or sensitive details.
 - The change targets the current supported baseline, not retired CSV/sheet/property formats.
 
 ## 3. Document The Operational Delta
@@ -71,9 +73,11 @@ Before marking a feature “ready” in docs:
 - Confirm provisioning can be re-run without duplicates.
 - Confirm the feature does not require direct sheet edits by end users.
 - Confirm audit logging expectations are described.
+- Confirm operator progress reaches the correct terminal state for success, cancellation, failure, and any saved background continuation.
 
 ## 8. Validation Expectations
 Every feature doc must include:
 - A short “happy path” validation.
 - At least one failure/edge-case validation.
+- A live-progress validation for every new or materially changed operator menu workflow.
 - A post-deploy verification step (menus load, triggers present, forms functioning).

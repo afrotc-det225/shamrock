@@ -76,6 +76,7 @@ These are non-negotiable unless the user explicitly asks to change the system de
 - Backend/admin workbook data is authoritative; frontend/main workbook is protected and user-facing.
 - Forms must require verified responder emails where Apps Script supports it.
 - Admin menu actions should be auditable through `AuditService` when they mutate data or affect operator state.
+- Every operator-invoked menu action must run through `runMenuAction(...)` so it receives the shared live-progress, audit, cancellation, and failure behavior. New workflows must add plain-language `ProgressService` stages and hints at meaningful boundaries; use stage-based progress when exact row-level progress is unavailable rather than inventing precision.
 - Changes that affect operator workflow must update docs and validation steps.
 
 ## Baseline And Compatibility
@@ -104,6 +105,7 @@ Use placeholders and runtime prompts for operational data. If a one-time admin a
 - Keep Apps Script global functions in `src/index.ts` so menus and triggers can call them.
 - Keep orchestration in `src/services/`.
 - Keep raw Apps Script IO localized and make business rules easy to read.
+- Use `ProgressService.report(...)`, `ProgressService.waiting(...)`, and `ProgressService.background(...)` for operator-visible milestones, prompts, and saved continuations. Progress copy must be non-technical and must not expose resource IDs, emails, personal data, or stack details.
 - Prefer existing helpers:
   - `Config.getScriptProperty`, `Config.setScriptProperty`, and related property helpers.
   - `Config.getBackendId`, `Config.getFrontendId`, `Config.getBackendSheet`, `Config.getFrontendSheet`.

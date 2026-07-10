@@ -10,6 +10,11 @@ namespace Log {
     } catch (err) {
       Logger.log(line);
     }
+    try {
+      ProgressService.captureTechnicalLog(level, message);
+    } catch {
+      // Live progress is best-effort and must not affect logging or real work.
+    }
   }
 
   export function info(message: string) {

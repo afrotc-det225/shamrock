@@ -95,6 +95,64 @@ namespace TransitionService {
     'reorder',
     'audit',
   ];
+  const PHASE_GUIDANCE: Record<TransitionPhase, { title: string; detail: string }> = {
+    archive: {
+      title: 'Archiving the current term',
+      detail: 'Creating locked frontend history tabs and hidden backend rollback copies before live data changes.',
+    },
+    directory: {
+      title: 'Updating the Directory roster',
+      detail: 'Applying roster status, AS-year, rank, role, flight, and squadron transition rules from the archived snapshot.',
+    },
+    logs: {
+      title: 'Resetting current-term logs',
+      detail: 'Clearing the active Attendance and Excusals operational logs after rollback archives exist.',
+    },
+    events: {
+      title: 'Generating the new term events',
+      detail: 'Writing training-week Mando, LLAB, Secondary, and POC Third Hour definitions.',
+    },
+    leadership: {
+      title: 'Rebuilding Leadership assignments',
+      detail: 'Deriving cadet leadership from Directory and applying requested cadre/manual-row changes.',
+    },
+    responses: {
+      title: 'Preparing current form response surfaces',
+      detail: 'Clearing supported current-term response rows while preserving Attendance raw history for its archive phase.',
+    },
+    directory_artifacts: {
+      title: 'Publishing new Directory views',
+      detail: 'Refreshing frontend Directory, derived Leadership, and the active-cadet Attendance roster.',
+    },
+    events_artifacts: {
+      title: 'Publishing new event-based views',
+      detail: 'Rebuilding Attendance columns, form choices, and formatted frontend surfaces from the new events.',
+    },
+    directory_form: {
+      title: 'Rebuilding the Directory Form',
+      detail: 'Refreshing Directory questions and supported validation for the new term.',
+    },
+    attendance_form: {
+      title: 'Rebuilding the Attendance Form',
+      detail: 'Archiving the prior raw response tab and linking a fresh verified destination.',
+    },
+    excusals_form: {
+      title: 'Refreshing the Excusals Form',
+      detail: 'Publishing the new term event choices without recreating response columns unnecessarily.',
+    },
+    triggers: {
+      title: 'Reinstalling automations',
+      detail: 'Ensuring form, workbook, cleanup, and reconciliation triggers point to the current resources.',
+    },
+    reorder: {
+      title: 'Restoring standard sheet order',
+      detail: 'Putting main and admin workbook tabs back into their expected operator order.',
+    },
+    audit: {
+      title: 'Recording transition completion',
+      detail: 'Writing the final auditable transition outcome and checkpoint metadata.',
+    },
+  };
   const CONTINUATION_HANDLER = 'continueTransitionV2';
   const TRANSITION_CONTINUATION_BUDGET_MS = 4 * 60 * 1000;
 
@@ -182,11 +240,21 @@ namespace TransitionService {
   }
 
   function promptValue(title: string, message: string, fallback: string): string {
+    ProgressService.waiting(
+      `Waiting for: ${title}`,
+      message,
+      'Your answers are collected into the saved transition draft as the wizard advances.',
+    );
     const response = ui().prompt(title, `${message}\n\nDefault: ${fallback}`, ui().ButtonSet.OK_CANCEL);
     if (response.getSelectedButton() !== ui().Button.OK) {
-      throw new Error(`Transition wizard cancelled at "${title}". Draft was saved; run the wizard again to resume.`);
+      throw ProgressService.cancellation(`Transition wizard cancelled at "${title}". Draft was saved; run the wizard again to resume.`);
     }
     const value = String(response.getResponseText() || '').trim();
+    ProgressService.report({
+      title: `${title} accepted`,
+      detail: 'Moving to the next transition question.',
+      percent: 8,
+    });
     return value || fallback;
   }
 
@@ -749,10 +817,21 @@ namespace TransitionService {
       if (Date.now() - started > TRANSITION_CONTINUATION_BUDGET_MS) {
         scheduleContinuation();
         const message = `Transition for ${state.draft.term} paused before phase ${phase}; a continuation trigger will resume it shortly.`;
+        ProgressService.background('Transition checkpoint saved', message);
         if (interactive) alert(message);
         else Log.info(message);
         return;
       }
+      const phaseIndex = TRANSITION_PHASES.indexOf(phase);
+      const guidance = PHASE_GUIDANCE[phase];
+      ProgressService.report({
+        title: guidance.title,
+        detail: guidance.detail,
+        hint: 'Completed transition phases are checkpointed and will not be repeated on resume.',
+        percent: 12 + Math.round((phaseIndex / TRANSITION_PHASES.length) * 82),
+        step: phaseIndex + 1,
+        totalSteps: TRANSITION_PHASES.length,
+      });
       Log.info(`Transition ${state.id}: starting phase ${phase}`);
       runPhase(state, phase);
       completePhase(state, phase);
@@ -760,6 +839,7 @@ namespace TransitionService {
       if (Date.now() - started > TRANSITION_CONTINUATION_BUDGET_MS) {
         scheduleContinuation();
         const message = `Transition for ${state.draft.term} paused after phase ${phase}; a continuation trigger will resume it shortly.`;
+        ProgressService.background('Transition checkpoint saved', message);
         if (interactive) alert(message);
         else Log.info(message);
         return;
@@ -790,27 +870,47 @@ namespace TransitionService {
   export function runTransition(kind: TransitionKind) {
     const inProgress = loadState();
     if (inProgress) {
+      ProgressService.waiting(
+        'Waiting to resume the saved transition',
+        `A transition for ${inProgress.draft.term} already has completed checkpoints. Choose Yes to continue the remaining phases.`,
+      );
       const resume = ui().alert(
         'Resume transition already in progress?',
         `A transition for ${inProgress.draft.term} is already applying. Resume remaining phases now?`,
         ui().ButtonSet.YES_NO,
       );
       if (resume === ui().Button.YES) applyTransitionState(inProgress, true);
+      else throw ProgressService.cancellation(`User chose not to resume the saved transition for ${inProgress.draft.term}.`);
       return;
     }
 
+    ProgressService.waiting(
+      'Collecting transition details',
+      'Complete the guided prompts. SHAMROCK saves the draft as you go and will not mutate live workbook data yet.',
+      'Live data changes begin only after the final transition summary is confirmed.',
+    );
     const draft = buildDraft(kind);
     const summary = [
       transitionSummary(draft),
       '',
       'After confirmation, this transition becomes phase-resumable. If Apps Script times out, do not start a new transition; rerun this action or wait for the continuation trigger.',
     ].join('\n');
+    ProgressService.waiting(
+      'Waiting for final transition confirmation',
+      'Review the complete transition summary in the spreadsheet before any live workbook data is changed.',
+      'Choose Cancel if any term, roster, schedule, or leadership detail is incorrect.',
+    );
     const confirmed = ui().alert('Apply SHAMROCK v2 transition?', summary, ui().ButtonSet.OK_CANCEL);
     if (confirmed !== ui().Button.OK) {
       alert('Transition not applied. Draft remains saved for later resume.');
-      return;
+      throw ProgressService.cancellation('Transition not applied. The saved draft remains available for a later resume.');
     }
 
+    ProgressService.report({
+      title: 'Final confirmation received',
+      detail: 'Creating the resumable transition state before the first archive phase.',
+      percent: 10,
+    });
     const state = createState(draft);
     saveState(state);
     applyTransitionState(state, true);

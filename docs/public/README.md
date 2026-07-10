@@ -15,6 +15,7 @@ Internal architecture rules live in `docs/system/SYSTEM_SPEC.md`. Deployment and
 | Directory sync | Directory Backend, frontend Directory, Directory Form | Backend SHAMROCK menu, form submit trigger, periodic reconciliation | Active |
 | Attendance | Attendance Backend, frontend Attendance, Attendance Form, Events Backend | Form submit trigger, backend menu actions | Active |
 | Excusals | Excusals Backend, Excusals Management workbook, frontend Excusals, Excusal Form | Form submit trigger, edit trigger, backend menu actions | Active |
+| Live menu progress | Backend/admin workbook | Every SHAMROCK menu action | Active |
 | Audit logging | Audit Backend, Apps Script logs | Menu action wrappers, service calls | Active |
 | Formatting and protections | Frontend/main workbook, backend/admin workbook | Setup and maintenance menu actions | Active |
 
@@ -196,6 +197,29 @@ Requests use a requested outcome of `P`, `T`, `E`, `ES`, or `MED`; pending reque
 - Record a decision and confirm attendance effect updates.
 - Confirm denied pre-event requests show `D`, denied post-event absences show `U`, and approved medical requests show `MED`.
 - Confirm related audit rows are written.
+
+## Live Menu Progress
+
+### Purpose
+
+Every backend SHAMROCK menu action opens a modeless live-progress window instead of leaving the operator with only Google's generic `Running script` notice. The window presents the current plain-language stage, a short explanation, an operator hint, elapsed time, stage count when the workflow has meaningful phases, and a compact activity history.
+
+### Operator Behavior
+
+- The selected action starts from the progress window and continues server-side.
+- Confirmation and data-entry prompts are reflected as `Waiting for you`; answer the prompt in the spreadsheet to continue.
+- Long workflows report real milestones. Percentages are stage-based and do not claim row-by-row precision when the underlying Google API does not expose it.
+- Non-critical validation, formatting, protection, or transient-retry warnings are distilled into operator-safe activity entries; full technical details remain in Apps Script logs.
+- Closing the progress window does not cancel the action.
+- Success, cancellation, background continuation, and failure are terminal states. Failures include the run ID needed to locate the matching Audit Backend and technical-log entries.
+- Installable triggers and form-submit automations do not open an interactive window because no operator is waiting in a spreadsheet UI; they continue to use technical and audit logging.
+
+### Validation
+
+- Run `Show menu help` and confirm the live-progress window advances from preparation to completion.
+- Run an action with confirmation and confirm the window shows `Waiting for you` until the spreadsheet prompt is answered.
+- Confirm the action still writes matching `started` and terminal Audit Backend rows with the same `run_id`.
+- Close the progress window during a harmless longer action and confirm the server-side action still completes.
 
 ## Audit Logging
 

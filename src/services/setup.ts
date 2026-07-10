@@ -1556,6 +1556,14 @@ namespace SetupService {
 
   // Deletes all installable triggers, then reinstalls the canonical SHAMROCK triggers for forms and spreadsheets.
   export function reinstallAllTriggers() {
+    ProgressService.report({
+      title: 'Removing stale SHAMROCK triggers',
+      detail: 'Inspecting installed triggers and clearing obsolete or duplicate SHAMROCK handlers.',
+      hint: 'The supported trigger set is recreated immediately after cleanup.',
+      percent: 35,
+      step: 1,
+      totalSteps: 2,
+    });
     Log.info('Reinstalling all installable triggers');
 
     // Clear existing triggers first.
@@ -1600,6 +1608,13 @@ namespace SetupService {
     ensureTimeTrigger('sendWeeklyMandoExcusedSummary', ScriptApp.WeekDay.THURSDAY, 5);
     ensureTimeTrigger('sendWeeklyLlabExcusedSummary', ScriptApp.WeekDay.TUESDAY, 12);
     ensureTimeTrigger('sendWeeklyUnexcusedSummary', ScriptApp.WeekDay.SUNDAY, 19);
+    ProgressService.report({
+      title: 'Supported triggers installed',
+      detail: 'Form, workbook, reconciliation, cleanup, and weekly notification automations now point to current resources.',
+      percent: 90,
+      step: 2,
+      totalSteps: 2,
+    });
   }
 
   function removeDefaultSheetIfPresent(spreadsheet: GoogleAppsScript.Spreadsheet.Spreadsheet, allowedNames: Set<string>) {
@@ -2014,6 +2029,11 @@ namespace SetupService {
       saveAttendanceFormRebuildState(state);
       if (state.attempts <= 15) {
         scheduleAttendanceFormRebuildContinuation();
+        ProgressService.background(
+          'Attendance Form finalization will continue',
+          'Google is still creating or backfilling the new response tab, so SHAMROCK saved a checkpoint and scheduled another verification.',
+          'Do not start a second rebuild. The continuation will rename and verify the exact linked response tab when it becomes available.',
+        );
         Log.info(
           `Attendance form: response tab is still being created/backfilled; continuation scheduled stateId=${state.id} attempt=${state.attempts}`,
         );
@@ -2176,12 +2196,56 @@ namespace SetupService {
 
   export function applyFrontendFormatting() {
     const frontendId = Config.getFrontendId();
-    runFrontendFormattingStage('clear managed protections', () => ProtectionService.clearManagedFrontendProtections(frontendId));
-    runFrontendFormattingStage('apply pre-table frontend formatting', () => FrontendFormattingService.applyAll(frontendId));
-    runFrontendFormattingStage('ensure frontend tables', () => ensureFrontendTables(frontendId));
-    runFrontendFormattingStage('reapply validations after table ensure', () => FrontendFormattingService.applyValidations(frontendId));
-    runFrontendFormattingStage('apply post-table formatting', () => FrontendFormattingService.applyPostTableFormatting(frontendId));
-    runFrontendFormattingStage('apply frontend protections', () => ProtectionService.applyFrontendProtections(frontendId));
+    const stages: Array<{ title: string; detail: string; technicalLabel: string; run: () => void }> = [
+      {
+        title: 'Temporarily opening managed ranges',
+        detail: 'Clearing SHAMROCK-managed protections so table and format repairs can run cleanly.',
+        technicalLabel: 'clear managed protections',
+        run: () => ProtectionService.clearManagedFrontendProtections(frontendId),
+      },
+      {
+        title: 'Applying the base frontend layout',
+        detail: 'Refreshing sheet chrome, widths, visible headers, and standard cell presentation.',
+        technicalLabel: 'apply pre-table frontend formatting',
+        run: () => FrontendFormattingService.applyAll(frontendId),
+      },
+      {
+        title: 'Checking Google Sheets tables',
+        detail: 'Ensuring each primary frontend surface has the expected table object and style.',
+        technicalLabel: 'ensure frontend tables',
+        run: () => ensureFrontendTables(frontendId),
+      },
+      {
+        title: 'Restoring dropdown and validation rules',
+        detail: 'Reapplying Data Legend-backed rules after table updates.',
+        technicalLabel: 'reapply validations after table ensure',
+        run: () => FrontendFormattingService.applyValidations(frontendId),
+      },
+      {
+        title: 'Finishing table-aware styling',
+        detail: 'Applying alignment, text treatment, and typed-cell-safe finishing passes.',
+        technicalLabel: 'apply post-table formatting',
+        run: () => FrontendFormattingService.applyPostTableFormatting(frontendId),
+      },
+      {
+        title: 'Restoring frontend protections',
+        detail: 'Locking the managed user-facing ranges again after formatting is complete.',
+        technicalLabel: 'apply frontend protections',
+        run: () => ProtectionService.applyFrontendProtections(frontendId),
+      },
+    ];
+
+    stages.forEach((stage, index) => {
+      ProgressService.report({
+        title: stage.title,
+        detail: stage.detail,
+        hint: 'Formatting stages are ordered to remain compatible with Google Sheets table and typed-column constraints.',
+        percent: 12 + Math.round((index / stages.length) * 78),
+        step: index + 1,
+        totalSteps: stages.length,
+      });
+      runFrontendFormattingStage(stage.technicalLabel, stage.run);
+    });
   }
 
   function runFrontendFormattingStage(label: string, fn: () => void) {
@@ -2207,17 +2271,32 @@ namespace SetupService {
       Log.info(`${Config.PROPERTY_KEYS.DISABLE_MAIN_WORKBOOK_FORMATTING}=true; skipping dashboard rebuild.`);
       return;
     }
+    ProgressService.report({
+      title: 'Rebuilding the Dashboard',
+      detail: 'Refreshing quick links, roster summaries, attendance highlights, and the mobile-friendly layout.',
+      percent: 45,
+    });
     FrontendFormattingService.applyDashboardOnly(frontendId);
   }
 
   export function reapplyFrontendProtections() {
     const frontendId = Config.getFrontendId();
+    ProgressService.report({
+      title: 'Reapplying frontend protections',
+      detail: 'Checking managed ranges and restoring the intended editor access.',
+      percent: 55,
+    });
     ProtectionService.applyFrontendProtections(frontendId);
   }
 
   export function toggleFrontendFormatting() {
     const current = Config.getBooleanScriptProperty(Config.PROPERTY_KEYS.DISABLE_MAIN_WORKBOOK_FORMATTING);
     const next = current ? '' : 'true';
+    ProgressService.report({
+      title: next === 'true' ? 'Disabling automatic frontend formatting' : 'Enabling automatic frontend formatting',
+      detail: 'Saving the presentation preference in Script Properties for future refreshes.',
+      percent: 70,
+    });
     Config.setScriptProperty(Config.PROPERTY_KEYS.DISABLE_MAIN_WORKBOOK_FORMATTING, next);
     const status = next === 'true' ? 'OFF (disabled)' : 'ON (enabled)';
     const msg = `Frontend formatting is now ${status}.`;
@@ -2258,6 +2337,11 @@ namespace SetupService {
   export function toggleFrontendColumnWidths() {
     const current = Config.getBooleanScriptProperty(Config.PROPERTY_KEYS.DISABLE_MAIN_WORKBOOK_COLUMN_WIDTHS);
     const next = current ? '' : 'true';
+    ProgressService.report({
+      title: next === 'true' ? 'Preserving manual column widths' : 'Enabling standard column widths',
+      detail: 'Saving the column-width preference in Script Properties for future formatting runs.',
+      percent: 70,
+    });
     Config.setScriptProperty(Config.PROPERTY_KEYS.DISABLE_MAIN_WORKBOOK_COLUMN_WIDTHS, next);
     const status = next === 'true' ? 'OFF (disabled)' : 'ON (enabled)';
     const msg = `Frontend column width formatting is now ${status}.`;
@@ -2269,6 +2353,11 @@ namespace SetupService {
   }
 
   export function pauseAutomations(reason = 'manual pause') {
+    ProgressService.report({
+      title: 'Pausing automated propagation',
+      detail: 'Saving the pause flag so edit-triggered updates wait for a later resume.',
+      percent: 65,
+    });
     PauseService.pause(reason);
     const msg = `Automation is now PAUSED (${PauseService.pauseInfo()}). Frontend edits will be deferred.`;
     try {
@@ -2280,14 +2369,49 @@ namespace SetupService {
 
   export function resumeAutomations() {
     const wasPaused = PauseService.isPaused();
+    ProgressService.report({
+      title: 'Re-enabling automations',
+      detail: 'Clearing the pause flag before reconciling any deferred changes.',
+      percent: 12,
+      step: 1,
+      totalSteps: 5,
+    });
     PauseService.resume();
 
     // Batch mirror any frontend Directory edits made while paused back into the backend, then resync artifacts.
+    ProgressService.report({
+      title: 'Reconciling deferred Directory edits',
+      detail: 'Comparing frontend changes with authoritative Directory records.',
+      percent: 28,
+      step: 2,
+      totalSteps: 5,
+    });
     const reconciliation = FrontendEditService.reconcilePendingDirectoryEdits();
+    ProgressService.report({
+      title: 'Publishing refreshed workbook data',
+      detail: 'Syncing mapped backend tables to the frontend.',
+      percent: 48,
+      step: 3,
+      totalSteps: 5,
+    });
     SyncService.syncAllMapped();
+    ProgressService.report({
+      title: 'Rebuilding attendance and form choices',
+      detail: 'Regenerating attendance results and current event choices.',
+      percent: 68,
+      step: 4,
+      totalSteps: 5,
+    });
     rebuildAttendanceMatrix();
     refreshAttendanceFormEventChoices();
     refreshExcusalsFormEventChoices();
+    ProgressService.report({
+      title: 'Finishing the frontend presentation',
+      detail: 'Applying the standard formatting and protections to refreshed views.',
+      percent: 86,
+      step: 5,
+      totalSteps: 5,
+    });
     applyFrontendFormatting();
 
     const msg = wasPaused
@@ -2301,30 +2425,98 @@ namespace SetupService {
   }
 
   export function refreshDataLegendAndFrontend() {
+    ProgressService.report({
+      title: 'Refreshing canonical option lists',
+      detail: 'Rebuilding attendance codes, ranks, units, and other supported choices.',
+      percent: 22,
+      step: 1,
+      totalSteps: 3,
+    });
     DataLegendService.refreshLegendFromArrays();
+    ProgressService.report({
+      title: 'Publishing Data Legend choices',
+      detail: 'Copying the authoritative option ranges to the frontend workbook.',
+      percent: 52,
+      step: 2,
+      totalSteps: 3,
+    });
     SyncService.syncByBackendSheetName('Data Legend');
+    ProgressService.report({
+      title: 'Applying updated validation rules',
+      detail: 'Refreshing dropdown and validation behavior that depends on the Data Legend.',
+      percent: 72,
+      step: 3,
+      totalSteps: 3,
+    });
     applyFrontendFormatting();
   }
 
   export function syncDirectoryBackendToFrontend() {
+    ProgressService.report({
+      title: 'Refreshing Directory dependencies',
+      detail: 'Updating option lists and derived Leadership rows before publishing Directory.',
+      percent: 18,
+      step: 1,
+      totalSteps: 4,
+    });
     DataLegendService.refreshLegendFromArrays();
     SyncService.syncByBackendSheetName('Data Legend');
     DirectoryService.syncLeadershipBackendFromDirectory();
+    ProgressService.report({
+      title: 'Publishing the Directory',
+      detail: 'Copying active cadet records to the protected frontend view.',
+      percent: 48,
+      step: 2,
+      totalSteps: 4,
+    });
     syncDirectoryFrontend();
+    ProgressService.report({
+      title: 'Refreshing the Directory presentation',
+      detail: 'Restoring validations, tables, formatting, and protections.',
+      percent: 70,
+      step: 3,
+      totalSteps: 4,
+    });
     applyFrontendFormatting();
   }
 
   export function syncLeadershipBackendToFrontend() {
+    ProgressService.report({
+      title: 'Publishing Leadership',
+      detail: 'Copying the current authoritative Leadership rows to the frontend.',
+      percent: 55,
+    });
     SyncService.syncByBackendSheetName('Leadership Backend');
   }
 
   export function syncDataLegendBackendToFrontend() {
+    ProgressService.report({
+      title: 'Publishing the Data Legend',
+      detail: 'Copying option ranges to the frontend before validations are reapplied.',
+      percent: 35,
+      step: 1,
+      totalSteps: 2,
+    });
     SyncService.syncByBackendSheetName('Data Legend');
     applyFrontendFormatting();
   }
 
   export function syncAllBackendToFrontend() {
+    ProgressService.report({
+      title: 'Syncing all mapped tables',
+      detail: 'Publishing each supported backend source to its frontend view.',
+      percent: 32,
+      step: 1,
+      totalSteps: 2,
+    });
     SyncService.syncAllMapped();
+    ProgressService.report({
+      title: 'Finishing refreshed frontend views',
+      detail: 'Restoring standard formatting, validations, and protections.',
+      percent: 62,
+      step: 2,
+      totalSteps: 2,
+    });
     applyFrontendFormatting();
   }
 
@@ -2347,16 +2539,37 @@ namespace SetupService {
 
   export function rebuildAttendanceMatrix() {
     const frontendId = Config.getFrontendId();
+    ProgressService.report({
+      title: 'Replaying attendance records',
+      detail: 'Calculating the current matrix from attendance logs, excusals, events, and active cadets.',
+      percent: 28,
+      step: 1,
+      totalSteps: 3,
+    });
     AttendanceService.rebuildMatrix();
     try {
       // Re-apply Attendance header formatting and validations after matrix rebuild.
-      fixAttendanceHeaders();
+      ProgressService.report({
+        title: 'Restoring Attendance rules and layout',
+        detail: 'Applying headers, validation, table-aware formatting, and summary alignment.',
+        percent: 62,
+        step: 2,
+        totalSteps: 3,
+      });
+      applyAttendanceHeaderFix();
       if (frontendId) {
         FrontendFormattingService.applyValidations(frontendId);
         ensureTableForSheet(frontendId, 'Attendance', 'Attendance');
         FrontendFormattingService.applyValidations(frontendId);
         FrontendFormattingService.applyPostTableFormatting(frontendId);
       }
+      ProgressService.report({
+        title: 'Protecting the rebuilt Attendance view',
+        detail: 'Restoring managed frontend protections after the derived matrix is complete.',
+        percent: 88,
+        step: 3,
+        totalSteps: 3,
+      });
       reapplyFrontendProtections();
     } catch (err) {
       Log.warn(`fixAttendanceHeaders post-rebuild failed: ${err}`);
@@ -2371,16 +2584,37 @@ namespace SetupService {
 
   export function refreshExcusalsForm() {
     const backendId = Config.getBackendId();
+    ProgressService.report({
+      title: 'Opening the Excusals Form',
+      detail: 'Checking the existing form without recreating its questions.',
+      percent: 35,
+      step: 1,
+      totalSteps: 2,
+    });
     // syncQuestions: false prevents a full form rebuild — only refreshes event choices.
     // A rebuild clears all items and recreates them, which creates duplicate columns
     // in the response sheet every time.
     const ensured = ensureForm('excusals', Config.RESOURCE_NAMES.EXCUSALS_FORM, Config.PROPERTY_KEYS.EXCUSAL_REQUEST_FORM_ID, backendId, { syncQuestions: false });
     const form = FormApp.openById(ensured.id);
+    ProgressService.report({
+      title: 'Refreshing Excusals event choices',
+      detail: 'Updating selectable events from the current Events Backend definitions.',
+      percent: 72,
+      step: 2,
+      totalSteps: 2,
+    });
     FormService.refreshExcusalsFormEventChoices(form);
   }
 
   export function rebuildAttendanceForm() {
     const backendId = Config.getBackendId();
+    ProgressService.report({
+      title: 'Checking the Attendance Form',
+      detail: 'Opening the current form and linked response destination.',
+      percent: 22,
+      step: 1,
+      totalSteps: 4,
+    });
     const ensured = ensureForm(
       'attendance',
       Config.RESOURCE_NAMES.ATTENDANCE_FORM,
@@ -2389,7 +2623,28 @@ namespace SetupService {
       { syncQuestions: false },
     );
     const form = FormApp.openById(ensured.id);
+    ProgressService.report({
+      title: 'Preserving the current response history',
+      detail: 'Closing the form briefly and archiving its linked response tab before structural changes.',
+      percent: 42,
+      step: 2,
+      totalSteps: 4,
+    });
     rebuildAttendanceFormWithFreshResponseSheet(form, backendId);
+    ProgressService.report({
+      title: 'Verifying the fresh response destination',
+      detail: 'Checking the new linked tab and saving continuation state if Google is still creating it.',
+      percent: 72,
+      step: 3,
+      totalSteps: 4,
+    });
+    ProgressService.report({
+      title: 'Formatting the Attendance backend',
+      detail: 'Restoring the standard backend response and attendance-log presentation.',
+      percent: 90,
+      step: 4,
+      totalSteps: 4,
+    });
     applyAttendanceBackendFormatting();
   }
 
@@ -2434,6 +2689,11 @@ namespace SetupService {
   export function reorderFrontendSheets() {
     const frontendId = Config.getFrontendId();
     const desired = ['FAQs', 'Dashboard', 'Leadership', 'Directory', 'Attendance', 'Data Legend'];
+    ProgressService.report({
+      title: 'Ordering frontend sheets',
+      detail: 'Moving user-facing tabs into the standard navigation order.',
+      percent: 62,
+    });
     reorderSheets(frontendId, desired);
   }
 
@@ -2452,6 +2712,11 @@ namespace SetupService {
       'Audit Backend',
       'Data Legend',
     ];
+    ProgressService.report({
+      title: 'Ordering admin sheets',
+      detail: 'Moving backend tabs into the standard operator order.',
+      percent: 62,
+    });
     reorderSheets(backendId, desired);
   }
 
@@ -2463,9 +2728,37 @@ namespace SetupService {
   }
 
   export function refreshEventsArtifacts() {
+    ProgressService.report({
+      title: 'Publishing current events',
+      detail: 'Syncing Events Backend definitions to their mapped surfaces.',
+      percent: 16,
+      step: 1,
+      totalSteps: 4,
+    });
     SyncService.syncByBackendSheetName('Events Backend');
+    ProgressService.report({
+      title: 'Rebuilding event-based attendance columns',
+      detail: 'Regenerating the Attendance matrix using the refreshed event list.',
+      percent: 38,
+      step: 2,
+      totalSteps: 4,
+    });
     rebuildAttendanceMatrix();
+    ProgressService.report({
+      title: 'Refreshing Attendance Form choices',
+      detail: 'Publishing the current event and cadet choices without recreating the full form.',
+      percent: 66,
+      step: 3,
+      totalSteps: 4,
+    });
     refreshAttendanceFormEventChoices();
+    ProgressService.report({
+      title: 'Finishing refreshed frontend views',
+      detail: 'Applying standard validation, formatting, tables, and protections.',
+      percent: 84,
+      step: 4,
+      totalSteps: 4,
+    });
     applyFrontendFormatting();
   }
 
@@ -2497,7 +2790,21 @@ namespace SetupService {
     const frontendNames = ['Leadership', 'Directory', 'Attendance'];
     const backendNames = ['Leadership Backend', 'Directory Backend', 'Attendance Backend'];
 
+    ProgressService.report({
+      title: 'Archiving core frontend sheets',
+      detail: 'Copying the current Leadership, Directory, and Attendance views before resetting supported structures.',
+      percent: 30,
+      step: 1,
+      totalSteps: 3,
+    });
     archiveAndResetSheets(frontendId, Schemas.FRONTEND_TABS, frontendNames);
+    ProgressService.report({
+      title: 'Archiving core backend sheets',
+      detail: 'Copying authoritative Leadership, Directory, and Attendance tables before resetting supported structures.',
+      percent: 55,
+      step: 2,
+      totalSteps: 3,
+    });
     archiveAndResetSheets(backendId, Schemas.BACKEND_TABS, backendNames);
 
     if (frontendId) {
@@ -2509,6 +2816,13 @@ namespace SetupService {
     if (backendId) {
       applyAttendanceBackendFormatting();
     }
+    ProgressService.report({
+      title: 'Archive surfaces repaired',
+      detail: 'Restored current-sheet tables, presentation, protections, and backend Attendance formatting.',
+      percent: 90,
+      step: 3,
+      totalSteps: 3,
+    });
   }
 
   export function restoreCoreSheetsFromArchive() {
@@ -2517,7 +2831,21 @@ namespace SetupService {
     const frontendNames = ['Leadership', 'Directory', 'Attendance'];
     const backendNames = ['Leadership Backend', 'Directory Backend', 'Attendance Backend'];
 
+    ProgressService.report({
+      title: 'Restoring frontend core sheets',
+      detail: 'Copying Leadership, Directory, and Attendance data back from their archive tabs.',
+      percent: 30,
+      step: 1,
+      totalSteps: 3,
+    });
     restoreFromArchiveSheets(frontendId, Schemas.FRONTEND_TABS, frontendNames);
+    ProgressService.report({
+      title: 'Restoring backend core sheets',
+      detail: 'Copying authoritative Leadership, Directory, and Attendance data back from archive tabs.',
+      percent: 55,
+      step: 2,
+      totalSteps: 3,
+    });
     restoreFromArchiveSheets(backendId, Schemas.BACKEND_TABS, backendNames);
 
     if (frontendId) {
@@ -2529,6 +2857,13 @@ namespace SetupService {
     if (backendId) {
       applyAttendanceBackendFormatting();
     }
+    ProgressService.report({
+      title: 'Restored sheets repaired',
+      detail: 'Recreated expected tables, formatting, protections, and backend Attendance presentation.',
+      percent: 90,
+      step: 3,
+      totalSteps: 3,
+    });
   }
 
   export function runSetup(): Types.SetupSummary {
@@ -2538,11 +2873,26 @@ namespace SetupService {
     const formResults: Types.EnsureFormResult[] = [];
 
     // Ensure spreadsheets.
+    ProgressService.report({
+      title: 'Checking SHAMROCK workbooks',
+      detail: 'Locating or creating the main and admin workbooks from Script Properties.',
+      hint: 'Setup is ensure-exists: rerunning it repairs missing resources without intentionally duplicating them.',
+      percent: 10,
+      step: 1,
+      totalSteps: 10,
+    });
     const frontend = ensureSpreadsheet('frontend', Config.RESOURCE_NAMES.FRONTEND_SPREADSHEET, Config.PROPERTY_KEYS.MAIN_SPREADSHEET_ID);
     const backend = ensureSpreadsheet('backend', Config.RESOURCE_NAMES.BACKEND_SPREADSHEET, Config.PROPERTY_KEYS.ADMIN_SPREADSHEET_ID);
     spreadsheetResults.push(frontend, backend);
 
     // Ensure excusals management spreadsheet.
+    ProgressService.report({
+      title: 'Checking the Excusals management workbook',
+      detail: 'Ensuring the commander-facing workflow surface exists, is shared, and is protected.',
+      percent: 18,
+      step: 2,
+      totalSteps: 10,
+    });
     try {
       ExcusalsService.ensureManagementSpreadsheet();
       ExcusalsService.shareAndProtectManagementSpreadsheet();
@@ -2551,6 +2901,13 @@ namespace SetupService {
     }
 
     // Ensure frontend sheets.
+    ProgressService.report({
+      title: 'Checking main workbook sheets',
+      detail: `Ensuring ${Schemas.FRONTEND_TABS.length} frontend tab(s), stable headers, and expected names.`,
+      percent: 27,
+      step: 3,
+      totalSteps: 10,
+    });
     const frontendSheet = SpreadsheetApp.openById(frontend.id);
     Schemas.FRONTEND_TABS.forEach((tab) => {
       sheetResults.push(ensureSheet(frontendSheet, tab));
@@ -2559,6 +2916,13 @@ namespace SetupService {
     restoreMissingHeaders(frontendSheet, Schemas.FRONTEND_TABS);
 
     // Ensure backend sheets.
+    ProgressService.report({
+      title: 'Checking admin workbook sheets',
+      detail: `Ensuring ${Schemas.BACKEND_TABS.length} authoritative and operational tab(s).`,
+      percent: 36,
+      step: 4,
+      totalSteps: 10,
+    });
     const backendSheet = SpreadsheetApp.openById(backend.id);
     Schemas.BACKEND_TABS.forEach((tab) => {
       sheetResults.push(ensureSheet(backendSheet, tab));
@@ -2567,12 +2931,26 @@ namespace SetupService {
     restoreMissingHeaders(backendSheet, Schemas.BACKEND_TABS);
 
     // Ensure forms.
+    ProgressService.report({
+      title: 'Checking SHAMROCK forms',
+      detail: 'Ensuring Attendance, Excusals, and Directory forms and their supported settings.',
+      percent: 45,
+      step: 5,
+      totalSteps: 10,
+    });
     const attendanceForm = ensureForm('attendance', Config.RESOURCE_NAMES.ATTENDANCE_FORM, Config.PROPERTY_KEYS.ATTENDANCE_FORM_ID, backend.id);
     const excusalForm = ensureForm('excusals', Config.RESOURCE_NAMES.EXCUSALS_FORM, Config.PROPERTY_KEYS.EXCUSAL_REQUEST_FORM_ID, backend.id);
     const directoryForm = ensureForm('directory', Config.RESOURCE_NAMES.DIRECTORY_FORM, Config.PROPERTY_KEYS.CADET_DIRECTORY_FORM_ID, backend.id);
     formResults.push(attendanceForm, excusalForm, directoryForm);
 
     // Normalize response sheet names based on the form actually linked to each sheet.
+    ProgressService.report({
+      title: 'Verifying form response destinations',
+      detail: 'Matching each form to the correct admin response sheet and checking response-sheet health.',
+      percent: 54,
+      step: 6,
+      totalSteps: 10,
+    });
     normalizeResponseSheetsForForms(backend.id, [
       { formId: attendanceForm.id, desiredSheetName: Config.RESOURCE_NAMES.ATTENDANCE_FORM_SHEET },
       { formId: excusalForm.id, desiredSheetName: Config.RESOURCE_NAMES.EXCUSALS_FORM_SHEET },
@@ -2581,6 +2959,13 @@ namespace SetupService {
     applyAttendanceBackendFormatting();
 
     // Refresh event choices for forms (attendance + excusals) after ensuring sheets/forms.
+    ProgressService.report({
+      title: 'Refreshing form choices and triggers',
+      detail: 'Publishing current cadet/event options and ensuring submission handlers are installed once.',
+      percent: 63,
+      step: 7,
+      totalSteps: 10,
+    });
     refreshAttendanceFormEventChoices();
     refreshExcusalsFormEventChoices();
 
@@ -2590,6 +2975,13 @@ namespace SetupService {
     ensureFormTrigger('onDirectoryFormSubmit', directoryForm.id);
 
     // Refresh Data Legend from canonical arrays and sync to frontend.
+    ProgressService.report({
+      title: 'Publishing option lists and core data',
+      detail: 'Refreshing Data Legend choices, Directory, and derived Leadership views.',
+      percent: 72,
+      step: 8,
+      totalSteps: 10,
+    });
     refreshDataLegendAndFrontend();
 
     // Protect user-facing directory and sync it from backend.
@@ -2599,12 +2991,26 @@ namespace SetupService {
     SyncService.syncByBackendSheetName('Leadership Backend');
 
     // Create structured tables on key frontend sheets via Sheets API.
+    ProgressService.report({
+      title: 'Repairing frontend tables and presentation',
+      detail: 'Ensuring table objects, validation, standard formatting, and managed protections.',
+      percent: 81,
+      step: 9,
+      totalSteps: 10,
+    });
     ensureFrontendTables(frontend.id);
 
     // Apply frontend validations, plus visual formatting unless disabled.
     FrontendFormattingService.applyAll(frontend.id);
 
     // Build attendance matrix initially.
+    ProgressService.report({
+      title: 'Finishing attendance, ordering, and automations',
+      detail: 'Rebuilding derived attendance, ordering tabs, and checking spreadsheet and maintenance triggers.',
+      percent: 90,
+      step: 10,
+      totalSteps: 10,
+    });
     rebuildAttendanceMatrix();
 
     // Order sheets for predictable UX

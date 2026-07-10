@@ -237,6 +237,11 @@ Required standards:
 Operators should not run scripts from the editor.
 
 - Provide custom menus for user/admin actions.
+- Every operator-invoked SHAMROCK menu action must pass through the shared live-progress and audit wrapper. A menu click opens a modeless progress surface, then the client starts the server action asynchronously so progress can be polled while work or spreadsheet prompts are active.
+- Live progress state is ephemeral and isolated with the active user's Apps Script cache. It is an operator feedback channel, not an authoritative job queue, security boundary, or replacement for Audit Backend and Apps Script logs.
+- Progress messages must use truthful workflow stages, plain-language descriptions, and safe hints. Do not invent row-level percentages when a Google API only exposes stage completion, and do not expose raw resource IDs, emails, personal data, or technical stack details in the progress history.
+- Closing the progress surface must not cancel the server action. Success, cancellation, failure, or a saved background continuation must remain visible as distinct terminal outcomes.
+- Trigger-driven functions do not open interactive progress UI because they have no waiting spreadsheet operator; they retain structured technical/audit logging.
 - Triggers should call stable, explicit entry points.
 - Trigger installation must be idempotent.
 - v2 operator workflows that replace earlier behavior must use explicit v2 menu/global names. Current transition entry points are `transferToNewSemesterV2` and `transferToNewAcademicYearV2`.

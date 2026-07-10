@@ -69,6 +69,8 @@ Do not deploy:
 Post-deploy validation checklist:
 - Open the backend/admin workbook and confirm the SHAMROCK category menus load.
 - Open the frontend/main workbook and confirm the SHAMROCK menu does not load.
+- Run `Show menu help` and confirm a `SHAMROCK Live Progress` window shows the current stage, hint, elapsed time, and successful completion.
+- Start a harmless prompt-driven action and confirm the progress window shows `Waiting for you` until the spreadsheet confirmation is answered; cancel the prompt and confirm the progress result is `Cancelled`.
 - Confirm that setup actions remain idempotent (re-run once).
 - Submit a test attendance form response and confirm it is recorded in Attendance Backend.
 - Submit a test excusal request and confirm it appears in Excusals Backend.
@@ -76,6 +78,17 @@ Post-deploy validation checklist:
 - Run a harmless menu action, such as Show menu help, and confirm Audit Backend has matching `started` and `ok` rows with the same `run_id`.
 
 ## 5. Daily Operations
+
+### 5.0 Reading live menu progress
+
+- Every backend SHAMROCK menu action opens a modeless progress window and then starts the actual work.
+- Leave the window open to see current stage, distilled activity, elapsed time, and stage count where available. The percentage represents completed workflow stages, not an estimated Google API row count.
+- If the window says `Waiting for you`, return to the spreadsheet and answer the visible confirmation or data-entry prompt.
+- You may close the progress window without stopping the action. Do not assume closing it cancels server-side work.
+- `Continuing later` means a resumable workflow saved a checkpoint and scheduled a continuation; do not start a fresh duplicate run.
+- For `Needs attention`, use the displayed run ID to find the matching Audit Backend row and Apps Script execution logs.
+- Automated triggers and form submissions run without this window because there is no waiting menu operator.
+
 ### 5.1 Directory maintenance
 - Directory source of truth is maintained in the backend.
 - Frontend Directory is a mirror.

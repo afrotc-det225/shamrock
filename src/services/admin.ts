@@ -117,6 +117,14 @@ namespace AdminService {
     const category = resolveCategory('Export which category (CSV)?', categoryInput);
     if (!category) return;
     const info = CATEGORY_MAP[category];
+    ProgressService.report({
+      title: `Reading ${info.sheetName}`,
+      detail: info.description,
+      hint: 'This export reads data only; it does not change the workbook.',
+      percent: 30,
+      step: 1,
+      totalSteps: 3,
+    });
     const spreadsheetId = requireSpreadsheetId(info);
     if (!spreadsheetId) throw new Error(`${info.location === 'backend' ? 'Backend' : 'Frontend'} sheet ID not set. Run setup first.`);
     const sheet = SheetUtils.getSheet(spreadsheetId, info.sheetName);
@@ -127,8 +135,22 @@ namespace AdminService {
     }
 
     const data = SheetUtils.readTable(sheet);
+    ProgressService.report({
+      title: 'Building the CSV file',
+      detail: `Converting ${data.rows.length} row(s) using the current machine headers.`,
+      percent: 65,
+      step: 2,
+      totalSteps: 3,
+    });
     const csv = toCsv(data.headers, data.rows);
     const file = DriveApp.createFile(`shamrock-${category}-${new Date().toISOString()}.csv`, csv, 'text/csv');
+    ProgressService.report({
+      title: 'Saving the export in Drive',
+      detail: `Created ${file.getName()} with ${data.rows.length} data row(s).`,
+      percent: 92,
+      step: 3,
+      totalSteps: 3,
+    });
     alertOrLog(`CSV export complete. File created: ${file.getName()} (ID: ${file.getId()})`);
   }
 
@@ -149,6 +171,14 @@ namespace AdminService {
     if (!fileId) return;
 
     const info = CATEGORY_MAP[category];
+    ProgressService.report({
+      title: 'Opening the selected CSV',
+      detail: `Reading the file for ${info.sheetName}.`,
+      hint: 'No sheet rows are changed until the file structure passes validation.',
+      percent: 25,
+      step: 1,
+      totalSteps: 4,
+    });
     const spreadsheetId = requireSpreadsheetId(info);
     if (!spreadsheetId) throw new Error(`${info.location === 'backend' ? 'Backend' : 'Frontend'} sheet ID not set. Run setup first.`);
     const sheet = SheetUtils.getSheet(spreadsheetId, info.sheetName);
@@ -171,6 +201,13 @@ namespace AdminService {
       .getValues()[0]
       .map((h) => String(h || '').trim());
 
+    ProgressService.report({
+      title: 'Validating the CSV structure',
+      detail: 'Comparing the file headers with the current supported sheet schema.',
+      percent: 45,
+      step: 2,
+      totalSteps: 4,
+    });
     let rows: Record<string, any>[] = [];
     try {
       rows = parseCsvToObjects(content, expectedHeaders);
@@ -179,6 +216,15 @@ namespace AdminService {
       throw err;
     }
 
+    ProgressService.report({
+      title: `Writing ${rows.length} imported row(s)`,
+      detail: category === 'events'
+        ? 'Merging matching events and preserving a chronological order.'
+        : `Replacing the current ${info.sheetName} data rows with the validated import.`,
+      percent: 65,
+      step: 3,
+      totalSteps: 4,
+    });
     if (category === 'events') {
       const existing = SheetUtils.readTable(sheet).rows;
       const toKey = (row: Record<string, any>) => {
@@ -230,6 +276,13 @@ namespace AdminService {
       }
     }
 
+    ProgressService.report({
+      title: 'Imported data and dependent views are ready',
+      detail: `${info.sheetName} is saved and its supported derived frontend updates have finished.`,
+      percent: 90,
+      step: 4,
+      totalSteps: 4,
+    });
     alertOrLog(`CSV import complete into ${info.sheetName}. Rows written: ${rows.length}`);
   }
 
