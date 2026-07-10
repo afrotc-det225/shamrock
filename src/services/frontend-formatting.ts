@@ -16,6 +16,11 @@ namespace FrontendFormattingService {
   const ATTENDANCE_BASE_HEADERS = ATTENDANCE_SCHEMA?.machineHeaders || ['last_name', 'first_name', 'as_year', 'flight', 'squadron', 'overall_attendance_pct', 'llab_attendance_pct'];
   const ATT_HEADER_OVERALL = ATTENDANCE_BASE_HEADERS.find((h) => h.includes('overall_attendance')) || 'overall_attendance_pct';
   const ATT_HEADER_LLAB = ATTENDANCE_BASE_HEADERS.find((h) => h.includes('llab_attendance')) || 'llab_attendance_pct';
+  const LEADERSHIP_RANK_SOURCE_HEADERS = [
+    'cadet_rank_options',
+    'rank_options',
+    'honorific_options',
+  ];
   const STANDARD_COLUMN_WIDTHS: Record<string, number> = {
     last_name: 115,
     first_name: 115,
@@ -331,26 +336,42 @@ namespace FrontendFormattingService {
     if (rankIdx < 0) return;
     const rankRange = getLeadershipRankRange(ss);
     if (!rankRange) return;
-    batchUpdateCellValidations(ss, [{
+    const applied = batchUpdateCellValidations(ss, [{
       setDataValidation: {
         range: gridRangeForColumn(sheet, rankIdx),
         rule: dataValidationRuleForRange(rankRange, false),
         filteredRowsIncluded: true,
       },
     }], 'Leadership rank validation');
+    if (!applied) {
+      throw new Error('Unable to apply Leadership Rank validation from the complete Data Legend rank source.');
+    }
+    Log.info(
+      `Leadership Rank validation ready source=${rankRange.getSheet().getName()}!${rankRange.getA1Notation()} `
+      + `includes=${LEADERSHIP_RANK_SOURCE_HEADERS.join(',')}.`,
+    );
   }
 
   function getLeadershipRankRange(ss: GoogleAppsScript.Spreadsheet.Spreadsheet): GoogleAppsScript.Spreadsheet.Range | null {
     const sheet = ss.getSheetByName('Data Legend');
-    if (!sheet) return null;
+    if (!sheet) {
+      throw new Error('Leadership Rank validation requires the Data Legend sheet.');
+    }
     const headers = readHeaderRows(ss, sheet).machine;
-    const indexes = ['cadet_rank_options', 'rank_options', 'honorific_options']
-      .map((header) => headers.indexOf(header))
-      .filter((idx) => idx >= 0);
-    if (!indexes.length) return ss.getRangeByName('RANKS');
+    const indexes = LEADERSHIP_RANK_SOURCE_HEADERS.map((header) => headers.indexOf(header));
+    const missingHeaders = LEADERSHIP_RANK_SOURCE_HEADERS.filter((_, index) => indexes[index] < 0);
+    if (missingHeaders.length) {
+      throw new Error(`Leadership Rank validation is missing Data Legend source column(s): ${missingHeaders.join(', ')}.`);
+    }
+    const contiguous = indexes.every((columnIndex, index) => columnIndex === indexes[0] + index);
+    if (!contiguous) {
+      throw new Error(
+        `Leadership Rank validation requires adjacent Data Legend columns in this order: ${LEADERSHIP_RANK_SOURCE_HEADERS.join(', ')}.`,
+      );
+    }
 
-    const startCol = Math.min(...indexes) + 1;
-    const endCol = Math.max(...indexes) + 1;
+    const startCol = indexes[0] + 1;
+    const endCol = indexes[indexes.length - 1] + 1;
     const lastRow = Math.max(3, sheet.getLastRow());
     const startLetter = columnNumberToA1(startCol);
     const endLetter = columnNumberToA1(endCol);
