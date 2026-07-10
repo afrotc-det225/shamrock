@@ -1,4 +1,4 @@
-// Form builders to scaffold required questions. Idempotent: only seeds when the form is empty.
+// Form builders and in-place choice synchronization for SHAMROCK forms.
 
 namespace FormService {
   function clearItems(form: GoogleAppsScript.Forms.Form) {
@@ -262,6 +262,20 @@ namespace FormService {
     pocByAs: Record<string, string[]>; // AS -> labels (POC years only)
   }
 
+  interface AttendanceCadetQuestion {
+    title: string;
+    sectionTitle: string;
+    choices: string[];
+  }
+
+  export interface AttendanceCadetChoiceSyncResult {
+    updated: number;
+    created: number;
+    retired: number;
+    duplicateItems: number;
+    missingSections: string[];
+  }
+
   function normalizeToList(value: string, options: string[]): string {
     const v = String(value || '').trim();
     if (!v) return '';
@@ -345,6 +359,73 @@ namespace FormService {
       Log.warn(`Unable to build cadet groups: ${err}`);
     }
     return groups;
+  }
+
+  function buildAttendanceCadetQuestions(cadets: CadetGroups): AttendanceCadetQuestion[] {
+    const questions: AttendanceCadetQuestion[] = [];
+    const addGroups = (
+      groupMap: Record<string, string[]>,
+      titleFor: (asYear: string) => string,
+      sectionTitle: string,
+    ) => {
+      Object.keys(groupMap)
+        .sort(Arrays.compareAsYearsForDisplay)
+        .forEach((asYear) => {
+          const choices = groupMap[asYear] || [];
+          if (!choices.length) return;
+          questions.push({ title: titleFor(asYear), sectionTitle, choices });
+        });
+    };
+
+    [...Arrays.FLIGHTS.filter((flight) => flight !== 'Abroad'), 'Trine', 'Valparaiso'].forEach((flight) => {
+      let groupMap: Record<string, string[]> = {};
+      if (flight === 'Trine' || flight === 'Valparaiso') {
+        const matchKey = Object.keys(cadets.byCrosstown).find((key) => key.toLowerCase().includes(flight.toLowerCase())) || '';
+        groupMap = (matchKey && cadets.byCrosstown[matchKey]) || {};
+      } else {
+        groupMap = cadets.byFlight[flight] || {};
+      }
+      addGroups(
+        groupMap,
+        (asYear) => `Cadets (${flight}) AS ${asYear} (Mando)`,
+        `Cadets for ${flight} (Mando)`,
+      );
+    });
+
+    Arrays.FLIGHTS.filter((flight) => flight !== 'Abroad').forEach((flight) => {
+      const groupMap = cadets.byFlightAll[flight] || cadets.byFlight[flight] || {};
+      addGroups(
+        groupMap,
+        (asYear) => `Cadets (${flight}) AS ${asYear} (LLAB)`,
+        `Cadets for ${flight} (LLAB)`,
+      );
+    });
+
+    addGroups(cadets.pocByAs, (asYear) => `Cadets (POC) AS ${asYear}`, 'POC Branch');
+    addGroups(cadets.nonAbroadByAs, (asYear) => `Cadets (Secondary) AS ${asYear}`, 'Secondary Branch');
+    addGroups(cadets.allByAs, (asYear) => `Cadets (All) AS ${asYear}`, 'Attendance Branch');
+    return questions;
+  }
+
+  function isAttendanceCadetQuestionTitle(title: string): boolean {
+    return /^Cadets \(.+\) AS AS\d+(?: \((?:Mando|LLAB)\))?$/.test(String(title || '').trim());
+  }
+
+  function moveItemToSectionEnd(
+    form: GoogleAppsScript.Forms.Form,
+    item: GoogleAppsScript.Forms.Item,
+    sectionTitle: string,
+  ): boolean {
+    const section = findPageBreakItem(form, sectionTitle);
+    if (!section) return false;
+
+    const items = form.getItems();
+    const sectionIndex = section.getIndex();
+    const nextSection = items.find((candidate) => (
+      candidate.getIndex() > sectionIndex && candidate.getType() === FormApp.ItemType.PAGE_BREAK
+    ));
+    if (nextSection) form.moveItem(item, nextSection.getIndex());
+    return true;
   }
 
   function enforceExcusalsItemOrder(form: GoogleAppsScript.Forms.Form) {
@@ -459,13 +540,16 @@ namespace FormService {
   }
 
   export function ensureAttendanceForm(form: GoogleAppsScript.Forms.Form) {
-    // If empty, build the full form; otherwise just keep the Event list up to date.
+    // If empty, build the full form. Otherwise preserve question IDs and update
+    // event/cadet choices in place so the linked response sheet does not grow a
+    // fresh set of columns on every Directory change.
     if (form.getItems().length === 0) {
       rebuildAttendanceForm(form);
       return;
     }
 
     refreshAttendanceFormEventChoices(form);
+    refreshAttendanceFormCadetChoices(form);
   }
 
   export function rebuildAttendanceForm(form: GoogleAppsScript.Forms.Form) {
@@ -672,6 +756,82 @@ namespace FormService {
     }
 
     Log.info('Attendance form: completed rebuild');
+  }
+
+  export function refreshAttendanceFormCadetChoices(
+    form: GoogleAppsScript.Forms.Form,
+  ): AttendanceCadetChoiceSyncResult {
+    const cadets = buildCadetGroups();
+    const expected = buildAttendanceCadetQuestions(cadets);
+    const expectedByTitle = new Map(expected.map((question) => [question.title, question] as const));
+    const existingByTitle = new Map<string, GoogleAppsScript.Forms.CheckboxItem[]>();
+
+    form.getItems(FormApp.ItemType.CHECKBOX).forEach((item) => {
+      const checkbox = item.asCheckboxItem();
+      const title = String(checkbox.getTitle() || '').trim();
+      if (!isAttendanceCadetQuestionTitle(title)) return;
+      const matches = existingByTitle.get(title) || [];
+      matches.push(checkbox);
+      existingByTitle.set(title, matches);
+    });
+
+    const result: AttendanceCadetChoiceSyncResult = {
+      updated: 0,
+      created: 0,
+      retired: 0,
+      duplicateItems: 0,
+      missingSections: [],
+    };
+
+    expected.forEach((question) => {
+      const existing = existingByTitle.get(question.title) || [];
+      if (existing.length) {
+        existing[0].setChoiceValues(question.choices);
+        result.updated += 1;
+        if (existing.length > 1) {
+          result.duplicateItems += existing.length - 1;
+          existing.slice(1).forEach((duplicate) => duplicate.setChoiceValues(['(retired duplicate question)']));
+        }
+        return;
+      }
+
+      const section = findPageBreakItem(form, question.sectionTitle);
+      if (!section) {
+        if (!result.missingSections.includes(question.sectionTitle)) result.missingSections.push(question.sectionTitle);
+        return;
+      }
+
+      const checkbox = form.addCheckboxItem().setTitle(question.title).setChoiceValues(question.choices);
+      const item = form.getItemById(checkbox.getId());
+      if (!item || !moveItemToSectionEnd(form, item, question.sectionTitle)) {
+        result.missingSections.push(question.sectionTitle);
+        return;
+      }
+      result.created += 1;
+    });
+
+    existingByTitle.forEach((items, title) => {
+      if (expectedByTitle.has(title)) return;
+      items.forEach((item) => {
+        item.setChoiceValues(['(no current cadets)']);
+        result.retired += 1;
+      });
+    });
+
+    if (result.duplicateItems) {
+      Log.warn(
+        `Attendance form: found ${result.duplicateItems} duplicate cadet question item(s); a response-sheet rotation is required to remove their historical columns safely.`,
+      );
+    }
+    if (result.missingSections.length) {
+      Log.warn(
+        `Attendance form: unable to add roster questions because sections are missing: ${result.missingSections.join(', ')}. Run the audited Attendance Form rebuild.`,
+      );
+    }
+    Log.info(
+      `Attendance form: roster choices synchronized updated=${result.updated} created=${result.created} retired=${result.retired} duplicateItems=${result.duplicateItems}`,
+    );
+    return result;
   }
 
   export function refreshAttendanceFormEventChoices(form: GoogleAppsScript.Forms.Form) {

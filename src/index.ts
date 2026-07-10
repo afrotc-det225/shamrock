@@ -127,7 +127,7 @@ function addShamrockMenu() {
         .addItem('Refresh Data Legend artifacts', 'refreshDataLegendAndFrontend')
         .addItem('Rebuild Dashboard', 'rebuildDashboard')
         .addItem('Rebuild Attendance Matrix', 'rebuildAttendanceMatrix')
-        .addItem('Rebuild Attendance Form', 'rebuildAttendanceForm')
+        .addItem('Rebuild Attendance Form (archive responses)', 'rebuildAttendanceForm')
         .addItem('Refresh Excusals Form choices', 'refreshExcusalsForm')
     )
     .addSubMenu(
@@ -321,8 +321,16 @@ function sendWeeklyUnexcusedSummary() {
 }
 
 function rebuildAttendanceForm() {
-  runMenuAction({ label: 'Rebuild Attendance Form', category: 'Sync & Refresh', action: 'menu.rebuild_attendance_form' }, () => {
-    confirmMenuAction('Rebuild Attendance Form', 'This rebuilds the Attendance Form from current Events Backend choices. Continue?');
+  runMenuAction({
+    label: 'Rebuild Attendance Form (archive responses)',
+    category: 'Sync & Refresh',
+    action: 'menu.rebuild_attendance_form',
+    targetSheet: Config.RESOURCE_NAMES.ATTENDANCE_FORM_SHEET,
+  }, () => {
+    confirmMenuAction(
+      'Rebuild Attendance Form',
+      'This briefly closes the form, preserves the current raw response tab as a hidden archive, rebuilds the questions, links a new clean response tab, and reopens the form. Continue?',
+    );
     SetupService.rebuildAttendanceForm();
   });
 }
@@ -379,8 +387,11 @@ function refreshExcusalsForm() {
 
 function debugAttendanceResponseSheet() {
   runMenuAction({ label: 'Debug Attendance response columns', category: 'Attendance', action: 'menu.debug_attendance_response_sheet', targetSheet: Config.RESOURCE_NAMES.ATTENDANCE_FORM_SHEET }, () => {
-    const headers = SetupService.debugAttendanceResponseSheet();
-    SpreadsheetApp.getUi().alert(`Found ${headers.length} columns in Attendance Response Sheet. Check logs for details.`);
+    const diagnostics = SetupService.debugAttendanceResponseSheet();
+    SpreadsheetApp.getUi().alert(
+      `Attendance Form Responses: ${diagnostics.columnCount} columns, ${diagnostics.uniqueHeaderCount} unique headers, `
+      + `${diagnostics.duplicateHeaderCount} duplicated header names (maximum ${diagnostics.maxHeaderOccurrences} copies). Check logs for details.`,
+    );
   });
 }
 
@@ -830,7 +841,7 @@ function onBackendEdit(e: GoogleAppsScript.Events.SheetsOnEdit) {
     if (sheetName === 'Directory Backend') {
       SetupService.refreshDirectoryArtifacts({
         rebuildAttendanceMatrix: DirectoryService.shouldRebuildAttendanceMatrixForField(header),
-        rebuildAttendanceForm: DirectoryService.shouldRebuildAttendanceFormForField(header),
+        refreshAttendanceForm: DirectoryService.shouldRefreshAttendanceFormForField(header),
       });
       return;
     }
@@ -995,7 +1006,7 @@ function addDeputyFlightCommanders() {
 
   // Sync to frontend
   try {
-    SetupService.refreshDirectoryArtifacts({ rebuildAttendanceMatrix: true, rebuildAttendanceForm: true });
+    SetupService.refreshDirectoryArtifacts({ rebuildAttendanceMatrix: true, refreshAttendanceForm: true });
   } catch (err) {
     Log.warn(`Unable to sync leadership to frontend after deputy update: ${err}`);
   }

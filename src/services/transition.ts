@@ -692,12 +692,14 @@ namespace TransitionService {
     }
     if (phase === 'responses') {
       clearResponseSheet(Config.RESOURCE_NAMES.DIRECTORY_FORM_SHEET);
-      clearResponseSheet(Config.RESOURCE_NAMES.ATTENDANCE_FORM_SHEET);
+      // Attendance raw responses are not cleared here. The later attendance_form
+      // phase unlinks and preserves the entire linked tab before creating a fresh
+      // destination, so a transition never destroys the raw submission history.
       clearResponseSheet(Config.RESOURCE_NAMES.EXCUSALS_FORM_SHEET);
       return;
     }
     if (phase === 'directory_artifacts') {
-      SetupService.refreshDirectoryArtifacts({ rebuildAttendanceMatrix: true, rebuildAttendanceForm: false });
+      SetupService.refreshDirectoryArtifacts({ rebuildAttendanceMatrix: true, refreshAttendanceForm: false });
       return;
     }
     if (phase === 'events_artifacts') {

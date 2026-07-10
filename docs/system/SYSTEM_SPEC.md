@@ -50,6 +50,8 @@ Idempotency rules:
 - Prefer deterministic resource naming.
 - Where a resource exists but differs from desired state, setup should update it.
 - Setup must avoid destructive operations unless explicitly invoked by an admin “reset” action.
+- Attendance roster and event refreshes must update existing Form items in place. They may add only a newly required roster question; they must not delete and recreate the full form.
+- A structural Attendance Form rebuild must temporarily stop responses, preserve the prior linked response tab as a hidden archive, rebuild the form, create and verify a fresh linked response tab, and restore the form's prior accepting-responses state. It must not merge or delete historical response columns in place.
 
 ## 4. Ownership and Source of Truth
 ### 4.1 Frontend Workbook
@@ -173,6 +175,7 @@ The attendance system is a replayable pipeline.
 - Submissions are recorded as immutable log rows in Attendance Backend.
 - The Frontend Attendance matrix is derived by replaying logs plus excusal decisions.
 - Rebuild/regenerate is an admin operation and must be deterministic.
+- Attendance Form Responses is the current raw linked destination. Structural form rebuilds retain its predecessor as a hidden, timestamped `Archived - Attendance Form Responses ...` tab; Attendance Backend remains the operational source used for replay.
 
 Attendance codes:
 - `P`, `T`, `E`, `ES`, and `MED` are credit outcomes.

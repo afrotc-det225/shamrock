@@ -117,7 +117,7 @@ The v2 transition workflow prepares SHAMROCK for a new semester or academic year
 - Current core frontend sheets are copied, locked, and hidden with term labels. Copied table objects are renamed to match the archive sheet names, such as `Spring 2026 Directory`.
 - Archive term labels are derived from the new target term, not the current Events Backend contents. For example, transferring into `2026-Fall` archives the current frontend tabs as `Spring 2026 Leadership`, `Spring 2026 Directory`, and `Spring 2026 Attendance`.
 - Backend rollback archives are copied, locked, hidden, and registered for deletion after seven days.
-- Attendance/Excusals logs and response rows are cleared only after archive creation and confirmation.
+- Attendance/Excusals operational logs plus Directory/Excusals response rows are cleared only after archive creation and confirmation. Attendance raw responses are instead preserved as a hidden timestamped tab when the Attendance Form is rebuilt and relinked.
 - After final confirmation, the workflow records phase progress and can resume after an Apps Script timeout. Directory changes are calculated from the rollback archive snapshot so AS-year advancement is not applied twice.
 - Transitions clear Directory role, flight, and squadron assignments. Academic-year transitions mark listed dropped cadets as `Dropped`, mark only original AS400s as `Commissioned` unless overridden, advance remaining AS years once, and reset cadet rank from the resulting AS year.
 
@@ -148,7 +148,14 @@ AS500 is a GMC year. AS500 cadets are excluded from POC Third Hour form groups a
 - Attendance Backend.
 - Events Backend.
 - Frontend Attendance.
+- Current Attendance Form Responses tab and preserved hidden response archives when an operator performs a structural form rebuild.
 - Data Legend attendance codes.
+
+### Safeguards
+
+- Normal Directory/Event refreshes update existing Attendance Form questions and choices in place, avoiding full-form question recreation and repeated linked-sheet columns.
+- The explicit `Rebuild Attendance Form (archive responses)` action briefly closes the form, preserves the existing linked response tab as a hidden timestamped archive, links a fresh clean response tab, verifies that it has no duplicate header names, and restores the prior open/closed state.
+- Historical raw response tabs are preserved rather than merged or pruned in place. Attendance Backend remains the operational attendance log.
 
 ### Validation
 
@@ -158,6 +165,7 @@ AS500 is a GMC year. AS500 cadets are excluded from POC Third Hour form groups a
 - Confirm AS500 cadets are counted as GMC, are absent from POC Third Hour choices, receive `N/A` for POC Third Hour when no entry exists, and sort between AS300 and AS250.
 - Confirm attendance codes validate against Data Legend options while frontend table column types remain unset.
 - Confirm stale blank rows are removed from the frontend matrix after cadets are removed or marked non-operational.
+- Run `Debug Attendance response columns` and confirm the current response tab reports no duplicate header names. After a structural rebuild, confirm the prior response tab is hidden and the new visible tab is named `Attendance Form Responses`.
 
 ## Excusals
 

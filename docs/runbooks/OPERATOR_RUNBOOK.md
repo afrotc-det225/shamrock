@@ -96,6 +96,9 @@ Post-deploy validation checklist:
 - Attendance submissions append to Attendance Backend.
 - Frontend Attendance matrix is derived; rebuild is available via admin menu.
 - Treat frontend attendance as derived state. Rebuild it instead of manually patching formulas or event columns.
+- Routine Directory and Event changes synchronize Attendance Form choices in place. Do not use a structural form rebuild just to refresh choices.
+- Use `Rebuild Attendance Form (archive responses)` only when the form structure itself needs repair or at the transition phase that intentionally rebuilds it. The action briefly stops responses, keeps the former raw response tab as a hidden timestamped archive, verifies a fresh `Attendance Form Responses` destination, and restores the form's prior open/closed state.
+- Use `Debug Attendance response columns` to review only header-count health. It does not log submission contents.
 - V2 attendance codes are `P`, `T`, `A`, `R`, `D`, `U`, `E`, `ES`, `MED`, and `N/A`.
 - `A` requires follow-up, `R` is pending leadership review, and `D` means a denied advance request where the cadet is still expected to attend.
 
@@ -126,7 +129,7 @@ Before starting:
 
 During the wizard:
 - The draft is saved after each prompt. Cancelling before final confirmation does not archive or rewrite workbook data.
-- The final confirmation is the destructive boundary. After that point, the workflow archives current sheets, updates roster/events, clears current attendance/excusal logs and form responses, rebuilds forms, and reinstalls triggers.
+- The final confirmation is the destructive boundary. After that point, the workflow archives current sheets, updates roster/events, clears current attendance/excusal logs, clears Directory and Excusals response rows, preserves the full Attendance raw response tab during its form rebuild, and reinstalls triggers.
 - After final confirmation, execution is phase-resumable. If Apps Script stops near its execution limit, wait for the continuation trigger or rerun the same transition menu action to resume remaining phases. Do not start a fresh transition.
 - Frontend archives are named from the new target term: transferring into `YYYY-Fall` creates `Spring YYYY Leadership/Directory/Attendance`; transferring into `YYYY-Spring` creates `Fall YYYY-1 Leadership/Directory/Attendance`.
 - Both semester and academic-year transitions clear Directory `Role`, `Flight`, and `Sqdn` assignments. Leadership roles must be reapplied through the wizard role-update prompt or backend edits after transition.
@@ -138,6 +141,7 @@ After completion:
 - Confirm Events Backend has the new term and the expected training-week sequence.
 - Confirm Directory AS-year advancement happened exactly once, role/flight/squadron are blank unless explicitly updated, and default ranks match AS year. AS500 remains GMC and resets to `C/3C`.
 - Confirm Attendance and Excusals forms list only current-term events.
+- Confirm the current `Attendance Form Responses` tab has no duplicate header names and the prior raw tab is preserved as a hidden timestamped archive.
 - Run one controlled attendance/excusal validation if this is a production transition.
 
 ## 6. Troubleshooting
@@ -160,7 +164,18 @@ Operator checks:
 - Confirm response destination is configured correctly if used.
 - Re-run trigger installation.
 
-### 6.3 Data validations not working
+### 6.3 Attendance response columns repeat
+Likely cause:
+- A historical structural rebuild deleted and recreated Form question items while the form remained linked. Google retained the old response columns and appended columns for the newly created items.
+
+Operator checks:
+- Run `Debug Attendance response columns` and record the current column and duplicate-header counts.
+- Run `Rebuild Attendance Form (archive responses)` once. Do not manually merge or delete columns on the linked response tab.
+- Confirm the original tab is now a hidden `Archived - Attendance Form Responses ...` tab and retains its rows.
+- Confirm the new visible `Attendance Form Responses` tab has no duplicate header names.
+- Submit one controlled response and confirm both the new raw response row and the corresponding Attendance Backend rows.
+
+### 6.4 Data validations not working
 Likely causes:
 - Data Legend ranges missing or renamed.
 - Named ranges missing.
@@ -174,7 +189,7 @@ Operator checks:
 - Confirm Directory `Rank` validates against cadet rank options with plain-text display, Leadership `Rank` validates against adjacent cadet rank, non-cadet rank, and honorific option columns with plain-text display, and Directory `Email` has no dropdown validation.
 - Confirm Data Legend order follows the v2 Directory flow: AS year, flight, squadron, cadet rank, rank, honorific, university, dorm, academic options, home state, flight path, attendance codes, excusal decisions, excusal statuses, and excusal requested outcomes.
 
-### 6.4 Attendance percentages look wrong
+### 6.5 Attendance percentages look wrong
 Likely causes:
 - Event metadata missing or miscategorized.
 - Attendance codes outside the allowed set.

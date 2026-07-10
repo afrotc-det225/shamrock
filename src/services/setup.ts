@@ -664,196 +664,6 @@ namespace SetupService {
     }
   }
 
-  function slimAttendanceResponseSheet() {
-    let sheet: GoogleAppsScript.Spreadsheet.Sheet | null = null;
-    try {
-      sheet = Config.getBackendSheet(Config.RESOURCE_NAMES.ATTENDANCE_FORM_SHEET);
-    } catch (err) {
-      Log.warn(`Attendance response sheet missing; skipping slim. Error: ${err}`);
-      return;
-    }
-
-    const lastRow = sheet.getLastRow();
-    const lastCol = sheet.getLastColumn();
-    if (lastCol === 0) return;
-
-    const headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0].map((h) => String(h || ''));
-    const dataRows = Math.max(0, lastRow - 1);
-    const startRow = 2;
-
-    // Headers that should not exist (legacy items we removed from the form).
-    const bannedHeaders = new Set(['Submitted By Email']);
-
-    // Group columns by header; keep the first occurrence, merge data from later duplicates.
-    const indicesByHeader = new Map<string, number[]>();
-    headers.forEach((h, idx) => {
-      const key = h.trim();
-      if (!key) return;
-      const arr = indicesByHeader.get(key) || [];
-      arr.push(idx + 1); // 1-based
-      indicesByHeader.set(key, arr);
-    });
-
-    indicesByHeader.forEach((cols, header) => {
-      if (cols.length <= 1) return;
-      if (bannedHeaders.has(header)) {
-        // Delete all occurrences of banned headers.
-        cols
-          .slice()
-          .sort((a, b) => b - a)
-          .forEach((col) => {
-            const currentMax = sheet.getMaxColumns();
-            if (col > currentMax) return;
-            try {
-              sheet.deleteColumn(col);
-            } catch (err) {
-              try {
-                sheet.hideColumn(sheet.getRange(1, col));
-              } catch (err2) {
-                Log.warn(
-                  `Unable to delete or hide banned header '${header}' column ${col} in ${Config.RESOURCE_NAMES.ATTENDANCE_FORM_SHEET}: ${err}; hide failed: ${err2}`,
-                );
-              }
-            }
-          });
-        return;
-      }
-      // Merge all duplicate columns' data together (deduping values) and write the merged value into every duplicate column.
-      if (dataRows > 0) {
-        const colValues = cols.map((col) => sheet.getRange(startRow, col, dataRows, 1).getValues());
-        const merged: string[][] = Array.from({ length: dataRows }, () => ['']);
-
-        for (let r = 0; r < dataRows; r++) {
-          const seen = new Set<string>();
-          const parts: string[] = [];
-          colValues.forEach((vals) => {
-            const raw = String(vals[r][0] || '').trim();
-            if (!raw) return;
-            raw.split('|').forEach((p) => {
-              const part = p.trim();
-              if (!part) return;
-              if (seen.has(part)) return;
-              seen.add(part);
-              parts.push(part);
-            });
-          });
-          merged[r][0] = parts.join(' | ');
-        }
-
-        cols.forEach((col) => {
-          sheet.getRange(startRow, col, dataRows, 1).setValues(merged);
-        });
-      }
-
-      // Attempt to delete all duplicates; the column that cannot be deleted (form-linked) will remain.
-      let survivor: number | null = null;
-      const sorted = cols.slice().sort((a, b) => b - a); // delete right-to-left to reduce shifting issues
-      sorted.forEach((col, idx) => {
-        // If we have no survivor yet and this is the last column, keep it to guarantee one remains.
-        if (survivor === null && idx === sorted.length - 1) {
-          survivor = col;
-          return;
-        }
-
-        const currentMax = sheet.getMaxColumns();
-        if (col > currentMax) return;
-        try {
-          sheet.deleteColumn(col);
-        } catch (err) {
-          // Likely the form-linked column; keep it but continue pruning other duplicates.
-          survivor = survivor ?? col;
-        }
-      });
-    });
-  }
-
-  function pruneAttendanceResponseColumnsExplicit() {
-    let sheet: GoogleAppsScript.Spreadsheet.Sheet;
-    try {
-      sheet = Config.getBackendSheet(Config.RESOURCE_NAMES.ATTENDANCE_FORM_SHEET);
-    } catch (err) {
-      Log.warn(`Attendance response sheet missing; skipping prune. Error: ${err}`);
-      return;
-    }
-
-    // First merge any duplicate data so deletes do not drop content.
-    slimAttendanceResponseSheet();
-
-    // Re-run pruning a few times to tolerate column shifting or prior delete failures.
-    const bannedHeaders = new Set(['Submitted By Email']);
-    for (let attempt = 0; attempt < 5; attempt++) {
-      const lastCol = sheet.getLastColumn();
-      if (lastCol === 0) return;
-      const headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0].map((h) => String(h || ''));
-
-      const indicesByHeader = new Map<string, number[]>();
-      headers.forEach((h, idx) => {
-        const key = h.trim();
-        if (!key) return;
-        const arr = indicesByHeader.get(key) || [];
-        arr.push(idx + 1);
-        indicesByHeader.set(key, arr);
-      });
-
-      let changed = false;
-      let sawDuplicate = false;
-
-      indicesByHeader.forEach((cols, header) => {
-        if (cols.length <= 1) return;
-        if (bannedHeaders.has(header)) {
-          cols
-            .slice()
-            .sort((a, b) => b - a)
-            .forEach((col) => {
-              const currentMax = sheet.getMaxColumns();
-              if (col > currentMax) return;
-              try {
-                sheet.deleteColumn(col);
-                changed = true;
-              } catch (err) {
-                try {
-                  sheet.hideColumn(sheet.getRange(1, col));
-                  changed = true;
-                } catch (err2) {
-                  Log.warn(
-                    `Unable to delete or hide banned header '${header}' column ${col} in ${Config.RESOURCE_NAMES.ATTENDANCE_FORM_SHEET}: ${err}; hide failed: ${err2}`,
-                  );
-                }
-              }
-            });
-          return;
-        }
-        sawDuplicate = true;
-
-        let kept = false;
-        const sorted = cols.slice().sort((a, b) => b - a);
-        sorted.forEach((col, idx) => {
-          const remaining = sorted.length - idx;
-
-          // Always leave at least one column untouched (last remaining if none kept yet).
-          if (!kept && remaining === 1) {
-            kept = true;
-            return;
-          }
-
-          const currentMax = sheet.getMaxColumns();
-          if (col > currentMax) return;
-          try {
-            sheet.deleteColumn(col);
-            changed = true;
-          } catch (err) {
-            // Likely form-linked; keep it and continue.
-            kept = true;
-          }
-        });
-      });
-
-      if (!sawDuplicate || !changed) break;
-    }
-
-    normalizeAttendanceBackendHeaders();
-  }
-
   /**
    * Safely remove duplicate columns from the Excusals Form Responses sheet.
    * Processes ONE duplicate at a time, re-reading headers after each deletion
@@ -1145,79 +955,6 @@ namespace SetupService {
   }
 
   /**
-   * Deep-clean the Attendance Form Responses sheet:
-   * Delete all empty "Column N" junk columns that have no data.
-   */
-  export function deepCleanAttendanceFormResponses(): { deleted: number } {
-    let sheet: GoogleAppsScript.Spreadsheet.Sheet;
-    try {
-      sheet = Config.getBackendSheet(Config.RESOURCE_NAMES.ATTENDANCE_FORM_SHEET);
-    } catch (err) {
-      Log.warn(`Attendance response sheet missing; skipping deep clean. Error: ${err}`);
-      return { deleted: 0 };
-    }
-
-    const lastCol = sheet.getLastColumn();
-    const lastRow = sheet.getLastRow();
-    if (lastCol === 0) return { deleted: 0 };
-
-    const headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0].map((h) => String(h || '').trim());
-    Log.info(`[deep-clean-attendance] Starting: ${lastCol} cols, ${lastRow} rows`);
-
-    // Find all "Column N" indices
-    const junkCols: number[] = [];
-    headers.forEach((h, i) => {
-      if (/^Column \d+$/i.test(h)) junkCols.push(i);
-    });
-
-    if (junkCols.length === 0) {
-      Log.info(`[deep-clean-attendance] No Column N junk found`);
-      return { deleted: 0 };
-    }
-
-    // Verify they're actually empty before deleting
-    const dataRows = Math.max(0, lastRow - 1);
-    let emptyJunk: number[] = [];
-    if (dataRows > 0) {
-      for (const ci of junkCols) {
-        const colData = sheet.getRange(2, ci + 1, dataRows, 1).getValues();
-        const hasData = colData.some((row) => String(row[0] || '').trim() !== '');
-        if (!hasData) {
-          emptyJunk.push(ci);
-        } else {
-          Log.warn(`[deep-clean-attendance] Column N col ${ci + 1} "${headers[ci]}" has data; skipping`);
-        }
-      }
-    } else {
-      emptyJunk = [...junkCols];
-    }
-
-    // Delete right-to-left
-    let deleted = 0;
-    emptyJunk.sort((a, b) => b - a);
-    for (const ci of emptyJunk) {
-      try {
-        sheet.deleteColumn(ci + 1);
-        deleted++;
-      } catch (err) {
-        Log.warn(`[deep-clean-attendance] Cannot delete col ${ci + 1} "${headers[ci]}": ${err}`);
-      }
-    }
-
-    Log.info(`[deep-clean-attendance] Done: deleted ${deleted} of ${junkCols.length} Column N columns`);
-    return { deleted };
-  }
-
-  /**
-   * Run deep clean on both form response sheets. Callable from menu.
-   */
-  export function deepCleanFormResponseSheets() {
-    const excusals = deepCleanExcusalsFormResponses();
-    const attendance = deepCleanAttendanceFormResponses();
-    return { excusals, attendance };
-  }
-
-  /**
    * Process any existing rows in the Excusals Form Responses sheet that haven't been
    * inserted into Excusals Backend yet (pre-online submissions/backfill).
    */
@@ -1376,27 +1113,17 @@ namespace SetupService {
   }
 
   /**
-   * Debug helper: shows what columns exist in the Attendance Form Response sheet.
+   * Privacy-safe diagnostic for Attendance Form response-sheet column growth.
+   * It intentionally does not log response values or cadet data.
    */
   export function debugAttendanceResponseSheet() {
     try {
       const respSheet = Config.getBackendSheet(Config.RESOURCE_NAMES.ATTENDANCE_FORM_SHEET);
-      const lastCol = respSheet.getLastColumn();
-      const headers = respSheet.getRange(1, 1, 1, lastCol).getValues()[0].map((h, idx) => `${idx}: "${String(h || '').trim()}"`);
-      Log.info(`Attendance Response Sheet has ${lastCol} columns:`);
-      headers.forEach((h) => Log.info(`  ${h}`));
-      
-      // Show first data row
-      const lastRow = respSheet.getLastRow();
-      if (lastRow >= 2) {
-        const firstDataRow = respSheet.getRange(2, 1, 1, lastCol).getValues()[0];
-        Log.info('First data row:');
-        firstDataRow.forEach((val, idx) => {
-          const v = String(val || '').trim();
-          if (v) Log.info(`  Col ${idx}: "${v.substring(0, 100)}"`);
-        });
-      }
-      return headers;
+      const diagnostics = logAttendanceResponseSheetHealth(respSheet);
+      diagnostics.duplicateHeaders.slice(0, 25).forEach(([header, count]) => {
+        Log.warn(`Attendance response duplicate header occurrences=${count} header='${header}'`);
+      });
+      return diagnostics;
     } catch (err) {
       Log.warn(`debugAttendanceResponseSheet failed: ${err}`);
       throw err;
@@ -1622,73 +1349,6 @@ namespace SetupService {
     } catch (err) {
       Log.warn(`Failed to process attendance form backlog: ${err}`);
       throw err;
-    }
-  }
-
-  function normalizeAttendanceBackendHeaders() {
-    const sheet = Config.getBackendSheet('Attendance Backend');
-
-    const attendanceSchema = Schemas.BACKEND_TABS.find((t) => t.name === 'Attendance Backend');
-    if (!attendanceSchema?.machineHeaders || !attendanceSchema?.displayHeaders) {
-      Log.warn('Attendance Backend schema is missing machine or display headers; skipping normalizing Attendance Backend headers.');
-      return;
-    }
-    const targetHeaders = attendanceSchema.machineHeaders;
-    const displayHeaders = attendanceSchema.displayHeaders;
-
-    const lastRow = Math.max(sheet.getLastRow(), 2);
-    const lastCol = Math.max(sheet.getLastColumn(), targetHeaders.length);
-    const values = sheet.getRange(1, 1, lastRow, lastCol).getValues();
-
-    const sourceHeaders = (values[0] || []).map((h) => String(h || '').trim());
-    const sourceLookup = new Map<string, number>();
-    sourceHeaders.forEach((h, idx) => {
-      const key = h.toLowerCase();
-      if (key) sourceLookup.set(key, idx);
-    });
-
-    const altKeys: Record<string, string[]> = {
-      submission_id: ['submission id'],
-      submitted_at: ['submitted at', 'timestamp', 'submission time'],
-      event: ['event'],
-      email: ['email', 'email address', 'submitted by email'],
-      name: ['name', 'submitted by name'],
-      flight: ['flight', 'flight / crosstown (mando)', 'flight (mando pt)', 'flight / crosstown', 'flight / crosstown (llab)', 'flight (llab)'],
-      cadets: ['cadets', 'cadet selections', 'cadet list'],
-    };
-
-    const headerMatches = targetHeaders.map((h) => {
-      const key = h.toLowerCase();
-      if (sourceLookup.has(key)) return sourceLookup.get(key)!;
-      const alts = altKeys[h] || [];
-      for (const alt of alts) {
-        const altIdx = sourceLookup.get(alt.toLowerCase());
-        if (altIdx !== undefined) return altIdx;
-      }
-      return -1;
-    });
-
-    // Detect if row 2 is a display/header row to skip when rebuilding data.
-    const displayRowMatches = (values[1] || []).every((cell: any, idx: number) => {
-      const expected = displayHeaders[idx] || '';
-      return String(cell || '').trim().toLowerCase() === expected.toLowerCase();
-    });
-    const dataStart = displayRowMatches ? 3 : 2;
-    const dataRows: any[][] = [];
-    for (let r = dataStart - 1; r < lastRow; r++) {
-      const row = values[r] || [];
-      const out = targetHeaders.map((_, idx) => {
-        const srcIdx = headerMatches[idx];
-        return srcIdx >= 0 ? row[srcIdx] || '' : '';
-      });
-      if (out.some((v) => v !== '')) dataRows.push(out);
-    }
-
-    sheet.clear();
-    sheet.getRange(1, 1, 1, targetHeaders.length).setValues([targetHeaders]);
-    sheet.getRange(2, 1, 1, targetHeaders.length).setValues([displayHeaders]);
-    if (dataRows.length) {
-      sheet.getRange(3, 1, dataRows.length, targetHeaders.length).setValues(dataRows);
     }
   }
 
@@ -2100,6 +1760,169 @@ namespace SetupService {
     };
   }
 
+  function findLinkedResponseSheet(
+    spreadsheet: GoogleAppsScript.Spreadsheet.Spreadsheet,
+    formId: string,
+  ): GoogleAppsScript.Spreadsheet.Sheet | null {
+    return spreadsheet.getSheets().find((sheet) => {
+      try {
+        return extractFormIdFromUrl(sheet.getFormUrl() || '') === formId;
+      } catch {
+        return false;
+      }
+    }) || null;
+  }
+
+  function uniqueSheetName(spreadsheet: GoogleAppsScript.Spreadsheet.Spreadsheet, desired: string): string {
+    const maxLength = 100;
+    const base = desired.slice(0, maxLength);
+    if (!spreadsheet.getSheetByName(base)) return base;
+    let suffix = 2;
+    while (suffix < 1000) {
+      const suffixText = ` ${suffix}`;
+      const candidate = `${desired.slice(0, maxLength - suffixText.length)}${suffixText}`;
+      if (!spreadsheet.getSheetByName(candidate)) return candidate;
+      suffix += 1;
+    }
+    throw new Error(`Unable to allocate a unique response archive sheet name for '${desired}'`);
+  }
+
+  function waitForNewLinkedResponseSheet(
+    spreadsheetId: string,
+    formId: string,
+    priorSheetIds: Set<number>,
+  ): GoogleAppsScript.Spreadsheet.Sheet | null {
+    for (let attempt = 0; attempt < 10; attempt += 1) {
+      if (attempt > 0) Utilities.sleep(500);
+      const spreadsheet = SpreadsheetApp.openById(spreadsheetId);
+      const linked = findLinkedResponseSheet(spreadsheet, formId);
+      if (linked && !priorSheetIds.has(linked.getSheetId())) return linked;
+
+      const newResponseSheet = spreadsheet.getSheets().find((sheet) => (
+        !priorSheetIds.has(sheet.getSheetId()) && RESPONSE_SHEET_REGEX.test(sheet.getName())
+      ));
+      if (newResponseSheet) return newResponseSheet;
+    }
+    return null;
+  }
+
+  function responseSheetDiagnostics(sheet: GoogleAppsScript.Spreadsheet.Sheet) {
+    const columnCount = sheet.getLastColumn();
+    const rowCount = sheet.getLastRow();
+    const headers = columnCount
+      ? sheet.getRange(1, 1, 1, columnCount).getValues()[0].map((header) => String(header || '').trim())
+      : [];
+    const counts = new Map<string, number>();
+    headers.forEach((header) => {
+      if (!header) return;
+      counts.set(header, (counts.get(header) || 0) + 1);
+    });
+    const duplicates = Array.from(counts.entries())
+      .filter(([, count]) => count > 1)
+      .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+    return {
+      columnCount,
+      rowCount,
+      uniqueHeaderCount: counts.size,
+      duplicateHeaderCount: duplicates.length,
+      maxHeaderOccurrences: duplicates.length ? duplicates[0][1] : 1,
+      duplicateHeaders: duplicates,
+    };
+  }
+
+  function logAttendanceResponseSheetHealth(sheet?: GoogleAppsScript.Spreadsheet.Sheet) {
+    const target = sheet || Config.getBackendSheet(Config.RESOURCE_NAMES.ATTENDANCE_FORM_SHEET);
+    const diagnostics = responseSheetDiagnostics(target);
+    const summary =
+      `Attendance response sheet health sheet='${target.getName()}' columns=${diagnostics.columnCount} rows=${diagnostics.rowCount} `
+      + `uniqueHeaders=${diagnostics.uniqueHeaderCount} duplicateHeaders=${diagnostics.duplicateHeaderCount} `
+      + `maxHeaderOccurrences=${diagnostics.maxHeaderOccurrences}`;
+    if (diagnostics.duplicateHeaderCount) Log.warn(summary);
+    else Log.info(summary);
+    return diagnostics;
+  }
+
+  function rebuildAttendanceFormWithFreshResponseSheet(
+    form: GoogleAppsScript.Forms.Form,
+    destinationSpreadsheetId: string,
+  ) {
+    const lock = LockService.getScriptLock();
+    lock.waitLock(30000);
+
+    const desiredSheetName = Config.RESOURCE_NAMES.ATTENDANCE_FORM_SHEET;
+    let wasAcceptingResponses: boolean | null = null;
+    let archivedSheetName = '';
+
+    try {
+      const formId = form.getId();
+      wasAcceptingResponses = form.isAcceptingResponses();
+      const spreadsheet = SpreadsheetApp.openById(destinationSpreadsheetId);
+      const priorSheetIds = new Set(spreadsheet.getSheets().map((sheet) => sheet.getSheetId()));
+      const originalDestinationId = getFormDestinationSpreadsheetId(form);
+      const priorResponseSheet = findLinkedResponseSheet(spreadsheet, formId)
+        || (originalDestinationId === destinationSpreadsheetId ? spreadsheet.getSheetByName(desiredSheetName) : null);
+
+      form.setAcceptingResponses(false);
+      if (originalDestinationId) form.removeDestination();
+
+      if (priorResponseSheet) {
+        const stamp = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyyMMdd-HHmmss');
+        archivedSheetName = uniqueSheetName(spreadsheet, `Archived - ${desiredSheetName} ${stamp}`);
+        priorResponseSheet.setName(archivedSheetName);
+        priorResponseSheet.hideSheet();
+        try {
+          priorResponseSheet.protect().setDescription(`${archivedSheetName} preserved raw form responses`).setWarningOnly(true);
+        } catch (err) {
+          Log.warn(`Unable to add warning protection to attendance response archive '${archivedSheetName}': ${err}`);
+        }
+        Log.info(
+          `Attendance form: preserved prior linked response sheet as '${archivedSheetName}' rows=${priorResponseSheet.getLastRow()} columns=${priorResponseSheet.getLastColumn()}`,
+        );
+      }
+
+      FormService.rebuildAttendanceForm(form);
+      form.setDestination(FormApp.DestinationType.SPREADSHEET, destinationSpreadsheetId);
+
+      const newResponseSheet = waitForNewLinkedResponseSheet(destinationSpreadsheetId, formId, priorSheetIds);
+      if (!newResponseSheet) {
+        throw new Error('Attendance form was rebuilt and relinked, but its new response sheet could not be verified');
+      }
+      if (newResponseSheet.getName() !== desiredSheetName) newResponseSheet.setName(desiredSheetName);
+      newResponseSheet.showSheet();
+      newResponseSheet.setFrozenRows(1);
+      const diagnostics = logAttendanceResponseSheetHealth(newResponseSheet);
+      if (diagnostics.duplicateHeaderCount) {
+        throw new Error(
+          `Fresh Attendance response sheet still has ${diagnostics.duplicateHeaderCount} duplicate header name(s); preserved archive='${archivedSheetName || 'none'}'`,
+        );
+      }
+      Log.info(
+        `Attendance form: rebuild completed with fresh linked response sheet '${desiredSheetName}' columns=${diagnostics.columnCount} archive='${archivedSheetName || 'none'}'`,
+      );
+    } catch (err) {
+      Log.error(`Attendance form: protected rebuild failed: ${err}`);
+      try {
+        if (getFormDestinationSpreadsheetId(form) !== destinationSpreadsheetId) {
+          form.setDestination(FormApp.DestinationType.SPREADSHEET, destinationSpreadsheetId);
+          Log.warn('Attendance form: restored backend response destination after rebuild failure');
+        }
+        ensureResponseSheetForForm(form, desiredSheetName, destinationSpreadsheetId);
+      } catch (recoveryErr) {
+        Log.error(`Attendance form: unable to restore response destination after rebuild failure: ${recoveryErr}`);
+      }
+      throw err;
+    } finally {
+      if (wasAcceptingResponses !== null) {
+        try {
+          form.setAcceptingResponses(wasAcceptingResponses);
+        } catch (err) {
+          Log.error(`Attendance form: unable to restore accepting-responses state=${wasAcceptingResponses}: ${err}`);
+        }
+      }
+      lock.releaseLock();
+    }
+  }
+
   export function applyFrontendFormatting() {
     const frontendId = Config.getFrontendId();
     runFrontendFormattingStage('clear managed protections', () => ProtectionService.clearManagedFrontendProtections(frontendId));
@@ -2264,11 +2087,11 @@ namespace SetupService {
     DirectoryService.syncDirectoryFrontend();
   }
 
-  export function refreshDirectoryArtifacts(opts?: { rebuildAttendanceMatrix?: boolean; rebuildAttendanceForm?: boolean }) {
+  export function refreshDirectoryArtifacts(opts?: { rebuildAttendanceMatrix?: boolean; refreshAttendanceForm?: boolean }) {
     DirectoryService.syncLeadershipBackendFromDirectory();
     syncDirectoryFrontend();
     if (opts?.rebuildAttendanceMatrix) rebuildAttendanceMatrix();
-    if (opts?.rebuildAttendanceForm) rebuildAttendanceForm();
+    if (opts?.refreshAttendanceForm) refreshAttendanceFormChoices();
   }
 
   export function rebuildAttendanceMatrix() {
@@ -2315,9 +2138,7 @@ namespace SetupService {
       { syncQuestions: false },
     );
     const form = FormApp.openById(ensured.id);
-    FormService.rebuildAttendanceForm(form);
-    // After rebuilding questions, refresh event list and clean up response artifacts.
-    FormService.refreshAttendanceFormEventChoices(form);
+    rebuildAttendanceFormWithFreshResponseSheet(form, backendId);
     applyAttendanceBackendFormatting();
   }
 
@@ -2334,11 +2155,29 @@ namespace SetupService {
     FormService.rebuildDirectoryForm(form);
   }
 
+  export function refreshAttendanceFormChoices() {
+    const lock = LockService.getScriptLock();
+    lock.waitLock(30000);
+    try {
+      const backendId = Config.getBackendId();
+      const ensured = ensureForm(
+        'attendance',
+        Config.RESOURCE_NAMES.ATTENDANCE_FORM,
+        Config.PROPERTY_KEYS.ATTENDANCE_FORM_ID,
+        backendId,
+        { syncQuestions: false },
+      );
+      const form = FormApp.openById(ensured.id);
+      FormService.refreshAttendanceFormEventChoices(form);
+      FormService.refreshAttendanceFormCadetChoices(form);
+      logAttendanceResponseSheetHealth();
+    } finally {
+      lock.releaseLock();
+    }
+  }
+
   export function refreshAttendanceFormEventChoices() {
-    const backendId = Config.getBackendId();
-    const ensured = ensureForm('attendance', Config.RESOURCE_NAMES.ATTENDANCE_FORM, Config.PROPERTY_KEYS.ATTENDANCE_FORM_ID, backendId);
-    const form = FormApp.openById(ensured.id);
-    FormService.refreshAttendanceFormEventChoices(form);
+    refreshAttendanceFormChoices();
   }
 
   export function reorderFrontendSheets() {
@@ -2387,7 +2226,7 @@ namespace SetupService {
       'Sync ALL mapped: runs Directory/Leadership/Data Legend syncs.',
       'Refresh Events + Attendance: sync events backend -> frontend artifacts and rebuild attendance matrix/form choices.',
       'Rebuild Attendance Matrix: replay attendance backend log -> frontend matrix.',
-      'Rebuild Attendance Form: rebuild questions + event choices from backend events.',
+      'Rebuild Attendance Form: archive the current raw response tab, rebuild questions from backend data, and link a clean response tab.',
       'CSV exports: create Drive CSV from the specified backend table. Imports overwrite the target backend sheet (headers must match).',
       'Transition v2: archive current sheets, update roster/events, clear current-term logs/responses, rebuild forms, and keep backend rollback archives for seven days.',
       'Protections/formatting items only affect frontend presentation; data comes from backend tables.',

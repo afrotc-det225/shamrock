@@ -168,11 +168,11 @@ namespace FrontendEditService {
     });
 
     const rebuildAttendanceMatrix = DirectoryService.shouldRebuildAttendanceMatrixForField(allowedField);
-    const rebuildAttendanceForm = DirectoryService.shouldRebuildAttendanceFormForField(allowedField);
+    const refreshAttendanceForm = DirectoryService.shouldRefreshAttendanceFormForField(allowedField);
 
     // Propagate directory-derived artifacts after backend update.
     Log.info(`[Directory] ${targetKey} ${allowedField} updated: \"${oldValue}\" -> \"${newValue}\"`);
-    SetupService.refreshDirectoryArtifacts({ rebuildAttendanceMatrix, rebuildAttendanceForm });
+    SetupService.refreshDirectoryArtifacts({ rebuildAttendanceMatrix, refreshAttendanceForm });
   }
 
   function applyLeadershipEdit(e: GoogleAppsScript.Events.SheetsOnEdit) {

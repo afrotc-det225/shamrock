@@ -55,7 +55,7 @@ namespace DirectoryService {
     return MATRIX_DERIVED_FIELDS.has(normalizeDirectoryFieldName(field));
   }
 
-  export function shouldRebuildAttendanceFormForField(field: string): boolean {
+  export function shouldRefreshAttendanceFormForField(field: string): boolean {
     return FORM_DERIVED_FIELDS.has(normalizeDirectoryFieldName(field));
   }
 
@@ -274,7 +274,7 @@ namespace DirectoryService {
     };
 
     upsertBackendRecord(record);
-    SetupService.refreshDirectoryArtifacts({ rebuildAttendanceMatrix: true, rebuildAttendanceForm: true });
+    SetupService.refreshDirectoryArtifacts({ rebuildAttendanceMatrix: true, refreshAttendanceForm: true });
   }
 
   function normalizeIdentity(row: any): string {
