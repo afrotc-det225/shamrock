@@ -305,21 +305,11 @@ namespace SetupService {
 
   const FRONTEND_TABLE_SHEETS = ['Directory', 'Leadership', 'Attendance', 'Data Legend'];
 
-  function tableIdForName(tableName: string): string {
-    return String(tableName || 'table')
-      .trim()
-      .toLowerCase()
-      .replace(/[^a-z0-9_]+/g, '_')
-      .replace(/^_+|_+$/g, '') || 'table';
-  }
-
-  function ensureTableForSheet(spreadsheetId: string, sheetName: string, tableName = sheetName) {
-    const tableId = tableIdForName(tableName);
+  function ensureTableForSheet(spreadsheetId: string, sheetName: string, tableName = sheetName): boolean {
     const displayTableName = String(tableName || sheetName).trim() || sheetName;
-    // Sheets advanced service may be disabled in some environments; skip gracefully if absent.
     if (typeof (globalThis as any).Sheets === 'undefined') {
       Log.warn(`Sheets advanced service unavailable; cannot create tables for ${sheetName}`);
-      return;
+      return false;
     }
 
     try {
@@ -331,7 +321,7 @@ namespace SetupService {
           : (() => {
               const found = ss.getSheetByName(sheetName);
               if (!found) {
-                const msg = `Sheet ${sheetName} missing; cannot ensure table ${tableId}.`;
+                const msg = `Sheet ${sheetName} missing; cannot ensure table ${displayTableName}.`;
                 Log.error(msg);
                 throw new Error(msg);
               }
@@ -342,7 +332,7 @@ namespace SetupService {
       const svc = (Sheets as any)?.Spreadsheets;
       if (!svc || !svc.batchUpdate || !svc.Values?.get) {
         Log.warn('Sheets advanced service unavailable; cannot create tables');
-        return;
+        return false;
       }
 
       const headerRow = 2; // display headers live on row 2
@@ -353,7 +343,7 @@ namespace SetupService {
       });
       const headerValues = ((headerResponse?.values || [])[0] || []).map((value: unknown) => String(value || '').trim());
       const colCount = headerValues.length;
-      if (colCount === 0) return;
+      if (colCount === 0) return false;
       const endColIndex = colCount; // zero-based exclusive
       const endRowIndex = Math.max(headerRow + 1, sheet.getLastRow());
 
@@ -365,9 +355,8 @@ namespace SetupService {
         endRowIndex,
       };
 
-      const baseTable = {
+      const desiredTable = {
         name: displayTableName,
-        tableId,
         range: tableRange,
         rowsProperties: {
           headerColorStyle: apiColorStyle('#356854'),
@@ -381,51 +370,82 @@ namespace SetupService {
         })),
       };
 
-      const existingTable = findExistingTable(svc, spreadsheetId, sheetId, tableId, displayTableName);
-      const baseRequest = existingTable
-        ? {
-            updateTable: {
-              table: { ...baseTable, tableId: existingTable.tableId },
-              fields: 'name,range,rowsProperties,columnProperties',
-            },
-          }
-        : {
+      let existingTable = findExistingTable(svc, spreadsheetId, sheetId, displayTableName);
+      if (!existingTable) {
+        const addOk = sheetsBatchUpdateWithRetry(
+          svc,
+          spreadsheetId,
+          [{
             addTable: {
-              table: baseTable,
+              table: {
+                name: displayTableName,
+                range: tableRange,
+              },
             },
-          };
-
-      const baseOk = sheetsBatchUpdateWithRetry(svc, spreadsheetId, [baseRequest as any], `Ensure table ${tableId} on ${sheetName}`);
-      if (!baseOk) {
-        Log.warn(`Unable to ensure table ${displayTableName} on sheet ${sheetName}; applying visual formatting fallback only.`);
-      } else {
-        const verifiedTable = findExistingTable(svc, spreadsheetId, sheetId, tableId, displayTableName);
-        const typedColumns = (verifiedTable?.columnProperties || []).filter(
-          (column: any) => column?.columnType && column.columnType !== 'COLUMN_TYPE_UNSPECIFIED',
+          }],
+          `Create Google Sheets table ${displayTableName} on ${sheetName}`,
         );
-        if (typedColumns.length) {
-          Log.warn(
-            `Table ${displayTableName} still reports ${typedColumns.length} typed column(s) after reset; `
-            + 'cell validation will continue through the separate Sheets API path.',
-          );
-        } else {
-          Log.info(`Verified table column types unset for ${displayTableName} columns=${headerValues.length}.`);
+        if (addOk) {
+          existingTable = findExistingTableWithRetry(svc, spreadsheetId, sheetId, displayTableName);
         }
       }
 
-      sheetsBatchUpdateWithRetry(
+      let tableOk = false;
+      if (existingTable?.tableId) {
+        const updateOk = sheetsBatchUpdateWithRetry(
+          svc,
+          spreadsheetId,
+          [{
+            updateTable: {
+              table: { ...desiredTable, tableId: existingTable.tableId },
+              fields: 'name,range,rowsProperties,columnProperties',
+            },
+          }],
+          `Configure Google Sheets table ${displayTableName} on ${sheetName}`,
+        );
+        if (updateOk) {
+          const verifiedTable = findExistingTableWithRetry(svc, spreadsheetId, sheetId, displayTableName);
+          const typedColumns = (verifiedTable?.columnProperties || []).filter(
+            (column: any) => column?.columnType && column.columnType !== 'COLUMN_TYPE_UNSPECIFIED',
+          );
+          tableOk = !!verifiedTable?.tableId && typedColumns.length === 0;
+          if (typedColumns.length) {
+            Log.warn(
+              `Table ${displayTableName} still reports ${typedColumns.length} typed column(s) after reset.`,
+            );
+          } else if (verifiedTable?.tableId) {
+            Log.info(`Verified table column types unset for ${displayTableName} columns=${headerValues.length}.`);
+          }
+        }
+      }
+
+      const visualOk = sheetsBatchUpdateWithRetry(
         svc,
         spreadsheetId,
         tableVisualStyleRequests(sheetId, 0, endColIndex, headerRow - 1, endRowIndex),
-        `Apply table visual style ${tableId} on ${sheetName}`,
+        `Apply table visual style ${displayTableName} on ${sheetName}`,
       );
-      Log.info(`Ensured table styling path completed for ${tableId} on sheet ${sheetName}`);
+      if (tableOk) {
+        Log.info(`Ensured table styling path completed for ${displayTableName} on sheet ${sheetName}`);
+      } else {
+        Log.warn(
+          `Google Sheets table missing after ensure for ${displayTableName} on ${sheetName}; `
+          + `visualFallbackApplied=${visualOk}`,
+        );
+        ProgressService.report({
+          title: `${displayTableName} table could not be created`,
+          detail: 'The visible fallback was applied, but the required native Google Sheets table is still missing.',
+          hint: 'SHAMROCK will restore protections and stop instead of reporting this surface as ready.',
+        });
+      }
+      return tableOk;
     } catch (err) {
       Log.warn(`Unable to ensure table ${displayTableName} on sheet ${sheetName}: ${err}`);
+      return false;
     }
   }
 
-  function findExistingTable(svc: any, spreadsheetId: string, sheetId: number, tableId: string, tableName: string): any | null {
+  function findExistingTable(svc: any, spreadsheetId: string, sheetId: number, tableName: string): any | null {
     try {
       if (!svc.get) return null;
       const spreadsheet = svc.get(spreadsheetId, {
@@ -433,11 +453,25 @@ namespace SetupService {
       });
       const targetSheet = (spreadsheet.sheets || []).find((sh: any) => sh?.properties?.sheetId === sheetId);
       const tables = targetSheet?.tables || [];
-      return tables.find((table: any) => table?.tableId === tableId || table?.name === tableId || table?.name === tableName) || null;
+      return tables.find((table: any) => table?.name === tableName) || tables[0] || null;
     } catch (err) {
-      Log.warn(`Unable to inspect existing table ${tableId}: ${err}`);
+      Log.warn(`Unable to inspect existing table ${tableName}: ${err}`);
       return null;
     }
+  }
+
+  function findExistingTableWithRetry(
+    svc: any,
+    spreadsheetId: string,
+    sheetId: number,
+    tableName: string,
+  ): any | null {
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      const table = findExistingTable(svc, spreadsheetId, sheetId, tableName);
+      if (table) return table;
+      if (attempt < 3) Utilities.sleep(300 * attempt);
+    }
+    return null;
   }
 
   function isFrontendFormattingDisabled(): boolean {
@@ -2258,7 +2292,7 @@ namespace SetupService {
       },
     ];
 
-    stages.forEach((stage, index) => {
+    const reportAndRunStage = (stage: typeof stages[number], index: number) => {
       ProgressService.report({
         title: stage.title,
         detail: stage.detail,
@@ -2268,7 +2302,29 @@ namespace SetupService {
         totalSteps: stages.length,
       });
       runFrontendFormattingStage(stage.technicalLabel, stage.run);
-    });
+    };
+
+    let primaryError: unknown = null;
+    try {
+      reportAndRunStage(stages[0], 0);
+      for (let index = 1; index < stages.length - 1; index++) {
+        reportAndRunStage(stages[index], index);
+      }
+    } catch (err) {
+      primaryError = err;
+    } finally {
+      try {
+        reportAndRunStage(stages[stages.length - 1], stages.length - 1);
+      } catch (protectionErr) {
+        if (primaryError) {
+          Log.error(`Frontend protections also failed while recovering from an earlier formatting error: ${protectionErr}`);
+        } else {
+          primaryError = protectionErr;
+        }
+      }
+    }
+
+    if (primaryError) throw primaryError;
   }
 
   function runFrontendFormattingStage(label: string, fn: () => void) {
@@ -2285,7 +2341,10 @@ namespace SetupService {
 
   function ensureFrontendTables(frontendId: string) {
     if (!frontendId) return;
-    FRONTEND_TABLE_SHEETS.forEach((name) => ensureTableForSheet(frontendId, name, name));
+    const failed = FRONTEND_TABLE_SHEETS.filter((name) => !ensureTableForSheet(frontendId, name, name));
+    if (failed.length) {
+      throw new Error(`Google Sheets table ensure failed for: ${failed.join(', ')}`);
+    }
   }
 
   export function rebuildDashboard() {
@@ -2582,7 +2641,9 @@ namespace SetupService {
       applyAttendanceHeaderFix();
       if (frontendId) {
         FrontendFormattingService.applyValidations(frontendId);
-        ensureTableForSheet(frontendId, 'Attendance', 'Attendance');
+        if (!ensureTableForSheet(frontendId, 'Attendance', 'Attendance')) {
+          throw new Error('Google Sheets table ensure failed for Attendance.');
+        }
         FrontendFormattingService.applyValidations(frontendId);
         FrontendFormattingService.applyPostTableFormatting(frontendId);
       }
@@ -2595,7 +2656,8 @@ namespace SetupService {
       });
       reapplyFrontendProtections();
     } catch (err) {
-      Log.warn(`fixAttendanceHeaders post-rebuild failed: ${err}`);
+      Log.error(`fixAttendanceHeaders post-rebuild failed: ${err}`);
+      throw err;
     }
   }
 

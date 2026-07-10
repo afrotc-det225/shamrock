@@ -115,6 +115,41 @@ namespace DirectoryService {
     return segments;
   }
 
+  function readBackendPhotoLinkSources(
+    sheet: GoogleAppsScript.Spreadsheet.Sheet,
+    headers: string[],
+    rowCount: number,
+  ): string[] {
+    if (rowCount <= 0) return [];
+    const photoIdx = headers.indexOf('photo_link');
+    if (photoIdx < 0) return Array(rowCount).fill('');
+
+    try {
+      const range = sheet.getRange(3, photoIdx + 1, rowCount, 1);
+      const values = range.getValues();
+      const richTextValues = range.getRichTextValues();
+      const formulas = range.getFormulas();
+      let linkedSources = 0;
+      const sources = values.map((row, index) => {
+        const richText = richTextValues[index]?.[0];
+        const wholeCellLink = richText?.getLinkUrl() || '';
+        const linkedRun = wholeCellLink
+          ? ''
+          : (richText?.getRuns() || []).map((run) => run.getLinkUrl() || '').find((link) => !!link) || '';
+        const formulaMatch = String(formulas[index]?.[0] || '').match(/^=HYPERLINK\(\s*"((?:[^"]|"")+)"/i);
+        const formulaLink = formulaMatch?.[1]?.replace(/""/g, '"') || '';
+        const source = String(wholeCellLink || linkedRun || formulaLink || row[0] || '').trim();
+        if (wholeCellLink || linkedRun || formulaLink) linkedSources += 1;
+        return source;
+      });
+      Log.info(`Directory Photo Link sources read rows=${rowCount} linkedSources=${linkedSources}.`);
+      return sources;
+    } catch (err) {
+      Log.warn(`Unable to read authoritative Directory Photo Link hyperlinks; using displayed backend values: ${err}`);
+      return Array(rowCount).fill('');
+    }
+  }
+
   function writeFrontendDirectoryRows(frontendId: string, frontendSheet: GoogleAppsScript.Spreadsheet.Sheet, rows: Record<string, any>[]) {
     const headers = frontendSheet.getRange(1, 1, 1, frontendSheet.getLastColumn()).getValues()[0].map((h) => String(h || '').trim());
     const photoIdx = headers.indexOf('photo_link');
@@ -145,29 +180,33 @@ namespace DirectoryService {
     if (!frontendId) return;
     SheetUtils.ensureSchemaColumns(backendSheet);
     const backend = SheetUtils.readTable(backendSheet);
+    const photoLinkSources = readBackendPhotoLinkSources(backendSheet, backend.headers, backend.rows.length);
     SheetUtils.ensureSchemaColumns(frontendSheet);
-    const mapped = backend.rows.filter((row) => isOperationallyActiveCadet(row)).map((row) => ({
-      last_name: row['last_name'] || '',
-      first_name: row['first_name'] || '',
-      as_year: row['as_year'] || '',
-      flight: row['flight'] || '',
-      squadron: row['squadron'] || '',
-      rank: row['rank'] || '',
-      role: row['role'] || '',
-      university: row['university'] || '',
-      email: row['email'] || '',
-      phone: formatPhoneDisplay(normalizePhone(String(row['phone'] || ''))),
-      dorm: row['dorm'] || '',
-      cip_broad_area: row['cip_broad_area'] || '',
-      cip_code: row['cip_code'] || '',
-      desired_assigned_afsc: row['desired_assigned_afsc'] || '',
-      home_town: row['home_town'] || '',
-      home_state: row['home_state'] || '',
-      class_year: row['class_year'] || '',
-      dob: row['dob'] || '',
-      flight_path_status: row['flight_path_status'] || '',
-      photo_link: row['photo_link'] || '',
-    }));
+    const mapped = backend.rows
+      .map((row, index) => ({ row, photoLinkSource: photoLinkSources[index] || row['photo_link'] || '' }))
+      .filter(({ row }) => isOperationallyActiveCadet(row))
+      .map(({ row, photoLinkSource }) => ({
+        last_name: row['last_name'] || '',
+        first_name: row['first_name'] || '',
+        as_year: row['as_year'] || '',
+        flight: row['flight'] || '',
+        squadron: row['squadron'] || '',
+        rank: row['rank'] || '',
+        role: row['role'] || '',
+        university: row['university'] || '',
+        email: row['email'] || '',
+        phone: formatPhoneDisplay(normalizePhone(String(row['phone'] || ''))),
+        dorm: row['dorm'] || '',
+        cip_broad_area: row['cip_broad_area'] || '',
+        cip_code: row['cip_code'] || '',
+        desired_assigned_afsc: row['desired_assigned_afsc'] || '',
+        home_town: row['home_town'] || '',
+        home_state: row['home_state'] || '',
+        class_year: row['class_year'] || '',
+        dob: row['dob'] || '',
+        flight_path_status: row['flight_path_status'] || '',
+        photo_link: photoLinkSource,
+      }));
 
     const sorted = sortDirectoryRows(mapped);
     ProgressService.report({

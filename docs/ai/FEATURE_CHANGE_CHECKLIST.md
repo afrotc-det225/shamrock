@@ -21,6 +21,8 @@ Confirm explicitly:
 - Column access is header-driven (no hardcoded column indexes).
 - Dropdowns and validations reference Data Legend ranges.
 - Validation inside a Sheets Table is applied through cell-level Sheets API `setDataValidation` or validation-only `copyPaste` requests after table columns are reset to `COLUMN_TYPE_UNSPECIFIED`; do not apply a single `Range.setDataValidation(...)` rule across a table column.
+- New tables use a minimal `addTable`, read back Google’s generated table ID, and then use `updateTable` for styling and unspecified column types; never treat visual fallback formatting as proof that a table exists.
+- Smart-chip formatting must use an authoritative URL or resource ID. Never reconstruct a chip from its visible label text.
 - Forms require verified responder emails.
 - Frontend tables are protected; edits flow through forms/logic.
 - Every new operator menu action uses `runMenuAction(...)` and the shared live-progress window.

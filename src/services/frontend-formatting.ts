@@ -19,7 +19,7 @@ namespace FrontendFormattingService {
   const STANDARD_COLUMN_WIDTHS: Record<string, number> = {
     last_name: 115,
     first_name: 115,
-    as_year: 75,
+    as_year: 100,
     flight: 75,
     squadron: 75,
     rank: 75,
@@ -670,9 +670,8 @@ namespace FrontendFormattingService {
     }
   }
 
-  function extractDriveFileChipUri(value: unknown, richText?: GoogleAppsScript.Spreadsheet.RichTextValue | null): string {
-    const linkUrl = richText?.getLinkUrl() || '';
-    const text = String(linkUrl || value || '').trim();
+  function extractDriveFileChipUri(value: unknown): string {
+    const text = String(value || '').trim();
     if (!text) return '';
 
     const fileMatch = text.match(/\/file\/d\/([A-Za-z0-9_-]+)/);
@@ -685,7 +684,7 @@ namespace FrontendFormattingService {
   function applyDirectoryPhotoFileChipsToSheet(
     ss: GoogleAppsScript.Spreadsheet.Spreadsheet,
     sheet: GoogleAppsScript.Spreadsheet.Sheet,
-    sourceValues?: unknown[],
+    sourceValues: unknown[],
   ) {
     const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0].map((h) => String(h || '').trim());
     const photoIdx = headers.indexOf('photo_link');
@@ -697,13 +696,13 @@ namespace FrontendFormattingService {
       return;
     }
 
-    const valueRange = sheet.getRange(3, photoIdx + 1, sheet.getLastRow() - 2, 1);
-    const values = sourceValues ? sourceValues.map((value) => [value]) : valueRange.getValues();
-    const richTextValues = sourceValues ? [] : valueRange.getRichTextValues();
+    const values = sourceValues.map((value) => [value]);
     const requests: Record<string, any>[] = [];
+    let requestedFileChips = 0;
     values.forEach((row, idx) => {
-      const uri = extractDriveFileChipUri(row[0], richTextValues[idx]?.[0]);
+      const uri = extractDriveFileChipUri(row[0]);
       const text = String(row[0] || '').trim();
+      if (uri) requestedFileChips += 1;
       const cell = uri
         ? {
             userEnteredValue: { stringValue: '@' },
@@ -751,10 +750,12 @@ namespace FrontendFormattingService {
         Log.warn(`Unable to apply Directory Photo Link file chips for rows ${i + 1}-${i + chunk.length}: ${err}`);
       }
     }
-    if (applied) Log.info(`Applied Directory Photo Link file chips to ${applied} cell(s).`);
+    if (applied) {
+      Log.info(`Applied Directory Photo Link file chips to ${requestedFileChips} cell(s).`);
+    }
   }
 
-  export function applyDirectoryPhotoFileChips(frontendId: string, sourceValues?: unknown[]) {
+  export function applyDirectoryPhotoFileChips(frontendId: string, sourceValues: unknown[]) {
     const ss = openFrontend(frontendId);
     if (!ss) return;
     const sheet = ss.getSheetByName('Directory');
@@ -825,7 +826,8 @@ namespace FrontendFormattingService {
     alignColumn('dob', 'right');
     alignColumn('flight_path_status', 'left');
     alignColumn('photo_link', 'center');
-    applyDirectoryPhotoFileChipsToSheet(ss, sheet);
+    // Formatting must never republish Photo Link values from the visible chip label.
+    // Directory sync owns chip writes because it has the canonical backend URL/file ID.
 
     // Freeze name columns
     sheet.setFrozenRows(2);
