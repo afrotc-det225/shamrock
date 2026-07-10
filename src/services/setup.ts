@@ -398,6 +398,19 @@ namespace SetupService {
       const baseOk = sheetsBatchUpdateWithRetry(svc, spreadsheetId, [baseRequest as any], `Ensure table ${tableId} on ${sheetName}`);
       if (!baseOk) {
         Log.warn(`Unable to ensure table ${displayTableName} on sheet ${sheetName}; applying visual formatting fallback only.`);
+      } else {
+        const verifiedTable = findExistingTable(svc, spreadsheetId, sheetId, tableId, displayTableName);
+        const typedColumns = (verifiedTable?.columnProperties || []).filter(
+          (column: any) => column?.columnType && column.columnType !== 'COLUMN_TYPE_UNSPECIFIED',
+        );
+        if (typedColumns.length) {
+          Log.warn(
+            `Table ${displayTableName} still reports ${typedColumns.length} typed column(s) after reset; `
+            + 'cell validation will continue through the separate Sheets API path.',
+          );
+        } else {
+          Log.info(`Verified table column types unset for ${displayTableName} columns=${headerValues.length}.`);
+        }
       }
 
       sheetsBatchUpdateWithRetry(
@@ -416,7 +429,7 @@ namespace SetupService {
     try {
       if (!svc.get) return null;
       const spreadsheet = svc.get(spreadsheetId, {
-        fields: 'sheets(properties(sheetId),tables(tableId,name,range))',
+        fields: 'sheets(properties(sheetId),tables(tableId,name,range,columnProperties(columnIndex,columnName,columnType)))',
       });
       const targetSheet = (spreadsheet.sheets || []).find((sh: any) => sh?.properties?.sheetId === sheetId);
       const tables = targetSheet?.tables || [];
@@ -2215,9 +2228,9 @@ namespace SetupService {
       },
       {
         title: 'Applying the base frontend layout',
-        detail: 'Refreshing sheet chrome, widths, visible headers, and standard cell presentation.',
+        detail: 'Refreshing sheet chrome, widths, visible headers, and standard cell presentation before validation is restored.',
         technicalLabel: 'apply pre-table frontend formatting',
-        run: () => FrontendFormattingService.applyAll(frontendId),
+        run: () => FrontendFormattingService.applyAll(frontendId, { skipValidations: true }),
       },
       {
         title: 'Checking Google Sheets tables',
@@ -2227,13 +2240,13 @@ namespace SetupService {
       },
       {
         title: 'Restoring dropdown and validation rules',
-        detail: 'Reapplying Data Legend-backed rules after table updates.',
+        detail: 'Reapplying archive-style, Data Legend-backed cell rules without converting table columns into typed dropdowns.',
         technicalLabel: 'reapply validations after table ensure',
         run: () => FrontendFormattingService.applyValidations(frontendId),
       },
       {
         title: 'Finishing table-aware styling',
-        detail: 'Applying alignment, text treatment, and typed-cell-safe finishing passes.',
+        detail: 'Applying alignment, text treatment, and final cell-format passes.',
         technicalLabel: 'apply post-table formatting',
         run: () => FrontendFormattingService.applyPostTableFormatting(frontendId),
       },
@@ -2249,7 +2262,7 @@ namespace SetupService {
       ProgressService.report({
         title: stage.title,
         detail: stage.detail,
-        hint: 'Formatting stages are ordered to remain compatible with Google Sheets table and typed-column constraints.',
+        hint: 'Table structure and cell validation are repaired separately so controlled inputs do not become table column types.',
         percent: 12 + Math.round((index / stages.length) * 78),
         step: index + 1,
         totalSteps: stages.length,

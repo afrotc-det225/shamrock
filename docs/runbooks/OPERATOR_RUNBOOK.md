@@ -98,7 +98,7 @@ Post-deploy validation checklist:
 - Use `Inactive`, `Commissioned`, or `Dropped` in `Flight Path` when a cadet should remain in backend records but be removed from operational frontend, leadership, attendance, and form choices.
 - Cadet rank and cadet leadership role are maintained on Directory. Leadership is rebuilt only from active Directory rows with Leadership-eligible command/advisor roles and sorted with non-cadet ranks/honorifics above cadet ranks, then wing commander, deputy wing commander, operations group, squadron commanders, flight commanders, deputy flight commanders, and advisor roles, while non-cadet/cadre/manual Leadership rows are preserved.
 - Leadership does not have separate flight or squadron columns. Flight and squadron commander routing comes from role names, so use explicit roles like `Alpha Flight Commander`, `Alpha Deputy Flight Commander`, and `Blue Squadron Commander`.
-- Sync Directory refreshes the frontend Data Legend first, clears stale frontend Directory dropdown rules, writes the v2 mirror, trims stale blank rows, removes legacy banded ranges, updates Sheets API frontend tables named `Directory`, `Leadership`, `Attendance`, and `Data Legend` in place, and reapplies v2 validations so they remain inside the table body. Normal formatting must not delete existing table objects.
+- Sync Directory refreshes the frontend Data Legend first, clears stale frontend Directory validation, writes the v2 mirror, trims stale blank rows, removes legacy banded ranges, updates Sheets API frontend tables named `Directory`, `Leadership`, `Attendance`, and `Data Legend` in place, resets their column types to `None`, and reapplies cell validation from the newest matching archive. With no archive, it creates equivalent strict Data Legend-backed rules through the Sheets API.
 - Prefer menu-driven sync/repair actions over ad hoc edits in the frontend.
 
 ### 5.2 Event maintenance
@@ -196,10 +196,11 @@ Likely causes:
 - Data Legend ranges missing or renamed.
 - Named ranges missing.
 - Sheets advanced service unavailable, which prevents SHAMROCK from creating/updating Sheets API Table objects.
-- Data validation can be applied by SHAMROCK from Data Legend ranges. Frontend Attendance code styling uses normal spreadsheet formatting and validation, not conditional-format color rules or Sheets Table dropdown column types.
+- Data validation is applied as cell metadata through the Sheets API. Directory and Attendance copy validation-only metadata from the newest matching frontend archive to retain the proven validation UI/color treatment; a fresh workbook falls back to Data Legend-backed `ONE_OF_RANGE` rules. SHAMROCK does not use Sheets Table dropdown column types.
+- Attendance `Overall` and `LLAB` retain the archive summary gradient (red at 80%, amber at 90%, green at 100%); it is intentionally the only Attendance conditional-format color rule.
 
 Operator checks:
-- Re-run Sync Directory, Rebuild Attendance Matrix, Apply frontend formatting, or setup to recreate validations and frontend tables.
+- Re-run Sync Directory, Rebuild Attendance Matrix, Apply frontend formatting, or setup to reset table column types and recreate archive-style cell validation.
 - Confirm Data Legend is present and populated.
 - Confirm the frontend Data Legend includes the v2 `cadet_rank_options`, `rank_options`, and `honorific_options` columns.
 - Confirm Directory `Rank` validates against cadet rank options with plain-text display, Leadership `Rank` validates against adjacent cadet rank, non-cadet rank, and honorific option columns with plain-text display, and Directory `Email` has no dropdown validation.

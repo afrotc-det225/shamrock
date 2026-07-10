@@ -70,7 +70,7 @@ Rows marked `Inactive`, `Commissioned`, or `Dropped` in `Flight Path` stay in Di
 
 - Backend/admin workbook Directory Backend edits.
 - Directory Form submissions.
-- Backend SHAMROCK menu sync and repair actions. Sync Directory also refreshes the frontend Data Legend dependency and reapplies v2 dropdown validation rules.
+- Backend SHAMROCK menu sync and repair actions. Sync Directory also refreshes the frontend Data Legend dependency and reapplies the archive-style cell validation rules without creating typed table columns.
 
 ### Data Touched
 
@@ -86,7 +86,7 @@ Rows marked `Inactive`, `Commissioned`, or `Dropped` in `Flight Path` stay in Di
 - Run the directory sync action.
 - Confirm the frontend Directory reflects the backend.
 - Confirm the frontend Directory column order starts `Last Name`, `First Name`, `Year`, `Flight`, `Sqdn`, `Rank`, `Role`, `University`.
-- Confirm the frontend Data Legend includes `cadet_rank_options`, non-cadet `rank_options`, and `honorific_options`; Directory `Rank` is strict cadet-rank validation with plain-text display; Leadership `Rank` accepts cadet ranks, non-cadet ranks, and honorifics with plain-text display; and Directory `Email` is free text with no stale dropdown.
+- Confirm the frontend Data Legend includes `cadet_rank_options`, non-cadet `rank_options`, and `honorific_options`; Directory controlled columns use the same cell-validation presentation as the newest Directory archive; Directory `Rank` is strict cadet-rank validation with plain-text display; Leadership `Rank` accepts cadet ranks, non-cadet ranks, and honorifics with plain-text display; and Directory `Email` is free text with no stale dropdown.
 - Confirm frontend Directory `Photo Link` values backed by Google Drive file URLs display as file chips and the column width remains 100 px.
 - Confirm `Inactive`, `Commissioned`, and `Dropped` rows are absent from operational frontend views.
 - If the row has a Leadership-eligible role, confirm Leadership reflects rank, role, email, and phone from Directory; phone values should display as `+1 (###) ###-####`, and flight/squadron commander role names should include the unit name.
@@ -164,7 +164,8 @@ AS500 is a GMC year. AS500 cadets are excluded from POC Third Hour form groups a
 - Confirm the response is appended to Attendance Backend.
 - Rebuild attendance and confirm the frontend matrix updates deterministically.
 - Confirm AS500 cadets are counted as GMC, are absent from POC Third Hour choices, receive `N/A` for POC Third Hour when no entry exists, and sort between AS300 and AS250.
-- Confirm attendance codes validate against Data Legend options while frontend table column types remain unset.
+- Confirm attendance codes use the same validation presentation as the newest Attendance archive, validate against Data Legend options, and leave frontend table column types unset.
+- Confirm `Overall` and `LLAB` use the archive-style red-at-80%, amber-at-90%, and green-at-100% summary gradient.
 - Confirm stale blank rows are removed from the frontend matrix after cadets are removed or marked non-operational.
 - Run `Debug Attendance response columns` and confirm the current response tab reports no duplicate header names. After a structural rebuild, confirm the prior response tab is hidden and the new visible tab is named `Attendance Form Responses`.
 

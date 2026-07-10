@@ -6,6 +6,12 @@ namespace FrontendFormattingService {
     range: GoogleAppsScript.Spreadsheet.Range;
   }
 
+  interface ValidationColumnDef {
+    field: string;
+    rangeName: string;
+    showDropdown: boolean;
+  }
+
   const ATTENDANCE_SCHEMA = Schemas.getTabSchema('Attendance');
   const ATTENDANCE_BASE_HEADERS = ATTENDANCE_SCHEMA?.machineHeaders || ['last_name', 'first_name', 'as_year', 'flight', 'squadron', 'overall_attendance_pct', 'llab_attendance_pct'];
   const ATT_HEADER_OVERALL = ATTENDANCE_BASE_HEADERS.find((h) => h.includes('overall_attendance')) || 'overall_attendance_pct';
@@ -79,6 +85,103 @@ namespace FrontendFormattingService {
     return result;
   }
 
+  function quoteSheetNameForFormula(sheetName: string): string {
+    return `'${sheetName.replace(/'/g, "''")}'`;
+  }
+
+  function absoluteA1Notation(a1Notation: string): string {
+    return String(a1Notation || '').replace(/([A-Z]+)(\d+)/g, '$$$1$$$2');
+  }
+
+  function gridRangeForColumn(
+    sheet: GoogleAppsScript.Spreadsheet.Sheet,
+    columnIndex: number,
+    endRowIndex = Math.max(3, sheet.getLastRow()),
+  ) {
+    return {
+      sheetId: sheet.getSheetId(),
+      startRowIndex: 2,
+      endRowIndex,
+      startColumnIndex: columnIndex,
+      endColumnIndex: columnIndex + 1,
+    };
+  }
+
+  function dataValidationRuleForRange(
+    sourceRange: GoogleAppsScript.Spreadsheet.Range,
+    showDropdown: boolean,
+  ): Record<string, any> {
+    const formula = `=${quoteSheetNameForFormula(sourceRange.getSheet().getName())}!${absoluteA1Notation(sourceRange.getA1Notation())}`;
+    return {
+      condition: {
+        type: 'ONE_OF_RANGE',
+        values: [{ userEnteredValue: formula }],
+      },
+      strict: true,
+      showCustomUi: showDropdown,
+    };
+  }
+
+  function latestArchiveSheet(
+    ss: GoogleAppsScript.Spreadsheet.Spreadsheet,
+    baseName: 'Directory' | 'Leadership' | 'Attendance',
+  ): GoogleAppsScript.Spreadsheet.Sheet | null {
+    const escapedBaseName = baseName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const pattern = new RegExp(`^(Spring|Fall) (\\d{4}) ${escapedBaseName}$`);
+    const candidates = ss.getSheets()
+      .map((sheet) => {
+        const match = sheet.getName().match(pattern);
+        if (!match) return null;
+        const termOrder = match[1] === 'Fall' ? 2 : 1;
+        return {
+          sheet,
+          sortKey: Number(match[2]) * 10 + termOrder,
+          index: sheet.getIndex(),
+        };
+      })
+      .filter((entry): entry is { sheet: GoogleAppsScript.Spreadsheet.Sheet; sortKey: number; index: number } => !!entry)
+      .sort((a, b) => b.sortKey - a.sortKey || b.index - a.index);
+    return candidates[0]?.sheet || null;
+  }
+
+  function archiveValidationSourceColumn(
+    ss: GoogleAppsScript.Spreadsheet.Spreadsheet,
+    archive: GoogleAppsScript.Spreadsheet.Sheet | null,
+    field: string,
+  ): number {
+    if (!archive || !field || archive.getLastRow() < 3) return -1;
+    const headers = readHeaderRows(ss, archive).machine;
+    const columnIndex = headers.indexOf(field);
+    if (columnIndex < 0) return -1;
+    try {
+      return archive.getRange(3, columnIndex + 1).getDataValidation() ? columnIndex : -1;
+    } catch (err) {
+      Log.warn(`Unable to inspect archive validation source ${archive.getName()} field=${field}: ${err}`);
+      return -1;
+    }
+  }
+
+  function batchUpdateCellValidations(
+    ss: GoogleAppsScript.Spreadsheet.Spreadsheet,
+    requests: Record<string, any>[],
+    label: string,
+  ): boolean {
+    if (!requests.length) return true;
+    const sheetsService = (globalThis as any).Sheets?.Spreadsheets;
+    if (!sheetsService?.batchUpdate) {
+      Log.warn(`Unable to apply ${label} because the Sheets advanced service is unavailable.`);
+      return false;
+    }
+    try {
+      sheetsService.batchUpdate({ requests }, ss.getId());
+      Log.info(`Applied ${label} through the cell-level Sheets API requests=${requests.length}.`);
+      return true;
+    } catch (err) {
+      Log.warn(`Unable to apply ${label} through the cell-level Sheets API: ${err}`);
+      return false;
+    }
+  }
+
   function readHeaderRows(
     ss: GoogleAppsScript.Spreadsheet.Spreadsheet,
     sheet: GoogleAppsScript.Spreadsheet.Sheet,
@@ -90,7 +193,7 @@ namespace FrontendFormattingService {
         display: (apiRows[1] || []).map((h) => String(h || '').trim()),
       };
     }
-    Log.warn(`Unable to read ${sheet.getName()} headers through the typed-table-safe Sheets API path; skipping this header-driven step.`);
+    Log.warn(`Unable to read ${sheet.getName()} headers through the Sheets API path; skipping this header-driven step.`);
     return { machine: [], display: [] };
   }
 
@@ -149,81 +252,92 @@ namespace FrontendFormattingService {
     const sheet = ss.getSheetByName('Directory');
     if (!sheet) return;
 
-    try {
-      const headers = readHeaderRows(ss, sheet).machine;
-      const headerIndex = (name: string) => headers.indexOf(name);
+    const headers = readHeaderRows(ss, sheet).machine;
+    if (!headers.length) return;
+    const endRowIndex = Math.max(3, sheet.getLastRow());
+    const validationColumns: ValidationColumnDef[] = [
+      { field: 'as_year', rangeName: 'AS_YEARS', showDropdown: true },
+      { field: 'flight', rangeName: 'FLIGHTS', showDropdown: true },
+      { field: 'squadron', rangeName: 'SQUADRONS', showDropdown: true },
+      { field: 'rank', rangeName: 'CADET_RANKS', showDropdown: false },
+      { field: 'university', rangeName: 'UNIVERSITIES', showDropdown: false },
+      { field: 'dorm', rangeName: 'DORMS', showDropdown: true },
+      { field: 'cip_broad_area', rangeName: 'CIP_BROAD_AREAS', showDropdown: false },
+      { field: 'desired_assigned_afsc', rangeName: 'AFSC_OPTIONS', showDropdown: true },
+      { field: 'home_state', rangeName: 'HOME_STATES', showDropdown: false },
+      { field: 'flight_path_status', rangeName: 'FLIGHT_PATH_STATUSES', showDropdown: true },
+    ];
+    const archive = latestArchiveSheet(ss, 'Directory');
+    const requests: Record<string, any>[] = [{
+      setDataValidation: {
+        range: {
+          sheetId: sheet.getSheetId(),
+          startRowIndex: 2,
+          endRowIndex,
+          startColumnIndex: 0,
+          endColumnIndex: headers.length,
+        },
+        filteredRowsIncluded: true,
+      },
+    }];
+    let copiedFromArchive = 0;
+    let generatedFromLegend = 0;
 
-      const map: Record<string, string> = {
-        as_year: 'AS_YEARS',
-        rank: 'CADET_RANKS',
-        flight: 'FLIGHTS',
-        squadron: 'SQUADRONS',
-        university: 'UNIVERSITIES',
-        dorm: 'DORMS',
-        home_state: 'HOME_STATES',
-        cip_broad_area: 'CIP_BROAD_AREAS',
-        cip_code: 'CIP_CODES',
-        desired_assigned_afsc: 'AFSC_OPTIONS',
-        flight_path_status: 'FLIGHT_PATH_STATUSES',
-      };
+    validationColumns.forEach((def) => {
+      const columnIndex = headers.indexOf(def.field);
+      if (columnIndex < 0) return;
+      const archiveColumnIndex = archiveValidationSourceColumn(ss, archive, def.field);
+      if (archive && archiveColumnIndex >= 0) {
+        requests.push({
+          copyPaste: {
+            source: gridRangeForColumn(archive, archiveColumnIndex, 3),
+            destination: gridRangeForColumn(sheet, columnIndex, endRowIndex),
+            pasteType: 'PASTE_DATA_VALIDATION',
+            pasteOrientation: 'NORMAL',
+          },
+        });
+        copiedFromArchive += 1;
+        return;
+      }
 
-      const dataRows = Math.max(1, sheet.getMaxRows() - 2);
-      ['last_name', 'first_name', 'role', 'email', 'phone', 'class_year', 'dob'].forEach((field) => {
-        const colIdx = headerIndex(field);
-        if (colIdx < 0) return;
-        try {
-          sheet.getRange(3, colIdx + 1, dataRows, 1).clearDataValidations();
-        } catch (err) {
-          Log.warn(`Skipping Directory stale validation clear on ${field}: ${err}`);
-        }
+      const namedRange = ss.getRangeByName(def.rangeName);
+      if (!namedRange) {
+        Log.warn(`Directory validation source missing field=${def.field} namedRange=${def.rangeName}.`);
+        return;
+      }
+      requests.push({
+        setDataValidation: {
+          range: gridRangeForColumn(sheet, columnIndex, endRowIndex),
+          rule: dataValidationRuleForRange(namedRange, def.showDropdown),
+          filteredRowsIncluded: true,
+        },
       });
+      generatedFromLegend += 1;
+    });
 
-      Object.entries(map).forEach(([field, rangeName]) => {
-        const colIdx = headerIndex(field);
-        if (colIdx < 0) return;
-        const namedRange = ss.getRangeByName(rangeName);
-        if (!namedRange) return;
-        const dataRange = sheet.getRange(3, colIdx + 1, dataRows, 1);
-        const showDropdown = !['as_year', 'rank', 'university'].includes(field);
-        const rule = SpreadsheetApp.newDataValidation()
-          .requireValueInRange(namedRange, showDropdown)
-          .setAllowInvalid(false)
-          .build();
-        try {
-          dataRange.clearDataValidations();
-          dataRange.setDataValidation(rule);
-        } catch (err) {
-          Log.warn(`Skipping Directory validation on column ${colIdx + 1} due to typed column/table constraints: ${err}`);
-        }
-      });
-    } catch (err) {
-      // Catch-all: typed columns (Tables) or other new Sheets features may block validation writes.
-      Log.warn(`Skipping Directory validations due to sheet constraints: ${err}`);
+    if (batchUpdateCellValidations(ss, requests, 'Directory archive-style validations')) {
+      Log.info(
+        `Directory validations ready rows=${Math.max(1, endRowIndex - 2)} columns=${copiedFromArchive + generatedFromLegend} `
+        + `archive=${archive?.getName() || 'none'} copied=${copiedFromArchive} generated=${generatedFromLegend} tableColumnTypes=unchanged`,
+      );
     }
   }
 
   function applyLeadershipValidations(ss: GoogleAppsScript.Spreadsheet.Spreadsheet) {
     const sheet = ss.getSheetByName('Leadership');
     if (!sheet) return;
-
-    try {
-      const headers = readHeaderRows(ss, sheet).machine;
-      const dataRows = Math.max(1, sheet.getMaxRows() - 2);
-      const rankIdx = headers.indexOf('rank');
-      if (rankIdx < 0) return;
-      const rankRange = getLeadershipRankRange(ss);
-      if (!rankRange) return;
-      const dataRange = sheet.getRange(3, rankIdx + 1, dataRows, 1);
-      dataRange.clearDataValidations();
-      dataRange.setDataValidation(
-        SpreadsheetApp.newDataValidation()
-          .requireValueInRange(rankRange, false)
-          .setAllowInvalid(false)
-          .build(),
-      );
-    } catch (err) {
-      Log.warn(`Skipping Leadership rank validation due to sheet constraints: ${err}`);
-    }
+    const headers = readHeaderRows(ss, sheet).machine;
+    const rankIdx = headers.indexOf('rank');
+    if (rankIdx < 0) return;
+    const rankRange = getLeadershipRankRange(ss);
+    if (!rankRange) return;
+    batchUpdateCellValidations(ss, [{
+      setDataValidation: {
+        range: gridRangeForColumn(sheet, rankIdx),
+        rule: dataValidationRuleForRange(rankRange, false),
+        filteredRowsIncluded: true,
+      },
+    }], 'Leadership rank validation');
   }
 
   function getLeadershipRankRange(ss: GoogleAppsScript.Spreadsheet.Spreadsheet): GoogleAppsScript.Spreadsheet.Range | null {
@@ -253,33 +367,76 @@ namespace FrontendFormattingService {
   function applyAttendanceValidations(ss: GoogleAppsScript.Spreadsheet.Spreadsheet) {
     const namedRange = ss.getRangeByName('ATTENDANCE_CODES');
     if (!namedRange) return;
+    const sheet = ss.getSheetByName('Attendance');
+    if (!sheet) return;
+    const headers = readHeaderRows(ss, sheet).machine.map((h) => h.toLowerCase());
+    if (!headers.length) return;
+    const fixed = new Set(ATTENDANCE_BASE_HEADERS.map((h) => h.toLowerCase()));
+    const eventIndexes = headers
+      .map((header, index) => ({ header, index }))
+      .filter((entry) => !fixed.has(entry.header))
+      .map((entry) => entry.index);
+    if (!eventIndexes.length) return;
 
-    const applyToSheet = (sheetName: string) => {
-      const sheet = ss.getSheetByName(sheetName);
-      if (!sheet) return;
-      const headers = readHeaderRows(ss, sheet).machine.map((h) => h.toLowerCase());
-      if (!headers.length) return;
-      const fixed = new Set(ATTENDANCE_BASE_HEADERS.map((h) => h.toLowerCase()));
-      const startRow = 3;
-      const numRows = Math.max(1, sheet.getMaxRows() - 2);
-      headers.forEach((h, idx) => {
-        if (fixed.has(h)) return;
-        const col = idx + 1;
-        const dataRange = sheet.getRange(startRow, col, numRows, 1);
-        const rule = SpreadsheetApp.newDataValidation()
-          .requireValueInRange(namedRange, true)
-          .setAllowInvalid(false)
-          .build();
-        try {
-          dataRange.setDataValidation(rule);
-        } catch (err) {
-          Log.warn(`Skipping ${sheetName} attendance validation on column ${col} due to typed column/table constraints: ${err}`);
-        }
-      });
+    const eventStartIndex = Math.min(...eventIndexes);
+    const eventEndIndex = Math.max(...eventIndexes) + 1;
+    const endRowIndex = Math.max(3, sheet.getLastRow());
+    const archive = latestArchiveSheet(ss, 'Attendance');
+    const archiveHeaders = archive ? readHeaderRows(ss, archive).machine.map((h) => h.toLowerCase()) : [];
+    const archiveEventIndex = archiveHeaders.findIndex((header) => !fixed.has(header));
+    let archiveHasValidation = false;
+    if (archive && archiveEventIndex >= 0 && archive.getLastRow() >= 3) {
+      try {
+        archiveHasValidation = !!archive.getRange(3, archiveEventIndex + 1).getDataValidation();
+      } catch (err) {
+        Log.warn(`Unable to inspect archive Attendance validation source ${archive.getName()}: ${err}`);
+      }
+    }
+
+    const destination = {
+      sheetId: sheet.getSheetId(),
+      startRowIndex: 2,
+      endRowIndex,
+      startColumnIndex: eventStartIndex,
+      endColumnIndex: eventEndIndex,
     };
+    const requests: Record<string, any>[] = [{
+      setDataValidation: {
+        range: {
+          sheetId: sheet.getSheetId(),
+          startRowIndex: 2,
+          endRowIndex,
+          startColumnIndex: 0,
+          endColumnIndex: headers.length,
+        },
+        filteredRowsIncluded: true,
+      },
+    }];
+    if (archive && archiveEventIndex >= 0 && archiveHasValidation) {
+      requests.push({
+        copyPaste: {
+          source: gridRangeForColumn(archive, archiveEventIndex, 3),
+          destination,
+          pasteType: 'PASTE_DATA_VALIDATION',
+          pasteOrientation: 'NORMAL',
+        },
+      });
+    } else {
+      requests.push({
+        setDataValidation: {
+          range: destination,
+          rule: dataValidationRuleForRange(namedRange, true),
+          filteredRowsIncluded: true,
+        },
+      });
+    }
 
-    applyToSheet('Attendance');
-    applyToSheet('Attendance Matrix Backend');
+    if (batchUpdateCellValidations(ss, requests, 'Attendance archive-style validations')) {
+      Log.info(
+        `Attendance validations ready rows=${Math.max(1, endRowIndex - 2)} eventColumns=${eventIndexes.length} `
+        + `archive=${archive?.getName() || 'none'} source=${archive && archiveHasValidation ? 'archive-copy' : 'Data Legend'} tableColumnTypes=unchanged`,
+      );
+    }
   }
 
   function applyValidationRules(ss: GoogleAppsScript.Spreadsheet.Spreadsheet) {
@@ -300,7 +457,7 @@ namespace FrontendFormattingService {
     });
   }
 
-  export function applyAll(frontendId: string) {
+  export function applyAll(frontendId: string, opts?: { skipValidations?: boolean }) {
     const ss = openFrontend(frontendId);
     if (!ss) return;
     const namedRanges = buildNamedRanges(ss);
@@ -327,7 +484,7 @@ namespace FrontendFormattingService {
       applyDashboardFormatting(ss); // keep layout populated so Dashboard isn’t blank
       applyFaqsFormatting(ss); // keep the mobile-friendly FAQ layout even when formatting is disabled
       ensureFaqLayout(ss);
-      applyValidationRules(ss);
+      if (!opts?.skipValidations) applyValidationRules(ss);
       return;
     }
 
@@ -339,7 +496,7 @@ namespace FrontendFormattingService {
     applyDataLegendFormatting(ss);
     applyAttendanceFormatting(ss);
     ensureFaqLayout(ss);
-    applyValidationRules(ss);
+    if (!opts?.skipValidations) applyValidationRules(ss);
   }
 
   export function applyValidations(frontendId: string) {
@@ -354,6 +511,27 @@ namespace FrontendFormattingService {
       }
     });
     applyValidationRules(ss);
+  }
+
+  export function repairAttendanceInputs(frontendId: string) {
+    const ss = openFrontend(frontendId);
+    if (!ss) return;
+    const namedRanges = buildNamedRanges(ss);
+    namedRanges.forEach((def) => {
+      try {
+        ss.setNamedRange(def.name, def.range);
+      } catch (err) {
+        Log.warn(`Unable to set named range ${def.name}: ${err}`);
+      }
+    });
+    applyAttendanceValidations(ss);
+
+    const sheet = ss.getSheetByName('Attendance');
+    if (!sheet) return;
+    const headers = readHeaderRows(ss, sheet).machine.map((header) => header.toLowerCase());
+    const overallIdx = headers.indexOf(ATT_HEADER_OVERALL.toLowerCase());
+    const llabIdx = headers.indexOf(ATT_HEADER_LLAB.toLowerCase());
+    applyAttendancePercentageGradient(sheet, overallIdx, llabIdx, Math.max(1, sheet.getLastRow() - 2));
   }
 
   // Final safety net to keep FAQs as one mobile-friendly column without forcing all content into one cell.
@@ -1051,11 +1229,36 @@ namespace FrontendFormattingService {
     };
     formatPercent(llabIdx);
     formatPercent(overallIdx);
+    applyAttendancePercentageGradient(sheet, overallIdx, llabIdx, dataRows);
 
     // Freeze first two columns
     sheet.setFrozenRows(2);
     sheet.setFrozenColumns(2);
 
+  }
+
+  function applyAttendancePercentageGradient(
+    sheet: GoogleAppsScript.Spreadsheet.Sheet,
+    overallIdx: number,
+    llabIdx: number,
+    dataRows: number,
+  ) {
+    const ranges = [overallIdx, llabIdx]
+      .filter((idx) => idx >= 0)
+      .map((idx) => sheet.getRange(3, idx + 1, Math.max(1, dataRows), 1));
+    if (!ranges.length) return;
+    try {
+      const rule = SpreadsheetApp.newConditionalFormatRule()
+        .setGradientMinpointWithValue('#E67C73', SpreadsheetApp.InterpolationType.NUMBER, '0.8')
+        .setGradientMidpointWithValue('#FFCE65', SpreadsheetApp.InterpolationType.NUMBER, '0.9')
+        .setGradientMaxpointWithValue('#57BB8A', SpreadsheetApp.InterpolationType.NUMBER, '1')
+        .setRanges(ranges)
+        .build();
+      sheet.setConditionalFormatRules([rule]);
+      Log.info(`Attendance percentage gradient ready rows=${Math.max(1, dataRows)} summaryColumns=${ranges.length}.`);
+    } catch (err) {
+      Log.warn(`Unable to apply archive-style Attendance percentage gradient: ${err}`);
+    }
   }
 
   function applyAttendancePostTableFormatting(ss: GoogleAppsScript.Spreadsheet.Spreadsheet) {

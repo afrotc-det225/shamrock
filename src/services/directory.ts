@@ -172,7 +172,7 @@ namespace DirectoryService {
     const sorted = sortDirectoryRows(mapped);
     ProgressService.report({
       title: 'Writing the frontend Directory',
-      detail: `Publishing ${sorted.length} active cadet row(s) while preserving typed Photo Link cells.`,
+      detail: `Publishing ${sorted.length} active cadet row(s) while preserving Photo Link smart-chip cells.`,
       hint: 'Photo links are written separately as Google Drive file chips after the regular columns.',
     });
     writeFrontendDirectoryRows(frontendId, frontendSheet, sorted);

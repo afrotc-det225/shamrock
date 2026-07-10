@@ -532,7 +532,29 @@ namespace AttendanceService {
     const baseLength = ATTENDANCE_MACHINE_HEADERS.length;
     const clearRows = Math.max(1, sheet.getMaxRows());
     const clearCols = Math.max(1, sheet.getMaxColumns());
-    sheet.getRange(1, 1, clearRows, clearCols).clearDataValidations();
+    const sheetsService = (globalThis as any).Sheets?.Spreadsheets;
+    if (sheetsService?.batchUpdate) {
+      try {
+        sheetsService.batchUpdate({
+          requests: [{
+            setDataValidation: {
+              range: {
+                sheetId: sheet.getSheetId(),
+                startRowIndex: 0,
+                endRowIndex: clearRows,
+                startColumnIndex: 0,
+                endColumnIndex: clearCols,
+              },
+              filteredRowsIncluded: true,
+            },
+          }],
+        }, sheet.getParent().getId());
+      } catch (err) {
+        Log.warn(`Unable to clear stale Attendance validation through the Sheets API: ${err}`);
+      }
+    } else {
+      sheet.getRange(1, 1, clearRows, clearCols).clearDataValidations();
+    }
     sheet.clear();
     if (machineHeaders.length) sheet.getRange(1, 1, 1, machineHeaders.length).setValues([machineHeaders]);
     if (displayHeaders.length) sheet.getRange(2, 1, 1, displayHeaders.length).setValues([displayHeaders]);

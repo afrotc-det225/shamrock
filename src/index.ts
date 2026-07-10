@@ -748,12 +748,6 @@ function applyAttendanceHeaderFix(showCompletionAlert = false) {
 
     const lastCol = sheet.getLastColumn();
     if (lastCol === 0) throw new Error('Attendance sheet has no columns.');
-    try {
-      sheet.getRange(1, 1, Math.max(1, sheet.getMaxRows()), Math.max(1, sheet.getMaxColumns())).clearDataValidations();
-    } catch (err) {
-      Log.warn(`Unable to clear stale attendance validations before header fix: ${err}`);
-    }
-
     const attendanceSchema = Schemas.getTabSchema('Attendance');
     const baseLength = attendanceSchema?.machineHeaders?.length || 7;
     const headers = sheet.getRange(2, 1, 1, lastCol).getValues()[0].map((h) => String(h || ''));
@@ -828,20 +822,7 @@ function applyAttendanceHeaderFix(showCompletionAlert = false) {
         step: 3,
         totalSteps: 4,
       });
-      try {
-        eventRange.clearDataValidations();
-        const codesRange = ss ? ss.getRangeByName('ATTENDANCE_CODES') : null;
-        if (codesRange) {
-          const validation = SpreadsheetApp.newDataValidation()
-            .requireValueInRange(codesRange, true)
-            .setAllowInvalid(false)
-            .setHelpText('Select attendance code')
-            .build();
-          eventRange.setDataValidation(validation);
-        }
-      } catch (err) {
-        Log.warn(`Unable to set attendance data validation: ${err}`);
-      }
+      FrontendFormattingService.repairAttendanceInputs(frontendId);
 
       try {
         eventRange.setHorizontalAlignment('center').setFontWeight('bold');

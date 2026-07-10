@@ -480,6 +480,17 @@ namespace ProgressService {
         return;
       }
 
+      const untypedTable = message.match(/^Verified table column types unset for (.+) columns=(\d+)\.$/i);
+      if (untypedTable) {
+        appendLiveActivity(
+          state,
+          'success',
+          `${untypedTable[1]} inputs kept cell-based`,
+          `Verified ${untypedTable[2]} table column(s) remain untyped before validation is restored.`,
+        );
+        return;
+      }
+
       const stageOk = message.match(/^applyFrontendFormatting stage ok: (.+) durationMs=(\d+)$/i);
       if (stageOk) {
         const seconds = Math.round((Number(stageOk[2]) / 1000) * 10) / 10;
@@ -493,7 +504,46 @@ namespace ProgressService {
           state,
           'success',
           `${postTable[1]} table formatting finished`,
-          `Applied ${postTable[2]} typed-table-safe formatting request(s).`,
+          `Applied ${postTable[2]} final cell-format request(s).`,
+        );
+        return;
+      }
+
+      const directoryValidations = message.match(
+        /^Directory validations ready rows=(\d+) columns=(\d+) archive=(.+?) copied=(\d+) generated=(\d+) tableColumnTypes=unchanged$/i,
+      );
+      if (directoryValidations) {
+        appendLiveActivity(
+          state,
+          'success',
+          'Directory choices restored',
+          `Applied archive-style validation to ${directoryValidations[1]} row(s) across ${directoryValidations[2]} controlled column(s) without table column types.`,
+        );
+        return;
+      }
+
+      const attendanceValidations = message.match(
+        /^Attendance validations ready rows=(\d+) eventColumns=(\d+) archive=(.+?) source=(.+?) tableColumnTypes=unchanged$/i,
+      );
+      if (attendanceValidations) {
+        appendLiveActivity(
+          state,
+          'success',
+          'Attendance choices restored',
+          `Applied attendance-code validation to ${attendanceValidations[1]} row(s) across ${attendanceValidations[2]} event column(s) without table column types.`,
+        );
+        return;
+      }
+
+      const attendanceGradient = message.match(
+        /^Attendance percentage gradient ready rows=(\d+) summaryColumns=(\d+)\.$/i,
+      );
+      if (attendanceGradient) {
+        appendLiveActivity(
+          state,
+          'success',
+          'Attendance summary colors restored',
+          `Applied the archive-style red, amber, and green scale to ${attendanceGradient[2]} summary column(s).`,
         );
         return;
       }
