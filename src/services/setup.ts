@@ -651,17 +651,12 @@ namespace SetupService {
       return;
     }
 
-    // As a last resort, create a placeholder sheet so downstream setup steps do not crash.
-    try {
-      const ss = SpreadsheetApp.openById(spreadsheetId);
-      const existing = ss.getSheetByName(desiredName);
-      if (!existing) {
-        ss.insertSheet(desiredName);
-        Log.warn(`Created placeholder response sheet ${desiredName} because none were found for formId=${form.getId()}.`);
-      }
-    } catch (err) {
-      Log.warn(`Unable to create placeholder response sheet ${desiredName}: ${err}`);
-    }
+    // Never create a same-named placeholder. Forms can take tens of seconds to
+    // create and backfill a real linked response tab, and a blank placeholder
+    // can then mask that destination and break downstream lookups.
+    Log.warn(
+      `Linked response sheet '${desiredName}' was not visible yet for formId=${form.getId()}; leaving the workbook unchanged for a later retry.`,
+    );
   }
 
   /**
@@ -1791,9 +1786,12 @@ namespace SetupService {
     spreadsheetId: string,
     formId: string,
     priorSheetIds: Set<number>,
+    timeoutMs = 120000,
   ): GoogleAppsScript.Spreadsheet.Sheet | null {
-    for (let attempt = 0; attempt < 10; attempt += 1) {
-      if (attempt > 0) Utilities.sleep(500);
+    const startedAt = Date.now();
+    let attempt = 0;
+    while (Date.now() - startedAt < timeoutMs) {
+      if (attempt > 0) Utilities.sleep(2000);
       const spreadsheet = SpreadsheetApp.openById(spreadsheetId);
       const linked = findLinkedResponseSheet(spreadsheet, formId);
       if (linked && !priorSheetIds.has(linked.getSheetId())) return linked;
@@ -1802,6 +1800,13 @@ namespace SetupService {
         !priorSheetIds.has(sheet.getSheetId()) && RESPONSE_SHEET_REGEX.test(sheet.getName())
       ));
       if (newResponseSheet) return newResponseSheet;
+
+      attempt += 1;
+      if (attempt % 5 === 0) {
+        Log.info(
+          `Attendance form: waiting for linked response sheet elapsedMs=${Date.now() - startedAt} attempts=${attempt}`,
+        );
+      }
     }
     return null;
   }
@@ -1885,7 +1890,9 @@ namespace SetupService {
 
       const newResponseSheet = waitForNewLinkedResponseSheet(destinationSpreadsheetId, formId, priorSheetIds);
       if (!newResponseSheet) {
-        throw new Error('Attendance form was rebuilt and relinked, but its new response sheet could not be verified');
+        throw new Error(
+          'Attendance form was rebuilt and its destination was set, but Google did not expose the new linked response tab within 120 seconds. No placeholder tab was created.',
+        );
       }
       if (newResponseSheet.getName() !== desiredSheetName) newResponseSheet.setName(desiredSheetName);
       newResponseSheet.showSheet();
@@ -1906,7 +1913,6 @@ namespace SetupService {
           form.setDestination(FormApp.DestinationType.SPREADSHEET, destinationSpreadsheetId);
           Log.warn('Attendance form: restored backend response destination after rebuild failure');
         }
-        ensureResponseSheetForForm(form, desiredSheetName, destinationSpreadsheetId);
       } catch (recoveryErr) {
         Log.error(`Attendance form: unable to restore response destination after rebuild failure: ${recoveryErr}`);
       }

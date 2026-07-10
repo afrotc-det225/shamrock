@@ -98,6 +98,7 @@ Post-deploy validation checklist:
 - Treat frontend attendance as derived state. Rebuild it instead of manually patching formulas or event columns.
 - Routine Directory and Event changes synchronize Attendance Form choices in place. Do not use a structural form rebuild just to refresh choices.
 - Use `Rebuild Attendance Form (archive responses)` only when the form structure itself needs repair or at the transition phase that intentionally rebuilds it. The action briefly stops responses, keeps the former raw response tab as a hidden timestamped archive, verifies a fresh `Attendance Form Responses` destination, and restores the form's prior open/closed state.
+- Google may take tens of seconds to create and backfill the new linked tab from the Form response store. Historical email addresses and response rows in that newly linked tab are expected; the Form collects responder email and retains its own response store independently of the spreadsheet archive.
 - Use `Debug Attendance response columns` to review only header-count health. It does not log submission contents.
 - V2 attendance codes are `P`, `T`, `A`, `R`, `D`, `U`, `E`, `ES`, `MED`, and `N/A`.
 - `A` requires follow-up, `R` is pending leadership review, and `D` means a denied advance request where the cadet is still expected to attend.
@@ -173,6 +174,7 @@ Operator checks:
 - Run `Rebuild Attendance Form (archive responses)` once. Do not manually merge or delete columns on the linked response tab.
 - Confirm the original tab is now a hidden `Archived - Attendance Form Responses ...` tab and retains its rows.
 - Confirm the new visible `Attendance Form Responses` tab has no duplicate header names.
+- If Google is still backfilling the destination when the action reaches its verification timeout, wait for the real `Form Responses N` tab to appear and rerun setup to normalize its name. SHAMROCK must never create an empty placeholder response tab.
 - Submit one controlled response and confirm both the new raw response row and the corresponding Attendance Backend rows.
 
 ### 6.4 Data validations not working
