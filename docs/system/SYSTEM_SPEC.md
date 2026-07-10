@@ -52,7 +52,7 @@ Idempotency rules:
 - Setup must avoid destructive operations unless explicitly invoked by an admin “reset” action.
 - Attendance roster and event refreshes must update existing Form items in place. They may add only a newly required roster question; they must not delete and recreate the full form.
 - A structural Attendance Form rebuild must temporarily stop responses, preserve the prior linked response tab as a hidden archive, rebuild the form, create and verify a fresh linked response tab, and restore the form's prior accepting-responses state. It must not merge or delete historical response columns in place.
-- The newly linked response tab is created asynchronously outside the running Apps Script execution. Discovery, renaming, and header verification must use fresh Sheets API metadata keyed by `sheetId`; `SpreadsheetApp.getSheets()` is not authoritative for this post-link phase because its sheet list can remain stale for the rest of the execution.
+- The newly linked response tab is created asynchronously outside the running Apps Script execution. Discovery, renaming, and header verification must use fresh Sheets API metadata keyed by `sheetId`; `SpreadsheetApp.getSheets()` is not authoritative for this post-link phase because its sheet list can remain stale for the rest of the execution. If the tab is not immediately available, SHAMROCK must persist finalization state and resume through a one-time continuation trigger without rebuilding or archiving again.
 
 ## 4. Ownership and Source of Truth
 ### 4.1 Frontend Workbook

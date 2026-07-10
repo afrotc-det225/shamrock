@@ -174,7 +174,7 @@ Operator checks:
 - Run `Rebuild Attendance Form (archive responses)` once. Do not manually merge or delete columns on the linked response tab.
 - Confirm the original tab is now a hidden `Archived - Attendance Form Responses ...` tab and retains its rows.
 - Confirm the new visible `Attendance Form Responses` tab has no duplicate header names.
-- If Google is still backfilling the destination when the action reaches its verification timeout, wait for the real `Form Responses N` tab to appear and rerun setup to normalize its name. SHAMROCK must never create an empty placeholder response tab.
+- If Google is still backfilling the destination when the menu execution finishes, a temporary `Form Responses N` name may appear. SHAMROCK saves finalization state and schedules a continuation to rename and verify that exact `sheetId`; do not start another rebuild. Rerunning the same menu action only retries the saved finalization and must not archive or rebuild again. SHAMROCK never creates an empty placeholder response tab.
 - Submit one controlled response and confirm both the new raw response row and the corresponding Attendance Backend rows.
 
 ### 6.4 Data validations not working

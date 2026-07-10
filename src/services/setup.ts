@@ -1790,6 +1790,20 @@ namespace SetupService {
     gridProperties?: { rowCount?: number; columnCount?: number; frozenRowCount?: number };
   }
 
+  interface AttendanceFormRebuildState {
+    id: string;
+    spreadsheetId: string;
+    formId: string;
+    desiredSheetName: string;
+    archivedSheetName: string;
+    priorSheetIds: number[];
+    newResponseSheetId?: number;
+    attempts: number;
+    createdAt: string;
+  }
+
+  const ATTENDANCE_FORM_REBUILD_CONTINUATION_HANDLER = 'finalizeAttendanceFormRebuild';
+
   function getFreshSheetProperties(spreadsheetId: string): FreshSheetProperties[] {
     const service = (globalThis as any).Sheets?.Spreadsheets;
     if (!service?.get) {
@@ -1808,7 +1822,7 @@ namespace SetupService {
   function waitForNewResponseSheetMetadata(
     spreadsheetId: string,
     priorSheetIds: Set<number>,
-    timeoutMs = 120000,
+    timeoutMs = 15000,
   ): FreshSheetProperties | null {
     const startedAt = Date.now();
     let attempt = 0;
@@ -1891,6 +1905,144 @@ namespace SetupService {
     };
   }
 
+  function loadAttendanceFormRebuildState(): AttendanceFormRebuildState | null {
+    const raw = Config.getScriptProperty(Config.PROPERTY_KEYS.ATTENDANCE_FORM_REBUILD_STATE);
+    if (!raw) return null;
+    try {
+      return JSON.parse(raw) as AttendanceFormRebuildState;
+    } catch (err) {
+      Log.error(`Attendance form: invalid rebuild continuation state; clearing it. Error: ${err}`);
+      Config.deleteScriptProperty(Config.PROPERTY_KEYS.ATTENDANCE_FORM_REBUILD_STATE);
+      return null;
+    }
+  }
+
+  function saveAttendanceFormRebuildState(state: AttendanceFormRebuildState) {
+    Config.setScriptProperty(Config.PROPERTY_KEYS.ATTENDANCE_FORM_REBUILD_STATE, JSON.stringify(state));
+  }
+
+  function clearAttendanceFormRebuildContinuationTriggers() {
+    ScriptApp.getProjectTriggers()
+      .filter((trigger) => trigger.getHandlerFunction() === ATTENDANCE_FORM_REBUILD_CONTINUATION_HANDLER)
+      .forEach((trigger) => {
+        try {
+          ScriptApp.deleteTrigger(trigger);
+        } catch (err) {
+          Log.warn(`Attendance form: unable to delete rebuild continuation trigger: ${err}`);
+        }
+      });
+  }
+
+  function scheduleAttendanceFormRebuildContinuation() {
+    clearAttendanceFormRebuildContinuationTriggers();
+    ScriptApp.newTrigger(ATTENDANCE_FORM_REBUILD_CONTINUATION_HANDLER).timeBased().after(60 * 1000).create();
+    Log.info('Attendance form: scheduled response-tab finalization continuation.');
+  }
+
+  function completeAttendanceFormRebuild(
+    state: AttendanceFormRebuildState,
+    newResponseSheet: FreshSheetProperties,
+  ) {
+    state.newResponseSheetId = newResponseSheet.sheetId;
+    saveAttendanceFormRebuildState(state);
+    renameResponseSheetViaSheetsApi(state.spreadsheetId, newResponseSheet.sheetId, state.desiredSheetName);
+    const diagnostics = responseSheetDiagnosticsViaSheetsApi(
+      state.spreadsheetId,
+      state.desiredSheetName,
+      newResponseSheet.gridProperties?.rowCount || 0,
+    );
+    const healthSummary =
+      `Attendance response sheet health sheet='${state.desiredSheetName}' sheetId=${newResponseSheet.sheetId} `
+      + `columns=${diagnostics.columnCount} rows=${diagnostics.rowCount} uniqueHeaders=${diagnostics.uniqueHeaderCount} `
+      + `duplicateHeaders=${diagnostics.duplicateHeaderCount} maxHeaderOccurrences=${diagnostics.maxHeaderOccurrences}`;
+    if (diagnostics.duplicateHeaderCount) {
+      Log.error(healthSummary);
+      throw new Error(
+        `Fresh Attendance response sheet still has ${diagnostics.duplicateHeaderCount} duplicate header name(s); preserved archive='${state.archivedSheetName || 'none'}'`,
+      );
+    }
+    Log.info(healthSummary);
+    Config.deleteScriptProperty(Config.PROPERTY_KEYS.ATTENDANCE_FORM_REBUILD_STATE);
+    clearAttendanceFormRebuildContinuationTriggers();
+    Log.info(
+      `Attendance form: rebuild finalized responseSheet='${state.desiredSheetName}' sheetId=${newResponseSheet.sheetId} `
+      + `originalTitle='${newResponseSheet.title}' columns=${diagnostics.columnCount} archive='${state.archivedSheetName || 'none'}' stateId=${state.id}`,
+    );
+    AuditService.log({
+      action: 'attendance_form_rebuild_finalize',
+      actionLabel: 'Finalize Attendance Form rebuild',
+      category: 'Sync & Refresh',
+      result: 'ok',
+      role: 'automation',
+      targetSheet: state.desiredSheetName,
+      source: 'Apps Script continuation',
+      runId: state.id,
+      metadata: {
+        sheet_id: newResponseSheet.sheetId,
+        original_title: newResponseSheet.title,
+        archived_sheet: state.archivedSheetName,
+        columns: diagnostics.columnCount,
+        duplicate_headers: diagnostics.duplicateHeaderCount,
+      },
+    });
+  }
+
+  function tryFinalizeAttendanceFormRebuild(
+    state: AttendanceFormRebuildState,
+    scheduleIfPending: boolean,
+  ): boolean {
+    const priorSheetIds = new Set(state.priorSheetIds);
+    const freshSheets = getFreshSheetProperties(state.spreadsheetId);
+    const candidates = state.newResponseSheetId
+      ? freshSheets.filter((sheet) => sheet.sheetId === state.newResponseSheetId)
+      : freshSheets.filter((sheet) => (
+          !priorSheetIds.has(sheet.sheetId)
+          && (RESPONSE_SHEET_REGEX.test(sheet.title) || sheet.title === state.desiredSheetName)
+        ));
+    if (candidates.length > 1) {
+      throw new Error(
+        `Multiple new Form response tabs appeared during Attendance rebuild: ${candidates.map((sheet) => `${sheet.title} (${sheet.sheetId})`).join(', ')}`,
+      );
+    }
+    if (candidates.length === 1) {
+      completeAttendanceFormRebuild(state, candidates[0]);
+      return true;
+    }
+
+    if (scheduleIfPending) {
+      state.attempts += 1;
+      saveAttendanceFormRebuildState(state);
+      if (state.attempts <= 15) {
+        scheduleAttendanceFormRebuildContinuation();
+        Log.info(
+          `Attendance form: response tab is still being created/backfilled; continuation scheduled stateId=${state.id} attempt=${state.attempts}`,
+        );
+      } else {
+        clearAttendanceFormRebuildContinuationTriggers();
+        Log.error(
+          `Attendance form: response-tab finalization remains pending after ${state.attempts} attempts; stateId=${state.id}. Rerun the menu action to retry finalization without rebuilding.`,
+        );
+      }
+    }
+    return false;
+  }
+
+  export function finalizeAttendanceFormRebuild() {
+    const lock = LockService.getScriptLock();
+    lock.waitLock(30000);
+    try {
+      const state = loadAttendanceFormRebuildState();
+      if (!state) {
+        clearAttendanceFormRebuildContinuationTriggers();
+        Log.info('Attendance form: no pending rebuild finalization state found.');
+        return;
+      }
+      tryFinalizeAttendanceFormRebuild(state, true);
+    } finally {
+      lock.releaseLock();
+    }
+  }
+
   function responseSheetDiagnostics(sheet: GoogleAppsScript.Spreadsheet.Sheet) {
     const columnCount = sheet.getLastColumn();
     const rowCount = sheet.getLastRow();
@@ -1939,6 +2091,17 @@ namespace SetupService {
     let archivedSheetName = '';
 
     try {
+      const pendingState = loadAttendanceFormRebuildState();
+      if (pendingState) {
+        if (pendingState.attempts > 15) pendingState.attempts = 0;
+        if (!tryFinalizeAttendanceFormRebuild(pendingState, true)) {
+          Log.warn(
+            `Attendance form: rebuild state ${pendingState.id} is still waiting for its response tab; no second rebuild was started.`,
+          );
+        }
+        return;
+      }
+
       const formId = form.getId();
       wasAcceptingResponses = form.isAcceptingResponses();
       const spreadsheet = SpreadsheetApp.openById(destinationSpreadsheetId);
@@ -1970,32 +2133,24 @@ namespace SetupService {
       FormService.rebuildAttendanceForm(form);
       form.setDestination(FormApp.DestinationType.SPREADSHEET, destinationSpreadsheetId);
 
-      const newResponseSheet = waitForNewResponseSheetMetadata(destinationSpreadsheetId, priorSheetIds);
-      if (!newResponseSheet) {
-        throw new Error(
-          'Attendance form was rebuilt and its destination was set, but the Sheets API did not expose the new linked response tab within 120 seconds. No placeholder tab was created.',
-        );
-      }
-      renameResponseSheetViaSheetsApi(destinationSpreadsheetId, newResponseSheet.sheetId, desiredSheetName);
-      const diagnostics = responseSheetDiagnosticsViaSheetsApi(
-        destinationSpreadsheetId,
+      const state: AttendanceFormRebuildState = {
+        id: Utilities.getUuid(),
+        spreadsheetId: destinationSpreadsheetId,
+        formId,
         desiredSheetName,
-        newResponseSheet.gridProperties?.rowCount || 0,
-      );
-      const healthSummary =
-        `Attendance response sheet health sheet='${desiredSheetName}' sheetId=${newResponseSheet.sheetId} `
-        + `columns=${diagnostics.columnCount} rows=${diagnostics.rowCount} uniqueHeaders=${diagnostics.uniqueHeaderCount} `
-        + `duplicateHeaders=${diagnostics.duplicateHeaderCount} maxHeaderOccurrences=${diagnostics.maxHeaderOccurrences}`;
-      if (diagnostics.duplicateHeaderCount) Log.warn(healthSummary);
-      else Log.info(healthSummary);
-      if (diagnostics.duplicateHeaderCount) {
-        throw new Error(
-          `Fresh Attendance response sheet still has ${diagnostics.duplicateHeaderCount} duplicate header name(s); preserved archive='${archivedSheetName || 'none'}'`,
-        );
+        archivedSheetName,
+        priorSheetIds: Array.from(priorSheetIds),
+        attempts: 0,
+        createdAt: new Date().toISOString(),
+      };
+      saveAttendanceFormRebuildState(state);
+
+      const immediateSheet = waitForNewResponseSheetMetadata(destinationSpreadsheetId, priorSheetIds);
+      if (immediateSheet) {
+        completeAttendanceFormRebuild(state, immediateSheet);
+      } else {
+        tryFinalizeAttendanceFormRebuild(state, true);
       }
-      Log.info(
-        `Attendance form: rebuild completed with fresh linked response sheet '${desiredSheetName}' sheetId=${newResponseSheet.sheetId} originalTitle='${newResponseSheet.title}' columns=${diagnostics.columnCount} archive='${archivedSheetName || 'none'}'`,
-      );
     } catch (err) {
       Log.error(`Attendance form: protected rebuild failed: ${err}`);
       try {
