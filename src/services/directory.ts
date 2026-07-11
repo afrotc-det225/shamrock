@@ -357,8 +357,16 @@ namespace DirectoryService {
     if (role.includes('flight commander') && flight && !roleContainsUnit(rawRole, (((globalThis as any).Arrays?.FLIGHTS as string[] | undefined) || []))) {
       return `${flight} ${rawRole}`;
     }
-    if (role.includes('squadron commander') && squadron && !roleContainsUnit(rawRole, (((globalThis as any).Arrays?.SQUADRONS as string[] | undefined) || []))) {
-      return `${squadron} ${rawRole}`;
+    if (role.includes('squadron commander')) {
+      const squadronCommanderUnit = Arrays.getSquadronCommanderUnit(rawRole);
+      if (squadronCommanderUnit) return rawRole;
+
+      const operationalSquadron = Arrays.OPERATIONAL_SQUADRONS.find(
+        (candidate) => normalizeRoleForMatch(candidate) === normalizeRoleForMatch(squadron),
+      );
+      if (role === 'squadron commander' && operationalSquadron) {
+        return `${operationalSquadron} Squadron Commander`;
+      }
     }
     return rawRole;
   }
@@ -373,7 +381,7 @@ namespace DirectoryService {
     if (role.includes('operations group commander') && !isDeputy) return 30;
     if (role.includes('operations group deputy commander')) return 35;
     if (role.includes('operations group deputy')) return 36;
-    if (role.includes('squadron commander') && !isDeputy) return 40;
+    if (Arrays.getSquadronCommanderUnit(roleRaw) && !isDeputy) return 40;
     if (role.includes('flight commander') && !isDeputy) return 50;
     if (role.includes('deputy flight commander')) return 60;
     if (role.includes('senior gmc advisor')) return 70;

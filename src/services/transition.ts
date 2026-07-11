@@ -42,6 +42,7 @@ namespace TransitionService {
     | 'logs'
     | 'events'
     | 'leadership'
+    | 'excusals_management'
     | 'responses'
     | 'directory_artifacts'
     | 'events_artifacts'
@@ -85,6 +86,7 @@ namespace TransitionService {
     'logs',
     'events',
     'leadership',
+    'excusals_management',
     'responses',
     'directory_artifacts',
     'events_artifacts',
@@ -115,6 +117,10 @@ namespace TransitionService {
     leadership: {
       title: 'Rebuilding Leadership assignments',
       detail: 'Deriving cadet leadership from Directory and applying requested cadre/manual-row changes.',
+    },
+    excusals_management: {
+      title: 'Preparing Excusals management for the new term',
+      detail: 'Clearing the active decision queues and refreshing editor/viewer access from the new Leadership assignments.',
     },
     responses: {
       title: 'Preparing current form response surfaces',
@@ -736,6 +742,9 @@ namespace TransitionService {
         state.archives = reusableArchives.length ? reusableArchives : archiveForTransition(draft);
         saveState(state);
       }
+      // Management history is a durable term archive, not a seven-day rollback
+      // copy. This is idempotent when a saved backend archive is reused.
+      ExcusalsService.archiveManagementSheets(previousTermLabelForArchive(draft), state.id);
       return;
     }
     if (phase === 'directory') {
@@ -756,6 +765,10 @@ namespace TransitionService {
     if (phase === 'leadership') {
       DirectoryService.syncLeadershipBackendFromDirectory();
       applyRemovedLeadership(draft);
+      return;
+    }
+    if (phase === 'excusals_management') {
+      ExcusalsService.resetManagementForNewTerm();
       return;
     }
     if (phase === 'responses') {

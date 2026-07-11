@@ -452,15 +452,25 @@ function rebuildAttendanceMatrix() {
   runMenuAction({ label: 'Rebuild Attendance Matrix', category: 'Sync & Refresh', action: 'menu.rebuild_attendance_matrix', targetSheet: 'Attendance Matrix Backend' }, () => SetupService.rebuildAttendanceMatrix());
 }
 
+function sendDailyEventAttendanceNotices() {
+  AttendanceService.sendDailyEventAttendanceNotices();
+}
+
+// Compatibility entry points for old installed triggers. Reinstalling triggers
+// removes these fixed-weekday schedules and installs the daily event dispatcher.
 function sendWeeklyMandoExcusedSummary() {
-  AttendanceService.sendWeeklyMandoExcusedSummary();
+  AttendanceService.sendDailyEventAttendanceNotices();
 }
 
 function sendWeeklyLlabExcusedSummary() {
-  AttendanceService.sendWeeklyLlabExcusedSummary();
+  AttendanceService.sendDailyEventAttendanceNotices();
 }
 
 function sendWeeklyUnexcusedSummary() {
+  AttendanceService.fillUnexcusedAndNotify();
+}
+
+function sendSundayAttendanceCloseout() {
   AttendanceService.fillUnexcusedAndNotify();
 }
 

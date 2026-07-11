@@ -44,6 +44,8 @@ Setup outputs to verify:
 - Custom menus appear in the backend/admin workbook.
 - Admin menus do not appear in the frontend/main workbook.
 - Triggers exist and are correctly bound.
+- No frontend open trigger is installed; the frontend open handler is intentionally a no-op.
+- The canonical clock triggers are the daily 5:00 AM event-aware attendance notice dispatcher and the Sunday 5:00 PM prior-week attendance closeout. Fixed weekday Mando PT and LLAB triggers should not remain after `Reinstall triggers`.
 
 ## 4. Deployment Model
 Deployment is performed from the local repository using clasp.
@@ -103,7 +105,7 @@ Post-deploy validation checklist:
 - Directory Backend uses the same v2 column order as the frontend Directory and no longer includes legacy `source` or freeform Directory `notes`.
 - Use `Inactive`, `Commissioned`, or `Dropped` in `Flight Path` when a cadet should remain in backend records but be removed from operational frontend, leadership, attendance, and form choices.
 - Cadet rank and cadet leadership role are maintained on Directory. Leadership refresh replaces all Directory-backed Leadership rows and republishes only active Directory rows with eligible command/advisor roles. This removes former leaders who are inactive, commissioned, dropped, or no longer assigned while preserving non-cadet/cadre/manual rows that do not originate in Directory.
-- Leadership does not have separate flight or squadron columns. Flight and squadron commander routing comes from role names, so use explicit roles like `Alpha Flight Commander`, `Alpha Deputy Flight Commander`, and `Blue Squadron Commander`.
+- Leadership does not have separate flight or squadron columns. Flight and squadron commander routing comes from role names, so use explicit roles like `Alpha Flight Commander`, `Alpha Deputy Flight Commander`, and `Blue Squadron Commander`. Only the non-Abroad squadrons in the canonical squadron list are valid squadron-command routing roles; Mission Support Squadron Commander is not included.
 - Sync Directory refreshes the frontend Data Legend and existing Directory Form list questions first—including all canonical dorm options without replacing question IDs—then clears stale frontend Directory validation, writes the v2 mirror, restores Photo Link chips only from authoritative backend URLs/file IDs, trims stale blank rows, removes legacy banded ranges, creates or updates real Sheets API tables named `Directory`, `Leadership`, `Attendance`, and `Data Legend`, resets their column types to `None`, and reapplies cell validation from the newest matching archive. With no archive, it creates equivalent strict Data Legend-backed rules through the Sheets API.
 - Formatting-only actions do not rewrite `Photo Link` content. If an earlier run converted chips to filename text, rerun Sync Directory or Sync all mapped tabs so the backend URLs/file IDs can recreate them.
 - Prefer menu-driven sync/repair actions over ad hoc edits in the frontend.
@@ -126,11 +128,13 @@ Post-deploy validation checklist:
 
 ### 5.4 Excusals processing
 - Requests append via form.
-- Decisions are made in Excusals Backend by authorized staff.
+- Decisions are made in Excusals Backend by authorized staff or in the separate Excusals Management workbook by the applicable Blue/Gold squadron commander.
+- In Excusals Management, link/domain sharing is private, squadron commanders are editors, canonical flight commanders/deputies are viewers, and only the applicable squadron commander's Decision cells are editable. Headers and request detail fields remain protected.
 - Decisions drive notifications and attendance effects.
 - Requested outcomes are `P`, `T`, `E`, `ES`, and `MED`.
 - Denied post-event absences become `U`; denied pre-event requests become `D` until attendance is taken or closeout marks the absence.
 - Use cleanup/backfill actions only when repairing a known data issue.
+- Use `Share management spreadsheet` after an out-of-cycle Leadership change to remove stale access, refresh current editors/viewers, and reapply Decision-only protections.
 
 ### 5.5 Audit review
 - Review Audit Backend after setup, repair, and bulk operator actions.
@@ -151,7 +155,7 @@ Before starting:
 
 During the wizard:
 - The draft is saved after each prompt. Cancelling before final confirmation does not archive or rewrite workbook data.
-- The final confirmation is the destructive boundary. After that point, the workflow archives current sheets, updates roster/events, clears current attendance/excusal logs, clears Directory and Excusals response rows, preserves the full Attendance raw response tab during its form rebuild, and reinstalls triggers.
+- The final confirmation is the destructive boundary. After that point, the workflow archives current sheets (including hidden, locked term copies of active Excusals Management tabs in the restricted admin workbook), updates roster/events, clears current attendance/excusal logs and management queues, refreshes management access from new Leadership assignments, clears Directory and Excusals response rows, preserves the full Attendance raw response tab during its form rebuild, and reinstalls triggers.
 - After final confirmation, execution is phase-resumable. If Apps Script stops near its execution limit, wait for the continuation trigger or rerun the same transition menu action to resume remaining phases. Do not start a fresh transition.
 - Frontend archives are named from the new target term: transferring into `YYYY-Fall` creates `Spring YYYY Leadership/Directory/Attendance`; transferring into `YYYY-Spring` creates `Fall YYYY-1 Leadership/Directory/Attendance`.
 - Both semester and academic-year transitions clear Directory `Role`, `Flight`, and `Sqdn` assignments. Leadership roles must be reapplied through the wizard role-update prompt or backend edits after transition.
@@ -159,6 +163,7 @@ During the wizard:
 
 After completion:
 - Confirm hidden frontend archives exist for Leadership, Directory, and Attendance using the prior term label.
+- Confirm hidden, locked prior-term Excusals Management tabs exist in the admin workbook and the active Blue/Gold management tabs have empty queues with current Leadership access.
 - Confirm hidden backend rollback archives exist. They are automatically eligible for deletion after seven days.
 - Confirm Events Backend has the new term and the expected training-week sequence.
 - Confirm Directory AS-year advancement happened exactly once, role/flight/squadron are blank unless explicitly updated, and default ranks match AS year. AS500 remains GMC and resets to `C/3C`.
@@ -205,6 +210,7 @@ Likely causes:
 - Sheets advanced service unavailable, which prevents SHAMROCK from creating/updating Sheets API Table objects.
 - Data validation is applied as cell metadata through the Sheets API. Directory and Attendance copy validation-only metadata from the newest matching frontend archive to retain the proven validation UI/color treatment; a fresh workbook falls back to Data Legend-backed `ONE_OF_RANGE` rules. SHAMROCK does not use Sheets Table dropdown column types.
 - Attendance `Overall` and `LLAB` retain the archive summary gradient (red at 80%, amber at 90%, green at 100%); it is intentionally the only Attendance conditional-format color rule.
+- Attendance display headers are left-aligned, event/code cells use Plain text display, and `Overall`/`LLAB` percentage values are bold.
 
 Operator checks:
 - Re-run Sync Directory, Rebuild Attendance Matrix, Apply frontend formatting, or setup to reset table column types and recreate archive-style cell validation.

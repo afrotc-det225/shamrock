@@ -409,6 +409,7 @@ namespace FormHandlers {
 
 		// Send notifications and sync to management panel for each row
 		rows.forEach((row) => {
+			ExcusalsService.auditExcusalSubmission(row);
 			ExcusalsService.notifySquadronCommanderOfNewExcusal(row);
 			ExcusalsService.syncExcusalToManagementPanel(row);
 			ExcusalsService.updateAttendanceOnExcusalSubmission(row);

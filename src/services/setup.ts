@@ -1152,6 +1152,7 @@ namespace SetupService {
 
       SheetUtils.appendRows(backendSheet, toAppend);
       toSync.forEach((row) => {
+        ExcusalsService.auditExcusalSubmission(row);
         ExcusalsService.notifySquadronCommanderOfNewExcusal(row);
         ExcusalsService.syncExcusalToManagementPanel(row);
         ExcusalsService.updateAttendanceOnExcusalSubmission(row);
@@ -1595,6 +1596,33 @@ namespace SetupService {
     ScriptApp.newTrigger(handlerName).timeBased().onWeekDay(weekDay).atHour(hour).create();
   }
 
+  function ensureDailyTimeTrigger(handlerName: string, hour: number) {
+    const triggers = ScriptApp.getProjectTriggers();
+    const exists = triggers.some((t) => t.getHandlerFunction() === handlerName && t.getTriggerSource() === ScriptApp.TriggerSource.CLOCK);
+    if (exists) return;
+    Log.info(`Creating daily time trigger handler=${handlerName} hour=${hour}`);
+    ScriptApp.newTrigger(handlerName).timeBased().everyDays(1).atHour(hour).create();
+  }
+
+  function installCanonicalAttendanceNotificationTriggers() {
+    const legacyNotificationHandlers = new Set([
+      'sendWeeklyUnexcusedSummary',
+      'sendWeeklyMandoExcusedSummary',
+      'sendWeeklyLlabExcusedSummary',
+    ]);
+    ScriptApp.getProjectTriggers().forEach((trigger) => {
+      if (trigger.getTriggerSource() !== ScriptApp.TriggerSource.CLOCK) return;
+      if (!legacyNotificationHandlers.has(trigger.getHandlerFunction())) return;
+      try {
+        ScriptApp.deleteTrigger(trigger);
+      } catch (err) {
+        Log.warn(`Unable to remove stale attendance notification trigger ${trigger.getHandlerFunction()}: ${err}`);
+      }
+    });
+    ensureDailyTimeTrigger('sendDailyEventAttendanceNotices', 5);
+    ensureTimeTrigger('sendSundayAttendanceCloseout', ScriptApp.WeekDay.SUNDAY, 17);
+  }
+
   function ensurePeriodicTrigger(handlerName: string, intervalMinutes: number) {
     const triggers = ScriptApp.getProjectTriggers();
     const exists = triggers.some((t) => t.getHandlerFunction() === handlerName && t.getTriggerSource() === ScriptApp.TriggerSource.CLOCK);
@@ -1632,12 +1660,11 @@ namespace SetupService {
       }
     });
 
-    // Recreate spreadsheet triggers. Frontend onOpen is intentionally a no-op;
-    // backend onOpen adds the admin menu for anyone with access to that sheet.
+    // Recreate functional spreadsheet triggers. Frontend onOpen is intentionally
+    // omitted; backend onOpen adds the admin menu for anyone with access.
     const frontendId = Config.getFrontendId();
     const backendId = Config.getBackendId();
     const managementId = Config.getScriptProperty(Config.PROPERTY_KEYS.EXCUSAL_MANAGEMENT_SPREADSHEET_ID);
-    ensureSpreadsheetTrigger('onFrontendOpen', frontendId, 'open');
     ensureSpreadsheetTrigger('onFrontendEdit', frontendId, 'edit');
     ensureSpreadsheetTrigger('onBackendOpen', backendId, 'open');
     ensureSpreadsheetTrigger('onBackendEdit', backendId, 'edit');
@@ -1661,10 +1688,10 @@ namespace SetupService {
     if (directoryFormId) ensureFormTrigger('onDirectoryFormSubmit', directoryFormId);
     else Log.warn(`${Config.PROPERTY_KEYS.CADET_DIRECTORY_FORM_ID} missing; cannot reinstall directory form trigger. Run setup first.`);
 
-    // Time-driven reminders
-    ensureTimeTrigger('sendWeeklyMandoExcusedSummary', ScriptApp.WeekDay.THURSDAY, 5);
-    ensureTimeTrigger('sendWeeklyLlabExcusedSummary', ScriptApp.WeekDay.TUESDAY, 12);
-    ensureTimeTrigger('sendWeeklyUnexcusedSummary', ScriptApp.WeekDay.SUNDAY, 19);
+    // Event-aware notices: the daily dispatcher sends only when Events Backend
+    // has an active Mando PT/LLAB event that day. Sunday closeout likewise
+    // skips weeks with no active events.
+    installCanonicalAttendanceNotificationTriggers();
     ProgressService.report({
       title: 'Supported triggers installed',
       detail: 'Form, workbook, reconciliation, cleanup, and weekly notification automations now point to current resources.',
@@ -3143,16 +3170,18 @@ namespace SetupService {
     reorderFrontendSheets();
     reorderBackendSheets();
 
-    // Install spreadsheet triggers. Frontend onOpen is intentionally a no-op;
-    // backend onOpen adds the admin menu for anyone with access to that sheet.
-    ensureSpreadsheetTrigger('onFrontendOpen', frontend.id, 'open');
+    // Install only functional spreadsheet triggers. The frontend open handler is
+    // intentionally a no-op and therefore does not need an installable trigger.
     ensureSpreadsheetTrigger('onFrontendEdit', frontend.id, 'edit');
     ensureSpreadsheetTrigger('onBackendOpen', backend.id, 'open');
     ensureSpreadsheetTrigger('onBackendEdit', backend.id, 'edit');
+    const managementId = Config.getScriptProperty(Config.PROPERTY_KEYS.EXCUSAL_MANAGEMENT_SPREADSHEET_ID);
+    ensureSpreadsheetTrigger('onExcusalsManagementEdit', managementId, 'edit');
 
     // Time-based trigger: reconcile frontend Directory edits every 10 minutes (handles edits by unauthorized users).
     ensurePeriodicTrigger('reconcilePendingDirectoryEdits', 10);
     ensureDailyTrigger('cleanupExpiredTransitionArchivesV2');
+    installCanonicalAttendanceNotificationTriggers();
 
     Log.info(`Setup finished: spreadsheets=${spreadsheetResults.length}, sheets=${sheetResults.length}, forms=${formResults.length}`);
 

@@ -55,6 +55,24 @@ namespace Arrays {
   export const HONORIFICS = ['Mr.', 'Mrs.', 'Ms.', 'Miss', 'Mx.', 'Dr.', 'Prof.', 'Rev.', 'Fr.', 'Sister', 'Brother'];
   export const FLIGHTS = ['Alpha', 'Bravo', 'Charlie', 'Delta', 'Echo', 'Foxtrot', 'Abroad'];
   export const SQUADRONS = ['Blue', 'Gold', 'Abroad'];
+  export const OPERATIONAL_SQUADRONS = SQUADRONS.filter((squadron) => squadron !== 'Abroad');
+
+  function normalizeUnitRole(raw: any): string {
+    return String(raw || '')
+      .toLowerCase()
+      .replace(/&/g, ' and ')
+      .replace(/[^a-z0-9]+/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+
+  /** Returns the canonical operational squadron named by an exact commander role. */
+  export function getSquadronCommanderUnit(rawRole: any): string {
+    const normalizedRole = normalizeUnitRole(rawRole);
+    return OPERATIONAL_SQUADRONS.find(
+      (squadron) => normalizedRole === `${normalizeUnitRole(squadron)} squadron commander`,
+    ) || '';
+  }
   export const UNIVERSITIES = ['Notre Dame', "St. Mary's", 'Holy Cross', 'Trine', 'Valparaiso'];
   export const DORMS = [
     'Cross-Town',

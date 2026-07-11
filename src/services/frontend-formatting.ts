@@ -1571,16 +1571,12 @@ namespace FrontendFormattingService {
         .setHorizontalAlignment('center')
         .setFontWeight('bold');
     }
-    // Explicitly center LLAB/Overall data columns (not just percentages) to avoid left drift.
-    if (llabIdx >= 0) sheet.getRange(2, llabIdx + 1, dataRows + 1, 1).setHorizontalAlignment('center');
-    if (overallIdx >= 0) sheet.getRange(2, overallIdx + 1, dataRows + 1, 1).setHorizontalAlignment('center');
-
     // Percentage formats
     const formatPercent = (idx: number) => {
       if (idx >= 0) {
         const range = sheet.getRange(3, idx + 1, dataRows, 1);
         range.setNumberFormat('0.0%');
-        range.setHorizontalAlignment('center');
+        range.setHorizontalAlignment('center').setFontWeight('bold');
       }
     };
     formatPercent(llabIdx);
@@ -1666,7 +1662,7 @@ namespace FrontendFormattingService {
           },
           cell: {
             userEnteredFormat: {
-              horizontalAlignment: 'CENTER',
+              horizontalAlignment: 'LEFT',
               wrapStrategy: 'WRAP',
               textFormat: { bold: true, fontSize: 5 },
             },
@@ -1684,16 +1680,36 @@ namespace FrontendFormattingService {
           range: {
             sheetId: sheet.getSheetId(),
             startRowIndex: 1,
-            endRowIndex,
+            endRowIndex: 2,
             startColumnIndex: idx,
             endColumnIndex: idx + 1,
           },
           cell: {
-            userEnteredFormat: { horizontalAlignment: 'CENTER' },
+            userEnteredFormat: { horizontalAlignment: 'LEFT' },
           },
           fields: 'userEnteredFormat.horizontalAlignment',
         },
       });
+      if (endRowIndex > 2) {
+        requests.push({
+          repeatCell: {
+            range: {
+              sheetId: sheet.getSheetId(),
+              startRowIndex: 2,
+              endRowIndex,
+              startColumnIndex: idx,
+              endColumnIndex: idx + 1,
+            },
+            cell: {
+              userEnteredFormat: {
+                horizontalAlignment: 'CENTER',
+                textFormat: { bold: true },
+              },
+            },
+            fields: 'userEnteredFormat(horizontalAlignment,textFormat.bold)',
+          },
+        });
+      }
     });
 
     if (!requests.length) return;

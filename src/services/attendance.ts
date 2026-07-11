@@ -603,36 +603,38 @@ namespace AttendanceService {
     return d;
   }
 
-  function findEventForWeek(eventType: 'mando' | 'llab', now: Date) {
+  function isActiveScheduledEvent(row: Record<string, any>): boolean {
+    const status = String(row['status'] || '').trim().toLowerCase();
+    return !['cancelled', 'canceled', 'inactive', 'archived', 'n/a'].includes(status);
+  }
+
+  function findNoticeEventsForDay(now: Date) {
     const backendId = Config.getBackendId();
     const sheet = SheetUtils.getSheet(backendId, 'Events Backend');
-    if (!sheet) return null;
+    if (!sheet) return [];
 
     const table = SheetUtils.readTable(sheet);
-    const weekStart = startOfWeek(now);
-    const weekEnd = new Date(weekStart);
-    weekEnd.setDate(weekStart.getDate() + 7);
+    const dayStart = new Date(now);
+    dayStart.setHours(0, 0, 0, 0);
+    const dayEnd = new Date(dayStart);
+    dayEnd.setDate(dayStart.getDate() + 1);
 
-    const targetKey = eventType === 'mando' ? 'mando' : 'llab';
-    const matches: any[] = [];
+    const matches: Array<{ row: Record<string, any>; colName: string; start: Date; eventType: 'mando' | 'llab' }> = [];
     table.rows.forEach((row) => {
       const type = String(row['event_type'] || '').toLowerCase();
+      const eventType = type.includes('mando') ? 'mando' : type.includes('llab') ? 'llab' : null;
+      if (!eventType || !isActiveScheduledEvent(row)) return;
       const startRaw = row['start_datetime'];
       if (!startRaw) return;
       const start = new Date(startRaw);
       if (Number.isNaN(start.getTime())) return;
-      if (start < weekStart || start >= weekEnd) return;
-      if (!type.includes(targetKey)) return;
-      matches.push({ row, start });
+      if (start < dayStart || start >= dayEnd) return;
+      const colName = String(row['display_name'] || row['attendance_column_label'] || row['event_id'] || '').trim();
+      if (!colName) return;
+      matches.push({ row, colName, start, eventType });
     });
-
-    if (!matches.length) return null;
-
     matches.sort((a, b) => a.start.getTime() - b.start.getTime());
-    const chosen = matches[0].row;
-    const colName = chosen['display_name'] || chosen['attendance_column_label'] || chosen['event_id'] || '';
-    if (!colName) return null;
-    return { row: chosen, colName, start: matches[0].start };
+    return matches;
   }
 
   function formatDateTime(date: Date): string {
@@ -686,22 +688,63 @@ namespace AttendanceService {
     return deputy ? String(deputy['email'] || '').trim() : '';
   }
 
-  function sendExcusedSummaryEmails(eventType: 'mando' | 'llab') {
+  function operationalFlightRecipients(): Array<{ flight: string; to: string; cc: string }> {
+    return Arrays.FLIGHTS
+      .filter((flight) => flight !== 'Abroad')
+      .map((flight) => {
+        const commander = getFlightCommanderEmail(flight);
+        const deputy = getDeputyFlightCommanderEmail(flight);
+        return { flight, to: commander || deputy, cc: commander && deputy ? deputy : '' };
+      })
+      .filter((recipient) => !!recipient.to);
+  }
+
+  function flightIsInEventScope(flight: string, scopeRaw: any): boolean {
+    const scope = String(scopeRaw || '').trim().toLowerCase();
+    if (!scope || scope === 'all' || scope === 'all cadets') return true;
+    return scope
+      .split(/[,;/|]+/)
+      .map((part) => part.trim().replace(/\s+flight$/, ''))
+      .includes(flight.toLowerCase());
+  }
+
+  function readPendingRequestsForEvent(eventName: string) {
+    const backendId = Config.getBackendId();
+    const sheet = SheetUtils.getSheet(backendId, 'Excusals Backend');
+    if (!sheet) return new Map<string, Array<{ last: string; first: string; asYear: string; requestedOutcome: string }>>();
+
+    const directoryByEmail = new Map<string, string>();
+    readDirectory().forEach((row) => {
+      directoryByEmail.set(String(row['email'] || '').trim().toLowerCase(), String(row['as_year'] || '').trim());
+    });
+    const pendingByFlight = new Map<string, Array<{ last: string; first: string; asYear: string; requestedOutcome: string }>>();
+    SheetUtils.readTable(sheet).rows.forEach((row) => {
+      if (String(row['event'] || '').trim() !== eventName) return;
+      if (String(row['decision'] || '').trim()) return;
+      const flight = String(row['flight'] || '').trim();
+      if (!flight) return;
+      const list = pendingByFlight.get(flight) || [];
+      list.push({
+        last: String(row['last_name'] || ''),
+        first: String(row['first_name'] || ''),
+        asYear: directoryByEmail.get(String(row['email'] || '').trim().toLowerCase()) || '',
+        requestedOutcome: String(row['requested_outcome'] || 'E').trim().toUpperCase(),
+      });
+      pendingByFlight.set(flight, list);
+    });
+    return pendingByFlight;
+  }
+
+  function sendEventAttendanceNotice(eventInfo: { row: Record<string, any>; colName: string; start: Date; eventType: 'mando' | 'llab' }) {
     const backendId = Config.getBackendId();
     if (!backendId) {
-      Log.warn('Cannot send excused summary: backend ID missing');
-      return;
-    }
-
-    const eventInfo = findEventForWeek(eventType, new Date());
-    if (!eventInfo) {
-      Log.warn(`No ${eventType} event found for this week; skipping excused summary email.`);
+      Log.warn('Cannot send event attendance notice: backend ID missing');
       return;
     }
 
     const matrixSheet = SheetUtils.getSheet(backendId, 'Attendance Matrix Backend');
     if (!matrixSheet) {
-      Log.warn('Attendance Matrix Backend not found; cannot send excused summary');
+      Log.warn('Attendance Matrix Backend not found; cannot send event attendance notice');
       return;
     }
 
@@ -732,49 +775,51 @@ namespace AttendanceService {
       excusedByFlight.set(flight, list);
     });
 
-    const friendly = eventType === 'mando' ? 'Mando PT' : 'LLAB';
+    const pendingByFlight = readPendingRequestsForEvent(eventInfo.colName);
+    const friendly = eventInfo.eventType === 'mando' ? 'Mando PT' : 'LLAB';
     const eventLabel = eventInfo.row['display_name'] || eventInfo.row['attendance_column_label'] || eventInfo.row['event_id'];
     const startStr = eventInfo.start ? formatDateTime(eventInfo.start) : 'this week';
 
-    excusedByFlight.forEach((cadets, flight) => {
-      const commanderEmail = getFlightCommanderEmail(flight);
-      if (!commanderEmail) {
-        Log.warn(`Cannot notify ${flight} flight: commander email not found`);
-        return;
-      }
+    operationalFlightRecipients()
+      .filter(({ flight }) => flightIsInEventScope(flight, eventInfo.row['flight_scope']))
+      .forEach(({ flight, to, cc }) => {
+        const cadets = excusedByFlight.get(flight) || [];
+        const pending = pendingByFlight.get(flight) || [];
+        const commanderRow = SheetUtils.lookupRowByEmail(Config.getBackendId(), 'Leadership Backend', to);
+        const commanderLast = String((commanderRow as any)?.['last_name'] || '');
+        const greeting = greetingForRecipient(commanderLast);
 
-      const deputyEmail = getDeputyFlightCommanderEmail(flight);
+        const excusedLines = cadets
+          .map((c) => `${c.last}, ${c.first} (${c.asYear || 'AS?'})`)
+          .sort();
+        const pendingLines = pending
+          .map((c) => `${c.last}, ${c.first} (${c.asYear || 'AS?'}) – requested ${c.requestedOutcome}`)
+          .sort();
+        const sections: string[] = [];
+        sections.push(excusedLines.length ? `Approved excusals:\n- ${excusedLines.join('\n- ')}` : 'Approved excusals: none');
+        sections.push(pendingLines.length ? `Pending excusal requests:\n- ${pendingLines.join('\n- ')}` : 'Pending excusal requests: none');
+        const allClear = excusedLines.length === 0 && pendingLines.length === 0;
+        const body = `${greeting}\n\n${friendly} attendance status for ${eventLabel} (${startStr}):\n\n${sections.join('\n\n')}\n\n${allClear ? 'No attendance exceptions are currently recorded; all cadets are expected to be present.' : 'Please account for pending requests when preparing for the event.'}\n\n${EMAIL_SIGNATURE}`;
 
-      const commanderRow = SheetUtils.lookupRowByEmail(Config.getBackendId(), 'Leadership Backend', commanderEmail);
-      const commanderLast = String((commanderRow as any)?.['last_name'] || '');
-      const greeting = greetingForRecipient(commanderLast);
-
-      const lines = cadets
-        .map((c) => `${c.last}, ${c.first} (${c.asYear || 'AS?'})`)
-        .sort();
-      const hasCadets = lines.length > 0;
-      const body = hasCadets
-        ? `${greeting}\n\nExcused cadets for ${friendly} this week (${eventLabel}, ${startStr}):\n- ${lines.join('\n- ')}\n\nIf a cadet will attend despite being excused, coordinate directly.\n\n${EMAIL_SIGNATURE}`
-        : `${greeting}\n\nNo cadets are excused for ${friendly} this week (${eventLabel}). All cadets are expected to be present.\n\n${EMAIL_SIGNATURE}`;
-
-      const subject = `Excused cadets for ${friendly} (${eventLabel})`;
-      const emailOpts: GoogleAppsScript.Gmail.GmailAdvancedOptions = { name: 'SHAMROCK Automations' };
-      if (deputyEmail) emailOpts.cc = deputyEmail;
-      try {
-        GmailApp.sendEmail(commanderEmail, subject, body, emailOpts);
-        Log.info(`Sent ${friendly} excused summary to ${commanderEmail}${deputyEmail ? ` (cc: ${deputyEmail})` : ''} for flight ${flight}`);
-      } catch (err) {
-        Log.warn(`Failed to send ${friendly} excused summary to ${commanderEmail}: ${err}`);
-      }
-    });
+        const subject = `${friendly} attendance status (${eventLabel})`;
+        const emailOpts: GoogleAppsScript.Gmail.GmailAdvancedOptions = { name: 'SHAMROCK Automations' };
+        if (cc) emailOpts.cc = cc;
+        try {
+          GmailApp.sendEmail(to, subject, body, emailOpts);
+          Log.info(`Sent ${friendly} attendance notice to flight ${flight}`);
+        } catch (err) {
+          Log.warn(`Failed to send ${friendly} attendance notice for flight ${flight}: ${err}`);
+        }
+      });
   }
 
-  export function sendWeeklyMandoExcusedSummary() {
-    sendExcusedSummaryEmails('mando');
-  }
-
-  export function sendWeeklyLlabExcusedSummary() {
-    sendExcusedSummaryEmails('llab');
+  export function sendDailyEventAttendanceNotices() {
+    const events = findNoticeEventsForDay(new Date());
+    if (!events.length) {
+      Log.info('No active Mando PT or LLAB event occurs today; no attendance notice is needed.');
+      return;
+    }
+    events.forEach(sendEventAttendanceNotice);
   }
 
   export function fillUnexcusedAndNotify() {
@@ -813,24 +858,25 @@ namespace AttendanceService {
     const backendEvents = SheetUtils.getSheet(backendId, 'Events Backend');
     if (!backendEvents) return;
     const eventsTable = SheetUtils.readTable(backendEvents);
-    const weekEventNames = new Set<string>();
+    const weekEventsByName = new Map<string, Record<string, any>>();
     eventsTable.rows.forEach((row) => {
+      if (!isActiveScheduledEvent(row)) return;
       const startRaw = row['start_datetime'];
       if (!startRaw) return;
       const start = new Date(startRaw);
       if (Number.isNaN(start.getTime())) return;
       if (start < lastWeekStart || start >= weekEnd) return;
       const name = row['display_name'] || row['attendance_column_label'] || row['event_id'];
-      if (name) weekEventNames.add(String(name));
+      if (name) weekEventsByName.set(String(name), row);
     });
-    if (weekEventNames.size === 0) {
+    if (weekEventsByName.size === 0) {
       Log.warn('No events found for this training week; skipping unexcused fill.');
       return;
     }
 
     const eventColIndexes = headers
       .map((h, idx) => ({ h, idx }))
-      .filter((p) => weekEventNames.has(p.h))
+      .filter((p) => weekEventsByName.has(p.h))
       .map((p) => p.idx);
 
     if (eventColIndexes.length === 0) {
@@ -844,7 +890,10 @@ namespace AttendanceService {
 
     eventColIndexes.forEach((colIdx) => {
       const colOffset = colIdx; // zero-based in array, but range uses 1-based later
+      const scopedEvent = weekEventsByName.get(headers[colIdx]);
       for (let r = 0; r < data.length; r++) {
+        const flight = baseHeaderIdx.flight >= 0 ? String(data[r][baseHeaderIdx.flight] || '').trim() : '';
+        if (scopedEvent && (!flight || !flightIsInEventScope(flight, scopedEvent['flight_scope']))) continue;
         const cell = String(data[r][colOffset] || '').trim();
         if (cell && cell !== 'D') continue; // Only fill if empty or denied-before-event.
         
@@ -871,16 +920,6 @@ namespace AttendanceService {
             (baseHeaderIdx.first >= 0 ? String(data[r][baseHeaderIdx.first] || '') : ''),
         });
         
-        const flight = baseHeaderIdx.flight >= 0 ? String(data[r][baseHeaderIdx.flight] || '').trim() : '';
-        if (!flight) continue;
-        const list = unexcusedByFlight.get(flight) || [];
-        list.push({
-          last: baseHeaderIdx.last >= 0 ? String(data[r][baseHeaderIdx.last] || '') : '',
-          first: baseHeaderIdx.first >= 0 ? String(data[r][baseHeaderIdx.first] || '') : '',
-          asYear: baseHeaderIdx.asYear >= 0 ? String(data[r][baseHeaderIdx.asYear] || '') : '',
-          event: headers[colIdx] || '',
-        });
-        unexcusedByFlight.set(flight, list);
       }
     });
 
@@ -895,42 +934,58 @@ namespace AttendanceService {
       });
     }
 
+    // Report every unresolved/final unexcused result for the week, including
+    // A/U values that already existed before this closeout run.
+    eventColIndexes.forEach((colIdx) => {
+      for (let r = 0; r < data.length; r++) {
+        const code = String(data[r][colIdx] || '').trim().toUpperCase();
+        if (code !== 'A' && code !== 'U') continue;
+        const flight = baseHeaderIdx.flight >= 0 ? String(data[r][baseHeaderIdx.flight] || '').trim() : '';
+        if (!flight) continue;
+        const event = weekEventsByName.get(headers[colIdx]);
+        if (event && !flightIsInEventScope(flight, event['flight_scope'])) continue;
+        const list = unexcusedByFlight.get(flight) || [];
+        list.push({
+          last: baseHeaderIdx.last >= 0 ? String(data[r][baseHeaderIdx.last] || '') : '',
+          first: baseHeaderIdx.first >= 0 ? String(data[r][baseHeaderIdx.first] || '') : '',
+          asYear: baseHeaderIdx.asYear >= 0 ? String(data[r][baseHeaderIdx.asYear] || '') : '',
+          event: headers[colIdx] || '',
+        });
+        unexcusedByFlight.set(flight, list);
+      }
+    });
+
     const tz = Session.getScriptTimeZone ? Session.getScriptTimeZone() : 'America/Chicago';
     const weekLabel = Utilities.formatDate(lastWeekStart, tz, 'MMM d');
 
-    unexcusedByFlight.forEach((items, flight) => {
-      const commanderEmail = getFlightCommanderEmail(flight);
-      if (!commanderEmail) {
-        Log.warn(`Cannot notify ${flight} flight: commander email not found`);
-        return;
-      }
+    operationalFlightRecipients()
+      .filter(({ flight }) => Array.from(weekEventsByName.values()).some((event) => flightIsInEventScope(flight, event['flight_scope'])))
+      .forEach(({ flight, to, cc }) => {
+        const items = unexcusedByFlight.get(flight) || [];
+        const commanderRow = SheetUtils.lookupRowByEmail(backendId, 'Leadership Backend', to);
+        const commanderLast = String((commanderRow as any)?.['last_name'] || '');
+        const greeting = greetingForRecipient(commanderLast);
 
-      const deputyEmail = getDeputyFlightCommanderEmail(flight);
+        const lines = items
+          .map((i) => `${i.last}, ${i.first} (${i.asYear || 'AS?'}) – ${i.event}`)
+          .sort();
+        const hasIssues = lines.length > 0;
+        const body = hasIssues
+          ? `${greeting}\n\nAttendance issues requiring follow-up this week (week of ${weekLabel}):\n- ${lines.join('\n- ')}\n\nA means absent with no resolved request. U means the absence is final unexcused.\n\n${EMAIL_SIGNATURE}`
+          : `${greeting}\n\nYour flight has perfect attendance for this week. Well done.\n\n${EMAIL_SIGNATURE}`;
 
-      const commanderRow = SheetUtils.lookupRowByEmail(backendId, 'Leadership Backend', commanderEmail);
-      const commanderLast = String((commanderRow as any)?.['last_name'] || '');
-      const greeting = greetingForRecipient(commanderLast);
+        const subject = hasIssues
+          ? `Attendance follow-up – week of ${weekLabel}`
+          : `Perfect attendance – week of ${weekLabel}`;
 
-      const lines = items
-        .map((i) => `${i.last}, ${i.first} (${i.asYear || 'AS?'}) – ${i.event}`)
-        .sort();
-      const hasIssues = lines.length > 0;
-      const body = hasIssues
-        ? `${greeting}\n\nAttendance issues requiring follow-up this week (week of ${weekLabel}):\n- ${lines.join('\n- ')}\n\nA means absent with no resolved request. U means the absence is final unexcused.\n\n${EMAIL_SIGNATURE}`
-        : `${greeting}\n\nYour flight has perfect attendance for this week. Well done.\n\n${EMAIL_SIGNATURE}`;
-
-      const subject = hasIssues
-        ? `Attendance follow-up – week of ${weekLabel}`
-        : `Perfect attendance – week of ${weekLabel}`;
-
-      const emailOpts: GoogleAppsScript.Gmail.GmailAdvancedOptions = { name: 'SHAMROCK Automations' };
-      if (deputyEmail) emailOpts.cc = deputyEmail;
-      try {
-        GmailApp.sendEmail(commanderEmail, subject, body, emailOpts);
-        Log.info(`Sent weekly unexcused summary to ${commanderEmail}${deputyEmail ? ` (cc: ${deputyEmail})` : ''} for flight ${flight}`);
-      } catch (err) {
-        Log.warn(`Failed to send weekly unexcused summary to ${commanderEmail}: ${err}`);
-      }
-    });
+        const emailOpts: GoogleAppsScript.Gmail.GmailAdvancedOptions = { name: 'SHAMROCK Automations' };
+        if (cc) emailOpts.cc = cc;
+        try {
+          GmailApp.sendEmail(to, subject, body, emailOpts);
+          Log.info(`Sent weekly attendance closeout to flight ${flight}`);
+        } catch (err) {
+          Log.warn(`Failed to send weekly attendance closeout for flight ${flight}: ${err}`);
+        }
+      });
   }
 }

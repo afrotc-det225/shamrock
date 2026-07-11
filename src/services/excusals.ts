@@ -6,6 +6,15 @@ namespace ExcusalsService {
   const REQUESTED_OUTCOMES = new Set(['P', 'T', 'E', 'ES', 'MED']);
   const ATTENDANCE_CODES = new Set(['P', 'T', 'A', 'R', 'D', 'U', 'E', 'ES', 'MED', 'N/A', '']);
 
+  function canonicalFlightLeadershipRoles(): Set<string> {
+    const roles = new Set<string>();
+    Arrays.FLIGHTS.forEach((flight) => {
+      roles.add(`${flight} Flight Commander`.toLowerCase());
+      roles.add(`${flight} Deputy Flight Commander`.toLowerCase());
+    });
+    return roles;
+  }
+
   function normalizeRequestedOutcome(raw: any): string {
     const value = String(raw || '').trim().toUpperCase();
     return REQUESTED_OUTCOMES.has(value) ? value : 'E';
@@ -170,14 +179,13 @@ SHAMROCK Automations`;
     const table = SheetUtils.readTable(leadershipSheet);
     const squadronNormalized = squadron.toLowerCase().trim();
 
-    const commander = table.rows.find((row) => {
-      const role = String(row['role'] || '').toLowerCase().trim();
-      const roleIncludesSquadron = Arrays.SQUADRONS.some((sq) => {
-        const sqLower = sq.toLowerCase();
-        return role.includes(sqLower) && squadronNormalized === sqLower;
-      });
-      return role.includes('squadron commander') && roleIncludesSquadron;
-    });
+    if (!Arrays.OPERATIONAL_SQUADRONS.some((value) => value.toLowerCase() === squadronNormalized)) {
+      return '';
+    }
+
+    const commander = table.rows.find((row) =>
+      Arrays.getSquadronCommanderUnit(row['role']).toLowerCase() === squadronNormalized,
+    );
 
     return commander ? String(commander['email'] || '') : '';
   }
@@ -207,7 +215,7 @@ SHAMROCK Automations`;
       try {
         const ss = SpreadsheetApp.openById(existingId);
         // Ensure squadron sheets exist and are initialized even if spreadsheet already exists.
-        const squadrons = Arrays.SQUADRONS.filter((s) => s !== 'Abroad');
+        const squadrons = Arrays.OPERATIONAL_SQUADRONS;
         squadrons.forEach((squadron) => {
           let sheet = ss.getSheetByName(squadron);
           if (!sheet) {
@@ -229,7 +237,7 @@ SHAMROCK Automations`;
 
     // Create squadron sheets first (before deleting default)
     // Use squadrons from canonical Arrays, excluding 'Abroad'
-    const squadrons = Arrays.SQUADRONS.filter((s) => s !== 'Abroad');
+    const squadrons = Arrays.OPERATIONAL_SQUADRONS;
     squadrons.forEach((squadron) => {
       const sheet = ss.insertSheet(squadron);
       initializeSquadronManagementSheet(sheet, squadron);
@@ -291,12 +299,16 @@ SHAMROCK Automations`;
     sheet.setColumnWidth(9, 80);   // flight
     sheet.setColumnWidth(10, 120); // request_id
 
+    // Requested outcome is a short code and is displayed as the operator-facing Type.
+    sheet.getRange(3, 5, Math.max(1, sheet.getMaxRows() - 2), 1).setHorizontalAlignment('center');
+
     // Freeze first two rows (machine headers + display headers)
     sheet.setFrozenRows(2);
 
     // Add data validation for Decision column (col 2, starting at row 3 since row 2 is frozen)
     const decisionRule = SpreadsheetApp.newDataValidation()
       .requireValueInList(DECISION_VALUES)
+      .setAllowInvalid(false)
       .setHelpText('Select Approved, Denied, Withdrawn, or Superseded')
       .build();
     sheet.getRange('B3:B').setDataValidation(decisionRule);
@@ -362,6 +374,8 @@ SHAMROCK Automations`;
       ];
 
       sheet.getRange(nextRow, 1, 1, rowData.length).setValues([rowData]);
+      const typeColumn = machineHeaders.indexOf('requested_outcome') + 1;
+      if (typeColumn > 0) sheet.getRange(nextRow, typeColumn).setHorizontalAlignment('center');
 
       // Trim extra rows and columns, then sort by Timestamp (descending)
       trimAndSortManagementSheet(sheet);
@@ -385,16 +399,18 @@ SHAMROCK Automations`;
       const decisionIdx = headers.indexOf('decision');
       if (requestIdx < 0 || decisionIdx < 0) return;
 
-      ss.getSheets().forEach((sheet) => {
-        const lastRow = sheet.getLastRow();
-        if (lastRow < 3) return;
-        const values = sheet.getRange(3, 1, lastRow - 2, headers.length).getValues();
-        for (let i = 0; i < values.length; i++) {
-          if (String(values[i][requestIdx] || '').trim() !== requestId) continue;
-          sheet.getRange(i + 3, decisionIdx + 1).setValue(decision);
-          return;
-        }
-      });
+      ss.getSheets()
+        .filter((sheet) => Arrays.OPERATIONAL_SQUADRONS.includes(sheet.getName()))
+        .forEach((sheet) => {
+          const lastRow = sheet.getLastRow();
+          if (lastRow < 3) return;
+          const values = sheet.getRange(3, 1, lastRow - 2, headers.length).getValues();
+          for (let i = 0; i < values.length; i++) {
+            if (String(values[i][requestIdx] || '').trim() !== requestId) continue;
+            sheet.getRange(i + 3, decisionIdx + 1).setValue(decision);
+            return;
+          }
+        });
     } catch (err) {
       Log.warn(`Failed to mirror backend decision ${requestId} to management panel: ${err}`);
     }
@@ -436,7 +452,7 @@ SHAMROCK Automations`;
     if (managementId) {
       try {
         const ss = SpreadsheetApp.openById(managementId);
-        const sheets = ss.getSheets();
+        const sheets = ss.getSheets().filter((sheet) => Arrays.OPERATIONAL_SQUADRONS.includes(sheet.getName()));
         for (const sheet of sheets) {
           const lastRow = sheet.getLastRow();
           if (lastRow < 3) continue; // headers only
@@ -589,7 +605,7 @@ SHAMROCK Automations`;
 
     try {
       const ss = SpreadsheetApp.openById(managementId);
-      const sheets = ss.getSheets();
+      const sheets = ss.getSheets().filter((sheet) => Arrays.OPERATIONAL_SQUADRONS.includes(sheet.getName()));
 
       for (const sheet of sheets) {
         // Ensure sheet has enough columns for new schema
@@ -601,6 +617,9 @@ SHAMROCK Automations`;
         // Refresh headers to match current schema
         sheet.getRange(1, 1, 1, machineHeaders.length).setValues([machineHeaders]);
         sheet.getRange(2, 1, 1, displayHeaders.length).setValues([displayHeaders]);
+        sheet
+          .getRange(3, reqTypeColIdx + 1, Math.max(1, sheet.getMaxRows() - 2), 1)
+          .setHorizontalAlignment('center');
 
         const lastRow = sheet.getLastRow();
         if (lastRow < 3) continue;
@@ -702,13 +721,19 @@ SHAMROCK Automations`;
 
     try {
       const ss = SpreadsheetApp.openById(managementId);
+      try {
+        DriveApp.getFileById(managementId).setSharing(DriveApp.Access.PRIVATE, DriveApp.Permission.NONE);
+      } catch (err) {
+        Log.warn(`Unable to enforce private link/domain sharing on the Excusals management workbook: ${err}`);
+      }
       const backendId = Config.getBackendId();
       if (!backendId) {
         Log.warn('Cannot share management spreadsheet: backend ID missing');
         return;
       }
 
-      // Get squadron and flight commander emails from Leadership Backend
+      // Squadron commanders are workbook editors. Flight commanders and deputies
+      // are viewers so they can monitor excusals without changing decisions.
       const leadershipSheet = SheetUtils.getSheet(backendId, 'Leadership Backend');
       if (!leadershipSheet) {
         Log.warn('Cannot share management spreadsheet: Leadership Backend not found');
@@ -716,34 +741,62 @@ SHAMROCK Automations`;
       }
 
       const table = SheetUtils.readTable(leadershipSheet);
-      const commanderEmails = new Set<string>();
+      const squadronEditorEmails = new Set<string>();
+      const flightViewerEmails = new Set<string>();
+      const flightRoles = canonicalFlightLeadershipRoles();
       table.rows.forEach((row) => {
         const role = String(row['role'] || '').toLowerCase().trim();
-        const email = String(row['email'] || '').trim();
-        if ((role.includes('squadron commander') || role.includes('flight commander')) && email) {
-          commanderEmails.add(email);
+        const email = String(row['email'] || '').trim().toLowerCase();
+        if (!email) return;
+        if (Arrays.getSquadronCommanderUnit(role)) squadronEditorEmails.add(email);
+        else if (flightRoles.has(role)) flightViewerEmails.add(email);
+      });
+
+      // An editor cannot simultaneously be a viewer.
+      squadronEditorEmails.forEach((email) => flightViewerEmails.delete(email));
+
+      const ownerEmail = (() => {
+        try { return String(ss.getOwner()?.getEmail() || '').trim().toLowerCase(); } catch { return ''; }
+      })();
+      const intendedEditors = new Set(squadronEditorEmails);
+      if (ownerEmail) intendedEditors.add(ownerEmail);
+
+      // Remove stale role-based access before applying current Leadership state.
+      ss.getEditors().forEach((user) => {
+        const email = String(user.getEmail() || '').trim().toLowerCase();
+        if (email && !intendedEditors.has(email)) {
+          try { ss.removeEditor(email); } catch (err) { Log.warn(`Failed to remove stale management editor ${email}: ${err}`); }
+        }
+      });
+      ss.getViewers().forEach((user) => {
+        const email = String(user.getEmail() || '').trim().toLowerCase();
+        if (email && !flightViewerEmails.has(email)) {
+          try { ss.removeViewer(email); } catch (err) { Log.warn(`Failed to remove stale management viewer ${email}: ${err}`); }
         }
       });
 
-      if (commanderEmails.size === 0) {
-        Log.warn('No squadron or flight commanders found in Leadership Backend');
-        return;
-      }
-
-      // Share spreadsheet with all commanders
-      const editorsArray = Array.from(commanderEmails);
-      editorsArray.forEach((email) => {
+      squadronEditorEmails.forEach((email) => {
         try {
           ss.addEditor(email);
         } catch (err) {
           Log.warn(`Failed to add editor ${email}: ${err}`);
         }
       });
+      flightViewerEmails.forEach((email) => {
+        try {
+          ss.addViewer(email);
+        } catch (err) {
+          Log.warn(`Failed to add viewer ${email}: ${err}`);
+        }
+      });
 
       // Apply range protections: each squadron sheet editable only by its commander
       applyManagementSheetProtections(ss);
 
-      Log.info(`Shared management spreadsheet with ${editorsArray.length} commanders and applied protections`);
+      Log.info(
+        `Management access refreshed: ${squadronEditorEmails.size} squadron commander editor(s), `
+        + `${flightViewerEmails.size} flight leadership viewer(s)`,
+      );
     } catch (err) {
       Log.warn(`Failed to share and protect management spreadsheet: ${err}`);
     }
@@ -780,7 +833,10 @@ SHAMROCK Automations`;
       const rowData = table.rows[row - 3]; // data starts on sheet row 3
       if (!rowData) return;
 
-      const oldDecision = String(rowData['decision'] || '').trim();
+      // The sheet row already contains the new value by the time onEdit runs.
+      // Use the event's oldValue so reconsiderations are audited and messaged correctly.
+      const oldDecision = String((e as any)?.oldValue ?? '').trim();
+      if (oldDecision === newValue) return;
       const requestId = String(rowData['request_id'] || '').trim();
       const cadetEmail = String(rowData['email'] || '').trim();
       const eventName = String(rowData['event'] || '').trim();
@@ -837,8 +893,32 @@ SHAMROCK Automations`;
       });
 
       Log.info(`Excusal decision recorded: row ${row} -> ${newValue}${isDecisionChange ? ` (changed from ${oldDecision})` : ''}`);
+      AuditService.log({
+        action: 'excusal_decision_recorded',
+        result: 'ok',
+        role: 'admin_operator',
+        targetSheet: 'Excusals Backend',
+        targetTable: 'Excusals Backend',
+        targetKey: requestId,
+        requestId,
+        field: 'decision',
+        oldValue: oldDecision,
+        newValue,
+        source: 'ExcusalsService.handleExcusalsBackendEdit',
+        metadata: { event: eventName, squadron, attendanceEffect },
+      });
     } catch (err) {
       Log.warn(`Failed to handle Excusals Backend edit: ${err}`);
+      AuditService.log({
+        action: 'excusal_decision_recorded',
+        result: 'failed',
+        role: 'admin_operator',
+        targetSheet: 'Excusals Backend',
+        field: 'decision',
+        newValue,
+        source: 'ExcusalsService.handleExcusalsBackendEdit',
+        error: err,
+      });
     }
   }
 
@@ -852,6 +932,7 @@ SHAMROCK Automations`;
     const range = e?.range;
     const sheet = range?.getSheet();
     if (!sheet || sheet.getParent().getId() !== mgmtId) return;
+    if (!Arrays.OPERATIONAL_SQUADRONS.includes(sheet.getName())) return;
 
     const row = range.getRow();
     const col = range.getColumn();
@@ -915,6 +996,7 @@ SHAMROCK Automations`;
 
     const rowNumber = targetRow + 3; // account for two header rows
     const oldDecision = idx.decision >= 0 ? String(data[targetRow][idx.decision] || '').trim() : '';
+    if (oldDecision === decision) return;
     const nowIso = new Date().toISOString();
     const activeEmail = currentUserEmail();
 
@@ -966,6 +1048,44 @@ SHAMROCK Automations`;
     Log.info(
       `Mirrored management decision for request ${requestId}: ${decision}${isDecisionChange ? ` (was ${oldDecision})` : ''}`,
     );
+    AuditService.log({
+      action: 'excusal_decision_recorded',
+      result: 'ok',
+      actorEmail: activeEmail || undefined,
+      role: 'squadron_commander',
+      targetSheet: 'Excusals Backend',
+      targetTable: 'Excusals Backend',
+      targetKey: requestId,
+      requestId,
+      field: 'decision',
+      oldValue: oldDecision,
+      newValue: decision,
+      source: 'ExcusalsService.handleExcusalsManagementEdit',
+      metadata: { event: eventName, squadron, attendanceEffect, managementSheet: sheet.getName() },
+    });
+  }
+
+  export function auditExcusalSubmission(excusalRow: Record<string, any>) {
+    const requestId = String(excusalRow['request_id'] || '').trim();
+    AuditService.log({
+      action: 'excusal_request_submitted',
+      result: 'ok',
+      actorEmail: String(excusalRow['email'] || '').trim().toLowerCase() || undefined,
+      role: 'cadet',
+      targetSheet: 'Excusals Backend',
+      targetTable: 'Excusals Backend',
+      targetKey: requestId,
+      requestId,
+      field: 'status',
+      oldValue: '',
+      newValue: 'Submitted',
+      source: 'ExcusalsService.auditExcusalSubmission',
+      metadata: {
+        event: String(excusalRow['event'] || ''),
+        squadron: String(excusalRow['squadron'] || ''),
+        requestedOutcome: String(excusalRow['requested_outcome'] || ''),
+      },
+    });
   }
 
   /**
@@ -1130,12 +1250,66 @@ C/${commanderLastName}`;
     return lookupMatrixValue(eventName, lastName, firstName);
   }
 
-  /**
-   * Apply sheet protections so commanders can only edit their own squadron sheet.
-   */
+  /** Archive current-term management rows into the admin workbook. */
+  export function archiveManagementSheets(archiveLabel: string, archiveKey: string): string[] {
+    const managementId = Config.getScriptProperty(Config.PROPERTY_KEYS.EXCUSAL_MANAGEMENT_SPREADSHEET_ID);
+    const backendId = Config.getBackendId();
+    if (!managementId || !backendId) return [];
+    const management = SpreadsheetApp.openById(managementId);
+    const archiveWorkbook = SpreadsheetApp.openById(backendId);
+    const archivedNames: string[] = [];
+    const safeLabel = String(archiveLabel || 'Previous Term').trim() || 'Previous Term';
+    const safeKey = String(archiveKey || 'archive').replace(/[^A-Za-z0-9_-]+/g, '').slice(0, 8) || 'archive';
+    const lockArchive = (sheet: GoogleAppsScript.Spreadsheet.Sheet, archiveName: string) => {
+      sheet.getProtections(SpreadsheetApp.ProtectionType.RANGE).forEach((protection) => {
+        try { protection.remove(); } catch {}
+      });
+      sheet.getProtections(SpreadsheetApp.ProtectionType.SHEET).forEach((protection) => {
+        try { protection.remove(); } catch {}
+      });
+      const protection = sheet.protect().setDescription(`${archiveName}: locked term archive`);
+      protection.setWarningOnly(false);
+      try { protection.removeEditors(protection.getEditors()); } catch {}
+      if (protection.canDomainEdit()) protection.setDomainEdit(false);
+      sheet.hideSheet();
+    };
+    Arrays.OPERATIONAL_SQUADRONS.forEach((squadron) => {
+      const source = management.getSheetByName(squadron);
+      if (!source || source.getLastRow() < 3) return;
+      const archiveName = `${safeLabel} ${squadron} Excusals ${safeKey}`;
+      const existing = archiveWorkbook.getSheetByName(archiveName);
+      if (existing) {
+        lockArchive(existing, archiveName);
+        archivedNames.push(archiveName);
+        return;
+      }
+      const archived = source.copyTo(archiveWorkbook).setName(archiveName);
+      lockArchive(archived, archiveName);
+      archivedNames.push(archiveName);
+    });
+    Log.info(`Archived ${archivedNames.length} Excusals management sheet(s) in the admin workbook for ${safeLabel}`);
+    return archivedNames;
+  }
+
+  /** Clear active management rows and refresh the sheets against current Leadership assignments. */
+  export function resetManagementForNewTerm() {
+    const managementId = ensureManagementSpreadsheet();
+    const ss = SpreadsheetApp.openById(managementId);
+    Arrays.OPERATIONAL_SQUADRONS.forEach((squadron) => {
+      const sheet = ss.getSheetByName(squadron);
+      if (!sheet) return;
+      const lastRow = sheet.getLastRow();
+      if (lastRow >= 3) sheet.getRange(3, 1, lastRow - 2, sheet.getMaxColumns()).clearContent();
+      initializeSquadronManagementSheet(sheet, squadron);
+    });
+    shareAndProtectManagementSpreadsheet();
+    Log.info('Reset active Excusals management sheets and refreshed current-term access');
+  }
+
+  /** Apply protections so only each squadron commander can edit Decision cells on their squadron tab. */
   function applyManagementSheetProtections(ss: GoogleAppsScript.Spreadsheet.Spreadsheet) {
     const sheets = ss.getSheets();
-    const squadrons = Arrays.SQUADRONS.filter((s) => s !== 'Abroad');
+    const squadrons = Arrays.OPERATIONAL_SQUADRONS;
 
     sheets.forEach((sheet) => {
       const sheetName = sheet.getName();
@@ -1153,42 +1327,55 @@ C/${commanderLastName}`;
         try { p.remove(); } catch {}
       });
 
-      // Protect header rows (1-2): no editors
+      // Protect header rows (1-2): owner/script only.
       const headerRange = sheet.getRange(1, 1, 2, lastCol);
       try {
         const headerProt = headerRange.protect().setDescription(`${sheetName}: Headers protected`);
         headerProt.setWarningOnly(false);
         try { headerProt.removeEditors(headerProt.getEditors()); } catch {}
+        if (headerProt.canDomainEdit()) headerProt.setDomainEdit(false);
       } catch (err) {
         Log.warn(`Failed to protect headers on ${sheetName}: ${err}`);
       }
 
-      // Protect data rows (from row 3 down): only squadron commander may edit
+      // Protect every data field except Decision. These fields are managed by SHAMROCK.
       const dataRowCount = Math.max(1, maxRows - 2);
       if (dataRowCount > 0) {
-        const dataRange = sheet.getRange(3, 1, dataRowCount, lastCol);
-        try {
-          const dataProt = dataRange.protect().setDescription(`${sheetName}: Data editable only by squadron commander`);
-          dataProt.setWarningOnly(false);
-          try { dataProt.removeEditors(dataProt.getEditors()); } catch {}
-          if (commanderEmail) {
-            try { dataProt.addEditor(commanderEmail); } catch (e) {
-              Log.warn(`Failed adding commander editor ${commanderEmail} on ${sheetName}: ${e}`);
-            }
-          } else {
-            Log.warn(`No commander email found for ${sheetName}; data will be owner-only`);
+        const decisionColumn = (Schemas.EXCUSALS_MANAGEMENT_SCHEMA.machineHeaders || []).indexOf('decision') + 1;
+        const managedRanges: GoogleAppsScript.Spreadsheet.Range[] = [];
+        if (decisionColumn > 1) managedRanges.push(sheet.getRange(3, 1, dataRowCount, decisionColumn - 1));
+        if (decisionColumn > 0 && decisionColumn < lastCol) {
+          managedRanges.push(sheet.getRange(3, decisionColumn + 1, dataRowCount, lastCol - decisionColumn));
+        }
+        managedRanges.forEach((range, index) => {
+          try {
+            const protection = range.protect().setDescription(`${sheetName}: Managed request fields ${index + 1}`);
+            protection.setWarningOnly(false);
+            try { protection.removeEditors(protection.getEditors()); } catch {}
+            if (protection.canDomainEdit()) protection.setDomainEdit(false);
+          } catch (err) {
+            Log.warn(`Failed to protect managed request fields on ${sheetName}: ${err}`);
           }
-          // Ensure owner also has edit access
-          const ownerEmail = currentUserEmail();
-          if (ownerEmail) {
-            try { dataProt.addEditor(ownerEmail); } catch {}
+        });
+
+        if (decisionColumn > 0) {
+          try {
+            const decisionProtection = sheet
+              .getRange(3, decisionColumn, dataRowCount, 1)
+              .protect()
+              .setDescription(`${sheetName}: Decisions editable only by squadron commander`);
+            decisionProtection.setWarningOnly(false);
+            try { decisionProtection.removeEditors(decisionProtection.getEditors()); } catch {}
+            if (decisionProtection.canDomainEdit()) decisionProtection.setDomainEdit(false);
+            if (commanderEmail) decisionProtection.addEditor(commanderEmail);
+            else Log.warn(`No commander email found for ${sheetName}; Decision cells will be owner-only`);
+          } catch (err) {
+            Log.warn(`Failed to protect Decision cells on ${sheetName}: ${err}`);
           }
-        } catch (err) {
-          Log.warn(`Failed to protect data range on ${sheetName}: ${err}`);
         }
       }
 
-      Log.info(`Applied range protections on ${sheetName}; commander=${commanderEmail || 'none'}`);
+      Log.info(`Applied Decision-only editing protections on ${sheetName}; commander=${commanderEmail || 'none'}`);
     });
   }
 }

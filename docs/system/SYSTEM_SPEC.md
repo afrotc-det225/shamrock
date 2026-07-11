@@ -68,13 +68,13 @@ Edits:
 ### 4.2 Backend Workbook
 The backend workbook is authoritative.
 
-- Directory, Events, Excusals are maintained in the backend and propagated forward to the frontend.
+- Directory and Events are maintained in the backend and propagated forward to the frontend. Excusals are maintained in Excusals Backend and the separate Excusals Management workbook.
 - Attendance is derived from backend logs and decisions.
 
 ### 4.3 Cadre & Leadership Ownership
 Default ownership model:
 - Directory Backend is the source of truth for cadet rank and cadet leadership roles.
-- Leadership Backend preserves non-cadet/cadre/manual leadership contacts and receives derived cadet leadership rows from Directory Backend only for command/advisor roles: wing commander, deputy wing commander, operations group commander/deputy, squadron commanders, flight commanders, deputy flight commanders, and senior/deputy GMC advisor.
+- Leadership Backend preserves non-cadet/cadre/manual leadership contacts and receives derived cadet leadership rows from Directory Backend only for command/advisor roles: wing commander, deputy wing commander, operations group commander/deputy, canonical operational squadron commanders, flight commanders, deputy flight commanders, and senior/deputy GMC advisor. Squadron commander classification is limited to the non-Abroad values in `Arrays.SQUADRONS` (currently Blue and Gold); titles such as Mission Support Squadron Commander are not squadron-command routing roles.
 - Every Leadership row whose identity exists in Directory Backend is replaceable derived state. A refresh removes those prior rows first, then republishes only operationally active cadets with a currently eligible role; commissioned, dropped, inactive, or reassigned cadets must not survive as stale manual rows.
 - Leadership rows sort non-cadet ranks and honorifics above cadet ranks, then by command hierarchy: wing commander, deputy wing commander, operations group, squadron commanders, flight commanders, deputy flight commanders, then advisor roles and remaining manual rows.
 - Leadership does not store separate `flight` or `squadron` columns. Flight and squadron commander routing derives unit ownership from role names such as `Alpha Flight Commander`, `Alpha Deputy Flight Commander`, or `Blue Squadron Commander`.
@@ -165,7 +165,7 @@ This section describes the current operational shape of the system so feature wo
 - Directory: cadet directory with AS year, flight, squadron, rank, role, contact, academic, and status fields (sorted by the canonical senior-to-junior display order, then A-Z by last name) with required formatting constraints. AS500 displays below AS300 and above AS250 because it remains a GMC year. The frontend and backend v2 Directory order begins `Last Name`, `First Name`, `Year`, `Flight`, `Sqdn`, `Rank`, `Role`, `University`.
 - Attendance: directory-synced cadet rows + event columns with attendance codes and percentage rollups.
 - Events: event metadata driving attendance columns and dashboard.
-- Excusals: public-facing excusal request log.
+- Excusals are not exposed as a frontend tab; the separate Excusals Management workbook is the commander-facing decision surface.
 - Audit/Changelog: append-only log of changes.
 - Data Legend: validation option ranges.
 - Data Legend, Dashboard Data, and every term-named frontend Leadership/Directory/Attendance archive must be fully protected and hidden whenever frontend protections are applied. The four working tabs remain visible.
@@ -217,6 +217,9 @@ Workflow summary:
 - Decision propagates to attendance computation.
 - Approved requests apply the requested outcome; denied requests become `D` before the event or `U` after the event unless the prior state proves the cadet attended.
 - Notifications are sent to appropriate leadership derived from Cadre & Leadership.
+- The Excusals Management workbook uses private link/domain sharing, grants edit access only to canonical operational squadron commanders, and grants view access to canonical flight commanders/deputies. Active tabs protect all fields except the owning squadron commander's Decision cells.
+- Semester/year transitions preserve management history as hidden, locked term-labeled tabs in the restricted backend/admin workbook, then reset active squadron queues and derive management-workbook access from refreshed Leadership assignments.
+- Excusal submissions and decisions append request-keyed Audit Backend rows; decision reconsiderations preserve the previous decision from the edit event.
 
 ## 10. Audit / Changelog Expectations
 Audit logging is required for key data mutations.
@@ -237,7 +240,7 @@ Required standards:
 - Keep Sheets Table column types unset. Prefer Data Legend-backed cell validation, number/date formats, widths, freezes, and protection over conditional formatting for frontend sheets.
 - Directory and Leadership shared columns use standard widths: last/first name `115`, year/flight/squadron/rank/class `75`, university/photo link `100`, phone `125`, dorm `150`, DOB `100`, and flight path `125`. Role, email, CIP broad area, AFSC, hometown, and home state fit to data. Directory Year, Rank, and University validations use plain-text display.
 - Attendance first and last name columns use `115` width.
-- Attendance event/code cells use plain-text number format, centered alignment, and bold text.
+- Attendance display headers are left-aligned. Event/code cells use plain-text number format, centered alignment, and bold text; `Overall` and `LLAB` percentage values remain centered, percentage-formatted, and bold.
 - Primary frontend table ranges should have cell borders cleared; use table fills, frozen headers, spacing, and selected non-table separators for readability.
 - Use smart chips for links where helpful.
 
@@ -254,6 +257,7 @@ Operators should not run scripts from the editor.
 - Trigger-driven functions do not open interactive progress UI because they have no waiting spreadsheet operator; they retain structured technical/audit logging.
 - Triggers should call stable, explicit entry points.
 - Trigger installation must be idempotent.
+- Attendance notification timing is driven by Events Backend rather than assumed semester weekdays. A daily 5:00 AM dispatcher sends Mando PT/LLAB status only for active events occurring that day, honors event flight scope, includes approved excusals and pending requests, and sends explicit all-clear results. The Sunday 5:00 PM closeout runs only when the preceding training week contained an active event and sends every applicable operational flight a discrepancy or no-discrepancy result.
 - v2 operator workflows that replace earlier behavior must use explicit v2 menu/global names. Current transition entry points are `transferToNewSemesterV2` and `transferToNewAcademicYearV2`.
 - Semester/year transitions must be interactive, auditable, archive-before-write, and resumable until the final confirmation.
 - After final confirmation, v2 transitions must also be phase-resumable. A retry must continue incomplete phases, not reapply Directory advancement from the already-mutated backend.

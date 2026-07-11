@@ -423,7 +423,7 @@ namespace Schemas {
   export const EXCUSALS_MANAGEMENT_SCHEMA: Types.TabSchema = {
     name: 'Excusals Management',
     machineHeaders: ['timestamp', 'decision', 'event', 'reason', 'requested_outcome', 'email', 'last_name', 'first_name', 'flight', 'request_id'],
-    displayHeaders: ['Timestamp', 'Decision', 'Event', 'Reason', 'Requested Outcome', 'Email', 'Last Name', 'First Name', 'Flight', 'Request ID'],
+    displayHeaders: ['Timestamp', 'Decision', 'Event', 'Reason', 'Type', 'Email', 'Last Name', 'First Name', 'Flight', 'Request ID'],
   };
 
   export function getTabSchema(name: string): Types.TabSchema | undefined {

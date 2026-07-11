@@ -14,7 +14,7 @@ Internal architecture rules live in `docs/system/SYSTEM_SPEC.md`. Deployment and
 | Semester/year transition | Backend/admin workbook, frontend/main workbook, forms, triggers | Backend SHAMROCK menu, v2 transition actions | Active |
 | Directory sync | Directory Backend, frontend Directory, Directory Form | Backend SHAMROCK menu, form submit trigger, periodic reconciliation | Active |
 | Attendance | Attendance Backend, frontend Attendance, Attendance Form, Events Backend | Form submit trigger, backend menu actions | Active |
-| Excusals | Excusals Backend, Excusals Management workbook, frontend Excusals, Excusal Form | Form submit trigger, edit trigger, backend menu actions | Active |
+| Excusals | Excusals Backend, Excusals Management workbook, Excusal Form | Form submit trigger, edit trigger, backend menu actions | Active |
 | Live menu progress | Backend/admin workbook | Every SHAMROCK menu action | Active |
 | Audit logging | Audit Backend, Apps Script logs | Menu action wrappers, service calls | Active |
 | Formatting and protections | Frontend/main workbook, backend/admin workbook | Setup and maintenance menu actions | Active |
@@ -61,7 +61,7 @@ The frontend/main workbook intentionally does not expose admin menus.
 
 Directory is the authoritative roster source for cadets and drives attendance, leadership lookups, form choices, and frontend display.
 
-Cadet rank and cadet leadership role live on Directory. A Leadership refresh replaces every Directory-backed Leadership row, then republishes only active cadets with current command/advisor roles: wing commander, deputy wing commander, operations group commander/deputy, squadron commanders, flight commanders, deputy flight commanders, and senior/deputy GMC advisor. This removes stale former leaders while preserving cadre/manual contacts that do not originate in Directory. Leadership sorts non-cadet ranks and honorifics above cadet ranks before applying command hierarchy and name tiebreakers. Leadership does not store separate flight/squadron columns; unit routing comes from role names such as `Alpha Flight Commander` or `Blue Squadron Commander`.
+Cadet rank and cadet leadership role live on Directory. A Leadership refresh replaces every Directory-backed Leadership row, then republishes only active cadets with current command/advisor roles: wing commander, deputy wing commander, operations group commander/deputy, canonical operational squadron commanders, flight commanders, deputy flight commanders, and senior/deputy GMC advisor. Squadron commander routing is limited to Blue and Gold; Mission Support and Abroad are not squadron-command routing roles. This removes stale former leaders while preserving cadre/manual contacts that do not originate in Directory. Leadership sorts non-cadet ranks and honorifics above cadet ranks before applying command hierarchy and name tiebreakers. Leadership does not store separate flight/squadron columns; unit routing comes from role names such as `Alpha Flight Commander` or `Blue Squadron Commander`.
 The frontend and backend Directory v2 order starts with `Last Name`, `First Name`, `Year`, `Flight`, `Sqdn`, `Rank`, `Role`, then `University` and the remaining contact/academic fields. Cadet rows use the canonical senior-to-junior display order, with AS500 below AS300 and above AS250. Legacy Directory `source` and freeform Directory `notes` columns are not part of the v2 baseline. Frontend `Year` and `Photo Link` columns are 100 px. `Photo Link` cells render authoritative Google Drive URLs/file IDs as file smart chips; formatting-only actions preserve existing chips without rewriting their visible filename labels.
 
 Rows marked `Inactive`, `Commissioned`, or `Dropped` in `Flight Path` stay in Directory Backend for recordkeeping but are excluded from frontend Directory, derived Leadership, Attendance, and form cadet choices.
@@ -168,6 +168,7 @@ AS500 is a GMC year. AS500 cadets are excluded from POC Third Hour form groups a
 - Rebuild attendance and confirm the frontend matrix updates deterministically.
 - Confirm AS500 cadets are counted as GMC, are absent from POC Third Hour choices, receive `N/A` for POC Third Hour when no entry exists, and sort between AS300 and AS250.
 - Confirm attendance codes use the same validation presentation as the newest Attendance archive, validate against Data Legend options, and leave frontend table column types unset.
+- Confirm visible Attendance headers are left-aligned, event/code cells use Plain text display, and `Overall`/`LLAB` percentage values are bold.
 - Confirm `Overall` and `LLAB` use the archive-style red-at-80%, amber-at-90%, and green-at-100% summary gradient.
 - Confirm stale blank rows are removed from the frontend matrix after cadets are removed or marked non-operational.
 - Run `Debug Attendance response columns` and confirm the current response tab reports no duplicate header names. After a structural rebuild, confirm the prior response tab is hidden and the new visible tab is named `Attendance Form Responses`.
@@ -178,6 +179,7 @@ AS500 is a GMC year. AS500 cadets are excluded from POC Third Hour form groups a
 
 Excusals capture cadet requests, route decisions through backend/management sheets, update attendance effects, and send appropriate notifications.
 Requests use a requested outcome of `P`, `T`, `E`, `ES`, or `MED`; pending requests show as `R` in Attendance until leadership records a decision.
+The separate management workbook has one active tab for each operational squadron. Blue and Gold squadron commanders are editors, while canonical flight commanders and deputy flight commanders are viewers. On an active squadron tab, SHAMROCK protects the headers and request details; only that squadron commander's Decision cells are editable. The requested-outcome column is displayed as `Type` and its codes are centered.
 
 ### Operator Entry Points
 
@@ -185,12 +187,12 @@ Requests use a requested outcome of `P`, `T`, `E`, `ES`, or `MED`; pending reque
 - Excusals Backend decision edits.
 - Excusals Management workbook edit trigger.
 - Backend SHAMROCK menu actions for cleanup, backfill, sync, and repair.
+- Semester and academic-year transitions, which archive the prior term's management tabs into the restricted admin workbook, clear the active queues, and refresh access from current Leadership assignments.
 
 ### Data Touched
 
 - Excusals Backend.
 - Excusals Management workbook.
-- Frontend Excusals.
 - Attendance Backend/frontend Attendance.
 - Audit Backend.
 
@@ -199,8 +201,18 @@ Requests use a requested outcome of `P`, `T`, `E`, `ES`, or `MED`; pending reque
 - Submit a controlled excusal request.
 - Confirm it appears in Excusals Backend and management surfaces.
 - Record a decision and confirm attendance effect updates.
+- Confirm a squadron commander can edit only Decision cells on their squadron tab, while flight commanders/deputies have view-only workbook access.
+- After a transition, confirm prior management rows are in hidden, locked term archives in the admin workbook and active Blue/Gold management tabs are empty with access derived from the new Leadership assignments.
 - Confirm denied pre-event requests show `D`, denied post-event absences show `U`, and approved medical requests show `MED`.
 - Confirm related audit rows are written.
+
+### Flight leadership notifications
+
+- At approximately 5:00 AM each day, SHAMROCK checks Events Backend. It sends a flight-level attendance-status message only when an active Mando PT or LLAB event occurs that day; no semester event means no message.
+- Each applicable flight commander receives the event notice, with the deputy copied. Event `flight_scope` limits recipients when it names specific flights.
+- The notice lists approved `E`, `ES`, and `MED` outcomes and undecided excusal requests separately. Flights with neither still receive an explicit all-clear message.
+- At approximately 5:00 PM Sunday, SHAMROCK closes out the preceding Sunday-through-Saturday training week only when that week contained an active event. Every applicable operational flight receives either its `A`/`U` discrepancies or an explicit perfect-attendance result.
+- Trigger installation uses one daily event-aware dispatcher and one Sunday closeout trigger; it does not install fixed Mando PT or LLAB weekday schedules.
 
 ## Live Menu Progress
 
