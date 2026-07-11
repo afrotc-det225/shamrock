@@ -136,6 +136,7 @@ Cell-level dropdown validations must be driven from the Data Legend tab(s) using
 Canonical option sets:
 - The authoritative lists for dropdowns (AS years, flights, universities, dorms, CIP broad areas, AFSC options, attendance codes, etc.) are recorded in `docs/system/DATA_LEGEND_RANGES.md`.
 - The Data Legend sheet(s) in each workbook must reflect these lists via stable named ranges.
+- Existing Directory Form list questions must be refreshed in place from the same canonical arrays during setup and Directory sync. In particular, Dorm must match `DORMS`; do not rebuild the question or create a new linked response column merely to update choices.
 
 ## 6. Security and Access
 ### 6.1 Google Forms Identity

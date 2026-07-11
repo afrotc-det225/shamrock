@@ -508,6 +508,33 @@ namespace FormService {
       buildDirectoryForm(f);
     }, 'Directory Form');
 
+    const canonicalChoices: Array<{ title: string; values: string[] }> = [
+      { title: 'Rank', values: Arrays.CADET_RANKS },
+      { title: 'AS Year', values: Arrays.AS_YEARS },
+      { title: 'Flight', values: Arrays.FLIGHTS },
+      { title: 'Squadron', values: Arrays.SQUADRONS },
+      { title: 'University', values: Arrays.UNIVERSITIES },
+      { title: 'Dorm', values: Arrays.DORMS },
+      { title: 'Home State', values: Arrays.HOME_STATES },
+      { title: 'CIP Broad Area', values: Arrays.CIP_BROAD_AREAS },
+      { title: 'Desired/Assigned AFSC', values: Arrays.AFSC_OPTIONS },
+      { title: 'Flight Path Status', values: Arrays.FLIGHT_PATH_STATUSES },
+    ];
+    const listItems = form.getItems(FormApp.ItemType.LIST);
+    canonicalChoices.forEach(({ title, values }) => {
+      const item = listItems.find((candidate) => String(candidate.getTitle() || '').trim() === title);
+      if (!item) {
+        Log.warn(`Directory form choice refresh skipped missing item: ${title}`);
+        return;
+      }
+      item.asListItem().setChoiceValues(values);
+    });
+    ProgressService.report({
+      title: 'Refreshing Directory form choices',
+      detail: `Updated the existing Directory form questions, including ${Arrays.DORMS.length} current dorm options.`,
+      hint: 'Question IDs and the linked response columns are preserved.',
+    });
+    Log.info(`Directory form choice lists refreshed lists=${canonicalChoices.length} dormOptions=${Arrays.DORMS.length}.`);
     applyDirectoryRegexValidations(form);
   }
 

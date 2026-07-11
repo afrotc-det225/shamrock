@@ -70,7 +70,7 @@ Rows marked `Inactive`, `Commissioned`, or `Dropped` in `Flight Path` stay in Di
 
 - Backend/admin workbook Directory Backend edits.
 - Directory Form submissions.
-- Backend SHAMROCK menu sync and repair actions. Sync Directory also refreshes the frontend Data Legend dependency and reapplies the archive-style cell validation rules without creating typed table columns.
+- Backend SHAMROCK menu sync and repair actions. Sync Directory also refreshes the frontend Data Legend dependency, updates existing Directory Form choice questions in place—including the current dorm list—and reapplies archive-style cell validation without creating typed table columns.
 
 ### Data Touched
 
@@ -88,6 +88,7 @@ Rows marked `Inactive`, `Commissioned`, or `Dropped` in `Flight Path` stay in Di
 - Confirm the frontend Directory column order starts `Last Name`, `First Name`, `Year`, `Flight`, `Sqdn`, `Rank`, `Role`, `University`.
 - Confirm the frontend Data Legend includes `cadet_rank_options`, non-cadet `rank_options`, and `honorific_options`; Directory controlled columns use the same cell-validation presentation as the newest Directory archive; Directory `Rank` is strict cadet-rank validation with plain-text display; Leadership `Rank` accepts cadet ranks, non-cadet ranks, and honorifics with plain-text display; and Directory `Email` is free text with no stale dropdown.
 - Confirm frontend Directory `Photo Link` values backed by Google Drive file URLs display as file chips, formatting does not replace them with filename text, and both `Year` and `Photo Link` remain 100 px.
+- Confirm the Directory Form Dorm question matches the canonical Data Legend dorm list without creating a replacement question or response column.
 - Confirm Directory, Leadership, Attendance, and Data Legend are real Google Sheets tables, not only visually formatted ranges, and their table column types remain unset.
 - Confirm `Inactive`, `Commissioned`, and `Dropped` rows are absent from operational frontend views.
 - Confirm a Directory-backed cadet who becomes non-operational or loses an eligible role is removed from Leadership Backend and the frontend Leadership view on the next refresh.
@@ -257,7 +258,7 @@ Formatting and protections keep the frontend usable as an interface while preser
 
 Dashboard is the single frontend home page. It combines end-user guidance with quick actions, roster and attendance metrics, current-versus-historical charts, and a full birthday calendar. Birthday rows are grouped by Sunday-through-Saturday week for the current year and use alternating group backgrounds; duplicate last names gain a first initial in the display label. The retired FAQ tab is removed rather than maintained as a separate reading surface.
 
-The Dashboard displays the original `System for Headcount & Accountability of Manpower, Readiness, Oversight, and Cadet Keeping` tagline. Its first two rows remain visible and unfrozen, the current-attendance-by-flight chart excludes Abroad, and rebuilds trim the page after the final generated content row.
+The Dashboard displays the original `System for Headcount & Accountability of Manpower, Readiness, Oversight, and Cadet Keeping` tagline. Its first two rows remain visible and unfrozen, the current-attendance-by-flight chart excludes Abroad, the two chart rows are contiguous without unused spacer bands, and rebuilds trim the page after the final generated content row.
 
 The visible frontend is limited to Dashboard, Leadership, Directory, and Attendance. Applying frontend protections fully locks and hides Data Legend, Dashboard Data, and every term-named Leadership/Directory/Attendance archive. Dashboard Data is ordered immediately after Data Legend. Chart values are mirrored beneath the chart overlays before Dashboard Data is hidden, and the graphics use native Sheets chart specifications with explicit source and axis settings.
 

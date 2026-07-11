@@ -189,9 +189,9 @@ namespace ProtectionService {
   function protectDashboard(ss: GoogleAppsScript.Spreadsheet.Spreadsheet, editors: string[] = []) {
     const sheet = ss.getSheetByName('Dashboard');
     if (!sheet) return;
-    const lastRow = Math.max(50, sheet.getMaxRows());
+    const lastRow = Math.max(41, sheet.getMaxRows());
     // Protect the generated birthday table (headers + data) in columns A:E.
-    const birthdayRange = sheet.getRange(50, 1, lastRow - 49, 5);
+    const birthdayRange = sheet.getRange(41, 1, lastRow - 40, 5);
     ensureRangeProtection(sheet, birthdayRange, 'Dashboard:birthdays', { warningOnly: false, editors });
   }
 

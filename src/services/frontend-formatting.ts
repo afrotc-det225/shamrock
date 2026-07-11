@@ -1128,8 +1128,8 @@ namespace FrontendFormattingService {
 
     const attendanceByAsYear = mirrorRange(helper.getRange(1, 1, asYearRows.length, asYearRows[0].length), 12, 1);
     const attendanceTrend = mirrorRange(helper.getRange(15, 1, trendRows.length, 2), 12, 7);
-    const attendanceByFlight = mirrorRange(helper.getRange(15, 6, flightRows.length, 2), 31, 1);
-    const rosterByAsYear = mirrorRange(helper.getRange(15, 10, rosterRows.length, 2), 31, 7);
+    const attendanceByFlight = mirrorRange(helper.getRange(15, 6, flightRows.length, 2), 26, 1);
+    const rosterByAsYear = mirrorRange(helper.getRange(15, 10, rosterRows.length, 2), 26, 7);
     if (attendanceByAsYear.getNumColumns() > 1) attendanceByAsYear.offset(1, 1, attendanceByAsYear.getNumRows() - 1, attendanceByAsYear.getNumColumns() - 1).setNumberFormat('0.0%');
     if (attendanceTrend.getNumRows() > 1) attendanceTrend.offset(1, 1, attendanceTrend.getNumRows() - 1, 1).setNumberFormat('0.0%');
     if (attendanceByFlight.getNumRows() > 1) attendanceByFlight.offset(1, 1, attendanceByFlight.getNumRows() - 1, 1).setNumberFormat('0.0%');
@@ -1288,7 +1288,7 @@ namespace FrontendFormattingService {
     const sources = dashboardAttendanceSources(ss);
     const currentAttendance = sources.find((source) => source.label === 'Current');
     const directoryDataRows = Math.max(0, directory.getLastRow() - 2);
-    const requiredRows = Math.max(79, 50 + directoryDataRows);
+    const requiredRows = Math.max(70, 41 + directoryDataRows);
     if (sheet.getMaxRows() < requiredRows) sheet.insertRowsAfter(sheet.getMaxRows(), requiredRows - sheet.getMaxRows());
     if (sheet.getMaxRows() > requiredRows) sheet.deleteRows(requiredRows + 1, sheet.getMaxRows() - requiredRows);
     if (sheet.getMaxColumns() < 12) sheet.insertColumnsAfter(sheet.getMaxColumns(), 12 - sheet.getMaxColumns());
@@ -1420,8 +1420,8 @@ namespace FrontendFormattingService {
       const chartIds = [
         insertDashboardChart(sheet, chartRanges.attendanceByAsYear, 'Overall Attendance by AS Year — Current vs Historical', Charts.ChartType.COLUMN, 12, 1, { percentAxis: true }),
         insertDashboardChart(sheet, chartRanges.attendanceTrend, 'Detachment Attendance Trend by Term', Charts.ChartType.LINE, 12, 7, { percentAxis: true, legend: 'none', colors: ['#2b6e55'] }),
-        insertDashboardChart(sheet, chartRanges.attendanceByFlight, 'Current Overall Attendance by Flight', Charts.ChartType.COLUMN, 31, 1, { percentAxis: true, legend: 'none', colors: ['#2b6e55'] }),
-        insertDashboardChart(sheet, chartRanges.rosterByAsYear, 'Current Roster by AS Year', Charts.ChartType.BAR, 31, 7, { horizontal: true, legend: 'none', colors: ['#557f70'] }),
+        insertDashboardChart(sheet, chartRanges.attendanceByFlight, 'Current Overall Attendance by Flight', Charts.ChartType.COLUMN, 26, 1, { percentAxis: true, legend: 'none', colors: ['#2b6e55'] }),
+        insertDashboardChart(sheet, chartRanges.rosterByAsYear, 'Current Roster by AS Year', Charts.ChartType.BAR, 26, 7, { horizontal: true, legend: 'none', colors: ['#557f70'] }),
       ];
       SpreadsheetApp.flush();
       if (chartIds.length !== 4 || chartIds.some((chartId) => !chartId)) throw new Error('Dashboard chart verification failed.');
@@ -1434,22 +1434,22 @@ namespace FrontendFormattingService {
       if (helper && !helper.isSheetHidden()) helper.hideSheet();
     }
 
-    styleSectionHeader('A49:E49', 'Birthday calendar');
-    styleSectionHeader('G49:L49', 'How to use SHAMROCK');
-    sheet.getRange('A50:E50').setValues([['Last Name', 'First Name', 'Birthday', 'Display', 'Group']])
+    styleSectionHeader('A40:E40', 'Birthday calendar');
+    styleSectionHeader('G40:L40', 'How to use SHAMROCK');
+    sheet.getRange('A41:E41').setValues([['Last Name', 'First Name', 'Birthday', 'Display', 'Group']])
       .setBackground('#edf2f0').setFontWeight('bold').setHorizontalAlignment('left')
       .setBorder(true, true, true, true, true, true, '#cfd9d5', SpreadsheetApp.BorderStyle.SOLID);
-    const birthdayRows = sheet.getMaxRows() - 50;
-    sheet.getRange(51, 1, birthdayRows, 5).setBackground('#ffffff').setFontColor('#26332e')
+    const birthdayRows = sheet.getMaxRows() - 41;
+    sheet.getRange(42, 1, birthdayRows, 5).setBackground('#ffffff').setFontColor('#26332e')
       .setBorder(false, true, true, true, false, true, '#e2e7e5', SpreadsheetApp.BorderStyle.SOLID)
       .setWrapStrategy(SpreadsheetApp.WrapStrategy.CLIP);
-    sheet.getRange('A51').setFormula(buildDashboardBirthdayFormula(directory.getLastColumn()));
-    sheet.getRange(51, 3, birthdayRows, 1).setNumberFormat('M/D/YYYY');
-    sheet.getRange(51, 5, birthdayRows, 1).setHorizontalAlignment('center');
+    sheet.getRange('A42').setFormula(buildDashboardBirthdayFormula(directory.getLastColumn()));
+    sheet.getRange(42, 3, birthdayRows, 1).setNumberFormat('M/D/YYYY');
+    sheet.getRange(42, 5, birthdayRows, 1).setHorizontalAlignment('center');
     const birthdayBanding = SpreadsheetApp.newConditionalFormatRule()
-      .whenFormulaSatisfied('=AND($E51<>"",ISEVEN($E51))')
+      .whenFormulaSatisfied('=AND($E42<>"",ISEVEN($E42))')
       .setBackground('#eef1f0')
-      .setRanges([sheet.getRange(51, 1, birthdayRows, 5)])
+      .setRanges([sheet.getRange(42, 1, birthdayRows, 5)])
       .build();
     sheet.setConditionalFormatRules([birthdayBanding]);
 
@@ -1460,11 +1460,11 @@ namespace FrontendFormattingService {
       sheet.getRange(a1).merge().setValue(value).setBackground('#ffffff').setWrap(true).setVerticalAlignment('top')
         .setBorder(true, true, true, true, false, false, '#d7e0dc', SpreadsheetApp.BorderStyle.SOLID);
     };
-    infoHeader('G50:L50', 'Core expectations');
-    infoBody('G51:L54', 'SHAMROCK is the read-only source for the current roster, attendance, leadership contacts, and participation history.\n\nCheck Attendance regularly, verify your marks, and report discrepancies promptly. Do not edit managed cells directly.');
-    infoHeader('G56:L56', 'Attendance and excusals');
-    infoBody('G57:L61', 'Attendance is recorded once per cadet and event. Submit excusal requests before the event whenever possible; submitting a request does not automatically excuse the absence.\n\nIf a mark looks wrong, first check whether a request is pending or denied, then contact flight leadership. Do not submit duplicate requests for the same event.');
-    infoHeader('G63:L63', 'Attendance codes');
+    infoHeader('G41:L41', 'Core expectations');
+    infoBody('G42:L45', 'SHAMROCK is the read-only source for the current roster, attendance, leadership contacts, and participation history.\n\nCheck Attendance regularly, verify your marks, and report discrepancies promptly. Do not edit managed cells directly.');
+    infoHeader('G47:L47', 'Attendance and excusals');
+    infoBody('G48:L52', 'Attendance is recorded once per cadet and event. Submit excusal requests before the event whenever possible; submitting a request does not automatically excuse the absence.\n\nIf a mark looks wrong, first check whether a request is pending or denied, then contact flight leadership. Do not submit duplicate requests for the same event.');
+    infoHeader('G54:L54', 'Attendance codes');
     const codeRows = [
       ['P', 'Present / full credit'], ['T', 'Tardy / credit'], ['A', 'Absent — follow-up required'],
       ['R', 'Excusal request pending'], ['D', 'Request denied before event; attendance required'],
@@ -1472,13 +1472,13 @@ namespace FrontendFormattingService {
       ['MED', 'Medical'], ['N/A', 'Not expected / not applicable'],
     ];
     codeRows.forEach(([code, meaning], index) => {
-      const row = 64 + index;
+      const row = 55 + index;
       sheet.getRange(row, 7, 1, 2).merge().setValue(code).setFontWeight('bold').setHorizontalAlignment('center').setBackground('#ffffff');
       sheet.getRange(row, 9, 1, 4).merge().setValue(meaning).setBackground('#ffffff');
       sheet.getRange(row, 7, 1, 6).setBorder(false, false, true, false, false, false, '#e2e7e5', SpreadsheetApp.BorderStyle.SOLID);
     });
-    infoHeader('G75:L75', 'Getting help');
-    infoBody('G76:L79', 'Start with your Flight Commander for attendance or roster questions. Escalate through squadron leadership or cadre when needed. Use the Leadership link above for current contact information.');
+    infoHeader('G66:L66', 'Getting help');
+    infoBody('G67:L70', 'Start with your Flight Commander for attendance or roster questions. Escalate through squadron leadership or cadre when needed. Use the Leadership link above for current contact information.');
 
     const widths = [115, 115, 90, 190, 70, 18, 95, 95, 95, 120, 95, 95];
     widths.forEach((width, index) => sheet.setColumnWidth(index + 1, width));
@@ -1488,12 +1488,12 @@ namespace FrontendFormattingService {
     sheet.setRowHeight(4, 26);
     sheet.setRowHeights(5, 6, 28);
     sheet.setRowHeight(11, 10);
-    sheet.setRowHeights(12, 37, 22);
-    sheet.setRowHeight(49, 28);
-    sheet.setRowHeight(50, 26);
-    sheet.setRowHeights(51, birthdayRows, 24);
-    [51, 57, 76].forEach((row) => sheet.setRowHeight(row, 38));
-    [52, 53, 54, 58, 59, 60, 61, 77, 78, 79].forEach((row) => sheet.setRowHeight(row, 30));
+    sheet.setRowHeights(12, 28, 22);
+    sheet.setRowHeight(40, 28);
+    sheet.setRowHeight(41, 26);
+    sheet.setRowHeights(42, birthdayRows, 24);
+    [42, 48, 67].forEach((row) => sheet.setRowHeight(row, 38));
+    [43, 44, 45, 49, 50, 51, 52, 68, 69, 70].forEach((row) => sheet.setRowHeight(row, 30));
 
     removeRetiredFaqSheet(ss);
     Log.info(

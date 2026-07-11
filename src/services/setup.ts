@@ -2571,13 +2571,16 @@ namespace SetupService {
   export function syncDirectoryBackendToFrontend() {
     ProgressService.report({
       title: 'Refreshing Directory dependencies',
-      detail: 'Updating option lists and derived Leadership rows before publishing Directory.',
+      detail: 'Updating Data Legend options, Directory Form choices, and derived Leadership rows before publishing Directory.',
       percent: 18,
       step: 1,
       totalSteps: 4,
     });
     DataLegendService.refreshLegendFromArrays();
     SyncService.syncByBackendSheetName('Data Legend');
+    const directoryFormId = Config.getScriptProperty(Config.PROPERTY_KEYS.CADET_DIRECTORY_FORM_ID);
+    if (directoryFormId) FormService.ensureDirectoryForm(FormApp.openById(directoryFormId));
+    else Log.warn(`${Config.PROPERTY_KEYS.CADET_DIRECTORY_FORM_ID} missing; Directory form choices were not refreshed.`);
     DirectoryService.syncLeadershipBackendFromDirectory();
     ProgressService.report({
       title: 'Publishing the Directory',
