@@ -1154,38 +1154,96 @@ namespace FrontendFormattingService {
     row: number,
     column: number,
     options?: { percentAxis?: boolean; horizontal?: boolean; legend?: string; colors?: string[] },
-  ) {
-    const builder = sheet.newChart()
-      .setChartType(chartType)
-      .addRange(range)
-      .setNumHeaders(1)
-      .setHiddenDimensionStrategy(Charts.ChartHiddenDimensionStrategy.SHOW_BOTH)
-      .setTransposeRowsAndColumns(false)
-      .setPosition(row, column, 0, 0)
-      .setOption('title', title)
-      .setOption('fontName', 'Roboto')
-      .setOption('backgroundColor', '#ffffff')
-      .setOption('chartArea', { left: 64, top: 52, width: '78%', height: '65%' })
-      .setOption('legend', { position: options?.legend || 'bottom', textStyle: { color: '#4d5b55', fontSize: 10 } })
-      .setOption('titleTextStyle', { color: '#173e32', fontSize: 15, bold: true })
-      .setOption('colors', options?.colors || ['#2b6e55', '#7f9d91', '#b8c6c0'])
-      .setOption('dataOpacity', 0.9)
-      .setOption('width', 560)
-      .setOption('height', 300);
+  ): number {
+    const sheetsService = (globalThis as any).Sheets?.Spreadsheets;
+    if (!sheetsService?.batchUpdate) throw new Error('Sheets advanced service is unavailable for Dashboard charts.');
+
+    const startRowIndex = range.getRow() - 1;
+    const endRowIndex = startRowIndex + range.getNumRows();
+    const startColumnIndex = range.getColumn() - 1;
+    const sheetId = sheet.getSheetId();
+    const source = (columnOffset: number) => ({
+      sheetId,
+      startRowIndex,
+      endRowIndex,
+      startColumnIndex: startColumnIndex + columnOffset,
+      endColumnIndex: startColumnIndex + columnOffset + 1,
+    });
+    const hexColor = (hex: string) => {
+      const value = String(hex || '').replace('#', '');
+      const normalized = value.length === 3 ? value.split('').map((digit) => digit + digit).join('') : value;
+      const numeric = Number.parseInt(normalized, 16);
+      return {
+        red: ((numeric >> 16) & 255) / 255,
+        green: ((numeric >> 8) & 255) / 255,
+        blue: (numeric & 255) / 255,
+      };
+    };
+
+    const apiChartType = chartType === Charts.ChartType.LINE
+      ? 'LINE'
+      : chartType === Charts.ChartType.BAR ? 'BAR' : 'COLUMN';
+    const colors = options?.colors || ['#2b6e55', '#7f9d91', '#b8c6c0'];
+    const targetAxis = options?.horizontal ? 'BOTTOM_AXIS' : 'LEFT_AXIS';
+    const numericValues = range.getValues().flat().filter((value) => typeof value === 'number' && Number.isFinite(value)) as number[];
+    const minimum = numericValues.length ? Math.min(...numericValues) : 0;
+    const axisMinimum = Math.max(0, Math.floor((minimum - 0.05) * 10) / 10);
+    const axis = [
+      { position: 'BOTTOM_AXIS', viewWindowOptions: {} },
+      { position: 'LEFT_AXIS', viewWindowOptions: {} },
+    ];
     if (options?.percentAxis) {
-      const numericValues = range.getValues().flat().filter((value) => typeof value === 'number' && Number.isFinite(value)) as number[];
-      const minimum = numericValues.length ? Math.min(...numericValues) : 0;
-      const axisMinimum = Math.max(0, Math.floor((minimum - 0.05) * 10) / 10);
-      builder.setOption(options.horizontal ? 'hAxis' : 'vAxis', {
-        format: 'percent',
-        viewWindow: { min: axisMinimum, max: 1.01 },
-        gridlines: { color: '#e6ebe8' },
-      });
+      const percentAxis = axis.find((entry) => entry.position === targetAxis)!;
+      percentAxis.viewWindowOptions = {
+        viewWindowMin: axisMinimum,
+        viewWindowMax: 1.01,
+        viewWindowMode: 'EXPLICIT',
+      } as any;
     }
-    if (chartType === Charts.ChartType.LINE) {
-      builder.setOption('pointSize', 5).setOption('lineWidth', 3);
-    }
-    sheet.insertChart(builder.build());
+
+    const series = Array.from({ length: Math.max(0, range.getNumColumns() - 1) }, (_, index) => ({
+      series: { sourceRange: { sources: [source(index + 1)] } },
+      targetAxis,
+      colorStyle: { rgbColor: hexColor(colors[index % colors.length]) },
+      ...(apiChartType === 'LINE' ? { lineStyle: { width: 3 }, pointStyle: { size: 5 } } : {}),
+    }));
+    const response = sheetsService.batchUpdate({
+      requests: [{
+        addChart: {
+          chart: {
+            spec: {
+              title,
+              basicChart: {
+                chartType: apiChartType,
+                legendPosition: options?.legend === 'none' ? 'NO_LEGEND' : 'BOTTOM_LEGEND',
+                axis,
+                domains: [{ domain: { sourceRange: { sources: [source(0)] } } }],
+                series,
+                headerCount: 1,
+              },
+              hiddenDimensionStrategy: 'SKIP_HIDDEN_ROWS_AND_COLUMNS',
+              titleTextFormat: {
+                foregroundColorStyle: { rgbColor: hexColor('#173e32') },
+                fontFamily: 'Roboto',
+                fontSize: 15,
+                bold: true,
+              },
+              fontName: 'Roboto',
+            },
+            position: {
+              overlayPosition: {
+                anchorCell: { sheetId, rowIndex: row - 1, columnIndex: column - 1 },
+                widthPixels: 560,
+                heightPixels: 300,
+              },
+            },
+          },
+        },
+      }],
+    }, sheet.getParent().getId());
+    const chartId = Number(response?.replies?.[0]?.addChart?.chart?.chartId || 0);
+    if (!chartId) throw new Error(`Dashboard chart creation returned no chart ID: ${title}`);
+    return chartId;
   }
 
   function buildDashboardBirthdayFormula(directoryLastColumn: number): string {
@@ -1355,18 +1413,17 @@ namespace FrontendFormattingService {
         title: 'Drawing Dashboard charts',
         detail: 'Creating attendance comparisons, the term trend, the flight summary, and roster composition.',
       });
-      insertDashboardChart(sheet, chartRanges.attendanceByAsYear, 'Overall Attendance by AS Year — Current vs Historical', Charts.ChartType.COLUMN, 12, 1, { percentAxis: true });
-      insertDashboardChart(sheet, chartRanges.attendanceTrend, 'Detachment Attendance Trend by Term', Charts.ChartType.LINE, 12, 7, { percentAxis: true, legend: 'none', colors: ['#2b6e55'] });
-      insertDashboardChart(sheet, chartRanges.attendanceByFlight, 'Current Overall Attendance by Flight', Charts.ChartType.COLUMN, 31, 1, { percentAxis: true, legend: 'none', colors: ['#2b6e55'] });
-      insertDashboardChart(sheet, chartRanges.rosterByAsYear, 'Current Roster by AS Year', Charts.ChartType.BAR, 31, 7, { horizontal: true, legend: 'none', colors: ['#557f70'] });
+      const chartIds = [
+        insertDashboardChart(sheet, chartRanges.attendanceByAsYear, 'Overall Attendance by AS Year — Current vs Historical', Charts.ChartType.COLUMN, 12, 1, { percentAxis: true }),
+        insertDashboardChart(sheet, chartRanges.attendanceTrend, 'Detachment Attendance Trend by Term', Charts.ChartType.LINE, 12, 7, { percentAxis: true, legend: 'none', colors: ['#2b6e55'] }),
+        insertDashboardChart(sheet, chartRanges.attendanceByFlight, 'Current Overall Attendance by Flight', Charts.ChartType.COLUMN, 31, 1, { percentAxis: true, legend: 'none', colors: ['#2b6e55'] }),
+        insertDashboardChart(sheet, chartRanges.rosterByAsYear, 'Current Roster by AS Year', Charts.ChartType.BAR, 31, 7, { horizontal: true, legend: 'none', colors: ['#557f70'] }),
+      ];
       SpreadsheetApp.flush();
-      const charts = sheet.getCharts();
-      if (charts.length !== 4 || charts.some((chart) => !chart.getRanges().length)) {
-        throw new Error(`Dashboard chart verification failed charts=${charts.length}.`);
-      }
+      if (chartIds.length !== 4 || chartIds.some((chartId) => !chartId)) throw new Error('Dashboard chart verification failed.');
       ProgressService.report({
         title: 'Dashboard charts ready',
-        detail: 'Verified four charts with recalculated source ranges.',
+        detail: 'Verified four native Sheets charts with recalculated source ranges and explicit axes.',
       });
     } finally {
       const helper = chartRanges?.helperSheet || ss.getSheetByName(DASHBOARD_HELPER_SHEET);
