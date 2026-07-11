@@ -26,6 +26,7 @@ Confirm explicitly:
 - Forms require verified responder emails.
 - Frontend tables are protected; edits flow through forms/logic.
 - Every new operator menu action uses `runMenuAction(...)` and the shared live-progress window.
+- Live-progress changes preserve the single-poller invariant: one scheduled chain, at most one in-flight progress request, bounded retry/backoff, no second loop from action completion handlers, and explicit cleanup for Close, unload, page-hide, and hidden-window paths.
 - Long or prompt-driven operator workflows define meaningful plain-language progress stages, hints, waiting states, and continuation states without false row-level precision or sensitive details.
 - Every useful operator-facing milestone added to technical logs is mirrored through an explicit progress report or a safe `captureTechnicalLog(...)` translation, including completion durations and recoverable warnings where helpful.
 - The change targets the current supported baseline, not retired CSV/sheet/property formats.

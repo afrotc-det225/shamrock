@@ -228,7 +228,11 @@ function runShamrockProgressAction(action: string, runId: string) {
 
 /** Lightweight polling endpoint used by the live-progress dialog. */
 function getShamrockProgress(runId: string) {
-  return ProgressService.get(runId);
+  try {
+    return ProgressService.get(runId);
+  } catch {
+    return null;
+  }
 }
 
 function addShamrockMenu() {

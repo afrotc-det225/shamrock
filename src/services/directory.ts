@@ -333,11 +333,6 @@ namespace DirectoryService {
     return last || first ? `name:${last},${first}` : '';
   }
 
-  function isCadetDirectoryRow(row: any): boolean {
-    const email = String(row?.['email'] || '').toLowerCase();
-    return email.includes('@') || Boolean(row?.['as_year']);
-  }
-
   function normalizeRoleForMatch(role: string): string {
     return role
       .toLowerCase()
@@ -460,11 +455,14 @@ namespace DirectoryService {
     const directoryRows = SheetUtils.readTable(directorySheet).rows;
     const currentLeadership = SheetUtils.readTable(leadershipSheet).rows;
 
-    const activeDirectoryIdentities = new Set<string>();
+    const directoryIdentities = new Set<string>();
+    directoryRows.forEach((row) => {
+      const identity = normalizeIdentity(row);
+      if (identity) directoryIdentities.add(identity);
+    });
+
     const derivedRows: Record<string, any>[] = [];
     directoryRows.filter((row) => isOperationallyActiveCadet(row)).forEach((row) => {
-      const identity = normalizeIdentity(row);
-      if (identity) activeDirectoryIdentities.add(identity);
       const leadership = leadershipRowFromDirectory(row);
       if (leadership) derivedRows.push(leadership);
     });
@@ -472,9 +470,9 @@ namespace DirectoryService {
     const preservedRows = currentLeadership.filter((row) => {
       const identity = normalizeIdentity(row);
       if (!identity) return true;
-      if (!activeDirectoryIdentities.has(identity)) return true;
-      return !isCadetDirectoryRow(row);
+      return !directoryIdentities.has(identity);
     });
+    const replacedDirectoryRows = currentLeadership.length - preservedRows.length;
 
     const nextRows = preservedRows.concat(derivedRows).map((row) => ({
       ...row,
@@ -483,8 +481,9 @@ namespace DirectoryService {
     })).sort(compareLeadershipRows);
 
     ProgressService.report({
-      title: 'Writing authoritative Leadership rows',
-      detail: `Preserving ${preservedRows.length} cadre/manual row(s) and publishing ${derivedRows.length} active cadet leadership row(s).`,
+      title: 'Refreshing cadet Leadership assignments',
+      detail: `Replacing ${replacedDirectoryRows} prior Directory-backed row(s), preserving ${preservedRows.length} cadre/manual row(s), and publishing ${derivedRows.length} active cadet leadership row(s).`,
+      hint: 'Inactive, commissioned, dropped, and no-longer-assigned cadets are removed from Leadership during this refresh.',
     });
     SheetUtils.writeTable(leadershipSheet, nextRows);
   }

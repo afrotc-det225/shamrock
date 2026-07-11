@@ -199,14 +199,24 @@ namespace ProgressService {
   <section class="current"><h2 id="title">Preparing the action</h2><div class="detail" id="detail">Opening a secure progress channel.</div><div class="hint" id="hint">Keep this window open for live updates.</div></section>
   <div class="meta"><span id="step">Stage-based progress</span><span id="elapsed">0s elapsed</span></div>
   <div class="history-title">Activity</div><div class="history" id="history"></div>
-  <div class="footer"><span class="quiet">Closing this window will not stop the action.</span><button onclick="google.script.host.close()">Close</button></div>
+  <div class="footer"><span class="quiet">Closing this window will not stop the action.</span><div><button id="retryButton" style="display:none;margin-right:7px" onclick="retryUpdates()">Retry updates</button><button onclick="closeProgressWindow()">Close</button></div></div>
   <script>
     const actionId = ${actionJson};
     const runId = ${runIdJson};
+    // A self-scheduling singleton avoids overlapping server calls and duplicate poll chains.
+    const ACTIVE_POLL_DELAY_MS = 5000;
+    const WAITING_POLL_DELAY_MS = 15000;
+    const MAX_POLL_FAILURES = 3;
     let terminal = false;
     let startedAt = Date.now();
     let lastState = null;
     let missingReads = 0;
+    let pollFailures = 0;
+    let pollInFlight = false;
+    let pollTimer = null;
+    let pollingStopped = false;
+    let elapsedTimer = null;
+    let disposed = false;
     const terminalStatuses = new Set(['success','cancelled','error','background']);
     const statusLabels = { prepared:'Preparing', running:'Running', waiting:'Waiting for you', background:'Continuing later', success:'Complete', cancelled:'Cancelled', error:'Needs attention' };
 
@@ -245,28 +255,138 @@ namespace ProgressService {
         history.appendChild(row);
       });
       terminal = terminalStatuses.has(state.status);
+      if (terminal && elapsedTimer !== null) {
+        clearInterval(elapsedTimer);
+        elapsedTimer = null;
+      }
     }
 
-    function updateElapsed() { text('elapsed', Math.max(0, Math.round((Date.now() - startedAt) / 1000)) + 's elapsed'); }
+    function updateElapsed() {
+      const finishedAt = lastState && lastState.finishedAt ? new Date(lastState.finishedAt).getTime() : 0;
+      const endAt = Number.isFinite(finishedAt) && finishedAt > 0 ? finishedAt : Date.now();
+      text('elapsed', Math.max(0, Math.round((endAt - startedAt) / 1000)) + 's elapsed');
+    }
+
+    function schedulePoll(delayMs) {
+      if (disposed || terminal || pollingStopped || pollInFlight || pollTimer !== null) return;
+      pollTimer = setTimeout(() => {
+        pollTimer = null;
+        poll();
+      }, Math.max(0, delayMs));
+    }
+
+    function nextPollDelay(state) {
+      return state && state.status === 'waiting' ? WAITING_POLL_DELAY_MS : ACTIVE_POLL_DELAY_MS;
+    }
+
+    function disposeProgressWindow() {
+      if (disposed) return;
+      disposed = true;
+      pollingStopped = true;
+      if (pollTimer !== null) {
+        clearTimeout(pollTimer);
+        pollTimer = null;
+      }
+      if (elapsedTimer !== null) {
+        clearInterval(elapsedTimer);
+        elapsedTimer = null;
+      }
+    }
+
+    function closeProgressWindow() {
+      disposeProgressWindow();
+      google.script.host.close();
+    }
+
+    function stopPolling(title, detail, hint) {
+      pollingStopped = true;
+      if (pollTimer !== null) {
+        clearTimeout(pollTimer);
+        pollTimer = null;
+      }
+      text('badge', 'Updates paused');
+      text('title', title);
+      text('detail', detail);
+      text('hint', hint);
+      document.getElementById('retryButton').style.display = '';
+    }
+
+    function retryUpdates() {
+      if (disposed || terminal) return;
+      pollingStopped = false;
+      pollFailures = 0;
+      missingReads = 0;
+      document.getElementById('retryButton').style.display = 'none';
+      text('badge', 'Reconnecting');
+      text('title', 'Reconnecting live updates');
+      text('detail', 'Checking the latest saved progress state.');
+      schedulePoll(0);
+    }
+
     function poll() {
+      if (disposed || terminal || pollingStopped || pollInFlight) return;
+      pollInFlight = true;
       google.script.run
-        .withSuccessHandler(state => { render(state); updateElapsed(); if (!terminal) setTimeout(poll, 700); })
-        .withFailureHandler(() => { if (!terminal) setTimeout(poll, 1400); })
+        .withSuccessHandler(state => {
+          pollInFlight = false;
+          if (disposed || pollingStopped) return;
+          pollFailures = 0;
+          render(state);
+          updateElapsed();
+          if (!state && missingReads >= 8) {
+            stopPolling(
+              'Live updates were paused',
+              'SHAMROCK could not find the saved progress state after several checks.',
+              'The action may still be running. Wait before retrying or use the Run ID in Audit Backend.',
+            );
+            return;
+          }
+          schedulePoll(nextPollDelay(state));
+        })
+        .withFailureHandler(() => {
+          pollInFlight = false;
+          if (disposed || pollingStopped) return;
+          pollFailures += 1;
+          if (pollFailures >= MAX_POLL_FAILURES) {
+            stopPolling(
+              'Live updates were paused',
+              'Google rejected several progress checks in a row, so SHAMROCK stopped polling to avoid repeated failed executions.',
+              'The action may still be running. Use Retry updates once, or close this window and review the Run ID later.',
+            );
+            return;
+          }
+          schedulePoll(Math.min(10000 * Math.pow(3, pollFailures - 1), 60000));
+        })
         .getShamrockProgress(runId);
     }
 
     poll();
     google.script.run
-      .withSuccessHandler(() => { setTimeout(poll, 100); })
+      .withSuccessHandler(() => {})
       .withFailureHandler(error => {
+        pollingStopped = true;
+        if (pollTimer !== null) {
+          clearTimeout(pollTimer);
+          pollTimer = null;
+        }
         text('badge', 'Needs attention');
         text('title', 'The action stopped');
         text('detail', error && error.message ? error.message : 'Apps Script reported an unexpected error.');
         text('hint', 'Use the Run ID in Audit Backend or Apps Script logs if more detail is needed.');
-        setTimeout(poll, 100);
       })
       .runShamrockProgressAction(actionId, runId);
-    setInterval(updateElapsed, 1000);
+    elapsedTimer = setInterval(updateElapsed, 1000);
+    window.addEventListener('pagehide', disposeProgressWindow);
+    window.addEventListener('beforeunload', disposeProgressWindow);
+    window.addEventListener('unload', disposeProgressWindow);
+    document.addEventListener('visibilitychange', () => {
+      if (!document.hidden || disposed || terminal || pollingStopped) return;
+      stopPolling(
+        'Live updates paused while hidden',
+        'SHAMROCK stopped checking the server because this progress window is no longer visible.',
+        'The action continues normally. Return here and use Retry updates if you want to reconnect.',
+      );
+    });
   </script>
 </body>
 </html>`;

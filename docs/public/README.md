@@ -61,7 +61,7 @@ The frontend/main workbook intentionally does not expose admin menus.
 
 Directory is the authoritative roster source for cadets and drives attendance, leadership lookups, form choices, and frontend display.
 
-Cadet rank and cadet leadership role live on Directory. The Leadership view is derived from active Directory rows only for command/advisor roles: wing commander, deputy wing commander, operations group commander/deputy, squadron commanders, flight commanders, deputy flight commanders, and senior/deputy GMC advisor. Cadre/manual leadership contacts are preserved, and Leadership sorts non-cadet ranks and honorifics above cadet ranks before applying command hierarchy and name tiebreakers. Leadership does not store separate flight/squadron columns; unit routing comes from role names such as `Alpha Flight Commander` or `Blue Squadron Commander`.
+Cadet rank and cadet leadership role live on Directory. A Leadership refresh replaces every Directory-backed Leadership row, then republishes only active cadets with current command/advisor roles: wing commander, deputy wing commander, operations group commander/deputy, squadron commanders, flight commanders, deputy flight commanders, and senior/deputy GMC advisor. This removes stale former leaders while preserving cadre/manual contacts that do not originate in Directory. Leadership sorts non-cadet ranks and honorifics above cadet ranks before applying command hierarchy and name tiebreakers. Leadership does not store separate flight/squadron columns; unit routing comes from role names such as `Alpha Flight Commander` or `Blue Squadron Commander`.
 The frontend and backend Directory v2 order starts with `Last Name`, `First Name`, `Year`, `Flight`, `Sqdn`, `Rank`, `Role`, then `University` and the remaining contact/academic fields. Cadet rows use the canonical senior-to-junior display order, with AS500 below AS300 and above AS250. Legacy Directory `source` and freeform Directory `notes` columns are not part of the v2 baseline. Frontend `Year` and `Photo Link` columns are 100 px. `Photo Link` cells render authoritative Google Drive URLs/file IDs as file smart chips; formatting-only actions preserve existing chips without rewriting their visible filename labels.
 
 Rows marked `Inactive`, `Commissioned`, or `Dropped` in `Flight Path` stay in Directory Backend for recordkeeping but are excluded from frontend Directory, derived Leadership, Attendance, and form cadet choices.
@@ -90,6 +90,7 @@ Rows marked `Inactive`, `Commissioned`, or `Dropped` in `Flight Path` stay in Di
 - Confirm frontend Directory `Photo Link` values backed by Google Drive file URLs display as file chips, formatting does not replace them with filename text, and both `Year` and `Photo Link` remain 100 px.
 - Confirm Directory, Leadership, Attendance, and Data Legend are real Google Sheets tables, not only visually formatted ranges, and their table column types remain unset.
 - Confirm `Inactive`, `Commissioned`, and `Dropped` rows are absent from operational frontend views.
+- Confirm a Directory-backed cadet who becomes non-operational or loses an eligible role is removed from Leadership Backend and the frontend Leadership view on the next refresh.
 - If the row has a Leadership-eligible role, confirm Leadership reflects rank, role, email, and phone from Directory; phone values should display as `+1 (###) ###-####`, and flight/squadron commander role names should include the unit name.
 - Confirm attendance/form rebuild actions use active cadets only.
 
@@ -213,6 +214,7 @@ Every backend SHAMROCK menu action opens a modeless live-progress window instead
 - Long workflows report real milestones. Percentages are stage-based and do not claim row-by-row precision when the underlying Google API does not expose it.
 - Meaningful execution milestones—such as synced row counts, restored photo chips, table readiness, completed formatting phases and durations, and recoverable warnings—are distilled into operator-safe activity entries; full technical details remain in Apps Script logs.
 - Closing the progress window does not cancel the action.
+- Live updates use one non-overlapping polling chain: approximately every five seconds while work is active and every fifteen seconds while waiting for operator input. Closing or hiding the window disposes or pauses that chain, and repeated connection failures back off sharply before polling stops and exposes a manual retry control.
 - Success, cancellation, background continuation, and failure are terminal states. Failures include the run ID needed to locate the matching Audit Backend and technical-log entries.
 - Installable triggers and form-submit automations do not open an interactive window because no operator is waiting in a spreadsheet UI; they continue to use technical and audit logging.
 
