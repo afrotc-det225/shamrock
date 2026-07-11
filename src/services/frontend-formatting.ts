@@ -1080,8 +1080,9 @@ namespace FrontendFormattingService {
     if (trendRows.length > 1) helper.getRange(16, 2, trendRows.length - 1, 1).setNumberFormat('0.0%');
 
     const current = sources.find((source) => source.label === 'Current');
+    const dashboardFlights = Arrays.FLIGHTS.filter((flight) => flight !== 'Abroad');
     const flightRows: any[][] = [['Flight', 'Overall Attendance']];
-    Arrays.FLIGHTS.forEach((flight, index) => {
+    dashboardFlights.forEach((flight, index) => {
       let formula = '';
       if (current && current.flightIndex >= 0) {
         const overall = dashboardColumnRange(current.sheet, current.overallIndex);
@@ -1286,16 +1287,19 @@ namespace FrontendFormattingService {
     if (!sheet || !directory) return;
     const sources = dashboardAttendanceSources(ss);
     const currentAttendance = sources.find((source) => source.label === 'Current');
-    const requiredRows = Math.max(120, directory.getLastRow() + 54);
+    const directoryDataRows = Math.max(0, directory.getLastRow() - 2);
+    const requiredRows = Math.max(79, 50 + directoryDataRows);
     if (sheet.getMaxRows() < requiredRows) sheet.insertRowsAfter(sheet.getMaxRows(), requiredRows - sheet.getMaxRows());
+    if (sheet.getMaxRows() > requiredRows) sheet.deleteRows(requiredRows + 1, sheet.getMaxRows() - requiredRows);
     if (sheet.getMaxColumns() < 12) sheet.insertColumnsAfter(sheet.getMaxColumns(), 12 - sheet.getMaxColumns());
 
     sheet.getCharts().forEach((chart) => sheet.removeChart(chart));
     sheet.clearConditionalFormatRules();
     sheet.getRange(1, 1, sheet.getMaxRows(), sheet.getMaxColumns()).breakApart().clear();
     if (sheet.getMaxColumns() > 12) sheet.deleteColumns(13, sheet.getMaxColumns() - 12);
-    sheet.setFrozenRows(2);
+    sheet.setFrozenRows(0);
     sheet.setFrozenColumns(0);
+    sheet.showRows(1, Math.min(2, sheet.getMaxRows()));
     (sheet as any).setHiddenGridlines?.(true);
     sheet.getRange(1, 1, sheet.getMaxRows(), 12)
       .setFontFamily('Roboto')
@@ -1308,7 +1312,7 @@ namespace FrontendFormattingService {
       .setBackground('#173e32').setFontColor('#ffffff').setFontWeight('bold').setFontSize(20)
       .setHorizontalAlignment('left');
     sheet.getRange('A2:L2').merge()
-      .setValue('Roster, accountability, resources, and historical context in one place')
+      .setValue('System for Headcount & Accountability of Manpower, Readiness, Oversight, and Cadet Keeping')
       .setBackground('#2b6e55').setFontColor('#eaf3ef').setFontSize(10)
       .setHorizontalAlignment('left');
 
@@ -1494,7 +1498,8 @@ namespace FrontendFormattingService {
     removeRetiredFaqSheet(ss);
     Log.info(
       `Dashboard rebuilt with managed links, metrics, charts=${sheet.getCharts().length}, `
-      + `birthdaySource=Directory groupRule=Sunday-Saturday historicalTerms=${Math.max(0, sources.length - 1)}.`,
+      + `birthdaySource=Directory groupRule=Sunday-Saturday historicalTerms=${Math.max(0, sources.length - 1)} `
+      + `flightChartAbroad=false dashboardRows=${requiredRows}.`,
     );
   }
 

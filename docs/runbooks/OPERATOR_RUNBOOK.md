@@ -38,6 +38,7 @@ Setup outputs to verify:
 - Dashboard is the first frontend tab, the retired FAQs tab is absent, and all four managed native Sheets charts render with visible marks rather than blank plot areas. Their specifications must include explicit header, domain, series, and percentage-axis window settings.
 - Data Legend is followed by Dashboard Data in tab order; both support sheets and every term-named frontend Leadership/Directory/Attendance archive are fully locked and hidden. Dashboard, Leadership, Directory, and Attendance remain visible.
 - Dashboard birthdays show Last Name, First Name, full Birthday, Display, and Group; duplicate last names use a first initial and Sunday-through-Saturday groups alternate white/gray backgrounds.
+- Dashboard rows 1 and 2 are visible and unfrozen, the SHAMROCK expansion appears as the tagline, the flight chart excludes Abroad, and no blank rows remain below the generated Dashboard content.
 - Backend workbook contains the expected tabs and formatting.
 - Forms exist and require verified responder emails.
 - Custom menus appear in the backend/admin workbook.
