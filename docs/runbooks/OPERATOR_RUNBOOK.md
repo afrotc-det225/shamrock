@@ -129,7 +129,7 @@ Post-deploy validation checklist:
 ### 5.4 Excusals processing
 - Requests append via form.
 - Decisions are made in Excusals Backend by authorized staff or in the separate Excusals Management workbook by the applicable Blue/Gold squadron commander.
-- In Excusals Management, link/domain sharing is private, squadron commanders are editors, canonical flight commanders/deputies are viewers, and only the applicable squadron commander's Decision cells are editable. Headers and request detail fields remain protected.
+- In Excusals Management, link/domain sharing is private, squadron commanders are editors, canonical flight commanders/deputies are viewers, and only the applicable squadron commander's Decision cells are editable. Headers and request detail fields remain protected. Active Blue/Gold tabs are native Sheets tables using the frontend Directory table style. A hidden protected local Data Legend supplies strict Decision dropdown validation, with Approved green, Denied red, Withdrawn amber, and Superseded purple.
 - Decisions drive notifications and attendance effects.
 - Requested outcomes are `P`, `T`, `E`, `ES`, and `MED`.
 - Denied post-event absences become `U`; denied pre-event requests become `D` until attendance is taken or closeout marks the absence.

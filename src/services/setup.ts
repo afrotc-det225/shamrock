@@ -305,7 +305,7 @@ namespace SetupService {
 
   const FRONTEND_TABLE_SHEETS = ['Directory', 'Leadership', 'Attendance', 'Data Legend'];
 
-  function ensureTableForSheet(spreadsheetId: string, sheetName: string, tableName = sheetName): boolean {
+  export function ensureTableForSheet(spreadsheetId: string, sheetName: string, tableName = sheetName): boolean {
     const displayTableName = String(tableName || sheetName).trim() || sheetName;
     if (typeof (globalThis as any).Sheets === 'undefined') {
       Log.warn(`Sheets advanced service unavailable; cannot create tables for ${sheetName}`);

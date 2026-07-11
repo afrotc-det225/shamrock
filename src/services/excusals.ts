@@ -1,10 +1,22 @@
 // Excusals processing service: handle notifications, decisions, and management panel.
 
 namespace ExcusalsService {
-  const DECISION_VALUES = ['Approved', 'Denied', 'Withdrawn', 'Superseded'];
+  const DEFAULT_DECISION_VALUES = ['Approved', 'Denied', 'Withdrawn', 'Superseded'];
+  const MANAGEMENT_LEGEND_SHEET = '_Excusals Data Legend';
+  const MANAGEMENT_DECISION_RANGE = 'EXCUSAL_DECISIONS';
+  const MANAGEMENT_TABLE_SUFFIX = ' Excusals';
   const TERMINAL_RESTORE_DECISIONS = new Set(['Withdrawn', 'Superseded']);
   const REQUESTED_OUTCOMES = new Set(['P', 'T', 'E', 'ES', 'MED']);
   const ATTENDANCE_CODES = new Set(['P', 'T', 'A', 'R', 'D', 'U', 'E', 'ES', 'MED', 'N/A', '']);
+
+  function decisionValues(): string[] {
+    const canonical = Arrays.EXCUSAL_DECISIONS || [];
+    return canonical.length ? canonical : DEFAULT_DECISION_VALUES;
+  }
+
+  function isDecisionValue(value: string): boolean {
+    return decisionValues().includes(value);
+  }
 
   function canonicalFlightLeadershipRoles(): Set<string> {
     const roles = new Set<string>();
@@ -205,6 +217,120 @@ SHAMROCK Automations`;
     return table.rows.find((r) => String(r['email'] || '').toLowerCase() === lower) || null;
   }
 
+  function managementTableName(squadron: string): string {
+    return `${squadron}${MANAGEMENT_TABLE_SUFFIX}`;
+  }
+
+  function ensureManagementDecisionLegend(
+    ss: GoogleAppsScript.Spreadsheet.Spreadsheet,
+  ): GoogleAppsScript.Spreadsheet.Range {
+    const values = decisionValues();
+    let sheet = ss.getSheetByName(MANAGEMENT_LEGEND_SHEET);
+    if (!sheet) sheet = ss.insertSheet(MANAGEMENT_LEGEND_SHEET);
+
+    sheet.getProtections(SpreadsheetApp.ProtectionType.RANGE).forEach((protection) => {
+      try { protection.remove(); } catch {}
+    });
+    sheet.getProtections(SpreadsheetApp.ProtectionType.SHEET).forEach((protection) => {
+      try { protection.remove(); } catch {}
+    });
+    let sourceRange: GoogleAppsScript.Spreadsheet.Range | null = null;
+    try {
+      if (sheet.getMaxRows() < values.length + 2) {
+        sheet.insertRowsAfter(sheet.getMaxRows(), values.length + 2 - sheet.getMaxRows());
+      }
+      const managedRange = sheet.getRange(1, 1, sheet.getMaxRows(), 1);
+      managedRange.clearContent().clearFormat();
+      sheet.getRange(1, 1).setValue('excusal_decision_options');
+      sheet.getRange(2, 1).setValue('Excusal Decision Options');
+      sourceRange = sheet.getRange(3, 1, values.length, 1);
+      const colors: Record<string, { background: string; font: string }> = {
+        Approved: { background: '#D9EAD3', font: '#274E13' },
+        Denied: { background: '#F4CCCC', font: '#990000' },
+        Withdrawn: { background: '#FFF2CC', font: '#7F6000' },
+        Superseded: { background: '#D9D2E9', font: '#674EA7' },
+      };
+      sourceRange.setValues(values.map((value) => [value]));
+      sourceRange.setBackgrounds(values.map((value) => [colors[value]?.background || '#FFFFFF']))
+        .setFontColors(values.map((value) => [colors[value]?.font || '#434343']))
+        .setFontWeight('bold');
+      sheet.getRange(1, 1, 2, 1).setFontWeight('bold');
+      sheet.setColumnWidth(1, 180);
+      ss.setNamedRange(MANAGEMENT_DECISION_RANGE, sourceRange);
+    } finally {
+      const protection = sheet.protect().setDescription('Excusals Management Data Legend');
+      protection.setWarningOnly(false);
+      try { protection.removeEditors(protection.getEditors()); } catch {}
+      if (protection.canDomainEdit()) protection.setDomainEdit(false);
+      if (!sheet.isSheetHidden()) sheet.hideSheet();
+    }
+    if (!sourceRange) throw new Error('Unable to prepare the Excusals Management decision legend.');
+    return sourceRange;
+  }
+
+  function applyManagementDecisionValidation(
+    ss: GoogleAppsScript.Spreadsheet.Spreadsheet,
+    sheet: GoogleAppsScript.Spreadsheet.Sheet,
+    sourceRange: GoogleAppsScript.Spreadsheet.Range,
+  ) {
+    const decisionColumn = (Schemas.EXCUSALS_MANAGEMENT_SCHEMA.machineHeaders || []).indexOf('decision');
+    if (decisionColumn < 0) throw new Error('Excusals Management schema is missing Decision.');
+    const sourceSheetName = sourceRange.getSheet().getName().replace(/'/g, "''");
+    const sourceA1 = sourceRange.getA1Notation().replace(/([A-Z]+)(\d+)/g, '$$$1$$$2');
+    const endRowIndex = Math.max(3, sheet.getMaxRows());
+    const svc = (globalThis as any).Sheets?.Spreadsheets;
+    if (!svc?.batchUpdate) throw new Error('Sheets advanced service is required for management Decision validation.');
+    svc.batchUpdate({
+      requests: [{
+        setDataValidation: {
+          range: {
+            sheetId: sheet.getSheetId(),
+            startRowIndex: 2,
+            endRowIndex,
+            startColumnIndex: decisionColumn,
+            endColumnIndex: decisionColumn + 1,
+          },
+          rule: {
+            condition: {
+              type: 'ONE_OF_RANGE',
+              values: [{ userEnteredValue: `='${sourceSheetName}'!${sourceA1}` }],
+            },
+            inputMessage: 'Select Approved, Denied, Withdrawn, or Superseded',
+            strict: true,
+            showCustomUi: true,
+          },
+          filteredRowsIncluded: true,
+        },
+      }],
+    }, ss.getId());
+
+    const decisionRange = sheet.getRange(3, decisionColumn + 1, Math.max(1, sheet.getMaxRows() - 2), 1);
+    const colorRule = (value: string, background: string, font: string) => SpreadsheetApp
+      .newConditionalFormatRule()
+      .whenTextEqualTo(value)
+      .setBackground(background)
+      .setFontColor(font)
+      .setRanges([decisionRange])
+      .build();
+    sheet.setConditionalFormatRules([
+      colorRule('Approved', '#D9EAD3', '#274E13'),
+      colorRule('Denied', '#F4CCCC', '#990000'),
+      colorRule('Withdrawn', '#FFF2CC', '#7F6000'),
+      colorRule('Superseded', '#D9D2E9', '#674EA7'),
+    ]);
+  }
+
+  function ensureManagementPresentation(ss: GoogleAppsScript.Spreadsheet.Spreadsheet) {
+    const sourceRange = ensureManagementDecisionLegend(ss);
+    Arrays.OPERATIONAL_SQUADRONS.forEach((squadron) => {
+      const sheet = ss.getSheetByName(squadron);
+      if (!sheet) return;
+      const tableReady = SetupService.ensureTableForSheet(ss.getId(), squadron, managementTableName(squadron));
+      if (!tableReady) throw new Error(`Unable to create the required Google Sheets table for ${squadron}.`);
+      applyManagementDecisionValidation(ss, sheet, sourceRange);
+    });
+  }
+
   /**
    * Get or create the excusals management spreadsheet.
    */
@@ -212,20 +338,24 @@ SHAMROCK Automations`;
     const existingId = Config.getScriptProperty(Config.PROPERTY_KEYS.EXCUSAL_MANAGEMENT_SPREADSHEET_ID);
 
     if (existingId) {
+      let existing: GoogleAppsScript.Spreadsheet.Spreadsheet | null = null;
       try {
-        const ss = SpreadsheetApp.openById(existingId);
+        existing = SpreadsheetApp.openById(existingId);
+      } catch (err) {
+        Log.warn(`Stored management spreadsheet ID invalid; creating new. Error: ${err}`);
+      }
+      if (existing) {
         // Ensure squadron sheets exist and are initialized even if spreadsheet already exists.
         const squadrons = Arrays.OPERATIONAL_SQUADRONS;
         squadrons.forEach((squadron) => {
-          let sheet = ss.getSheetByName(squadron);
+          let sheet = existing!.getSheetByName(squadron);
           if (!sheet) {
-            sheet = ss.insertSheet(squadron);
+            sheet = existing!.insertSheet(squadron);
           }
           initializeSquadronManagementSheet(sheet, squadron);
         });
+        ensureManagementPresentation(existing);
         return existingId;
-      } catch (err) {
-        Log.warn(`Stored management spreadsheet ID invalid; creating new. Error: ${err}`);
       }
     }
 
@@ -246,6 +376,8 @@ SHAMROCK Automations`;
     // Remove default sheet only after new sheets exist
     const defaultSheet = ss.getSheetByName('Sheet1');
     if (defaultSheet) ss.deleteSheet(defaultSheet);
+
+    ensureManagementPresentation(ss);
 
     return newId;
   }
@@ -270,22 +402,14 @@ SHAMROCK Automations`;
     // Hide machine headers (row 1)
     sheet.hideRows(1, 1);
     // Ensure minimal rows = 3 (2 headers + 1 blank data row)
-    const lastRow = sheet.getLastRow();
     const maxRows = sheet.getMaxRows();
     const MIN_ROWS = 3;
-    if (lastRow <= 2) {
-      if (maxRows < MIN_ROWS) {
-        sheet.insertRowsAfter(maxRows, MIN_ROWS - maxRows);
-      } else if (maxRows > MIN_ROWS) {
-        sheet.deleteRows(MIN_ROWS + 1, maxRows - MIN_ROWS);
-      }
-    }
+    if (maxRows < MIN_ROWS) sheet.insertRowsAfter(maxRows, MIN_ROWS - maxRows);
 
-    // Trim any extra columns beyond the schema width to keep things tidy.
+    // Tables tolerate spare blank rows/columns; avoid structural trimming after
+    // a native table exists because Google can reject those sheet mutations.
     const maxCols = sheet.getMaxColumns();
-    if (maxCols > headerWidth) {
-      sheet.deleteColumns(headerWidth + 1, maxCols - headerWidth);
-    }
+    if (maxCols < headerWidth) sheet.insertColumnsAfter(maxCols, headerWidth - maxCols);
 
     // Set column widths
     sheet.setColumnWidth(1, 150);  // timestamp
@@ -304,14 +428,10 @@ SHAMROCK Automations`;
 
     // Freeze first two rows (machine headers + display headers)
     sheet.setFrozenRows(2);
-
-    // Add data validation for Decision column (col 2, starting at row 3 since row 2 is frozen)
-    const decisionRule = SpreadsheetApp.newDataValidation()
-      .requireValueInList(DECISION_VALUES)
-      .setAllowInvalid(false)
-      .setHelpText('Select Approved, Denied, Withdrawn, or Superseded')
-      .build();
-    sheet.getRange('B3:B').setDataValidation(decisionRule);
+    sheet.setFrozenColumns(2);
+    sheet.getRange(2, 1, Math.max(2, sheet.getMaxRows() - 1), headerWidth)
+      .setFontFamily('Roboto')
+      .setVerticalAlignment('middle');
 
     Log.info(`Initialized management sheet for ${squadron} squadron`);
   }
@@ -377,11 +497,14 @@ SHAMROCK Automations`;
       const typeColumn = machineHeaders.indexOf('requested_outcome') + 1;
       if (typeColumn > 0) sheet.getRange(nextRow, typeColumn).setHorizontalAlignment('center');
 
-      // Trim extra rows and columns, then sort by Timestamp (descending)
+      // Sort by Timestamp (descending), then extend the native table and validation.
+      // Protections are restored even if the presentation API is temporarily unavailable.
       trimAndSortManagementSheet(sheet);
-
-      // Reapply protections so new rows remain covered
-      applyManagementSheetProtections(ss);
+      try {
+        ensureManagementPresentation(ss);
+      } finally {
+        applyManagementSheetProtections(ss);
+      }
 
       Log.info(`Synced excusal ${excusalRow['request_id']} to ${squadron} management sheet`);
     } catch (err) {
@@ -461,12 +584,14 @@ SHAMROCK Automations`;
           for (let i = allValues.length - 1; i >= 2; i--) {
             const eventVal = String(allValues[i][2] || '').trim();
             if (JUNK_EVENTS.has(eventVal)) {
-              sheet.deleteRow(i + 1);
+              sheet.getRange(i + 1, 1, 1, Schemas.EXCUSALS_MANAGEMENT_SCHEMA.machineHeaders!.length).clearContent();
               managementPurged++;
             }
           }
           trimAndSortManagementSheet(sheet);
         }
+        ensureManagementPresentation(ss);
+        applyManagementSheetProtections(ss);
       } catch (err) {
         Log.warn(`purgeJunkExcusalRows: management cleanup failed: ${err}`);
       }
@@ -648,6 +773,8 @@ SHAMROCK Automations`;
 
         trimAndSortManagementSheet(sheet);
       }
+      ensureManagementPresentation(ss);
+      applyManagementSheetProtections(ss);
     } catch (err) {
       Log.warn(`backpopulateManagementRequestedOutcome failed: ${err}`);
     }
@@ -657,22 +784,18 @@ SHAMROCK Automations`;
   }
 
   /**
-   * Trim empty rows and columns from management sheet, sort by Timestamp descending.
+   * Sort the management sheet by Timestamp descending without structural edits.
    */
   function trimAndSortManagementSheet(sheet: GoogleAppsScript.Spreadsheet.Sheet) {
-    const maxRows = sheet.getMaxRows();
-    const maxCols = sheet.getMaxColumns();
     const lastRow = sheet.getLastRow();
     const lastColumn = sheet.getLastColumn();
 
     // Only sort and trim if there's any rows present
     if (lastRow >= 2) {
-      const dataRange = sheet.getRange(1, 1, lastRow, lastColumn);
-      const values = dataRange.getValues();
-
-      // Preserve first two rows (machine + display headers)
-      const headerRows = values.slice(0, 2);
-      const dataRows = values.slice(2);
+      const dataRange = sheet.getRange(3, 1, Math.max(1, lastRow - 2), lastColumn);
+      const dataRows = lastRow >= 3
+        ? dataRange.getValues().filter((row) => row.some((cell) => cell !== '' && cell !== null && cell !== undefined))
+        : [];
 
       // Sort data rows by timestamp descending (col 1)
       dataRows.sort((a: any[], b: any[]) => {
@@ -681,22 +804,9 @@ SHAMROCK Automations`;
         return timeB - timeA; // Descending (latest first)
       });
 
-      const sortedValues = [...headerRows, ...dataRows];
-      dataRange.setValues(sortedValues);
+      dataRange.clearContent();
+      if (dataRows.length) sheet.getRange(3, 1, dataRows.length, lastColumn).setValues(dataRows);
 
-      // Delete extra rows beyond data, but keep minimum of 3 total rows
-      const MIN_ROWS = 3;
-      const targetRows = Math.max(lastRow, MIN_ROWS);
-      if (maxRows > targetRows) {
-        sheet.deleteRows(targetRows + 1, maxRows - targetRows);
-      } else if (maxRows < targetRows) {
-        sheet.insertRowsAfter(maxRows, targetRows - maxRows);
-      }
-    }
-
-    // Delete extra columns beyond data
-    if (lastColumn < maxCols) {
-      sheet.deleteColumns(lastColumn + 1, maxCols - lastColumn);
     }
   }
 
@@ -824,7 +934,7 @@ SHAMROCK Automations`;
 
     // Only process if Decision column was edited and value is a v2 workflow decision.
     if (col - 1 !== decisionColIdx || row < 3) return;
-    if (!DECISION_VALUES.includes(newValue)) return;
+    if (!isDecisionValue(newValue)) return;
 
     try {
       const backendSheet = SheetUtils.getSheet(Config.getBackendId(), 'Excusals Backend');
@@ -942,7 +1052,7 @@ SHAMROCK Automations`;
     const requestCol = Schemas.EXCUSALS_MANAGEMENT_SCHEMA.machineHeaders?.indexOf('request_id') ?? -1;
     if (decisionCol < 0 || requestCol < 0) return;
     if (row < 3 || col !== decisionCol + 1) return;
-    if (!DECISION_VALUES.includes(decision)) return;
+    if (!isDecisionValue(decision)) return;
 
     const requestId = String(sheet.getRange(row, requestCol + 1).getValue() || '').trim();
     if (!requestId) {
@@ -1261,6 +1371,11 @@ C/${commanderLastName}`;
     const safeLabel = String(archiveLabel || 'Previous Term').trim() || 'Previous Term';
     const safeKey = String(archiveKey || 'archive').replace(/[^A-Za-z0-9_-]+/g, '').slice(0, 8) || 'archive';
     const lockArchive = (sheet: GoogleAppsScript.Spreadsheet.Sheet, archiveName: string) => {
+      const tableReady = SetupService.ensureTableForSheet(backendId, archiveName, archiveName);
+      const decisionColumn = (Schemas.EXCUSALS_MANAGEMENT_SCHEMA.machineHeaders || []).indexOf('decision') + 1;
+      if (decisionColumn > 0) {
+        sheet.getRange(3, decisionColumn, Math.max(1, sheet.getMaxRows() - 2), 1).clearDataValidations();
+      }
       sheet.getProtections(SpreadsheetApp.ProtectionType.RANGE).forEach((protection) => {
         try { protection.remove(); } catch {}
       });
@@ -1272,6 +1387,7 @@ C/${commanderLastName}`;
       try { protection.removeEditors(protection.getEditors()); } catch {}
       if (protection.canDomainEdit()) protection.setDomainEdit(false);
       sheet.hideSheet();
+      if (!tableReady) throw new Error(`Unable to create the required archive table for ${archiveName}.`);
     };
     Arrays.OPERATIONAL_SQUADRONS.forEach((squadron) => {
       const source = management.getSheetByName(squadron);
@@ -1280,11 +1396,34 @@ C/${commanderLastName}`;
       const existing = archiveWorkbook.getSheetByName(archiveName);
       if (existing) {
         lockArchive(existing, archiveName);
+        try {
+          ensureManagementPresentation(management);
+        } finally {
+          applyManagementSheetProtections(management);
+        }
         archivedNames.push(archiveName);
         return;
       }
-      const archived = source.copyTo(archiveWorkbook).setName(archiveName);
+      const decisionColumn = (Schemas.EXCUSALS_MANAGEMENT_SCHEMA.machineHeaders || []).indexOf('decision') + 1;
+      const sourceDecisionRange = decisionColumn > 0
+        ? source.getRange(3, decisionColumn, Math.max(1, source.getMaxRows() - 2), 1)
+        : null;
+      if (sourceDecisionRange) sourceDecisionRange.clearDataValidations();
+      let archived: GoogleAppsScript.Spreadsheet.Sheet;
+      let restoreError: any = null;
+      try {
+        archived = source.copyTo(archiveWorkbook).setName(archiveName);
+      } finally {
+        try {
+          ensureManagementPresentation(management);
+        } catch (err) {
+          restoreError = err;
+        } finally {
+          applyManagementSheetProtections(management);
+        }
+      }
       lockArchive(archived, archiveName);
+      if (restoreError) throw restoreError;
       archivedNames.push(archiveName);
     });
     Log.info(`Archived ${archivedNames.length} Excusals management sheet(s) in the admin workbook for ${safeLabel}`);
@@ -1302,6 +1441,7 @@ C/${commanderLastName}`;
       if (lastRow >= 3) sheet.getRange(3, 1, lastRow - 2, sheet.getMaxColumns()).clearContent();
       initializeSquadronManagementSheet(sheet, squadron);
     });
+    ensureManagementPresentation(ss);
     shareAndProtectManagementSpreadsheet();
     Log.info('Reset active Excusals management sheets and refreshed current-term access');
   }

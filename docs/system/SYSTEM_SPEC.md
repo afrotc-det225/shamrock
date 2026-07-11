@@ -119,6 +119,7 @@ Cell-level dropdown validations must be driven from the Data Legend tab(s) using
 - Validations in other sheets reference Data Legend ranges.
 - Frontend primary sheets use Google Sheets Table objects through the Sheets API advanced service. They must not rely on ordinary `applyRowBanding()` ranges as a substitute for Tables.
 - Active frontend table names must match the sheet display names: `Directory`, `Leadership`, `Attendance`, and `Data Legend`.
+- Active Excusals Management squadron tabs use native Google Sheets tables named `<Squadron> Excusals`, with the same green header and white/gray banding as frontend Directory.
 - Table column types must remain `None` / `COLUMN_TYPE_UNSPECIFIED`. Controlled values are enforced with normal cell-level data validation rules, not Sheets Table dropdown column types.
 - Frontend formatting must never delete Sheets Table objects as part of normal formatting. It updates existing table objects in place, explicitly resets every table column to `COLUMN_TYPE_UNSPECIFIED`, and then applies validation through Sheets API cell-level `setDataValidation` or validation-only `copyPaste` requests. Do not use `Range.setDataValidation(...)` across a table body because Google Sheets can promote that rule into a typed table dropdown column.
 - Directory and Attendance validation repair should copy validation-only metadata from the newest matching `Spring YYYY ...` or `Fall YYYY ...` frontend archive when available. This preserves the proven archive presentation, including the validation UI/color treatment. A fresh environment with no archive falls back to equivalent strict Data Legend-backed `ONE_OF_RANGE` rules through the Sheets API.
@@ -218,6 +219,7 @@ Workflow summary:
 - Approved requests apply the requested outcome; denied requests become `D` before the event or `U` after the event unless the prior state proves the cadet attended.
 - Notifications are sent to appropriate leadership derived from Cadre & Leadership.
 - The Excusals Management workbook uses private link/domain sharing, grants edit access only to canonical operational squadron commanders, and grants view access to canonical flight commanders/deputies. Active tabs protect all fields except the owning squadron commander's Decision cells.
+- The management workbook contains its own hidden, fully protected Data Legend because Google Sheets validation cannot reference another workbook. Its `EXCUSAL_DECISIONS` range mirrors the canonical decision array. Decision cells use strict cell-level `ONE_OF_RANGE` validation while table column types remain unset; conditional formatting colors Approved green, Denied red, Withdrawn amber, and Superseded purple.
 - Semester/year transitions preserve management history as hidden, locked term-labeled tabs in the restricted backend/admin workbook, then reset active squadron queues and derive management-workbook access from refreshed Leadership assignments.
 - Excusal submissions and decisions append request-keyed Audit Backend rows; decision reconsiderations preserve the previous decision from the edit event.
 
