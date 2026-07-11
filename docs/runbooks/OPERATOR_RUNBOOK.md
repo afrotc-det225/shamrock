@@ -229,6 +229,15 @@ Operator checks:
 - Confirm Events Backend definitions.
 - Run rebuild/regenerate attendance.
 
+### 6.6 Dashboard chart source reports no numeric values
+Likely cause:
+- A long sync exhausted the per-user Sheets API read quota before Dashboard source headers were read. This is a presentation-stage failure; mapped backend/frontend data may already have synchronized successfully.
+
+Operator checks:
+- Confirm the log contains Sheets API `Read requests per minute per user` quota warnings before the Dashboard error.
+- Re-run `Sync all mapped tabs` after deploying the quota-safe formatting path. SHAMROCK batches Data Legend reads and falls back to SpreadsheetApp for header discovery when the API is temporarily quota-limited.
+- Confirm all four Dashboard charts render and frontend protections were restored.
+
 ## 7. Safety and Rollback
 General rollback principles:
 - Prefer disabling triggers and reverting derived views over deleting data.

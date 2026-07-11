@@ -64,8 +64,18 @@ namespace FrontendFormattingService {
     sheetName: string,
     a1Range: string,
   ): unknown[][] | null {
+    const spreadsheetFallback = (): unknown[][] | null => {
+      try {
+        const sheet = ss.getSheetByName(sheetName);
+        if (!sheet) return null;
+        return sheet.getRange(a1Range).getDisplayValues() as unknown[][];
+      } catch (err) {
+        Log.warn(`Unable to read ${sheetName}!${a1Range} with SpreadsheetApp fallback: ${err}`);
+        return null;
+      }
+    };
     const valuesService = (globalThis as any).Sheets?.Spreadsheets?.Values;
-    if (!valuesService?.get) return null;
+    if (!valuesService?.get) return spreadsheetFallback();
     const escapedName = sheetName.replace(/'/g, "''");
     try {
       const response = valuesService.get(ss.getId(), `'${escapedName}'!${a1Range}`, {
@@ -74,8 +84,8 @@ namespace FrontendFormattingService {
       });
       return (response?.values || []) as unknown[][];
     } catch (err) {
-      Log.warn(`Unable to read ${sheetName}!${a1Range} with Sheets API: ${err}`);
-      return null;
+      Log.warn(`Unable to read ${sheetName}!${a1Range} with Sheets API; using SpreadsheetApp fallback. Error: ${err}`);
+      return spreadsheetFallback();
     }
   }
 
@@ -198,14 +208,20 @@ namespace FrontendFormattingService {
         display: (apiRows[1] || []).map((h) => String(h || '').trim()),
       };
     }
-    Log.warn(`Unable to read ${sheet.getName()} headers through the Sheets API path; skipping this header-driven step.`);
+    Log.warn(`Unable to read ${sheet.getName()} headers through either supported read path; skipping this header-driven step.`);
     return { machine: [], display: [] };
   }
 
   function buildNamedRanges(ss: GoogleAppsScript.Spreadsheet.Spreadsheet): NamedRangeDef[] {
     const sheet = ss.getSheetByName('Data Legend');
     if (!sheet) return [];
-    const headers = readHeaderRows(ss, sheet).machine;
+    const lastRow = sheet.getLastRow();
+    const lastColumn = sheet.getLastColumn();
+    if (lastRow < 3 || lastColumn < 1) return [];
+    const endColumn = columnNumberToA1(lastColumn);
+    const legendValues = readSheetValuesViaApi(ss, sheet.getName(), `A1:${endColumn}${lastRow}`);
+    if (!legendValues) return [];
+    const headers = (legendValues[0] || []).map((header) => String(header || '').trim());
 
     const mapping: Record<string, string> = {
       as_year_options: 'AS_YEARS',
@@ -226,18 +242,12 @@ namespace FrontendFormattingService {
       excusal_requested_outcome_options: 'EXCUSAL_REQUESTED_OUTCOMES',
     };
 
-    const lastRow = sheet.getLastRow();
     const defs: NamedRangeDef[] = [];
     headers.forEach((header, idx) => {
       const rangeName = mapping[header];
       if (!rangeName) return;
       const col = idx + 1;
-      const rowsCount = Math.max(0, lastRow - 2);
-      if (rowsCount === 0) return;
-      const columnLetter = columnNumberToA1(col);
-      const apiValues = readSheetValuesViaApi(ss, sheet.getName(), `${columnLetter}3:${columnLetter}${lastRow}`);
-      if (!apiValues) return;
-      const values = apiValues.map((r) => String(r[0] || ''));
+      const values = legendValues.slice(2).map((row) => String(row[idx] || ''));
       let nonEmpty = -1;
       for (let i = values.length - 1; i >= 0; i--) {
         if (values[i].trim() !== '') {
@@ -481,14 +491,16 @@ namespace FrontendFormattingService {
   export function applyAll(frontendId: string, opts?: { skipValidations?: boolean }) {
     const ss = openFrontend(frontendId);
     if (!ss) return;
-    const namedRanges = buildNamedRanges(ss);
-    namedRanges.forEach((def) => {
-      try {
-        ss.setNamedRange(def.name, def.range);
-      } catch (err) {
-        Log.warn(`Unable to set named range ${def.name}: ${err}`);
-      }
-    });
+    if (!opts?.skipValidations) {
+      const namedRanges = buildNamedRanges(ss);
+      namedRanges.forEach((def) => {
+        try {
+          ss.setNamedRange(def.name, def.range);
+        } catch (err) {
+          Log.warn(`Unable to set named range ${def.name}: ${err}`);
+        }
+      });
+    }
 
     clearLegacyBandingFromFrontendTables(ss);
 
@@ -1136,8 +1148,15 @@ namespace FrontendFormattingService {
     SpreadsheetApp.flush();
 
     const assertNumericSeries = (range: GoogleAppsScript.Spreadsheet.Range, label: string) => {
-      const numericValues = range.getValues().flat().filter((value) => typeof value === 'number' && Number.isFinite(value));
-      if (!numericValues.length) throw new Error(`Dashboard chart source has no numeric values: ${label}`);
+      for (let attempt = 1; attempt <= 4; attempt++) {
+        const numericValues = range.getValues().flat().filter((value) => typeof value === 'number' && Number.isFinite(value));
+        if (numericValues.length) return;
+        if (attempt < 4) {
+          SpreadsheetApp.flush();
+          Utilities.sleep(250 * attempt);
+        }
+      }
+      throw new Error(`Dashboard chart source has no numeric values after recalculation: ${label}`);
     };
     assertNumericSeries(attendanceByAsYear, 'attendance by AS year');
     assertNumericSeries(attendanceTrend, 'attendance trend');
