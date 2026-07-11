@@ -28,7 +28,7 @@ Confirm explicitly:
 - Frontend protection changes preserve the hidden, whole-sheet lock invariant for Data Legend, Dashboard Data, and all term-named frontend Leadership/Directory/Attendance archives.
 - Dashboard chart changes verify numeric source values and native chart IDs after the support sheet is hidden; chart existence alone is not sufficient. Use native Sheets API chart specifications with explicit header, domain, series, and axis-window settings rather than the Apps Script embedded-chart builder.
 - Every new operator menu action uses `runMenuAction(...)` and the shared live-progress window.
-- Live-progress changes preserve the single-poller invariant: one scheduled chain, at most one in-flight progress request, bounded retry/backoff, no second loop from action completion handlers, and explicit cleanup for Close, unload, page-hide, and hidden-window paths.
+- Live-progress changes preserve the single-poller invariant: one scheduled chain, at most one in-flight progress request, bounded retry/backoff and lifetime/request caps, no second loop from action completion handlers, direct termination from the action's sanitized completion response, and explicit cleanup for Close, unload, page-hide, and hidden-window paths.
 - Long or prompt-driven operator workflows define meaningful plain-language progress stages, hints, waiting states, and continuation states without false row-level precision or sensitive details.
 - Every useful operator-facing milestone added to technical logs is mirrored through an explicit progress report or a safe `captureTechnicalLog(...)` translation, including completion durations and recoverable warnings where helpful.
 - The change targets the current supported baseline, not retired CSV/sheet/property formats.

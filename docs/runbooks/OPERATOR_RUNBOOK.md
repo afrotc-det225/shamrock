@@ -89,9 +89,11 @@ Post-deploy validation checklist:
 - Leave the window open to see current stage, distilled activity, elapsed time, and stage count where available. The percentage represents completed workflow stages, not an estimated Google API row count.
 - If the window says `Waiting for you`, return to the spreadsheet and answer the visible confirmation or data-entry prompt.
 - You may close the progress window without stopping the action. Do not assume closing it cancels server-side work.
+- The action completion response stops live polling directly; the dialog does not depend on another progress request to discover completion. Close, title-bar X, unload, hidden-window, repeated-failure, and absolute safety-limit paths also prevent indefinite polling.
 - `Continuing later` means a resumable workflow saved a checkpoint and scheduled a continuation; do not start a fresh duplicate run.
 - For `Needs attention`, use the displayed run ID to find the matching Audit Backend row and Apps Script execution logs.
 - Automated triggers and form submissions run without this window because there is no waiting menu operator.
+- After a progress-poller deployment, reload any backend workbook tab that already had a progress dialog open; deployed HTML cannot replace a stale dialog frame that the browser already loaded.
 
 ### 5.1 Directory maintenance
 - Directory source of truth is maintained in the backend.

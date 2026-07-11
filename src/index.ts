@@ -165,7 +165,7 @@ function runShamrockProgressAction(action: string, runId: string) {
   }
 
   try {
-    return ProgressService.withExecutionContext(runId, action, () => {
+    ProgressService.withExecutionContext(runId, action, () => {
     switch (action) {
       case 'menu.setup': return setup();
       case 'menu.transfer_new_semester_v2': return transferToNewSemesterV2();
@@ -222,8 +222,11 @@ function runShamrockProgressAction(action: string, runId: string) {
   } catch {
     // runMenuAction already recorded/audited the failure and updated the live
     // progress state. Do not echo raw server details into the HTML client.
-    return undefined;
   }
+  // The dialog receives only the sanitized cached progress state, never a
+  // workflow's arbitrary return value. This completion response is also the
+  // authoritative client-side signal to terminate polling immediately.
+  return ProgressService.get(runId);
 }
 
 /** Lightweight polling endpoint used by the live-progress dialog. */

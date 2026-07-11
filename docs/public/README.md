@@ -214,7 +214,7 @@ Every backend SHAMROCK menu action opens a modeless live-progress window instead
 - Long workflows report real milestones. Percentages are stage-based and do not claim row-by-row precision when the underlying Google API does not expose it.
 - Meaningful execution milestones—such as synced row counts, restored photo chips, table readiness, completed formatting phases and durations, and recoverable warnings—are distilled into operator-safe activity entries; full technical details remain in Apps Script logs.
 - Closing the progress window does not cancel the action.
-- Live updates use one non-overlapping polling chain: approximately every five seconds while work is active and every fifteen seconds while waiting for operator input. Closing or hiding the window disposes or pauses that chain, and repeated connection failures back off sharply before polling stops and exposes a manual retry control.
+- Live updates use one non-overlapping polling chain: approximately every eight seconds while work is active and every twenty seconds while waiting for operator input. The server action's own completion response terminates polling immediately, even if a final progress read would fail. Closing or hiding the window disposes or pauses the chain, repeated connection failures back off sharply, and an absolute request/lifetime limit prevents an abandoned Google-hosted dialog frame from polling indefinitely.
 - Success, cancellation, background continuation, and failure are terminal states. Failures include the run ID needed to locate the matching Audit Backend and technical-log entries.
 - Installable triggers and form-submit automations do not open an interactive window because no operator is waiting in a spreadsheet UI; they continue to use technical and audit logging.
 
@@ -224,6 +224,7 @@ Every backend SHAMROCK menu action opens a modeless live-progress window instead
 - Run an action with confirmation and confirm the window shows `Waiting for you` until the spreadsheet prompt is answered.
 - Confirm the action still writes matching `started` and terminal Audit Backend rows with the same `run_id`.
 - Close the progress window during a harmless longer action and confirm the server-side action still completes.
+- After completion and after closing with either Close or the title-bar X, confirm Apps Script executions do not continue accumulating `getShamrockProgress` calls.
 
 ## Audit Logging
 

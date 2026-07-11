@@ -204,14 +204,19 @@ namespace ProgressService {
     const actionId = ${actionJson};
     const runId = ${runIdJson};
     // A self-scheduling singleton avoids overlapping server calls and duplicate poll chains.
-    const ACTIVE_POLL_DELAY_MS = 5000;
-    const WAITING_POLL_DELAY_MS = 15000;
+    const ACTIVE_POLL_DELAY_MS = 8000;
+    const WAITING_POLL_DELAY_MS = 20000;
     const MAX_POLL_FAILURES = 3;
+    const MAX_POLL_REQUESTS = 240;
+    const MAX_POLL_LIFETIME_MS = 35 * 60 * 1000;
+    const dialogOpenedAt = Date.now();
     let terminal = false;
+    let actionSettled = false;
     let startedAt = Date.now();
     let lastState = null;
     let missingReads = 0;
     let pollFailures = 0;
+    let pollRequests = 0;
     let pollInFlight = false;
     let pollTimer = null;
     let pollingStopped = false;
@@ -293,26 +298,69 @@ namespace ProgressService {
       }
     }
 
+    function clearPollTimer() {
+      if (pollTimer !== null) {
+        clearTimeout(pollTimer);
+        pollTimer = null;
+      }
+    }
+
+    function finishFromAction(finalState) {
+      if (disposed || actionSettled) return;
+      actionSettled = true;
+      pollingStopped = true;
+      clearPollTimer();
+      if (finalState) {
+        render(finalState);
+      } else {
+        text('badge', 'Finished');
+        text('title', 'The action has finished');
+        text('detail', 'The server action returned, but its final saved progress state was unavailable.');
+        text('hint', 'Use the Run ID in Audit Backend if you need to confirm the final result.');
+      }
+      terminal = true;
+      updateElapsed();
+      if (elapsedTimer !== null) {
+        clearInterval(elapsedTimer);
+        elapsedTimer = null;
+      }
+      document.getElementById('retryButton').style.display = 'none';
+    }
+
+    function finishFromActionFailure(error) {
+      if (disposed || actionSettled) return;
+      actionSettled = true;
+      pollingStopped = true;
+      terminal = true;
+      clearPollTimer();
+      if (elapsedTimer !== null) {
+        clearInterval(elapsedTimer);
+        elapsedTimer = null;
+      }
+      text('badge', 'Needs attention');
+      text('title', 'The action stopped');
+      text('detail', error && error.message ? error.message : 'Apps Script reported an unexpected error.');
+      text('hint', 'Use the Run ID in Audit Backend or Apps Script logs if more detail is needed.');
+      document.getElementById('retryButton').style.display = 'none';
+    }
+
     function closeProgressWindow() {
       disposeProgressWindow();
       google.script.host.close();
     }
 
-    function stopPolling(title, detail, hint) {
+    function stopPolling(title, detail, hint, allowRetry = true) {
       pollingStopped = true;
-      if (pollTimer !== null) {
-        clearTimeout(pollTimer);
-        pollTimer = null;
-      }
+      clearPollTimer();
       text('badge', 'Updates paused');
       text('title', title);
       text('detail', detail);
       text('hint', hint);
-      document.getElementById('retryButton').style.display = '';
+      document.getElementById('retryButton').style.display = allowRetry ? '' : 'none';
     }
 
     function retryUpdates() {
-      if (disposed || terminal) return;
+      if (disposed || terminal || actionSettled) return;
       pollingStopped = false;
       pollFailures = 0;
       missingReads = 0;
@@ -325,6 +373,16 @@ namespace ProgressService {
 
     function poll() {
       if (disposed || terminal || pollingStopped || pollInFlight) return;
+      if (pollRequests >= MAX_POLL_REQUESTS || Date.now() - dialogOpenedAt >= MAX_POLL_LIFETIME_MS) {
+        stopPolling(
+          'Live updates reached their safety limit',
+          'SHAMROCK stopped checking the server so an abandoned progress window cannot continue creating executions.',
+          'The action continues normally. Review Audit Backend for the final result.',
+          false,
+        );
+        return;
+      }
+      pollRequests += 1;
       pollInFlight = true;
       google.script.run
         .withSuccessHandler(state => {
@@ -362,18 +420,8 @@ namespace ProgressService {
 
     poll();
     google.script.run
-      .withSuccessHandler(() => {})
-      .withFailureHandler(error => {
-        pollingStopped = true;
-        if (pollTimer !== null) {
-          clearTimeout(pollTimer);
-          pollTimer = null;
-        }
-        text('badge', 'Needs attention');
-        text('title', 'The action stopped');
-        text('detail', error && error.message ? error.message : 'Apps Script reported an unexpected error.');
-        text('hint', 'Use the Run ID in Audit Backend or Apps Script logs if more detail is needed.');
-      })
+      .withSuccessHandler(finalState => finishFromAction(finalState))
+      .withFailureHandler(error => finishFromActionFailure(error))
       .runShamrockProgressAction(actionId, runId);
     elapsedTimer = setInterval(updateElapsed, 1000);
     window.addEventListener('pagehide', disposeProgressWindow);
