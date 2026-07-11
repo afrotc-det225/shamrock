@@ -256,6 +256,8 @@ Formatting and protections keep the frontend usable as an interface while preser
 
 Dashboard is the single frontend home page. It combines end-user guidance with quick actions, roster and attendance metrics, current-versus-historical charts, and a full birthday calendar. Birthday rows are grouped by Sunday-through-Saturday week for the current year and use alternating group backgrounds; duplicate last names gain a first initial in the display label. The retired FAQ tab is removed rather than maintained as a separate reading surface.
 
+The visible frontend is limited to Dashboard, Leadership, Directory, and Attendance. Applying frontend protections fully locks and hides Data Legend, Dashboard Data, and every term-named Leadership/Directory/Attendance archive. Dashboard Data is ordered immediately after Data Legend. Chart values are mirrored beneath the chart overlays before Dashboard Data is hidden, preventing hidden helper data from producing blank graphics.
+
 ### Operator Entry Points
 
 - Setup.

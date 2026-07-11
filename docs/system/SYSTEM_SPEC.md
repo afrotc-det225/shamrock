@@ -159,7 +159,7 @@ This section describes the current operational shape of the system so feature wo
 ### 7.1 Frontend Tabs
 - Dashboard: the single frontend home page for end-user guidance, quick links, roster and attendance metrics, current-versus-historical charts, and the full birthday calendar. The retired FAQs tab must not be recreated.
 - Dashboard birthday rows contain `Last Name`, `First Name`, `Birthday`, `Display`, and `Group`. Display values use `C/Last` for unique last names and `C/F. Last` when a first initial is needed to disambiguate a duplicate last name. Groups are sequential occupied Sunday-through-Saturday birthday weeks in the current calendar year; group parity drives alternating white/gray backgrounds.
-- `_Dashboard Data`: hidden formula-backed helper tab used only as the source for managed Dashboard charts. Dashboard rebuilds may recreate its contents, and it must remain hidden from end users.
+- `Dashboard Data`: hidden, fully protected formula-backed helper tab for managed Dashboard charts. It is ordered immediately after `Data Legend`; Dashboard rebuilds may recreate its contents. Renderable chart-source mirrors live beneath the Dashboard chart overlays so hiding the helper cannot blank the graphics.
 - Cadre & Leadership: minimal contact directory.
 - Directory: cadet directory with AS year, flight, squadron, rank, role, contact, academic, and status fields (sorted by the canonical senior-to-junior display order, then A-Z by last name) with required formatting constraints. AS500 displays below AS300 and above AS250 because it remains a GMC year. The frontend and backend v2 Directory order begins `Last Name`, `First Name`, `Year`, `Flight`, `Sqdn`, `Rank`, `Role`, `University`.
 - Attendance: directory-synced cadet rows + event columns with attendance codes and percentage rollups.
@@ -167,6 +167,7 @@ This section describes the current operational shape of the system so feature wo
 - Excusals: public-facing excusal request log.
 - Audit/Changelog: append-only log of changes.
 - Data Legend: validation option ranges.
+- Data Legend, Dashboard Data, and every term-named frontend Leadership/Directory/Attendance archive must be fully protected and hidden whenever frontend protections are applied. The four working tabs remain visible.
 
 ### 7.2 Backend Tabs
 - Directory Backend: authoritative directory source using the same v2 order as the frontend Directory. It does not include legacy `source` or freeform Directory `notes` columns.

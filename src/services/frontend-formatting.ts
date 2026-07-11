@@ -963,13 +963,31 @@ namespace FrontendFormattingService {
   }
 
   interface DashboardChartRanges {
+    helperSheet: GoogleAppsScript.Spreadsheet.Sheet;
     attendanceByAsYear: GoogleAppsScript.Spreadsheet.Range;
     attendanceTrend: GoogleAppsScript.Spreadsheet.Range;
     attendanceByFlight: GoogleAppsScript.Spreadsheet.Range;
     rosterByAsYear: GoogleAppsScript.Spreadsheet.Range;
   }
 
-  const DASHBOARD_HELPER_SHEET = '_Dashboard Data';
+  const DASHBOARD_HELPER_SHEET = 'Dashboard Data';
+  const LEGACY_DASHBOARD_HELPER_SHEET = '_Dashboard Data';
+
+  function resolveDashboardHelperSheet(ss: GoogleAppsScript.Spreadsheet.Spreadsheet): GoogleAppsScript.Spreadsheet.Sheet {
+    let helper = ss.getSheetByName(DASHBOARD_HELPER_SHEET);
+    const legacy = ss.getSheetByName(LEGACY_DASHBOARD_HELPER_SHEET);
+    if (!helper && legacy) {
+      legacy.setName(DASHBOARD_HELPER_SHEET);
+      helper = legacy;
+      Log.info(`Renamed legacy ${LEGACY_DASHBOARD_HELPER_SHEET} sheet to ${DASHBOARD_HELPER_SHEET}.`);
+    } else if (helper && legacy && helper.getSheetId() !== legacy.getSheetId()) {
+      legacy.getProtections(SpreadsheetApp.ProtectionType.RANGE).forEach((protection) => protection.remove());
+      legacy.getProtections(SpreadsheetApp.ProtectionType.SHEET).forEach((protection) => protection.remove());
+      ss.deleteSheet(legacy);
+      Log.info(`Removed duplicate legacy ${LEGACY_DASHBOARD_HELPER_SHEET} sheet.`);
+    }
+    return helper || ss.insertSheet(DASHBOARD_HELPER_SHEET);
+  }
 
   function dashboardColumnRange(sheet: GoogleAppsScript.Spreadsheet.Sheet, columnIndex: number): string {
     const column = columnNumberToA1(columnIndex + 1);
@@ -1018,89 +1036,114 @@ namespace FrontendFormattingService {
 
   function buildDashboardChartData(
     ss: GoogleAppsScript.Spreadsheet.Spreadsheet,
+    dashboard: GoogleAppsScript.Spreadsheet.Sheet,
     directory: GoogleAppsScript.Spreadsheet.Sheet,
     sources: DashboardAttendanceSource[],
   ): DashboardChartRanges {
-    let helper = ss.getSheetByName(DASHBOARD_HELPER_SHEET);
-    if (!helper) helper = ss.insertSheet(DASHBOARD_HELPER_SHEET);
+    const helper = resolveDashboardHelperSheet(ss);
     if (helper.getMaxRows() < 40) helper.insertRowsAfter(helper.getMaxRows(), 40 - helper.getMaxRows());
     if (helper.getMaxColumns() < 12) helper.insertColumnsAfter(helper.getMaxColumns(), 12 - helper.getMaxColumns());
     helper.showSheet();
 
-    try {
-      helper.clear();
-      helper.clearConditionalFormatRules();
-      helper.getRange(1, 1, helper.getMaxRows(), helper.getMaxColumns()).setFontFamily('Roboto').setFontSize(10);
+    helper.clear();
+    helper.clearConditionalFormatRules();
+    helper.getRange(1, 1, helper.getMaxRows(), helper.getMaxColumns()).setFontFamily('Roboto').setFontSize(10);
 
-      const comparisonSources = sources.slice(0, 3);
-      const asYearRows: any[][] = [
-        ['AS Year', ...comparisonSources.map((source) => source.label)],
-        ...Arrays.AS_YEARS.map((asYear, index) => {
-          const row = index + 2;
-          return [
-            asYear,
-            ...comparisonSources.map((source) => {
-              const overall = dashboardColumnRange(source.sheet, source.overallIndex);
-              const sourceAsYear = dashboardColumnRange(source.sheet, source.asYearIndex);
-              return `=IFERROR(AVERAGE(FILTER(${overall},${sourceAsYear}=$A${row},${overall}<>"")),"")`;
-            }),
-          ];
-        }),
-      ];
-      helper.getRange(1, 1, asYearRows.length, asYearRows[0].length).setValues(asYearRows);
-      if (asYearRows[0].length > 1) helper.getRange(2, 2, asYearRows.length - 1, asYearRows[0].length - 1).setNumberFormat('0.0%');
-
-      const chronologicalSources = [...sources.slice(1)].reverse().concat(sources.slice(0, 1));
-      const trendRows = [
-        ['Term', 'Overall Attendance'],
-        ...chronologicalSources.map((source) => {
-          const overall = dashboardColumnRange(source.sheet, source.overallIndex);
-          const lastName = dashboardColumnRange(source.sheet, source.lastNameIndex);
-          return [source.label, `=IFERROR(AVERAGE(FILTER(${overall},${lastName}<>"",${overall}<>"")),"")`];
-        }),
-      ];
-      helper.getRange(15, 1, trendRows.length, 2).setValues(trendRows);
-      if (trendRows.length > 1) helper.getRange(16, 2, trendRows.length - 1, 1).setNumberFormat('0.0%');
-
-      const current = sources.find((source) => source.label === 'Current');
-      const flightRows: any[][] = [['Flight', 'Overall Attendance']];
-      Arrays.FLIGHTS.forEach((flight, index) => {
-        let formula = '';
-        if (current && current.flightIndex >= 0) {
-          const overall = dashboardColumnRange(current.sheet, current.overallIndex);
-          const sourceFlight = dashboardColumnRange(current.sheet, current.flightIndex);
-          formula = `=IFERROR(AVERAGE(FILTER(${overall},${sourceFlight}=$F${index + 16},${overall}<>"")),"")`;
-        }
-        flightRows.push([flight, formula]);
-      });
-      helper.getRange(15, 6, flightRows.length, 2).setValues(flightRows);
-      helper.getRange(16, 7, flightRows.length - 1, 1).setNumberFormat('0.0%');
-
-      const directoryHeaders = readHeaderRows(ss, directory).machine.map((header) => header.toLowerCase());
-      const directoryAsYearIndex = directoryHeaders.indexOf('as_year');
-      const directoryAsYearRange = directoryAsYearIndex >= 0 ? dashboardColumnRange(directory, directoryAsYearIndex) : '';
-      const rosterRows = [
-        ['AS Year', 'Cadets'],
-        ...Arrays.AS_YEARS.map((asYear, index) => [
+    const comparisonSources = sources.slice(0, 3);
+    const asYearRows: any[][] = [
+      ['AS Year', ...comparisonSources.map((source) => source.label)],
+      ...Arrays.AS_YEARS.map((asYear, index) => {
+        const row = index + 2;
+        return [
           asYear,
-          directoryAsYearRange ? `=COUNTIF(${directoryAsYearRange},$J${index + 16})` : '',
-        ]),
-      ];
-      helper.getRange(15, 10, rosterRows.length, 2).setValues(rosterRows);
+          ...comparisonSources.map((source) => {
+            const overall = dashboardColumnRange(source.sheet, source.overallIndex);
+            const sourceAsYear = dashboardColumnRange(source.sheet, source.asYearIndex);
+            return `=IFERROR(AVERAGE(FILTER(${overall},${sourceAsYear}=$A${row},${overall}<>"")),"")`;
+          }),
+        ];
+      }),
+    ];
+    helper.getRange(1, 1, asYearRows.length, asYearRows[0].length).setValues(asYearRows);
+    if (asYearRows[0].length > 1) helper.getRange(2, 2, asYearRows.length - 1, asYearRows[0].length - 1).setNumberFormat('0.0%');
 
-      helper.getRange('A1:L1').setFontWeight('bold').setBackground('#dfe9e4');
-      helper.getRange('A15:L15').setFontWeight('bold').setBackground('#dfe9e4');
-      helper.autoResizeColumns(1, 12);
+    const chronologicalSources = [...sources.slice(1)].reverse().concat(sources.slice(0, 1));
+    const trendRows = [
+      ['Term', 'Overall Attendance'],
+      ...chronologicalSources.map((source) => {
+        const overall = dashboardColumnRange(source.sheet, source.overallIndex);
+        const lastName = dashboardColumnRange(source.sheet, source.lastNameIndex);
+        return [source.label, `=IFERROR(AVERAGE(FILTER(${overall},${lastName}<>"",${overall}<>"")),"")`];
+      }),
+    ];
+    helper.getRange(15, 1, trendRows.length, 2).setValues(trendRows);
+    if (trendRows.length > 1) helper.getRange(16, 2, trendRows.length - 1, 1).setNumberFormat('0.0%');
 
-      return {
-        attendanceByAsYear: helper.getRange(1, 1, asYearRows.length, asYearRows[0].length),
-        attendanceTrend: helper.getRange(15, 1, trendRows.length, 2),
-        attendanceByFlight: helper.getRange(15, 6, flightRows.length, 2),
-        rosterByAsYear: helper.getRange(15, 10, rosterRows.length, 2),
-      };
-    } finally {
-      helper.hideSheet();
-    }
+    const current = sources.find((source) => source.label === 'Current');
+    const flightRows: any[][] = [['Flight', 'Overall Attendance']];
+    Arrays.FLIGHTS.forEach((flight, index) => {
+      let formula = '';
+      if (current && current.flightIndex >= 0) {
+        const overall = dashboardColumnRange(current.sheet, current.overallIndex);
+        const sourceFlight = dashboardColumnRange(current.sheet, current.flightIndex);
+        formula = `=IFERROR(AVERAGE(FILTER(${overall},${sourceFlight}=$F${index + 16},${overall}<>"")),"")`;
+      }
+      flightRows.push([flight, formula]);
+    });
+    helper.getRange(15, 6, flightRows.length, 2).setValues(flightRows);
+    helper.getRange(16, 7, flightRows.length - 1, 1).setNumberFormat('0.0%');
+
+    const directoryHeaders = readHeaderRows(ss, directory).machine.map((header) => header.toLowerCase());
+    const directoryAsYearIndex = directoryHeaders.indexOf('as_year');
+    const directoryAsYearRange = directoryAsYearIndex >= 0 ? dashboardColumnRange(directory, directoryAsYearIndex) : '';
+    const rosterRows = [
+      ['AS Year', 'Cadets'],
+      ...Arrays.AS_YEARS.map((asYear, index) => [
+        asYear,
+        directoryAsYearRange ? `=COUNTIF(${directoryAsYearRange},$J${index + 16})` : '',
+      ]),
+    ];
+    helper.getRange(15, 10, rosterRows.length, 2).setValues(rosterRows);
+
+    helper.getRange('A1:L1').setFontWeight('bold').setBackground('#dfe9e4');
+    helper.getRange('A15:L15').setFontWeight('bold').setBackground('#dfe9e4');
+    helper.autoResizeColumns(1, 12);
+    SpreadsheetApp.flush();
+
+    const mirrorRange = (
+      sourceRange: GoogleAppsScript.Spreadsheet.Range,
+      targetRow: number,
+      targetColumn: number,
+    ): GoogleAppsScript.Spreadsheet.Range => {
+      const formulas = Array.from({ length: sourceRange.getNumRows() }, (_, rowOffset) =>
+        Array.from({ length: sourceRange.getNumColumns() }, (_, columnOffset) => {
+          const sourceCell = helper.getRange(sourceRange.getRow() + rowOffset, sourceRange.getColumn() + columnOffset);
+          return `=${quoteSheetNameForFormula(helper.getName())}!${sourceCell.getA1Notation()}`;
+        }));
+      const target = dashboard.getRange(targetRow, targetColumn, sourceRange.getNumRows(), sourceRange.getNumColumns());
+      target.setFormulas(formulas);
+      return target;
+    };
+
+    const attendanceByAsYear = mirrorRange(helper.getRange(1, 1, asYearRows.length, asYearRows[0].length), 12, 1);
+    const attendanceTrend = mirrorRange(helper.getRange(15, 1, trendRows.length, 2), 12, 7);
+    const attendanceByFlight = mirrorRange(helper.getRange(15, 6, flightRows.length, 2), 31, 1);
+    const rosterByAsYear = mirrorRange(helper.getRange(15, 10, rosterRows.length, 2), 31, 7);
+    if (attendanceByAsYear.getNumColumns() > 1) attendanceByAsYear.offset(1, 1, attendanceByAsYear.getNumRows() - 1, attendanceByAsYear.getNumColumns() - 1).setNumberFormat('0.0%');
+    if (attendanceTrend.getNumRows() > 1) attendanceTrend.offset(1, 1, attendanceTrend.getNumRows() - 1, 1).setNumberFormat('0.0%');
+    if (attendanceByFlight.getNumRows() > 1) attendanceByFlight.offset(1, 1, attendanceByFlight.getNumRows() - 1, 1).setNumberFormat('0.0%');
+    SpreadsheetApp.flush();
+
+    const assertNumericSeries = (range: GoogleAppsScript.Spreadsheet.Range, label: string) => {
+      const numericValues = range.getValues().flat().filter((value) => typeof value === 'number' && Number.isFinite(value));
+      if (!numericValues.length) throw new Error(`Dashboard chart source has no numeric values: ${label}`);
+    };
+    assertNumericSeries(attendanceByAsYear, 'attendance by AS year');
+    assertNumericSeries(attendanceTrend, 'attendance trend');
+    assertNumericSeries(attendanceByFlight, 'attendance by flight');
+    assertNumericSeries(rosterByAsYear, 'roster by AS year');
+
+    return { helperSheet: helper, attendanceByAsYear, attendanceTrend, attendanceByFlight, rosterByAsYear };
   }
 
   function insertDashboardChart(
@@ -1117,6 +1160,7 @@ namespace FrontendFormattingService {
       .addRange(range)
       .setNumHeaders(1)
       .setHiddenDimensionStrategy(Charts.ChartHiddenDimensionStrategy.SHOW_BOTH)
+      .setTransposeRowsAndColumns(false)
       .setPosition(row, column, 0, 0)
       .setOption('title', title)
       .setOption('fontName', 'Roboto')
@@ -1125,12 +1169,16 @@ namespace FrontendFormattingService {
       .setOption('legend', { position: options?.legend || 'bottom', textStyle: { color: '#4d5b55', fontSize: 10 } })
       .setOption('titleTextStyle', { color: '#173e32', fontSize: 15, bold: true })
       .setOption('colors', options?.colors || ['#2b6e55', '#7f9d91', '#b8c6c0'])
+      .setOption('dataOpacity', 0.9)
       .setOption('width', 560)
       .setOption('height', 300);
     if (options?.percentAxis) {
+      const numericValues = range.getValues().flat().filter((value) => typeof value === 'number' && Number.isFinite(value)) as number[];
+      const minimum = numericValues.length ? Math.min(...numericValues) : 0;
+      const axisMinimum = Math.max(0, Math.floor((minimum - 0.05) * 10) / 10);
       builder.setOption(options.horizontal ? 'hAxis' : 'vAxis', {
         format: 'percent',
-        viewWindow: { min: 0, max: 1 },
+        viewWindow: { min: axisMinimum, max: 1.01 },
         gridlines: { color: '#e6ebe8' },
       });
     }
@@ -1295,11 +1343,35 @@ namespace FrontendFormattingService {
       sheet.getRange(bounds).setBorder(true, true, true, true, false, false, '#d7e0dc', SpreadsheetApp.BorderStyle.SOLID);
     });
 
-    const chartRanges = buildDashboardChartData(ss, directory, sources);
-    insertDashboardChart(sheet, chartRanges.attendanceByAsYear, 'Overall Attendance by AS Year — Current vs Historical', Charts.ChartType.COLUMN, 12, 1, { percentAxis: true });
-    insertDashboardChart(sheet, chartRanges.attendanceTrend, 'Detachment Attendance Trend by Term', Charts.ChartType.LINE, 12, 7, { percentAxis: true, legend: 'none', colors: ['#2b6e55'] });
-    insertDashboardChart(sheet, chartRanges.attendanceByFlight, 'Current Overall Attendance by Flight', Charts.ChartType.COLUMN, 31, 1, { percentAxis: true, legend: 'none', colors: ['#2b6e55'] });
-    insertDashboardChart(sheet, chartRanges.rosterByAsYear, 'Current Roster by AS Year', Charts.ChartType.BAR, 31, 7, { horizontal: true, legend: 'none', colors: ['#557f70'] });
+    let chartRanges: DashboardChartRanges | null = null;
+    ProgressService.report({
+      title: 'Preparing Dashboard chart data',
+      detail: `Recalculating current attendance and ${Math.max(0, sources.length - 1)} historical term comparison(s).`,
+      hint: 'Charts use source cells directly beneath each graphic so hidden support sheets cannot blank the visualization.',
+    });
+    try {
+      chartRanges = buildDashboardChartData(ss, sheet, directory, sources);
+      ProgressService.report({
+        title: 'Drawing Dashboard charts',
+        detail: 'Creating attendance comparisons, the term trend, the flight summary, and roster composition.',
+      });
+      insertDashboardChart(sheet, chartRanges.attendanceByAsYear, 'Overall Attendance by AS Year — Current vs Historical', Charts.ChartType.COLUMN, 12, 1, { percentAxis: true });
+      insertDashboardChart(sheet, chartRanges.attendanceTrend, 'Detachment Attendance Trend by Term', Charts.ChartType.LINE, 12, 7, { percentAxis: true, legend: 'none', colors: ['#2b6e55'] });
+      insertDashboardChart(sheet, chartRanges.attendanceByFlight, 'Current Overall Attendance by Flight', Charts.ChartType.COLUMN, 31, 1, { percentAxis: true, legend: 'none', colors: ['#2b6e55'] });
+      insertDashboardChart(sheet, chartRanges.rosterByAsYear, 'Current Roster by AS Year', Charts.ChartType.BAR, 31, 7, { horizontal: true, legend: 'none', colors: ['#557f70'] });
+      SpreadsheetApp.flush();
+      const charts = sheet.getCharts();
+      if (charts.length !== 4 || charts.some((chart) => !chart.getRanges().length)) {
+        throw new Error(`Dashboard chart verification failed charts=${charts.length}.`);
+      }
+      ProgressService.report({
+        title: 'Dashboard charts ready',
+        detail: 'Verified four charts with recalculated source ranges.',
+      });
+    } finally {
+      const helper = chartRanges?.helperSheet || ss.getSheetByName(DASHBOARD_HELPER_SHEET);
+      if (helper && !helper.isSheetHidden()) helper.hideSheet();
+    }
 
     styleSectionHeader('A49:E49', 'Birthday calendar');
     styleSectionHeader('G49:L49', 'How to use SHAMROCK');

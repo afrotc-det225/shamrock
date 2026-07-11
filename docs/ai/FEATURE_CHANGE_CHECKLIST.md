@@ -25,6 +25,8 @@ Confirm explicitly:
 - Smart-chip formatting must use an authoritative URL or resource ID. Never reconstruct a chip from its visible label text.
 - Forms require verified responder emails.
 - Frontend tables are protected; edits flow through forms/logic.
+- Frontend protection changes preserve the hidden, whole-sheet lock invariant for Data Legend, Dashboard Data, and all term-named frontend Leadership/Directory/Attendance archives.
+- Dashboard chart changes verify both numeric source values and rendered chart ranges after the support sheet is hidden; chart existence alone is not sufficient.
 - Every new operator menu action uses `runMenuAction(...)` and the shared live-progress window.
 - Live-progress changes preserve the single-poller invariant: one scheduled chain, at most one in-flight progress request, bounded retry/backoff, no second loop from action completion handlers, and explicit cleanup for Close, unload, page-hide, and hidden-window paths.
 - Long or prompt-driven operator workflows define meaningful plain-language progress stages, hints, waiting states, and continuation states without false row-level precision or sensitive details.

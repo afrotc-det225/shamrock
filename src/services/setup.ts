@@ -2286,7 +2286,7 @@ namespace SetupService {
       },
       {
         title: 'Restoring frontend protections',
-        detail: 'Locking the managed user-facing ranges again after formatting is complete.',
+        detail: 'Locking managed ranges, securing every archive, and hiding support sheets after formatting is complete.',
         technicalLabel: 'apply frontend protections',
         run: () => ProtectionService.applyFrontendProtections(frontendId),
       },
@@ -2354,29 +2354,40 @@ namespace SetupService {
       return;
     }
     ProgressService.report({
-      title: 'Rebuilding the Dashboard',
-      detail: 'Refreshing quick actions, roster metrics, historical attendance charts, birthday groups, and end-user guidance.',
+      title: 'Preparing the Dashboard rebuild',
+      detail: 'Temporarily opening SHAMROCK-managed ranges so the generated page and chart data can be replaced safely.',
       hint: 'Historical comparisons use the two newest archived Attendance tabs and update through hidden formula-backed chart data.',
-      percent: 35,
+      percent: 20,
       step: 1,
-      totalSteps: 2,
+      totalSteps: 3,
     });
-    FrontendFormattingService.applyDashboardOnly(frontendId);
-    ProgressService.report({
-      title: 'Protecting the generated Dashboard',
-      detail: 'Locking the birthday output and restoring the standard frontend safeguards after the rebuild.',
-      percent: 82,
-      step: 2,
-      totalSteps: 2,
-    });
-    ProtectionService.applyFrontendProtections(frontendId);
+    ProtectionService.clearManagedFrontendProtections(frontendId);
+    try {
+      ProgressService.report({
+        title: 'Rebuilding the Dashboard',
+        detail: 'Refreshing quick actions, roster metrics, historical attendance charts, birthday groups, and end-user guidance.',
+        percent: 42,
+        step: 2,
+        totalSteps: 3,
+      });
+      FrontendFormattingService.applyDashboardOnly(frontendId);
+    } finally {
+      ProgressService.report({
+        title: 'Protecting the generated Dashboard',
+        detail: 'Locking the birthday output, archives, and support sheets after the rebuild.',
+        percent: 82,
+        step: 3,
+        totalSteps: 3,
+      });
+      ProtectionService.applyFrontendProtections(frontendId);
+    }
   }
 
   export function reapplyFrontendProtections() {
     const frontendId = Config.getFrontendId();
     ProgressService.report({
       title: 'Reapplying frontend protections',
-      detail: 'Checking managed ranges and restoring the intended editor access.',
+      detail: 'Restoring editor access while locking and hiding archive and support sheets.',
       percent: 55,
     });
     ProtectionService.applyFrontendProtections(frontendId);
@@ -2406,10 +2417,14 @@ namespace SetupService {
       return;
     }
     const ss = SpreadsheetApp.openById(spreadsheetId);
+    const hiddenSheetIds = new Set(
+      ss.getSheets().filter((sheet) => sheet.isSheetHidden()).map((sheet) => sheet.getSheetId()),
+    );
     let position = 1;
 
     const moveSheet = (sheet: GoogleAppsScript.Spreadsheet.Sheet) => {
       try {
+        if (sheet.isSheetHidden()) sheet.showSheet();
         ss.setActiveSheet(sheet);
         ss.moveActiveSheet(position++);
       } catch (err) {
@@ -2425,6 +2440,15 @@ namespace SetupService {
     ss.getSheets()
       .filter((s) => !desiredOrder.includes(s.getName()))
       .forEach((sheet) => moveSheet(sheet));
+
+    const visibleLandingSheet = desiredOrder
+      .map((name) => ss.getSheetByName(name))
+      .find((sheet): sheet is GoogleAppsScript.Spreadsheet.Sheet => Boolean(sheet && !hiddenSheetIds.has(sheet.getSheetId())))
+      || ss.getSheets().find((sheet) => !hiddenSheetIds.has(sheet.getSheetId()));
+    if (visibleLandingSheet) ss.setActiveSheet(visibleLandingSheet);
+    ss.getSheets().forEach((sheet) => {
+      if (hiddenSheetIds.has(sheet.getSheetId()) && !sheet.isSheetHidden()) sheet.hideSheet();
+    });
   }
 
   export function toggleFrontendColumnWidths() {
@@ -2787,10 +2811,10 @@ namespace SetupService {
 
   export function reorderFrontendSheets() {
     const frontendId = Config.getFrontendId();
-    const desired = ['Dashboard', 'Leadership', 'Directory', 'Attendance', 'Data Legend'];
+    const desired = ['Dashboard', 'Leadership', 'Directory', 'Attendance', 'Data Legend', 'Dashboard Data'];
     ProgressService.report({
       title: 'Ordering frontend sheets',
-      detail: 'Moving user-facing tabs into the standard navigation order.',
+      detail: 'Moving working tabs first, followed by Data Legend and Dashboard Data, while preserving hidden sheets.',
       percent: 62,
     });
     reorderSheets(frontendId, desired);

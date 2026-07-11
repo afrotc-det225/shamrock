@@ -35,7 +35,8 @@ Operator expectations:
 
 Setup outputs to verify:
 - Frontend workbook contains the expected tabs and formatting.
-- Dashboard is the first frontend tab, the retired FAQs tab is absent, all four managed charts render, and the hidden `_Dashboard Data` helper remains hidden.
+- Dashboard is the first frontend tab, the retired FAQs tab is absent, and all four managed charts render with visible marks rather than blank plot areas.
+- Data Legend is followed by Dashboard Data in tab order; both support sheets and every term-named frontend Leadership/Directory/Attendance archive are fully locked and hidden. Dashboard, Leadership, Directory, and Attendance remain visible.
 - Dashboard birthdays show Last Name, First Name, full Birthday, Display, and Group; duplicate last names use a first initial and Sunday-through-Saturday groups alternate white/gray backgrounds.
 - Backend workbook contains the expected tabs and formatting.
 - Forms exist and require verified responder emails.
