@@ -2557,12 +2557,13 @@ namespace SetupService {
     DirectoryService.syncLeadershipBackendFromDirectory();
     ProgressService.report({
       title: 'Publishing the Directory',
-      detail: 'Copying active cadet records to the protected frontend view.',
+      detail: 'Copying active cadet records and refreshed Leadership assignments to the protected frontend views.',
       percent: 48,
       step: 2,
       totalSteps: 4,
     });
     syncDirectoryFrontend();
+    SyncService.syncByBackendSheetName('Leadership Backend');
     ProgressService.report({
       title: 'Refreshing the Directory presentation',
       detail: 'Restoring validations, tables, formatting, and protections.',
@@ -2597,11 +2598,12 @@ namespace SetupService {
   export function syncAllBackendToFrontend() {
     ProgressService.report({
       title: 'Syncing all mapped tables',
-      detail: 'Publishing each supported backend source to its frontend view.',
+      detail: 'Regenerating active cadet Leadership assignments, then publishing each supported backend source.',
       percent: 32,
       step: 1,
       totalSteps: 2,
     });
+    DirectoryService.syncLeadershipBackendFromDirectory();
     SyncService.syncAllMapped();
     ProgressService.report({
       title: 'Finishing refreshed frontend views',
@@ -2626,6 +2628,7 @@ namespace SetupService {
   export function refreshDirectoryArtifacts(opts?: { rebuildAttendanceMatrix?: boolean; refreshAttendanceForm?: boolean }) {
     DirectoryService.syncLeadershipBackendFromDirectory();
     syncDirectoryFrontend();
+    SyncService.syncByBackendSheetName('Leadership Backend');
     if (opts?.rebuildAttendanceMatrix) rebuildAttendanceMatrix();
     if (opts?.refreshAttendanceForm) refreshAttendanceFormChoices();
   }
