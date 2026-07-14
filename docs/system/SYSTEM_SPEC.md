@@ -147,7 +147,7 @@ All system forms must require verified responder emails.
 - Any secondary identity fields (name) are used for human readability and additional matching but not as the sole identifier.
 
 ### 6.2 Sheet Protections
-- Frontend: core tabs protected; editing reserved for scripts.
+- Frontend: core tabs remain protected. Explicit editors of the backend/admin workbook are the canonical SHAMROCK admin set and are added to every managed frontend range/sheet protection, including headers, Directory identity cells, Attendance fixed columns, generated/support sheets, and archives. `MAIN_WORKBOOK_ALLOWED_EDITOR_EMAILS` may add exceptions without replacing the backend-derived admin set. Leadership-derived editors retain their narrower Leadership and Attendance-event access.
 - Backend: protected with tighter editor set.
 
 ### 6.3 Secrets and IDs

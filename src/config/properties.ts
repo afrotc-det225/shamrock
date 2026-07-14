@@ -25,7 +25,7 @@ namespace Config {
     { key: PROPERTY_KEYS.EXCUSAL_REQUEST_FORM_ID, description: 'Google Form ID for cadet excusal requests.' },
     { key: PROPERTY_KEYS.CADET_DIRECTORY_FORM_ID, description: 'Google Form ID for cadet directory updates.' },
     { key: PROPERTY_KEYS.EXCUSAL_MANAGEMENT_SPREADSHEET_ID, description: 'Google Sheet ID for the excusal decision management workbook.' },
-    { key: PROPERTY_KEYS.MAIN_WORKBOOK_ALLOWED_EDITOR_EMAILS, description: 'Comma-separated emails allowed to edit protected areas in the main workbook, in addition to leadership-derived editors.' },
+    { key: PROPERTY_KEYS.MAIN_WORKBOOK_ALLOWED_EDITOR_EMAILS, description: 'Optional comma-separated additional emails allowed to edit protected areas in the main workbook, beyond backend-workbook admins and leadership-derived editors.' },
     { key: PROPERTY_KEYS.DISABLE_MAIN_WORKBOOK_FORMATTING, description: 'Set to true to stop SHAMROCK from applying main workbook visual formatting.' },
     { key: PROPERTY_KEYS.DISABLE_MAIN_WORKBOOK_COLUMN_WIDTHS, description: 'Set to true to stop SHAMROCK from changing main workbook column widths.' },
     { key: PROPERTY_KEYS.AUTOMATIONS_PAUSED, description: 'Internal pause flag set by the SHAMROCK Pause automations menu action.' },

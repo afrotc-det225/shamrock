@@ -276,6 +276,8 @@ The Dashboard displays the original `System for Headcount & Accountability of Ma
 
 The visible frontend is limited to Dashboard, Leadership, Directory, and Attendance. Applying frontend protections fully locks and hides Data Legend, Dashboard Data, and every term-named Leadership/Directory/Attendance archive. Dashboard Data is ordered immediately after Data Legend. Chart values are mirrored beneath the chart overlays before Dashboard Data is hidden, and the graphics use native Sheets chart specifications with explicit source and axis settings.
 
+Accounts explicitly added as editors of the backend/admin workbook are treated as SHAMROCK administrators when frontend protections are applied. Those accounts are added to every managed frontend cell and sheet protection. Leadership-derived editors keep their narrower Leadership and Attendance-event access, and `MAIN_WORKBOOK_ALLOWED_EDITOR_EMAILS` remains available for exceptional additional accounts.
+
 ### Operator Entry Points
 
 - Setup.
@@ -291,6 +293,7 @@ The visible frontend is limited to Dashboard, Leadership, Directory, and Attenda
 
 - Run the relevant formatting/protection action.
 - Confirm frontend core data ranges remain protected.
+- Confirm every explicit backend/admin workbook editor can edit protected frontend ranges, while non-admin access remains limited to its Leadership/Attendance scope.
 - Confirm dropdowns point to Data Legend ranges.
 - Confirm any intentionally manual formatting limitations are documented in the runbook.
 

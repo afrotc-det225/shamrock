@@ -17,7 +17,7 @@ namespace ProtectionService {
   }
 
   function normalizeEditors(editors: string[]): string[] {
-    return Array.from(new Set(editors.map((e) => (e || '').trim()).filter(Boolean)));
+    return Array.from(new Set(editors.map((e) => (e || '').trim().toLowerCase()).filter(Boolean)));
   }
 
   function configureProtectionEditors(
@@ -104,10 +104,11 @@ namespace ProtectionService {
   function protectEntireManagedSheet(
     sheet: GoogleAppsScript.Spreadsheet.Sheet,
     description: string,
+    editors: string[] = [],
   ) {
     sheet.getProtections(SpreadsheetApp.ProtectionType.RANGE).forEach((protection) => protection.remove());
     sheet.getProtections(SpreadsheetApp.ProtectionType.SHEET).forEach((protection) => protection.remove());
-    ensureSheetProtection(sheet, description);
+    ensureSheetProtection(sheet, description, editors);
   }
 
   function getMainWorkbookAllowedEditors(): string[] {
@@ -115,6 +116,20 @@ namespace ProtectionService {
       return Config.getCommaSeparatedScriptProperty(Config.PROPERTY_KEYS.MAIN_WORKBOOK_ALLOWED_EDITOR_EMAILS);
     } catch (err) {
       Log.warn(`Unable to read ${Config.PROPERTY_KEYS.MAIN_WORKBOOK_ALLOWED_EDITOR_EMAILS} property: ${err}`);
+      return [];
+    }
+  }
+
+  function getBackendAdminEditors(): string[] {
+    try {
+      const backendId = Config.getBackendId();
+      if (!backendId) return [];
+      const backend = SpreadsheetApp.openById(backendId);
+      const editors = normalizeEditors(backend.getEditors().map((user) => user.getEmail()));
+      Log.info(`Frontend protection admin source ready backendEditors=${editors.length}.`);
+      return editors;
+    } catch (err) {
+      Log.warn(`Unable to read backend workbook editors for frontend protections: ${err}`);
       return [];
     }
   }
@@ -257,22 +272,22 @@ namespace ProtectionService {
     ensureRangeProtection(sheet, range, 'Leadership:all', { warningOnly: false, editors });
   }
 
-  function protectDataLegend(ss: GoogleAppsScript.Spreadsheet.Spreadsheet) {
+  function protectDataLegend(ss: GoogleAppsScript.Spreadsheet.Spreadsheet, editors: string[] = []) {
     const sheet = ss.getSheetByName('Data Legend');
     if (!sheet) return;
-    protectEntireManagedSheet(sheet, 'Data Legend:all');
+    protectEntireManagedSheet(sheet, 'Data Legend:all', editors);
   }
 
-  function protectDashboardData(ss: GoogleAppsScript.Spreadsheet.Spreadsheet) {
+  function protectDashboardData(ss: GoogleAppsScript.Spreadsheet.Spreadsheet, editors: string[] = []) {
     [DASHBOARD_HELPER_SHEET, LEGACY_DASHBOARD_HELPER_SHEET].forEach((name) => {
       const sheet = ss.getSheetByName(name);
-      if (sheet) protectEntireManagedSheet(sheet, `${name}:all`);
+      if (sheet) protectEntireManagedSheet(sheet, `${name}:all`, editors);
     });
   }
 
-  function protectArchives(ss: GoogleAppsScript.Spreadsheet.Spreadsheet) {
+  function protectArchives(ss: GoogleAppsScript.Spreadsheet.Spreadsheet, editors: string[] = []) {
     const archives = ss.getSheets().filter((sheet) => isFrontendArchiveSheetName(sheet.getName()));
-    archives.forEach((sheet) => protectEntireManagedSheet(sheet, `SHAMROCK archive: ${sheet.getName()}`));
+    archives.forEach((sheet) => protectEntireManagedSheet(sheet, `SHAMROCK archive: ${sheet.getName()}`, editors));
     return archives.length;
   }
 
@@ -295,7 +310,11 @@ namespace ProtectionService {
     ensureRangeProtection(sheet, warnRange, 'Directory:warn_rest', { warningOnly: true, editors });
   }
 
-  function protectAttendance(ss: GoogleAppsScript.Spreadsheet.Spreadsheet, editors: string[] = []) {
+  function protectAttendance(
+    ss: GoogleAppsScript.Spreadsheet.Spreadsheet,
+    adminEditors: string[] = [],
+    eventEditors: string[] = [],
+  ) {
     const sheet = ss.getSheetByName('Attendance');
     if (!sheet) return;
     // Clear any prior sheet protections to prevent stale "except" scopes.
@@ -305,8 +324,10 @@ namespace ProtectionService {
 
     // Lock columns A:G (Last Name through LLAB) across all rows.
     const fixedRange = sheet.getRange(1, 1, lastRow, Math.min(lastCol, 7));
-    // Owner-only for fixed columns (A:G)
-    ensureRangeProtection(sheet, fixedRange, 'Attendance:fixed_cols', { warningOnly: false });
+    ensureRangeProtection(sheet, fixedRange, 'Attendance:fixed_cols', {
+      warningOnly: false,
+      editors: adminEditors,
+    });
 
     // Event columns (H+): protect rows 3+ but allow leadership emails to edit.
     const eventsStartCol = 8;
@@ -314,7 +335,7 @@ namespace ProtectionService {
       const eventsRange = sheet.getRange(3, eventsStartCol, lastRow - 2, lastCol - eventsStartCol + 1);
       ensureRangeProtection(sheet, eventsRange, 'Attendance:event_cols_with_leadership', {
         warningOnly: false,
-        editors,
+        editors: eventEditors,
       });
     }
   }
@@ -323,8 +344,12 @@ namespace ProtectionService {
     const ss = openFrontend(frontendId);
     if (!ss) return;
 
-    const allowedEditors = normalizeEditors([
+    const adminEditors = normalizeEditors([
+      ...getBackendAdminEditors(),
       ...getMainWorkbookAllowedEditors(),
+    ]);
+    const operationalEditors = normalizeEditors([
+      ...adminEditors,
       ...getLeadershipEmails(ss),
     ]);
 
@@ -336,23 +361,27 @@ namespace ProtectionService {
       supportSheetCount = organized.supportSheets.length;
     });
 
-    // Only broaden protections for Leadership and Attendance (allowlist). Directory warning stays open; others remain owner-only.
-    runProtectionStep('header_rows', () => protectFirstTwoRows(ss));
-    runProtectionStep('Dashboard:birthdays', () => protectDashboard(ss));
-    runProtectionStep('Leadership:all', () => protectLeadership(ss, allowedEditors));
-    runProtectionStep('Data Legend:all', () => protectDataLegend(ss));
-    runProtectionStep('Dashboard Data:all', () => protectDashboardData(ss));
+    // Backend workbook editors are SHAMROCK admins and can edit all managed frontend protections.
+    // Leadership-derived editors retain their narrower Leadership/Attendance event access.
+    runProtectionStep('header_rows', () => protectFirstTwoRows(ss, adminEditors));
+    runProtectionStep('Dashboard:birthdays', () => protectDashboard(ss, adminEditors));
+    runProtectionStep('Leadership:all', () => protectLeadership(ss, operationalEditors));
+    runProtectionStep('Data Legend:all', () => protectDataLegend(ss, adminEditors));
+    runProtectionStep('Dashboard Data:all', () => protectDashboardData(ss, adminEditors));
     runProtectionStep('frontend archives', () => {
-      archiveCount = protectArchives(ss);
+      archiveCount = protectArchives(ss, adminEditors);
     });
-    runProtectionStep('Directory protections', () => protectDirectory(ss)); // name lock stays owner-only; warning is warning-only (open)
-    runProtectionStep('Attendance protections', () => protectAttendance(ss, allowedEditors));
+    runProtectionStep('Directory protections', () => protectDirectory(ss, adminEditors));
+    runProtectionStep('Attendance protections', () => protectAttendance(ss, adminEditors, operationalEditors));
     ProgressService.report({
       title: 'Archive and support sheets secured',
       detail: `Locked and hid ${archiveCount} archive sheet(s) and ${supportSheetCount} support sheet(s).`,
       hint: 'Dashboard, Leadership, Directory, and Attendance remain the visible working tabs.',
     });
-    Log.info(`Frontend protections secured archives=${archiveCount} supportSheets=${supportSheetCount}.`);
+    Log.info(
+      `Frontend protections secured archives=${archiveCount} supportSheets=${supportSheetCount} `
+      + `adminEditors=${adminEditors.length} operationalEditors=${operationalEditors.length}.`,
+    );
   }
 
   export function clearManagedFrontendProtections(frontendId: string) {

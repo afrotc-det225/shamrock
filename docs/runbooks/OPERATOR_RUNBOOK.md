@@ -214,6 +214,7 @@ Likely causes:
 
 Operator checks:
 - Re-run Sync Directory, Rebuild Attendance Matrix, Apply frontend formatting, or setup to reset table column types and recreate archive-style cell validation.
+- After changing backend/admin workbook editors, run `SHAMROCK -> Formatting & Protections -> Reapply frontend protections`; confirm each explicit backend editor can edit protected frontend cells and sheets.
 - Confirm Data Legend is present and populated.
 - Confirm the frontend Data Legend includes the v2 `cadet_rank_options`, `rank_options`, and `honorific_options` columns.
 - Confirm Directory `Rank` validates against cadet rank options with plain-text display, Leadership `Rank` validates against adjacent cadet rank, non-cadet rank, and honorific option columns with plain-text display, and Directory `Email` has no dropdown validation.
