@@ -1,6 +1,22 @@
 // Form builders and in-place choice synchronization for SHAMROCK forms.
 
 namespace FormService {
+  const EXCUSAL_DETAILS_DESCRIPTION = [
+    'Attendance codes:',
+    'P — Present',
+    'T — Tardy',
+    'A — Absent, unresolved',
+    'R — Request pending',
+    'D — Request denied before the event; attendance is still required',
+    'U — Unexcused absence',
+    'E — Excused',
+    'ES — Excused – Sport',
+    'MED — Medical',
+    'N/A — Cancelled / Not Applicable',
+    '',
+    'For Requested Outcome, select P, T, E, ES, or MED.',
+  ].join('\n');
+
   function clearItems(form: GoogleAppsScript.Forms.Form) {
     const items = form.getItems();
 
@@ -1060,6 +1076,7 @@ namespace FormService {
     // Section 4: Requested outcome and reason (shared final section)
     const detailsPage = addPageBreakItemSafe(workingForm, 'Excusal Details', FormApp.PageNavigationType.SUBMIT);
     workingForm = detailsPage.form;
+    detailsPage.item.setHelpText(EXCUSAL_DETAILS_DESCRIPTION);
     const attendanceTypeItem = addListItemSafe(workingForm, 'Requested Outcome', Arrays.EXCUSAL_REQUESTED_OUTCOMES, true);
     workingForm = attendanceTypeItem.form;
     const reasonItem = addTextItemSafe(workingForm, 'Reason', true);
@@ -1174,6 +1191,8 @@ namespace FormService {
 
   export function refreshExcusalsFormEventChoices(form: GoogleAppsScript.Forms.Form) {
     const eventTypeItem = findMultipleChoiceItem(form, 'Select Event Type (or Done to continue)');
+    const detailsPage = findPageBreakItem(form, 'Excusal Details');
+    if (detailsPage) detailsPage.setHelpText(EXCUSAL_DETAILS_DESCRIPTION);
     const mandoEventList = form
       .getItems(FormApp.ItemType.CHECKBOX)
       .find((item) => {
@@ -1235,7 +1254,6 @@ namespace FormService {
     const pocEventsPage = findPageBreakItem(form, 'Third Hour Events');
     const secondaryEventsPage = findPageBreakItem(form, 'Secondary Events');
     const otherEventsPage = findPageBreakItem(form, 'Other Events');
-    const detailsPage = findPageBreakItem(form, 'Excusal Details');
 
     const eventBuckets = readAttendanceEventBuckets();
 

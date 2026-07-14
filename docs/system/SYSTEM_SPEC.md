@@ -189,6 +189,7 @@ The attendance system is a replayable pipeline.
 - Attendance Form Responses is the current raw linked destination. Structural form rebuilds retain its predecessor as a hidden, timestamped `Archived - Attendance Form Responses ...` tab; Attendance Backend remains the operational source used for replay.
 
 Attendance codes:
+- The Excusals Form displays these meanings in the `Excusal Details` section and identifies `P`, `T`, `E`, `ES`, and `MED` as selectable requested outcomes.
 - `P`, `T`, `E`, `ES`, and `MED` are credit outcomes.
 - `A` means absent and unresolved; `U` means final unexcused absence.
 - `R` means an attendance exception request is pending.

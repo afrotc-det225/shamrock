@@ -2844,7 +2844,7 @@ namespace SetupService {
     const form = FormApp.openById(ensured.id);
     ProgressService.report({
       title: 'Refreshing Excusals event choices',
-      detail: 'Updating selectable events from the current Events Backend definitions.',
+      detail: 'Updating selectable events and the attendance-code guidance shown with Excusal Details.',
       percent: 72,
       step: 2,
       totalSteps: 2,

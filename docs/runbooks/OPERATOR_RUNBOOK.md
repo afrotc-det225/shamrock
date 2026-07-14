@@ -132,6 +132,7 @@ Post-deploy validation checklist:
 - In Excusals Management, link/domain sharing is private, squadron commanders are editors, canonical flight commanders/deputies are viewers, and only the applicable squadron commander's Decision cells are editable. Headers and request detail fields remain protected. Active Blue/Gold tabs are native Sheets tables using the frontend Directory table style. A hidden protected local Data Legend supplies strict Decision dropdown validation, with Approved green, Denied red, Withdrawn amber, and Superseded purple.
 - Decisions drive notifications and attendance effects.
 - Requested outcomes are `P`, `T`, `E`, `ES`, and `MED`.
+- Confirm the Excusals Form's `Excusal Details` section explains all attendance codes and lists the allowed requested outcomes. `Refresh Excusals Form choices` reapplies this description without replacing question IDs.
 - Denied post-event absences become `U`; denied pre-event requests become `D` until attendance is taken or closeout marks the absence.
 - Use cleanup/backfill actions only when repairing a known data issue.
 - Use `Share management spreadsheet` after an out-of-cycle Leadership change to remove stale access, refresh current editors/viewers, and reapply Decision-only protections.

@@ -181,6 +181,7 @@ AS500 is a GMC year. AS500 cadets are excluded from POC Third Hour form groups a
 
 Excusals capture cadet requests, route decisions through backend/management sheets, update attendance effects, and send appropriate notifications.
 Requests use a requested outcome of `P`, `T`, `E`, `ES`, or `MED`; pending requests show as `R` in Attendance until leadership records a decision.
+The Excusals Form's `Excusal Details` section explains every attendance code and identifies `P`, `T`, `E`, `ES`, and `MED` as the available requested outcomes.
 The separate management workbook has one active tab for each operational squadron. Blue and Gold squadron commanders are editors, while canonical flight commanders and deputy flight commanders are viewers. On an active squadron tab, SHAMROCK protects the headers and request details; only that squadron commander's Decision cells are editable. Active tabs use native Google Sheets tables with the same green-header and white/gray-banded styling as frontend Directory. Decision dropdowns are backed by the workbook's hidden protected Data Legend and selected decisions are color-coded. The requested-outcome column is displayed as `Type` and its codes are centered.
 
 ### Operator Entry Points
@@ -201,6 +202,7 @@ The separate management workbook has one active tab for each operational squadro
 ### Validation
 
 - Submit a controlled excusal request.
+- Confirm the `Excusal Details` section displays the attendance-code explanations and the allowed requested outcomes.
 - Confirm it appears in Excusals Backend and management surfaces.
 - Record a decision and confirm attendance effect updates.
 - Confirm a squadron commander can edit only Decision cells on their squadron tab, while flight commanders/deputies have view-only workbook access.
