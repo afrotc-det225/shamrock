@@ -279,14 +279,16 @@ namespace FormService {
   }
 
   function attendanceCadetQuestionTitle(group: string, asYear: string, branch?: 'Mando' | 'LLAB'): string {
-    const yearLabel = Arrays.normalizeAsYear(asYear) === 'AFCIV' ? 'AF Civ' : `AS ${asYear}`;
+    const yearLabel = Arrays.normalizeAsYear(asYear) === 'AFCIV' ? 'AF Civ' : String(asYear || '').trim();
     return `Cadets (${group}) ${yearLabel}${branch ? ` (${branch})` : ''}`;
   }
 
   function canonicalizeAttendanceCadetQuestionTitle(title: string): string {
     const normalized = String(title || '').trim();
-    const legacyAfCiv = normalized.match(/^(Cadets \(.+\)) AS AF\s*Civ( \((?:Mando|LLAB)\))?$/i);
-    return legacyAfCiv ? `${legacyAfCiv[1]} AF Civ${legacyAfCiv[2] || ''}` : normalized;
+    const duplicatedAs = normalized.match(/^(Cadets \(.+\)) AS (AS\d+|AF\s*Civ)( \((?:Mando|LLAB)\))?$/i);
+    if (!duplicatedAs) return normalized;
+    const yearLabel = Arrays.normalizeAsYear(duplicatedAs[2]) === 'AFCIV' ? 'AF Civ' : duplicatedAs[2].toUpperCase();
+    return `${duplicatedAs[1]} ${yearLabel}${duplicatedAs[3] || ''}`;
   }
 
   function normalizeToList(value: string, options: string[]): string {
@@ -421,7 +423,7 @@ namespace FormService {
   }
 
   function isAttendanceCadetQuestionTitle(title: string): boolean {
-    return /^Cadets \(.+\) (?:AS AS\d+|(?:AS )?AF Civ)(?: \((?:Mando|LLAB)\))?$/.test(String(title || '').trim());
+    return /^Cadets \(.+\) (?:AS )?(?:AS\d+|AF Civ)(?: \((?:Mando|LLAB)\))?$/.test(String(title || '').trim());
   }
 
   function moveItemToSectionEnd(

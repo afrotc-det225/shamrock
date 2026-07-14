@@ -157,7 +157,7 @@ AS500 is a GMC year. AS500 cadets are excluded from POC Third Hour form groups a
 
 ### Safeguards
 
-- Normal Directory/Event refreshes update existing Attendance Form questions and choices in place, avoiding full-form question recreation and repeated linked-sheet columns. Within each cadet subsection, the questions are restored to the canonical senior-to-junior AS-year order; AF Civ appears below AS100 and uses labels such as `Cadets (Delta) AF Civ (Mando)` rather than `AS AF Civ`.
+- Normal Directory/Event refreshes update existing Attendance Form questions and choices in place, avoiding full-form question recreation and repeated linked-sheet columns. Within each cadet subsection, the questions are restored to the canonical senior-to-junior AS-year order. Question labels use forms such as `Cadets (Delta) AS400 (Mando)` and `Cadets (Delta) AF Civ (Mando)`, without a duplicated `AS` prefix.
 - The explicit `Rebuild Attendance Form (archive responses)` action briefly closes the form, preserves the existing linked response tab as a hidden timestamped archive, links a fresh clean response tab, verifies that it has no duplicate header names, and restores the prior open/closed state.
 - Historical raw response tabs are preserved rather than merged or pruned in place. Attendance Backend remains the operational attendance log.
 
@@ -168,7 +168,7 @@ AS500 is a GMC year. AS500 cadets are excluded from POC Third Hour form groups a
 - Rebuild attendance and confirm the frontend matrix updates deterministically.
 - Confirm AS500 cadets are counted as GMC, are absent from POC Third Hour choices, receive `N/A` for POC Third Hour when no entry exists, and sort between AS300 and AS250.
 - Confirm AF Civ is available in AS-year dropdowns, remains outside GMC/POC counts and POC Third Hour choices, accepts any class year, and sorts below AS100.
-- Confirm each Attendance Form cadet subsection follows the canonical senior-to-junior AS-year order and AF Civ question labels do not contain `AS AF Civ`.
+- Confirm each Attendance Form cadet subsection follows the canonical senior-to-junior AS-year order and question labels do not contain duplicated prefixes such as `AS AS400` or `AS AF Civ`.
 - Confirm attendance codes use the same validation presentation as the newest Attendance archive, validate against Data Legend options, and leave frontend table column types unset.
 - Confirm visible Attendance headers are left-aligned, event headers wrap, event/code cells use Plain text display with bold text, and `Overall`/`LLAB` percentage values are bold.
 - Confirm `Overall` and `LLAB` use the archive-style red-at-80%, amber-at-90%, and green-at-100% summary gradient.

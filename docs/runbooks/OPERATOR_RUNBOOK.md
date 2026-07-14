@@ -119,7 +119,7 @@ Post-deploy validation checklist:
 - Attendance submissions append to Attendance Backend.
 - Frontend Attendance matrix is derived; rebuild is available via admin menu.
 - Treat frontend attendance as derived state. Rebuild it instead of manually patching formulas or event columns.
-- Routine Directory and Event changes synchronize Attendance Form choices in place, restore each cadet subsection to the canonical senior-to-junior AS-year order, and correct legacy `AS AF Civ` question labels without replacing question IDs. Do not use a structural form rebuild just to refresh choices.
+- Routine Directory and Event changes synchronize Attendance Form choices in place, restore each cadet subsection to the canonical senior-to-junior AS-year order, and remove duplicated `AS` prefixes from legacy question labels without replacing question IDs. Do not use a structural form rebuild just to refresh choices.
 - Use `Rebuild Attendance Form (archive responses)` only when the form structure itself needs repair or at the transition phase that intentionally rebuilds it. The action briefly stops responses, keeps the former raw response tab as a hidden timestamped archive, verifies a fresh `Attendance Form Responses` destination, and restores the form's prior open/closed state.
 - Google may take tens of seconds to create and backfill the new linked tab from the Form response store. Historical email addresses and response rows in that newly linked tab are expected; the Form collects responder email and retains its own response store independently of the spreadsheet archive.
 - Use `Debug Attendance response columns` to review only header-count health. It does not log submission contents.
