@@ -1064,7 +1064,7 @@ namespace FrontendFormattingService {
     const comparisonSources = sources.slice(0, 3);
     const asYearRows: any[][] = [
       ['AS Year', ...comparisonSources.map((source) => source.label)],
-      ...Arrays.AS_YEARS.map((asYear, index) => {
+      ...Arrays.AS_YEAR_DISPLAY_ORDER.map((asYear, index) => {
         const row = index + 2;
         return [
           asYear,
@@ -1111,7 +1111,7 @@ namespace FrontendFormattingService {
     const directoryAsYearRange = directoryAsYearIndex >= 0 ? dashboardColumnRange(directory, directoryAsYearIndex) : '';
     const rosterRows = [
       ['AS Year', 'Cadets'],
-      ...Arrays.AS_YEARS.map((asYear, index) => [
+      ...Arrays.AS_YEAR_DISPLAY_ORDER.map((asYear, index) => [
         asYear,
         directoryAsYearRange ? `=COUNTIF(${directoryAsYearRange},$J${index + 16})` : '',
       ]),

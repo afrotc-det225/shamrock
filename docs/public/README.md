@@ -62,7 +62,7 @@ The frontend/main workbook intentionally does not expose admin menus.
 Directory is the authoritative roster source for cadets and drives attendance, leadership lookups, form choices, and frontend display.
 
 Cadet rank and cadet leadership role live on Directory. A Leadership refresh replaces every Directory-backed Leadership row, then republishes only active cadets with current command/advisor roles: wing commander, deputy wing commander, operations group commander/deputy, canonical operational squadron commanders, flight commanders, deputy flight commanders, and senior/deputy GMC advisor. Squadron commander routing is limited to Blue and Gold; Mission Support and Abroad are not squadron-command routing roles. This removes stale former leaders while preserving cadre/manual contacts that do not originate in Directory. Leadership sorts non-cadet ranks and honorifics above cadet ranks before applying command hierarchy and name tiebreakers. Leadership does not store separate flight/squadron columns; unit routing comes from role names such as `Alpha Flight Commander` or `Blue Squadron Commander`.
-The frontend and backend Directory v2 order starts with `Last Name`, `First Name`, `Year`, `Flight`, `Sqdn`, `Rank`, `Role`, then `University` and the remaining contact/academic fields. Cadet rows use the canonical senior-to-junior display order, with AS500 below AS300 and above AS250. Legacy Directory `source` and freeform Directory `notes` columns are not part of the v2 baseline. Frontend `Year` and `Photo Link` columns are 100 px. `Photo Link` cells render authoritative Google Drive URLs/file IDs as file smart chips; formatting-only actions preserve existing chips without rewriting their visible filename labels.
+The frontend and backend Directory v2 order starts with `Last Name`, `First Name`, `Year`, `Flight`, `Sqdn`, `Rank`, `Role`, then `University` and the remaining contact/academic fields. Rows use the canonical senior-to-junior display order, with AS500 below AS300 and above AS250 and AF Civ below AS100. AF Civ may be paired with any class year and does not receive a cadet rank. Legacy Directory `source` and freeform Directory `notes` columns are not part of the v2 baseline. Frontend `Year` and `Photo Link` columns are 100 px. `Photo Link` cells render authoritative Google Drive URLs/file IDs as file smart chips; formatting-only actions preserve existing chips without rewriting their visible filename labels.
 
 Rows marked `Inactive`, `Commissioned`, or `Dropped` in `Flight Path` stay in Directory Backend for recordkeeping but are excluded from frontend Directory, derived Leadership, Attendance, and form cadet choices.
 
@@ -123,7 +123,7 @@ The v2 transition workflow prepares SHAMROCK for a new semester or academic year
 - Backend rollback archives are copied, locked, hidden, and registered for deletion after seven days.
 - Attendance/Excusals operational logs plus Directory/Excusals response rows are cleared only after archive creation and confirmation. Attendance raw responses are instead preserved as a hidden timestamped tab when the Attendance Form is rebuilt and relinked.
 - After final confirmation, the workflow records phase progress and can resume after an Apps Script timeout. Directory changes are calculated from the rollback archive snapshot so AS-year advancement is not applied twice.
-- Transitions clear Directory role, flight, and squadron assignments. Academic-year transitions mark listed dropped cadets as `Dropped`, mark only original AS400s as `Commissioned` unless overridden, advance remaining AS years once, and reset cadet rank from the resulting AS year.
+- Transitions clear Directory role, flight, and squadron assignments. Academic-year transitions mark listed dropped cadets as `Dropped`, mark only original AS400s as `Commissioned` unless overridden, advance remaining cadet AS years once, leave AF Civ unchanged, and reset cadet rank from the resulting AS year.
 
 ### Validation
 
@@ -139,7 +139,7 @@ The v2 transition workflow prepares SHAMROCK for a new semester or academic year
 
 Attendance records form submissions in backend logs and derives the frontend attendance matrix from attendance events, excusals, and directory state.
 The v2 code set is `P`, `T`, `A`, `R`, `D`, `U`, `E`, `ES`, `MED`, and `N/A`.
-AS500 is a GMC year. AS500 cadets are excluded from POC Third Hour form groups and receive `N/A` for POC Third Hour in the matrix unless an explicit attendance entry exists. Year-grouped cadet lists place AS500 below AS300 and above AS250.
+AS500 is a GMC year. AS500 cadets are excluded from POC Third Hour form groups and receive `N/A` for POC Third Hour in the matrix unless an explicit attendance entry exists. AF Civ is neither GMC nor POC and is also excluded from POC Third Hour groups. Year-grouped lists place AS500 below AS300 and above AS250, with AF Civ below AS100.
 
 ### Operator Entry Points
 
@@ -167,8 +167,9 @@ AS500 is a GMC year. AS500 cadets are excluded from POC Third Hour form groups a
 - Confirm the response is appended to Attendance Backend.
 - Rebuild attendance and confirm the frontend matrix updates deterministically.
 - Confirm AS500 cadets are counted as GMC, are absent from POC Third Hour choices, receive `N/A` for POC Third Hour when no entry exists, and sort between AS300 and AS250.
+- Confirm AF Civ is available in AS-year dropdowns, remains outside GMC/POC counts and POC Third Hour choices, accepts any class year, and sorts below AS100.
 - Confirm attendance codes use the same validation presentation as the newest Attendance archive, validate against Data Legend options, and leave frontend table column types unset.
-- Confirm visible Attendance headers are left-aligned, event/code cells use Plain text display, and `Overall`/`LLAB` percentage values are bold.
+- Confirm visible Attendance headers are left-aligned, event headers wrap, event/code cells use Plain text display with bold text, and `Overall`/`LLAB` percentage values are bold.
 - Confirm `Overall` and `LLAB` use the archive-style red-at-80%, amber-at-90%, and green-at-100% summary gradient.
 - Confirm stale blank rows are removed from the frontend matrix after cadets are removed or marked non-operational.
 - Run `Debug Attendance response columns` and confirm the current response tab reports no duplicate header names. After a structural rebuild, confirm the prior response tab is hidden and the new visible tab is named `Attendance Form Responses`.

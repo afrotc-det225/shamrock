@@ -801,7 +801,7 @@ function applyAttendanceHeaderFix(showCompletionAlert = false) {
       const col = idx + 1;
       try {
         sheet.getRange(2, col, 1, 1).setHorizontalAlignment('center');
-        sheet.getRange(3, col, dataRows, 1).setHorizontalAlignment('center');
+        sheet.getRange(3, col, dataRows, 1).setHorizontalAlignment('center').setFontWeight('bold');
       } catch (err) {
         Log.warn(`Unable to center attendance summary column ${col}: ${err}`);
       }

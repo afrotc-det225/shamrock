@@ -555,7 +555,10 @@ namespace AttendanceService {
     } else {
       sheet.getRange(1, 1, clearRows, clearCols).clearDataValidations();
     }
-    sheet.clear();
+    // Preserve the frontend presentation while replacing derived matrix values.
+    // The table-aware formatting pass still normalizes the final active range.
+    if (sheet.getName() === 'Attendance') sheet.clearContents();
+    else sheet.clear();
     if (machineHeaders.length) sheet.getRange(1, 1, 1, machineHeaders.length).setValues([machineHeaders]);
     if (displayHeaders.length) sheet.getRange(2, 1, 1, displayHeaders.length).setValues([displayHeaders]);
     const sortedRows = sortAttendanceRows(rows);

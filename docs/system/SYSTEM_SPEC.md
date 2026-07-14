@@ -123,7 +123,7 @@ Cell-level dropdown validations must be driven from the Data Legend tab(s) using
 - Table column types must remain `None` / `COLUMN_TYPE_UNSPECIFIED`. Controlled values are enforced with normal cell-level data validation rules, not Sheets Table dropdown column types.
 - Frontend formatting must never delete Sheets Table objects as part of normal formatting. It updates existing table objects in place, explicitly resets every table column to `COLUMN_TYPE_UNSPECIFIED`, and then applies validation through Sheets API cell-level `setDataValidation` or validation-only `copyPaste` requests. Do not use `Range.setDataValidation(...)` across a table body because Google Sheets can promote that rule into a typed table dropdown column.
 - Directory and Attendance validation repair should copy validation-only metadata from the newest matching `Spring YYYY ...` or `Fall YYYY ...` frontend archive when available. This preserves the proven archive presentation, including the validation UI/color treatment. A fresh environment with no archive falls back to equivalent strict Data Legend-backed `ONE_OF_RANGE` rules through the Sheets API.
-- Frontend table creation/update also applies Sheets API cell-format requests for the Fall 2025-style visible table treatment: dark header row, clipped middle-aligned text, and white/light banded body rows. This is not conditional formatting or legacy row banding.
+- Frontend table creation/update also applies Sheets API cell-format requests for the Fall 2025-style visible table treatment: dark header row, clipped middle-aligned text, and white/light banded body rows. Attendance event headers are the intentional exception: they wrap at a compact font size, and the same final table-style batch restores bold event and percentage cells. This is not conditional formatting or legacy row banding.
 - New Google Sheets tables are created with a minimal `addTable` request, then read back to obtain Google’s generated numeric `tableId`, and finally configured through `updateTable`. Do not include row-style or column-property payloads in the initial `addTable` request; Google can return an internal error for that combined creation shape.
 - Table creation/update and visual style requests use retry/backoff. The visible fallback may still be applied for diagnostics, but a missing real table is a formatting failure and must not be reported as success.
 - Frontend formatting temporarily clears SHAMROCK-managed protections before table creation/update and always reapplies protections in a `finally` path, including after a table or formatting failure.
@@ -164,7 +164,7 @@ This section describes the current operational shape of the system so feature wo
 - `Dashboard Data`: hidden, fully protected formula-backed helper tab for managed Dashboard charts. It is ordered immediately after `Data Legend`; Dashboard rebuilds may recreate its contents. Renderable chart-source mirrors live beneath the Dashboard chart overlays so hiding the helper cannot blank the graphics. Managed charts are created through native Sheets API chart specifications with explicit header, domain, series, and axis-window settings; do not use the Apps Script embedded-chart builder for these charts.
 - Frontend formatting must batch Data Legend value reads and fall back to safe SpreadsheetApp header/value reads when the Sheets API read quota is temporarily exhausted. A transient API quota failure must not erase Dashboard source-column discovery or turn a populated roster into blank chart data.
 - Cadre & Leadership: minimal contact directory.
-- Directory: cadet directory with AS year, flight, squadron, rank, role, contact, academic, and status fields (sorted by the canonical senior-to-junior display order, then A-Z by last name) with required formatting constraints. AS500 displays below AS300 and above AS250 because it remains a GMC year. The frontend and backend v2 Directory order begins `Last Name`, `First Name`, `Year`, `Flight`, `Sqdn`, `Rank`, `Role`, `University`.
+- Directory: cadet directory with AS year, flight, squadron, rank, role, contact, academic, and status fields (sorted by the canonical senior-to-junior display order, then A-Z by last name) with required formatting constraints. AS500 displays below AS300 and above AS250 because it remains a GMC year; AF Civ displays below AS100. The frontend and backend v2 Directory order begins `Last Name`, `First Name`, `Year`, `Flight`, `Sqdn`, `Rank`, `Role`, `University`.
 - Attendance: directory-synced cadet rows + event columns with attendance codes and percentage rollups.
 - Events: event metadata driving attendance columns and dashboard.
 - Excusals are not exposed as a frontend tab; the separate Excusals Management workbook is the commander-facing decision surface.
@@ -202,7 +202,8 @@ Roster status:
 Cadet groups and display order:
 - GMC years are `AS100`, `AS150`, `AS200`, `AS250`, and `AS500`; AS500 is not eligible for POC Third Hour and receives `N/A` for those events when no explicit attendance log exists.
 - POC years are `AS300`, `AS400`, `AS700`, `AS800`, and `AS900`.
-- Cadet lists grouped by AS year display in this order: `AS900`, `AS800`, `AS700`, `AS400`, `AS300`, `AS500`, `AS250`, `AS200`, `AS150`, `AS100`.
+- `AF Civ` is an independent non-cadet AS-year option. It may be paired with any `class_year`, is neither GMC nor POC, and is not included in POC Third Hour groups.
+- Cadet lists and year-based Dashboard summaries display in this order: `AS900`, `AS800`, `AS700`, `AS400`, `AS300`, `AS500`, `AS250`, `AS200`, `AS150`, `AS100`, `AF Civ`.
 
 Percent metrics:
 - LLAB attendance % is based on LLAB event subset.
@@ -243,7 +244,7 @@ Required standards:
 - Keep Sheets Table column types unset. Prefer Data Legend-backed cell validation, number/date formats, widths, freezes, and protection over conditional formatting for frontend sheets.
 - Directory and Leadership shared columns use standard widths: last/first name `115`, year/flight/squadron/rank/class `75`, university/photo link `100`, phone `125`, dorm `150`, DOB `100`, and flight path `125`. Role, email, CIP broad area, AFSC, hometown, and home state fit to data. Directory Year, Rank, and University validations use plain-text display.
 - Attendance first and last name columns use `115` width.
-- Attendance display headers are left-aligned. Event/code cells use plain-text number format, centered alignment, and bold text; `Overall` and `LLAB` percentage values remain centered, percentage-formatted, and bold.
+- Attendance display headers are left-aligned, with event headers wrapped. Event/code cells use plain-text number format, centered alignment, and bold text; `Overall` and `LLAB` percentage values remain centered, percentage-formatted, and bold. Matrix rebuilds preserve existing presentation before the final table-aware style normalization.
 - Primary frontend table ranges should have cell borders cleared; use table fills, frozen headers, spacing, and selected non-table separators for readability.
 - Use smart chips for links where helpful.
 
@@ -264,7 +265,7 @@ Operators should not run scripts from the editor.
 - v2 operator workflows that replace earlier behavior must use explicit v2 menu/global names. Current transition entry points are `transferToNewSemesterV2` and `transferToNewAcademicYearV2`.
 - Semester/year transitions must be interactive, auditable, archive-before-write, and resumable until the final confirmation.
 - After final confirmation, v2 transitions must also be phase-resumable. A retry must continue incomplete phases, not reapply Directory advancement from the already-mutated backend.
-- Academic-year Directory advancement is calculated from the archived pre-transition Directory snapshot. It clears role, flight, and squadron assignments; marks listed dropped cadets as `Dropped`; marks original AS400s as `Commissioned` unless overridden; advances remaining AS years once; and resets cadet rank from the resulting AS year.
+- Academic-year Directory advancement is calculated from the archived pre-transition Directory snapshot. It clears role, flight, and squadron assignments; marks listed dropped cadets as `Dropped`; marks original AS400s as `Commissioned` unless overridden; advances remaining cadet AS years once; leaves `AF Civ` unchanged; and resets cadet rank from the resulting AS year (blank for `AF Civ`).
 
 ## 13. Document Policy
 - Public docs: explain how features work operationally without sensitive IDs.

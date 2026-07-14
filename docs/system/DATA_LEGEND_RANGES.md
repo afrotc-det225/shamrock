@@ -49,6 +49,7 @@ Allowed values:
 - AS700
 - AS800
 - AS900
+- AF Civ
 
 ## Cadet Ranks (`CADET_RANKS`)
 Allowed values:

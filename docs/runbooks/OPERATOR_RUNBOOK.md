@@ -159,14 +159,14 @@ During the wizard:
 - After final confirmation, execution is phase-resumable. If Apps Script stops near its execution limit, wait for the continuation trigger or rerun the same transition menu action to resume remaining phases. Do not start a fresh transition.
 - Frontend archives are named from the new target term: transferring into `YYYY-Fall` creates `Spring YYYY Leadership/Directory/Attendance`; transferring into `YYYY-Spring` creates `Fall YYYY-1 Leadership/Directory/Attendance`.
 - Both semester and academic-year transitions clear Directory `Role`, `Flight`, and `Sqdn` assignments. Leadership roles must be reapplied through the wizard role-update prompt or backend edits after transition.
-- Academic-year transitions mark listed dropped cadets as `Dropped`, advance AS years from the archived pre-transition Directory snapshot, mark only original AS400s as `Commissioned` by default, and reset cadet rank from the resulting AS year.
+- Academic-year transitions mark listed dropped cadets as `Dropped`, advance cadet AS years from the archived pre-transition Directory snapshot, leave AF Civ unchanged, mark only original AS400s as `Commissioned` by default, and reset cadet rank from the resulting AS year.
 
 After completion:
 - Confirm hidden frontend archives exist for Leadership, Directory, and Attendance using the prior term label.
 - Confirm hidden, locked prior-term Excusals Management tabs exist in the admin workbook and the active Blue/Gold management tabs have empty queues with current Leadership access.
 - Confirm hidden backend rollback archives exist. They are automatically eligible for deletion after seven days.
 - Confirm Events Backend has the new term and the expected training-week sequence.
-- Confirm Directory AS-year advancement happened exactly once, role/flight/squadron are blank unless explicitly updated, and default ranks match AS year. AS500 remains GMC and resets to `C/3C`.
+- Confirm Directory AS-year advancement happened exactly once, role/flight/squadron are blank unless explicitly updated, and default ranks match AS year. AS500 remains GMC and resets to `C/3C`; AF Civ remains AF Civ, may use any class year, and has a blank cadet rank.
 - Confirm Attendance and Excusals forms list only current-term events.
 - Confirm the current `Attendance Form Responses` tab has no duplicate header names and the prior raw tab is preserved as a hidden timestamped archive.
 - Run one controlled attendance/excusal validation if this is a production transition.
@@ -210,7 +210,7 @@ Likely causes:
 - Sheets advanced service unavailable, which prevents SHAMROCK from creating/updating Sheets API Table objects.
 - Data validation is applied as cell metadata through the Sheets API. Directory and Attendance copy validation-only metadata from the newest matching frontend archive to retain the proven validation UI/color treatment; a fresh workbook falls back to Data Legend-backed `ONE_OF_RANGE` rules. SHAMROCK does not use Sheets Table dropdown column types.
 - Attendance `Overall` and `LLAB` retain the archive summary gradient (red at 80%, amber at 90%, green at 100%); it is intentionally the only Attendance conditional-format color rule.
-- Attendance display headers are left-aligned, event/code cells use Plain text display, and `Overall`/`LLAB` percentage values are bold.
+- Attendance display headers are left-aligned, event headers wrap, event/code cells use Plain text display with bold text, and `Overall`/`LLAB` percentage values are bold.
 
 Operator checks:
 - Re-run Sync Directory, Rebuild Attendance Matrix, Apply frontend formatting, or setup to reset table column types and recreate archive-style cell validation.

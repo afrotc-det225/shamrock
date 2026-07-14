@@ -1,14 +1,16 @@
 // Canonical option arrays for use in forms. Keep in sync with DATA_LEGEND_RANGES.md.
 
 namespace Arrays {
-  export const AS_YEARS = ['AS100', 'AS150', 'AS200', 'AS250', 'AS300', 'AS400', 'AS500', 'AS700', 'AS800', 'AS900'];
+  export const AS_YEARS = ['AS100', 'AS150', 'AS200', 'AS250', 'AS300', 'AS400', 'AS500', 'AS700', 'AS800', 'AS900', 'AF Civ'];
   export const GMC_AS_YEARS = ['AS100', 'AS150', 'AS200', 'AS250', 'AS500'];
-  export const POC_AS_YEARS = AS_YEARS.filter((asYear) => !GMC_AS_YEARS.includes(asYear));
-  export const AS_YEAR_DISPLAY_ORDER = ['AS900', 'AS800', 'AS700', 'AS400', 'AS300', 'AS500', 'AS250', 'AS200', 'AS150', 'AS100'];
+  export const POC_AS_YEARS = ['AS300', 'AS400', 'AS700', 'AS800', 'AS900'];
+  export const AS_YEAR_DISPLAY_ORDER = ['AS900', 'AS800', 'AS700', 'AS400', 'AS300', 'AS500', 'AS250', 'AS200', 'AS150', 'AS100', 'AF Civ'];
 
   export function normalizeAsYear(raw: any): string {
     return String(raw || '').trim().toUpperCase().replace(/\s+/g, '');
   }
+
+  const NORMALIZED_AS_YEAR_DISPLAY_ORDER = AS_YEAR_DISPLAY_ORDER.map(normalizeAsYear);
 
   export function isGmcAsYear(raw: any): boolean {
     return GMC_AS_YEARS.includes(normalizeAsYear(raw));
@@ -21,8 +23,8 @@ namespace Arrays {
   export function compareAsYearsForDisplay(a: any, b: any): number {
     const normalizedA = normalizeAsYear(a);
     const normalizedB = normalizeAsYear(b);
-    const indexA = AS_YEAR_DISPLAY_ORDER.indexOf(normalizedA);
-    const indexB = AS_YEAR_DISPLAY_ORDER.indexOf(normalizedB);
+    const indexA = NORMALIZED_AS_YEAR_DISPLAY_ORDER.indexOf(normalizedA);
+    const indexB = NORMALIZED_AS_YEAR_DISPLAY_ORDER.indexOf(normalizedB);
 
     if (indexA >= 0 && indexB >= 0) return indexA - indexB;
     if (indexA >= 0) return -1;

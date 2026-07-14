@@ -283,6 +283,95 @@ namespace SetupService {
     return requests;
   }
 
+  function attendanceTableStyleRequests(
+    sheetId: number,
+    displayHeaders: string[],
+    headerRowIndex: number,
+    endRowIndex: number,
+  ): Record<string, any>[] {
+    const baseHeaders = Schemas.getTabSchema('Attendance')?.machineHeaders || [
+      'last_name',
+      'first_name',
+      'as_year',
+      'flight',
+      'squadron',
+      'overall_attendance_pct',
+      'llab_attendance_pct',
+    ];
+    const eventStartColumnIndex = baseHeaders.length;
+    const dataStartRowIndex = headerRowIndex + 1;
+    const normalizedHeaders = displayHeaders.map((header) => String(header || '').trim().toLowerCase());
+    const requests: Record<string, any>[] = [];
+
+    if (displayHeaders.length > eventStartColumnIndex) {
+      requests.push({
+        repeatCell: {
+          range: {
+            sheetId,
+            startRowIndex: headerRowIndex,
+            endRowIndex: headerRowIndex + 1,
+            startColumnIndex: eventStartColumnIndex,
+            endColumnIndex: displayHeaders.length,
+          },
+          cell: {
+            userEnteredFormat: {
+              horizontalAlignment: 'LEFT',
+              wrapStrategy: 'WRAP',
+              textFormat: { bold: true, fontSize: 5 },
+            },
+          },
+          fields: 'userEnteredFormat(horizontalAlignment,wrapStrategy,textFormat.bold,textFormat.fontSize)',
+        },
+      });
+      if (endRowIndex > dataStartRowIndex) {
+        requests.push({
+          repeatCell: {
+            range: {
+              sheetId,
+              startRowIndex: dataStartRowIndex,
+              endRowIndex,
+              startColumnIndex: eventStartColumnIndex,
+              endColumnIndex: displayHeaders.length,
+            },
+            cell: {
+              userEnteredFormat: {
+                numberFormat: { type: 'TEXT' },
+                horizontalAlignment: 'CENTER',
+                textFormat: { bold: true },
+              },
+            },
+            fields: 'userEnteredFormat(numberFormat,horizontalAlignment,textFormat.bold)',
+          },
+        });
+      }
+    }
+
+    ['overall', 'llab', 'overall_attendance_pct', 'llab_attendance_pct'].forEach((header) => {
+      const columnIndex = normalizedHeaders.indexOf(header);
+      if (columnIndex < 0 || endRowIndex <= dataStartRowIndex) return;
+      requests.push({
+        repeatCell: {
+          range: {
+            sheetId,
+            startRowIndex: dataStartRowIndex,
+            endRowIndex,
+            startColumnIndex: columnIndex,
+            endColumnIndex: columnIndex + 1,
+          },
+          cell: {
+            userEnteredFormat: {
+              horizontalAlignment: 'CENTER',
+              textFormat: { bold: true },
+            },
+          },
+          fields: 'userEnteredFormat(horizontalAlignment,textFormat.bold)',
+        },
+      });
+    });
+
+    return requests;
+  }
+
   function sheetsBatchUpdateWithRetry(svc: any, spreadsheetId: string, requests: Record<string, any>[], label: string): boolean {
     const maxAttempts = 3;
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
@@ -419,10 +508,14 @@ namespace SetupService {
         }
       }
 
+      const visualRequests = tableVisualStyleRequests(sheetId, 0, endColIndex, headerRow - 1, endRowIndex);
+      if (spreadsheetId === Config.getFrontendId() && sheetName === 'Attendance') {
+        visualRequests.push(...attendanceTableStyleRequests(sheetId, headerValues, headerRow - 1, endRowIndex));
+      }
       const visualOk = sheetsBatchUpdateWithRetry(
         svc,
         spreadsheetId,
-        tableVisualStyleRequests(sheetId, 0, endColIndex, headerRow - 1, endRowIndex),
+        visualRequests,
         `Apply table visual style ${displayTableName} on ${sheetName}`,
       );
       if (tableOk) {
