@@ -273,7 +273,20 @@ namespace FormService {
     created: number;
     retired: number;
     duplicateItems: number;
+    renamed: number;
+    reordered: number;
     missingSections: string[];
+  }
+
+  function attendanceCadetQuestionTitle(group: string, asYear: string, branch?: 'Mando' | 'LLAB'): string {
+    const yearLabel = Arrays.normalizeAsYear(asYear) === 'AFCIV' ? 'AF Civ' : `AS ${asYear}`;
+    return `Cadets (${group}) ${yearLabel}${branch ? ` (${branch})` : ''}`;
+  }
+
+  function canonicalizeAttendanceCadetQuestionTitle(title: string): string {
+    const normalized = String(title || '').trim();
+    const legacyAfCiv = normalized.match(/^(Cadets \(.+\)) AS AF\s*Civ( \((?:Mando|LLAB)\))?$/i);
+    return legacyAfCiv ? `${legacyAfCiv[1]} AF Civ${legacyAfCiv[2] || ''}` : normalized;
   }
 
   function normalizeToList(value: string, options: string[]): string {
@@ -387,7 +400,7 @@ namespace FormService {
       }
       addGroups(
         groupMap,
-        (asYear) => `Cadets (${flight}) AS ${asYear} (Mando)`,
+        (asYear) => attendanceCadetQuestionTitle(flight, asYear, 'Mando'),
         `Cadets for ${flight} (Mando)`,
       );
     });
@@ -396,19 +409,19 @@ namespace FormService {
       const groupMap = cadets.byFlightAll[flight] || cadets.byFlight[flight] || {};
       addGroups(
         groupMap,
-        (asYear) => `Cadets (${flight}) AS ${asYear} (LLAB)`,
+        (asYear) => attendanceCadetQuestionTitle(flight, asYear, 'LLAB'),
         `Cadets for ${flight} (LLAB)`,
       );
     });
 
-    addGroups(cadets.pocByAs, (asYear) => `Cadets (POC) AS ${asYear}`, 'POC Branch');
-    addGroups(cadets.nonAbroadByAs, (asYear) => `Cadets (Secondary) AS ${asYear}`, 'Secondary Branch');
-    addGroups(cadets.allByAs, (asYear) => `Cadets (All) AS ${asYear}`, 'Attendance Branch');
+    addGroups(cadets.pocByAs, (asYear) => attendanceCadetQuestionTitle('POC', asYear), 'POC Branch');
+    addGroups(cadets.nonAbroadByAs, (asYear) => attendanceCadetQuestionTitle('Secondary', asYear), 'Secondary Branch');
+    addGroups(cadets.allByAs, (asYear) => attendanceCadetQuestionTitle('All', asYear), 'Attendance Branch');
     return questions;
   }
 
   function isAttendanceCadetQuestionTitle(title: string): boolean {
-    return /^Cadets \(.+\) AS AS\d+(?: \((?:Mando|LLAB)\))?$/.test(String(title || '').trim());
+    return /^Cadets \(.+\) (?:AS AS\d+|(?:AS )?AF Civ)(?: \((?:Mando|LLAB)\))?$/.test(String(title || '').trim());
   }
 
   function moveItemToSectionEnd(
@@ -426,6 +439,54 @@ namespace FormService {
     ));
     if (nextSection) form.moveItem(item, nextSection.getIndex());
     return true;
+  }
+
+  function reorderAttendanceCadetQuestions(
+    form: GoogleAppsScript.Forms.Form,
+    expected: AttendanceCadetQuestion[],
+    activeItemsByTitle: Map<string, GoogleAppsScript.Forms.CheckboxItem>,
+  ): number {
+    const expectedBySection = new Map<string, AttendanceCadetQuestion[]>();
+    expected.forEach((question) => {
+      const sectionQuestions = expectedBySection.get(question.sectionTitle) || [];
+      sectionQuestions.push(question);
+      expectedBySection.set(question.sectionTitle, sectionQuestions);
+    });
+
+    let reordered = 0;
+    expectedBySection.forEach((sectionQuestions, sectionTitle) => {
+      const section = findPageBreakItem(form, sectionTitle);
+      if (!section) return;
+
+      const desiredItems = sectionQuestions
+        .map((question) => activeItemsByTitle.get(question.title))
+        .map((item) => item ? form.getItemById(item.getId()) : null)
+        .filter((item): item is GoogleAppsScript.Forms.Item => Boolean(item));
+      if (desiredItems.length < 2) return;
+
+      const desiredIds = desiredItems.map((item) => item.getId());
+      const desiredIdSet = new Set(desiredIds);
+      const allItems = form.getItems();
+      const sectionIndex = section.getIndex();
+      const nextSection = allItems.find((item) => (
+        item.getIndex() > sectionIndex && item.getType() === FormApp.ItemType.PAGE_BREAK
+      ));
+      const sectionEnd = nextSection ? nextSection.getIndex() : allItems.length;
+      const currentIds = allItems
+        .slice(sectionIndex + 1, sectionEnd)
+        .map((item) => item.getId())
+        .filter((id) => desiredIdSet.has(id));
+
+      if (currentIds.length === desiredIds.length && currentIds.every((id, index) => id === desiredIds[index])) return;
+
+      // Insert in reverse immediately after the section break so the final
+      // visible order matches the canonical AS-year display order.
+      desiredItems.slice().reverse().forEach((item) => {
+        form.moveItem(item, section.getIndex() + 1);
+      });
+      reordered += desiredItems.length;
+    });
+    return reordered;
   }
 
   function enforceExcusalsItemOrder(form: GoogleAppsScript.Forms.Form) {
@@ -652,7 +713,7 @@ namespace FormService {
         .forEach((as) => {
           const opts = groupMap[as];
           if (!opts || !opts.length) return;
-          const result = addCheckboxItemSafe(workingForm, `Cadets (${fName}) AS ${as} (Mando)`, opts);
+          const result = addCheckboxItemSafe(workingForm, attendanceCadetQuestionTitle(fName, as, 'Mando'), opts);
           workingForm = result.form;
         });
     });
@@ -679,7 +740,7 @@ namespace FormService {
         .forEach((as) => {
           const opts = groupMap[as];
           if (!opts || !opts.length) return;
-          const result = addCheckboxItemSafe(workingForm, `Cadets (${fName}) AS ${as} (LLAB)`, opts);
+          const result = addCheckboxItemSafe(workingForm, attendanceCadetQuestionTitle(fName, as, 'LLAB'), opts);
           workingForm = result.form;
         });
     });
@@ -695,7 +756,7 @@ namespace FormService {
       .forEach((as) => {
         const opts = cadets.pocByAs[as];
         if (!opts || !opts.length) return;
-        const result = addCheckboxItemSafe(workingForm, `Cadets (POC) AS ${as}`, opts);
+        const result = addCheckboxItemSafe(workingForm, attendanceCadetQuestionTitle('POC', as), opts);
         workingForm = result.form;
       });
     Log.info(`Attendance form: POC groups=${Object.keys(cadets.pocByAs).length}`);
@@ -709,7 +770,7 @@ namespace FormService {
       .forEach((as) => {
         const opts = cadets.nonAbroadByAs[as];
         if (!opts || !opts.length) return;
-        const result = addCheckboxItemSafe(workingForm, `Cadets (Secondary) AS ${as}`, opts);
+        const result = addCheckboxItemSafe(workingForm, attendanceCadetQuestionTitle('Secondary', as), opts);
         workingForm = result.form;
       });
     Log.info(`Attendance form: Secondary groups=${Object.keys(cadets.nonAbroadByAs).length}`);
@@ -723,7 +784,7 @@ namespace FormService {
       .forEach((as) => {
         const opts = cadets.allByAs[as];
         if (!opts || !opts.length) return;
-        const result = addCheckboxItemSafe(workingForm, `Cadets (All) AS ${as}`, opts);
+        const result = addCheckboxItemSafe(workingForm, attendanceCadetQuestionTitle('All', as), opts);
         workingForm = result.form;
       });
     Log.info(`Attendance form: Other/all groups=${Object.keys(cadets.allByAs).length}`);
@@ -792,11 +853,17 @@ namespace FormService {
     const expected = buildAttendanceCadetQuestions(cadets);
     const expectedByTitle = new Map(expected.map((question) => [question.title, question] as const));
     const existingByTitle = new Map<string, GoogleAppsScript.Forms.CheckboxItem[]>();
+    let renamed = 0;
 
     form.getItems(FormApp.ItemType.CHECKBOX).forEach((item) => {
       const checkbox = item.asCheckboxItem();
-      const title = String(checkbox.getTitle() || '').trim();
-      if (!isAttendanceCadetQuestionTitle(title)) return;
+      const originalTitle = String(checkbox.getTitle() || '').trim();
+      if (!isAttendanceCadetQuestionTitle(originalTitle)) return;
+      const title = canonicalizeAttendanceCadetQuestionTitle(originalTitle);
+      if (title !== originalTitle) {
+        checkbox.setTitle(title);
+        renamed += 1;
+      }
       const matches = existingByTitle.get(title) || [];
       matches.push(checkbox);
       existingByTitle.set(title, matches);
@@ -807,13 +874,17 @@ namespace FormService {
       created: 0,
       retired: 0,
       duplicateItems: 0,
+      renamed,
+      reordered: 0,
       missingSections: [],
     };
+    const activeItemsByTitle = new Map<string, GoogleAppsScript.Forms.CheckboxItem>();
 
     expected.forEach((question) => {
       const existing = existingByTitle.get(question.title) || [];
       if (existing.length) {
         existing[0].setChoiceValues(question.choices);
+        activeItemsByTitle.set(question.title, existing[0]);
         result.updated += 1;
         if (existing.length > 1) {
           result.duplicateItems += existing.length - 1;
@@ -834,6 +905,7 @@ namespace FormService {
         result.missingSections.push(question.sectionTitle);
         return;
       }
+      activeItemsByTitle.set(question.title, checkbox);
       result.created += 1;
     });
 
@@ -844,6 +916,8 @@ namespace FormService {
         result.retired += 1;
       });
     });
+
+    result.reordered = reorderAttendanceCadetQuestions(form, expected, activeItemsByTitle);
 
     if (result.duplicateItems) {
       Log.warn(
@@ -856,7 +930,7 @@ namespace FormService {
       );
     }
     Log.info(
-      `Attendance form: roster choices synchronized updated=${result.updated} created=${result.created} retired=${result.retired} duplicateItems=${result.duplicateItems}`,
+      `Attendance form: roster choices synchronized updated=${result.updated} created=${result.created} retired=${result.retired} duplicateItems=${result.duplicateItems} renamed=${result.renamed} reordered=${result.reordered}`,
     );
     return result;
   }

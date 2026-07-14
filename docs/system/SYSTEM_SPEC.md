@@ -204,6 +204,7 @@ Cadet groups and display order:
 - POC years are `AS300`, `AS400`, `AS700`, `AS800`, and `AS900`.
 - `AF Civ` is an independent non-cadet AS-year option. It may be paired with any `class_year`, is neither GMC nor POC, and is not included in POC Third Hour groups.
 - Cadet lists and year-based Dashboard summaries display in this order: `AS900`, `AS800`, `AS700`, `AS400`, `AS300`, `AS500`, `AS250`, `AS200`, `AS150`, `AS100`, `AF Civ`.
+- Attendance Form roster refreshes preserve existing question IDs while restoring that order within every cadet subsection. AF Civ question titles omit the redundant `AS` prefix (for example, `Cadets (Delta) AF Civ (Mando)`).
 
 Percent metrics:
 - LLAB attendance % is based on LLAB event subset.
