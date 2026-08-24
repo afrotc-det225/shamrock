@@ -107,6 +107,7 @@ Post-deploy validation checklist:
 - Cadet rank and cadet leadership role are maintained on Directory. Leadership refresh replaces all Directory-backed Leadership rows and republishes only active Directory rows with eligible command/advisor roles. This removes former leaders who are inactive, commissioned, dropped, or no longer assigned while preserving non-cadet/cadre/manual rows that do not originate in Directory.
 - Leadership does not have separate flight or squadron columns. Flight and squadron commander routing comes from role names, so use explicit roles like `Alpha Flight Commander`, `Alpha Deputy Flight Commander`, and `Blue Squadron Commander`. Only the non-Abroad squadrons in the canonical squadron list are valid squadron-command routing roles; Mission Support Squadron Commander is not included.
 - Sync Directory refreshes the frontend Data Legend and existing Directory Form list questions first—including all canonical dorm options without replacing question IDs—then clears stale frontend Directory validation, writes the v2 mirror, restores Photo Link chips only from authoritative backend URLs/file IDs, trims stale blank rows, removes legacy banded ranges, creates or updates real Sheets API tables named `Directory`, `Leadership`, `Attendance`, and `Data Legend`, resets their column types to `None`, and reapplies cell validation from the newest matching archive. With no archive, it creates equivalent strict Data Legend-backed rules through the Sheets API.
+- Use `Rebuild Directory Form (archive responses)` only for structural repair or a transition. It archives and hides the linked raw response tab before rebuilding the supported Rank/Role and contact questions and linking a verified clean response tab.
 - Formatting-only actions do not rewrite `Photo Link` content. If an earlier run converted chips to filename text, rerun Sync Directory or Sync all mapped tabs so the backend URLs/file IDs can recreate them.
 - Prefer menu-driven sync/repair actions over ad hoc edits in the frontend.
 
@@ -135,6 +136,8 @@ Post-deploy validation checklist:
 - Decisions drive notifications and attendance effects.
 - Requested outcomes are `P`, `T`, `E`, `ES`, and `MED`.
 - Confirm the Excusals Form's `Excusal Details` section explains all attendance codes and lists the allowed requested outcomes. `Refresh Excusals Form choices` reapplies this description without replacing question IDs.
+- Routine setup and `Refresh Excusals Form choices` preserve existing question IDs. Use `Rebuild Excusals Form (archive responses)` only for structural repair or a transition; it archives the linked response tab and verifies a clean replacement.
+- `Debug Excusals response columns` is read-only and reports header/duplicate counts without merging, deleting, or hiding response columns.
 - Denied post-event absences become `U`; denied pre-event requests become `D` until attendance is taken or closeout marks the absence.
 - Use cleanup/backfill actions only when repairing a known data issue.
 - Use `Share management spreadsheet` after an out-of-cycle Leadership change to remove stale access, refresh current editors/viewers, and reapply Decision-only protections.
@@ -158,7 +161,7 @@ Before starting:
 
 During the wizard:
 - The draft is saved after each prompt. Cancelling before final confirmation does not archive or rewrite workbook data.
-- The final confirmation is the destructive boundary. After that point, the workflow archives current sheets (including hidden, locked term copies of active Excusals Management tabs in the restricted admin workbook), updates roster/events, clears current attendance/excusal logs and management queues, refreshes management access from new Leadership assignments, clears Directory and Excusals response rows, preserves the full Attendance raw response tab during its form rebuild, and reinstalls triggers.
+- The final confirmation is the destructive boundary. After that point, the workflow archives current sheets (including hidden, locked term copies of active Excusals Management tabs in the restricted admin workbook), updates roster/events, clears current attendance/excusal logs and management queues, refreshes management access from new Leadership assignments, preserves all three raw response tabs as hidden timestamped archives during structural form rebuilds, and reinstalls triggers.
 - After final confirmation, execution is phase-resumable. If Apps Script stops near its execution limit, wait for the continuation trigger or rerun the same transition menu action to resume remaining phases. Do not start a fresh transition.
 - Frontend archives are named from the new target term: transferring into `YYYY-Fall` creates `Spring YYYY Leadership/Directory/Attendance`; transferring into `YYYY-Spring` creates `Fall YYYY-1 Leadership/Directory/Attendance`.
 - Both semester and academic-year transitions clear Directory `Role`, `Flight`, and `Sqdn` assignments. Leadership roles must be reapplied through the wizard role-update prompt or backend edits after transition.
@@ -171,7 +174,7 @@ After completion:
 - Confirm Events Backend has the new term and the expected training-week sequence.
 - Confirm Directory AS-year advancement happened exactly once, role/flight/squadron are blank unless explicitly updated, and default ranks match AS year. AS500 remains GMC and resets to `C/3C`; AF Civ remains AF Civ, may use any class year, and has a blank cadet rank.
 - Confirm Attendance and Excusals forms list only current-term events.
-- Confirm the current `Attendance Form Responses` tab has no duplicate header names and the prior raw tab is preserved as a hidden timestamped archive.
+- Confirm the current Attendance, Directory, and Excusals response tabs have no duplicate header names and each prior raw tab is preserved as a hidden timestamped archive.
 - Run one controlled attendance/excusal validation if this is a production transition.
 
 ## 6. Troubleshooting

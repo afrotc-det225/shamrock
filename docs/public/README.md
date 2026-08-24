@@ -121,7 +121,7 @@ The v2 transition workflow prepares SHAMROCK for a new semester or academic year
 - Current core frontend sheets are copied, locked, and hidden with term labels. Copied table objects are renamed to match the archive sheet names, such as `Spring 2026 Directory`.
 - Archive term labels are derived from the new target term, not the current Events Backend contents. For example, transferring into `2026-Fall` archives the current frontend tabs as `Spring 2026 Leadership`, `Spring 2026 Directory`, and `Spring 2026 Attendance`.
 - Backend rollback archives are copied, locked, hidden, and registered for deletion after seven days.
-- Attendance/Excusals operational logs plus Directory/Excusals response rows are cleared only after archive creation and confirmation. Attendance raw responses are instead preserved as a hidden timestamped tab when the Attendance Form is rebuilt and relinked.
+- Attendance/Excusals operational logs are cleared only after archive creation and confirmation. Attendance, Directory, and Excusals raw response tabs are preserved as hidden timestamped archives when their forms are structurally rebuilt and relinked.
 - After final confirmation, the workflow records phase progress and can resume after an Apps Script timeout. Directory changes are calculated from the rollback archive snapshot so AS-year advancement is not applied twice.
 - Transitions clear Directory role, flight, and squadron assignments. Academic-year transitions mark listed dropped cadets as `Dropped`, mark only original AS400s as `Commissioned` unless overridden, advance remaining cadet AS years once, leave AF Civ unchanged, and reset cadet rank from the resulting AS year.
 
@@ -160,6 +160,7 @@ AS500 is a GMC year. AS500 cadets are excluded from POC Third Hour form groups a
 - Normal Directory/Event refreshes update existing Attendance Form questions and choices in place, avoiding full-form question recreation and repeated linked-sheet columns. Within each cadet subsection, the questions are restored to the canonical senior-to-junior AS-year order. Question labels use forms such as `Cadets (Delta) AS400 (Mando)` and `Cadets (Delta) AF Civ (Mando)`, without a duplicated `AS` prefix.
 - Attendance parsing recognizes those canonical question labels and retains compatibility with legacy duplicated-`AS` labels. The backend Attendance menu can repair blank cadet lists or missing event rows from preserved raw form responses without overwriting populated log rows.
 - The explicit `Rebuild Attendance Form (archive responses)` action briefly closes the form, preserves the existing linked response tab as a hidden timestamped archive, links a fresh clean response tab, verifies that it has no duplicate header names, and restores the prior open/closed state.
+- Directory and Excusals have matching explicit archive-and-relink rebuild actions. Routine setup and refreshes preserve their existing question IDs; structural rebuilds are reserved for schema repair and transitions.
 - Historical raw response tabs are preserved rather than merged or pruned in place. Attendance Backend remains the operational attendance log.
 
 ### Validation

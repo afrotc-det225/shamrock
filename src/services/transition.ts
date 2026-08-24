@@ -712,21 +712,6 @@ namespace TransitionService {
     SheetUtils.writeTable(sheet, []);
   }
 
-  function clearResponseSheet(sheetName: string) {
-    let sheet: GoogleAppsScript.Spreadsheet.Sheet;
-    try {
-      sheet = Config.getBackendSheet(sheetName);
-    } catch (err) {
-      Log.warn(`Response sheet ${sheetName} not found; skipping clear. Error: ${err}`);
-      return;
-    }
-    const lastRow = sheet.getLastRow();
-    const lastCol = sheet.getLastColumn();
-    if (lastRow > 1 && lastCol > 0) {
-      sheet.getRange(2, 1, lastRow - 1, lastCol).clearContent();
-    }
-  }
-
   function applyRemovedLeadership(draft: TransitionDraft) {
     if (!draft.removedLeadership.length) return;
     const sheet = Config.getBackendSheet('Leadership Backend');
@@ -772,11 +757,8 @@ namespace TransitionService {
       return;
     }
     if (phase === 'responses') {
-      clearResponseSheet(Config.RESOURCE_NAMES.DIRECTORY_FORM_SHEET);
-      // Attendance raw responses are not cleared here. The later attendance_form
-      // phase unlinks and preserves the entire linked tab before creating a fresh
-      // destination, so a transition never destroys the raw submission history.
-      clearResponseSheet(Config.RESOURCE_NAMES.EXCUSALS_FORM_SHEET);
+      // Raw response tabs are preserved by the later structural form rebuild
+      // phases. Operational backends are cleared separately after archives exist.
       return;
     }
     if (phase === 'directory_artifacts') {
@@ -796,7 +778,7 @@ namespace TransitionService {
       return;
     }
     if (phase === 'excusals_form') {
-      SetupService.refreshExcusalsForm();
+      SetupService.rebuildExcusalsForm();
       return;
     }
     if (phase === 'triggers') {

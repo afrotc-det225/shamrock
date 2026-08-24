@@ -627,7 +627,7 @@ namespace FormService {
     f.addListItem().setTitle('Flight').setChoiceValues(Arrays.FLIGHTS);
     f.addListItem().setTitle('Squadron').setChoiceValues(Arrays.SQUADRONS);
     f.addListItem().setTitle('University').setChoiceValues(Arrays.UNIVERSITIES).setRequired(true);
-    f.addTextItem().setTitle('Phone (+1 (555) 555-5555)').setRequired(true);
+    f.addTextItem().setTitle('Phone (+5 (555) 555-5555)').setRequired(true);
     f.addListItem().setTitle('Dorm').setChoiceValues(Arrays.DORMS);
     f.addTextItem().setTitle('Home Town').setRequired(true);
     f.addListItem().setTitle('Home State').setChoiceValues(Arrays.HOME_STATES).setRequired(true);
@@ -1024,8 +1024,10 @@ namespace FormService {
   }
 
   export function ensureExcusalsForm(form: GoogleAppsScript.Forms.Form) {
-    // Rebuild form with structured flow: Name → Event Type → Events → Attendance Type → Reason
-    rebuildExcusalsForm(form);
+    seedIfEmpty(form, (emptyForm) => {
+      rebuildExcusalsForm(emptyForm);
+    }, 'Excusals Form');
+    refreshExcusalsFormEventChoices(form);
   }
 
   export function rebuildExcusalsForm(form: GoogleAppsScript.Forms.Form) {

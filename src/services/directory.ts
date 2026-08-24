@@ -308,7 +308,7 @@ namespace DirectoryService {
       role: pick(['role', 'leadership role']),
       university: pick(['university', 'school']),
       email,
-      phone: normalizePhone(pick(['phone (+5 (555) 555-5555)', 'phone', 'phone number'])),
+      phone: normalizePhone(pick(['phone (+5 (555) 555-5555)', 'phone (+1 (555) 555-5555)', 'phone', 'phone number'])),
       dorm: pick(['dorm']),
       cip_broad_area: pick(['cip broad area', 'cip broad']),
       cip_code: sanitizeCipCode(pick(['cip code (xx.xxxx)', 'cip code'])),

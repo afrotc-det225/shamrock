@@ -187,6 +187,8 @@ function runShamrockProgressAction(action: string, runId: string) {
       case 'menu.rebuild_dashboard': return rebuildDashboard();
       case 'menu.rebuild_attendance_matrix': return rebuildAttendanceMatrix();
       case 'menu.rebuild_attendance_form': return rebuildAttendanceForm();
+      case 'menu.rebuild_directory_form': return rebuildDirectoryForm();
+      case 'menu.rebuild_excusals_form': return rebuildExcusalsForm();
       case 'menu.reorder_frontend_sheets': return reorderFrontendSheets();
       case 'menu.reorder_backend_sheets': return reorderBackendSheets();
       case 'menu.apply_frontend_formatting': return applyFrontendFormatting();
@@ -269,6 +271,8 @@ function addShamrockMenu() {
         .addItem('Rebuild Dashboard', 'rebuildDashboard')
         .addItem('Rebuild Attendance Matrix', 'rebuildAttendanceMatrix')
         .addItem('Rebuild Attendance Form (archive responses)', 'rebuildAttendanceForm')
+        .addItem('Rebuild Directory Form (archive responses)', 'rebuildDirectoryForm')
+        .addItem('Rebuild Excusals Form (archive responses)', 'rebuildExcusalsForm')
         .addItem('Refresh Excusals Form choices', 'refreshExcusalsForm')
     )
     .addSubMenu(
@@ -373,6 +377,14 @@ function continueTransitionV2() {
 
 function finalizeAttendanceFormRebuild() {
   SetupService.finalizeAttendanceFormRebuild();
+}
+
+function finalizeDirectoryFormRebuild() {
+  SetupService.finalizeDirectoryFormRebuild();
+}
+
+function finalizeExcusalsFormRebuild() {
+  SetupService.finalizeExcusalsFormRebuild();
 }
 
 function exportEventsCsv() {
@@ -488,6 +500,36 @@ function rebuildAttendanceForm() {
       'This briefly closes the form, preserves the current raw response tab as a hidden archive, rebuilds the questions, links a new clean response tab, and reopens the form. Continue?',
     );
     SetupService.rebuildAttendanceForm();
+  });
+}
+
+function rebuildDirectoryForm() {
+  runMenuAction({
+    label: 'Rebuild Directory Form (archive responses)',
+    category: 'Sync & Refresh',
+    action: 'menu.rebuild_directory_form',
+    targetSheet: Config.RESOURCE_NAMES.DIRECTORY_FORM_SHEET,
+  }, () => {
+    confirmMenuAction(
+      'Rebuild Directory Form',
+      'This briefly closes the form, archives the current raw response tab, rebuilds the supported questions, and links a clean response tab. Continue?',
+    );
+    SetupService.rebuildDirectoryForm();
+  });
+}
+
+function rebuildExcusalsForm() {
+  runMenuAction({
+    label: 'Rebuild Excusals Form (archive responses)',
+    category: 'Sync & Refresh',
+    action: 'menu.rebuild_excusals_form',
+    targetSheet: Config.RESOURCE_NAMES.EXCUSALS_FORM_SHEET,
+  }, () => {
+    confirmMenuAction(
+      'Rebuild Excusals Form',
+      'This briefly closes the form, archives the current raw response tab, rebuilds the supported questions, and links a clean response tab. Continue?',
+    );
+    SetupService.rebuildExcusalsForm();
   });
 }
 
@@ -658,7 +700,11 @@ function debugExcusalsResponseColumnsVerbose() {
       detail: 'Reviewing the linked response headers and duplicate-column structure without changing response data.',
       percent: 55,
     });
-    SetupService.debugExcusalsResponseColumnsVerbose();
+    const diagnostics = SetupService.debugExcusalsResponseColumnsVerbose();
+    SpreadsheetApp.getUi().alert(
+      `Excusals Form Responses: ${diagnostics.columnCount} columns, ${diagnostics.uniqueHeaderCount} unique headers, `
+      + `${diagnostics.duplicateHeaderCount} duplicated header names (maximum ${diagnostics.maxHeaderOccurrences} copies). No data was changed.`,
+    );
   });
 }
 

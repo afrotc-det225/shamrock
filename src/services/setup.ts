@@ -917,20 +917,21 @@ namespace SetupService {
     safeDeduplicateExcusalsResponseColumns();
   }
 
-  // Verbose debug entrypoint to inspect and prune excusals Event columns; callable from Apps Script.
+  // Privacy-safe, read-only diagnostic for Excusals response columns.
   export function debugExcusalsResponseColumnsVerbose() {
-    pruneExcusalsResponseColumnsExplicit(true);
     try {
       const sheet = Config.getBackendSheet(Config.RESOURCE_NAMES.EXCUSALS_FORM_SHEET);
-      const lastCol = sheet.getLastColumn();
-      const headers = lastCol
-        ? sheet.getRange(1, 1, 1, lastCol).getValues()[0].map((h) => String(h || ''))
-        : [];
-      Log.info(`[excusal-prune] Final headers (${headers.length} cols): ${headers.map((h, i) => `${i + 1}:'${h}'`).join(', ')}`);
-      return headers;
+      const diagnostics = responseSheetDiagnostics(sheet);
+      const summary =
+        `Excusals response sheet health sheet='${sheet.getName()}' columns=${diagnostics.columnCount} rows=${diagnostics.rowCount} `
+        + `uniqueHeaders=${diagnostics.uniqueHeaderCount} duplicateHeaders=${diagnostics.duplicateHeaderCount} `
+        + `maxHeaderOccurrences=${diagnostics.maxHeaderOccurrences}`;
+      if (diagnostics.duplicateHeaderCount) Log.warn(summary);
+      else Log.info(summary);
+      return diagnostics;
     } catch (err) {
-      Log.warn(`[excusal-prune] Unable to log final headers: ${err}`);
-      return [];
+      Log.warn(`Unable to inspect Excusals response columns: ${err}`);
+      throw err;
     }
   }
 
@@ -2062,7 +2063,7 @@ namespace SetupService {
       if (candidates.length === 1) return candidates[0];
       if (candidates.length > 1) {
         throw new Error(
-          `Multiple new Form response tabs appeared during Attendance rebuild: ${candidates.map((sheet) => `${sheet.title} (${sheet.sheetId})`).join(', ')}`,
+          `Multiple new Form response tabs appeared during a protected form rebuild: ${candidates.map((sheet) => `${sheet.title} (${sheet.sheetId})`).join(', ')}`,
         );
       }
 
@@ -2401,6 +2402,255 @@ namespace SetupService {
           form.setAcceptingResponses(wasAcceptingResponses);
         } catch (err) {
           Log.error(`Attendance form: unable to restore accepting-responses state=${wasAcceptingResponses}: ${err}`);
+        }
+      }
+      lock.releaseLock();
+    }
+  }
+
+  type ManagedFormRebuildKind = 'directory' | 'excusals';
+
+  function managedFormRebuildConfig(kind: ManagedFormRebuildKind) {
+    if (kind === 'directory') {
+      return {
+        label: 'Directory',
+        desiredSheetName: Config.RESOURCE_NAMES.DIRECTORY_FORM_SHEET,
+        stateKey: Config.PROPERTY_KEYS.DIRECTORY_FORM_REBUILD_STATE,
+        continuationHandler: 'finalizeDirectoryFormRebuild',
+        rebuild: (form: GoogleAppsScript.Forms.Form) => FormService.rebuildDirectoryForm(form),
+      };
+    }
+    return {
+      label: 'Excusals',
+      desiredSheetName: Config.RESOURCE_NAMES.EXCUSALS_FORM_SHEET,
+      stateKey: Config.PROPERTY_KEYS.EXCUSALS_FORM_REBUILD_STATE,
+      continuationHandler: 'finalizeExcusalsFormRebuild',
+      rebuild: (form: GoogleAppsScript.Forms.Form) => FormService.rebuildExcusalsForm(form),
+    };
+  }
+
+  function loadManagedFormRebuildState(kind: ManagedFormRebuildKind): AttendanceFormRebuildState | null {
+    const config = managedFormRebuildConfig(kind);
+    const raw = Config.getScriptProperty(config.stateKey);
+    if (!raw) return null;
+    try {
+      return JSON.parse(raw) as AttendanceFormRebuildState;
+    } catch (err) {
+      Log.error(`${config.label} form: invalid rebuild continuation state; clearing it. Error: ${err}`);
+      Config.deleteScriptProperty(config.stateKey);
+      return null;
+    }
+  }
+
+  function saveManagedFormRebuildState(kind: ManagedFormRebuildKind, state: AttendanceFormRebuildState) {
+    Config.setScriptProperty(managedFormRebuildConfig(kind).stateKey, JSON.stringify(state));
+  }
+
+  function clearManagedFormRebuildContinuationTriggers(kind: ManagedFormRebuildKind) {
+    const handler = managedFormRebuildConfig(kind).continuationHandler;
+    ScriptApp.getProjectTriggers()
+      .filter((trigger) => trigger.getHandlerFunction() === handler)
+      .forEach((trigger) => {
+        try {
+          ScriptApp.deleteTrigger(trigger);
+        } catch (err) {
+          Log.warn(`${managedFormRebuildConfig(kind).label} form: unable to delete rebuild continuation trigger: ${err}`);
+        }
+      });
+  }
+
+  function scheduleManagedFormRebuildContinuation(kind: ManagedFormRebuildKind) {
+    const config = managedFormRebuildConfig(kind);
+    clearManagedFormRebuildContinuationTriggers(kind);
+    ScriptApp.newTrigger(config.continuationHandler).timeBased().after(60 * 1000).create();
+    Log.info(`${config.label} form: scheduled response-tab finalization continuation.`);
+  }
+
+  function completeManagedFormRebuild(
+    kind: ManagedFormRebuildKind,
+    state: AttendanceFormRebuildState,
+    newResponseSheet: FreshSheetProperties,
+  ) {
+    const config = managedFormRebuildConfig(kind);
+    state.newResponseSheetId = newResponseSheet.sheetId;
+    saveManagedFormRebuildState(kind, state);
+    renameResponseSheetViaSheetsApi(state.spreadsheetId, newResponseSheet.sheetId, state.desiredSheetName);
+    const diagnostics = responseSheetDiagnosticsViaSheetsApi(
+      state.spreadsheetId,
+      state.desiredSheetName,
+      newResponseSheet.gridProperties?.rowCount || 0,
+    );
+    const healthSummary =
+      `${config.label} response sheet health sheet='${state.desiredSheetName}' sheetId=${newResponseSheet.sheetId} `
+      + `columns=${diagnostics.columnCount} rows=${diagnostics.rowCount} uniqueHeaders=${diagnostics.uniqueHeaderCount} `
+      + `duplicateHeaders=${diagnostics.duplicateHeaderCount} maxHeaderOccurrences=${diagnostics.maxHeaderOccurrences}`;
+    if (diagnostics.duplicateHeaderCount) {
+      Log.error(healthSummary);
+      throw new Error(
+        `Fresh ${config.label} response sheet still has ${diagnostics.duplicateHeaderCount} duplicate header name(s); preserved archive='${state.archivedSheetName || 'none'}'`,
+      );
+    }
+    Log.info(healthSummary);
+    Config.deleteScriptProperty(config.stateKey);
+    clearManagedFormRebuildContinuationTriggers(kind);
+    AuditService.log({
+      action: `${kind}_form_rebuild_finalize`,
+      actionLabel: `Finalize ${config.label} Form rebuild`,
+      category: 'Sync & Refresh',
+      result: 'ok',
+      role: 'automation',
+      targetSheet: state.desiredSheetName,
+      source: 'Apps Script continuation',
+      runId: state.id,
+      metadata: {
+        sheet_id: newResponseSheet.sheetId,
+        original_title: newResponseSheet.title,
+        archived_sheet: state.archivedSheetName,
+        columns: diagnostics.columnCount,
+        duplicate_headers: diagnostics.duplicateHeaderCount,
+      },
+    });
+  }
+
+  function tryFinalizeManagedFormRebuild(
+    kind: ManagedFormRebuildKind,
+    state: AttendanceFormRebuildState,
+    scheduleIfPending: boolean,
+  ): boolean {
+    const config = managedFormRebuildConfig(kind);
+    const priorSheetIds = new Set(state.priorSheetIds);
+    const freshSheets = getFreshSheetProperties(state.spreadsheetId);
+    const candidates = state.newResponseSheetId
+      ? freshSheets.filter((sheet) => sheet.sheetId === state.newResponseSheetId)
+      : freshSheets.filter((sheet) => (
+          !priorSheetIds.has(sheet.sheetId)
+          && (RESPONSE_SHEET_REGEX.test(sheet.title) || sheet.title === state.desiredSheetName)
+        ));
+    if (candidates.length > 1) {
+      throw new Error(
+        `Multiple new Form response tabs appeared during ${config.label} rebuild: ${candidates.map((sheet) => `${sheet.title} (${sheet.sheetId})`).join(', ')}`,
+      );
+    }
+    if (candidates.length === 1) {
+      completeManagedFormRebuild(kind, state, candidates[0]);
+      return true;
+    }
+    if (scheduleIfPending) {
+      state.attempts += 1;
+      saveManagedFormRebuildState(kind, state);
+      if (state.attempts <= 15) {
+        scheduleManagedFormRebuildContinuation(kind);
+        ProgressService.background(
+          `${config.label} Form finalization will continue`,
+          'Google is still creating or backfilling the new response tab, so SHAMROCK saved a checkpoint and scheduled another verification.',
+          'Do not start a second rebuild. The continuation will rename and verify the exact linked response tab when it becomes available.',
+        );
+      } else {
+        clearManagedFormRebuildContinuationTriggers(kind);
+        Log.error(`${config.label} form: response-tab finalization remains pending after ${state.attempts} attempts; stateId=${state.id}.`);
+      }
+    }
+    return false;
+  }
+
+  function finalizeManagedFormRebuild(kind: ManagedFormRebuildKind) {
+    const lock = LockService.getScriptLock();
+    lock.waitLock(30000);
+    try {
+      const state = loadManagedFormRebuildState(kind);
+      if (!state) {
+        clearManagedFormRebuildContinuationTriggers(kind);
+        Log.info(`${managedFormRebuildConfig(kind).label} form: no pending rebuild finalization state found.`);
+        return;
+      }
+      tryFinalizeManagedFormRebuild(kind, state, true);
+    } finally {
+      lock.releaseLock();
+    }
+  }
+
+  export function finalizeDirectoryFormRebuild() {
+    finalizeManagedFormRebuild('directory');
+  }
+
+  export function finalizeExcusalsFormRebuild() {
+    finalizeManagedFormRebuild('excusals');
+  }
+
+  function rebuildManagedFormWithFreshResponseSheet(
+    kind: ManagedFormRebuildKind,
+    form: GoogleAppsScript.Forms.Form,
+    destinationSpreadsheetId: string,
+  ) {
+    const config = managedFormRebuildConfig(kind);
+    const lock = LockService.getScriptLock();
+    lock.waitLock(30000);
+    let wasAcceptingResponses: boolean | null = null;
+
+    try {
+      const pendingState = loadManagedFormRebuildState(kind);
+      if (pendingState) {
+        if (pendingState.attempts > 15) pendingState.attempts = 0;
+        tryFinalizeManagedFormRebuild(kind, pendingState, true);
+        return;
+      }
+
+      const formId = form.getId();
+      wasAcceptingResponses = form.isAcceptingResponses();
+      const spreadsheet = SpreadsheetApp.openById(destinationSpreadsheetId);
+      const priorSheetIds = new Set(getFreshSheetProperties(destinationSpreadsheetId).map((sheet) => sheet.sheetId));
+      const originalDestinationId = getFormDestinationSpreadsheetId(form);
+      const priorResponseSheet = findLinkedResponseSheet(spreadsheet, formId)
+        || (originalDestinationId === destinationSpreadsheetId ? spreadsheet.getSheetByName(config.desiredSheetName) : null);
+
+      form.setAcceptingResponses(false);
+      if (originalDestinationId) form.removeDestination();
+
+      let archivedSheetName = '';
+      if (priorResponseSheet) {
+        const stamp = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyyMMdd-HHmmss');
+        archivedSheetName = uniqueSheetName(spreadsheet, `Archived - ${config.desiredSheetName} ${stamp}`);
+        priorResponseSheet.setName(archivedSheetName);
+        priorResponseSheet.hideSheet();
+        try {
+          priorResponseSheet.protect().setDescription(`${archivedSheetName} preserved raw form responses`).setWarningOnly(true);
+        } catch (err) {
+          Log.warn(`Unable to add warning protection to ${config.label} response archive '${archivedSheetName}': ${err}`);
+        }
+      }
+
+      config.rebuild(form);
+      form.setDestination(FormApp.DestinationType.SPREADSHEET, destinationSpreadsheetId);
+      const state: AttendanceFormRebuildState = {
+        id: Utilities.getUuid(),
+        spreadsheetId: destinationSpreadsheetId,
+        formId,
+        desiredSheetName: config.desiredSheetName,
+        archivedSheetName,
+        priorSheetIds: Array.from(priorSheetIds),
+        attempts: 0,
+        createdAt: new Date().toISOString(),
+      };
+      saveManagedFormRebuildState(kind, state);
+      const immediateSheet = waitForNewResponseSheetMetadata(destinationSpreadsheetId, priorSheetIds);
+      if (immediateSheet) completeManagedFormRebuild(kind, state, immediateSheet);
+      else tryFinalizeManagedFormRebuild(kind, state, true);
+    } catch (err) {
+      Log.error(`${config.label} form: protected rebuild failed: ${err}`);
+      try {
+        if (getFormDestinationSpreadsheetId(form) !== destinationSpreadsheetId) {
+          form.setDestination(FormApp.DestinationType.SPREADSHEET, destinationSpreadsheetId);
+        }
+      } catch (recoveryErr) {
+        Log.error(`${config.label} form: unable to restore response destination after rebuild failure: ${recoveryErr}`);
+      }
+      throw err;
+    } finally {
+      if (wasAcceptingResponses !== null) {
+        try {
+          form.setAcceptingResponses(wasAcceptingResponses);
+        } catch (err) {
+          Log.error(`${config.label} form: unable to restore accepting-responses state=${wasAcceptingResponses}: ${err}`);
         }
       }
       lock.releaseLock();
@@ -2932,6 +3182,13 @@ namespace SetupService {
 
   export function rebuildDirectoryForm() {
     const backendId = Config.getBackendId();
+    ProgressService.report({
+      title: 'Checking the Directory Form',
+      detail: 'Opening the current form and linked response destination before structural repair.',
+      percent: 22,
+      step: 1,
+      totalSteps: 3,
+    });
     const ensured = ensureForm(
       'directory',
       Config.RESOURCE_NAMES.DIRECTORY_FORM,
@@ -2940,7 +3197,55 @@ namespace SetupService {
       { syncQuestions: false },
     );
     const form = FormApp.openById(ensured.id);
-    FormService.rebuildDirectoryForm(form);
+    ProgressService.report({
+      title: 'Preserving Directory response history',
+      detail: 'Closing the form briefly and archiving its linked raw response tab before rebuilding questions.',
+      percent: 48,
+      step: 2,
+      totalSteps: 3,
+    });
+    rebuildManagedFormWithFreshResponseSheet('directory', form, backendId);
+    ProgressService.report({
+      title: 'Verifying the Directory response destination',
+      detail: 'Checking the new linked tab or saving a continuation while Google finishes creating it.',
+      percent: 88,
+      step: 3,
+      totalSteps: 3,
+    });
+  }
+
+  export function rebuildExcusalsForm() {
+    const backendId = Config.getBackendId();
+    ProgressService.report({
+      title: 'Checking the Excusals Form',
+      detail: 'Opening the current form and linked response destination before structural repair.',
+      percent: 22,
+      step: 1,
+      totalSteps: 3,
+    });
+    const ensured = ensureForm(
+      'excusals',
+      Config.RESOURCE_NAMES.EXCUSALS_FORM,
+      Config.PROPERTY_KEYS.EXCUSAL_REQUEST_FORM_ID,
+      backendId,
+      { syncQuestions: false },
+    );
+    const form = FormApp.openById(ensured.id);
+    ProgressService.report({
+      title: 'Preserving Excusals response history',
+      detail: 'Closing the form briefly and archiving its linked raw response tab before rebuilding questions.',
+      percent: 48,
+      step: 2,
+      totalSteps: 3,
+    });
+    rebuildManagedFormWithFreshResponseSheet('excusals', form, backendId);
+    ProgressService.report({
+      title: 'Verifying the Excusals response destination',
+      detail: 'Checking the new linked tab or saving a continuation while Google finishes creating it.',
+      percent: 88,
+      step: 3,
+      totalSteps: 3,
+    });
   }
 
   export function refreshAttendanceFormChoices() {

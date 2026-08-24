@@ -265,6 +265,24 @@ namespace FrontendEditService {
     const header = headerRow1[col - 1] || headerRow2[col - 1] || '';
     if (!header) return;
 
+    const fixedColumnCount = Schemas.getTabSchema('Attendance')?.machineHeaders?.length || 7;
+    if (col <= fixedColumnCount) {
+      Log.info(`[Attendance] Ignoring edit to fixed column '${header}' at row ${row}.`);
+      return;
+    }
+
+    const eventRows = SheetUtils.readTable(Config.getBackendSheet('Events Backend')).rows;
+    const normalizedHeader = header.toLowerCase();
+    const isManagedEvent = eventRows.some((eventRow) => [
+      eventRow['event_id'],
+      eventRow['display_name'],
+      eventRow['attendance_column_label'],
+    ].some((candidate) => String(candidate || '').trim().toLowerCase() === normalizedHeader));
+    if (!isManagedEvent) {
+      Log.warn(`[Attendance] Ignoring edit to unrecognized event column '${header}' at row ${row}.`);
+      return;
+    }
+
     const rowValues = sheet.getRange(row, 1, 1, headerRow1.length).getValues()[0];
     const normalize = (v: any) => String(v || '').toLowerCase();
     const lastIdx = headerRow1.findIndex((h) => h.toLowerCase() === 'last_name');
