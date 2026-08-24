@@ -311,6 +311,15 @@ namespace FormHandlers {
 		if (backendRows.length > 0) {
 			appendToBackend('Attendance Backend', backendRows);
 			SetupService.applyAttendanceBackendFormattingPublic();
+			const frontendId = Config.getFrontendId();
+			if (frontendId) {
+				try {
+					FrontendFormattingService.repairAttendanceInputs(frontendId);
+					Log.info('Restored Attendance dropdowns and summary coloring after form submission.');
+				} catch (err) {
+					Log.warn(`Unable to restore Attendance input presentation after submission: ${err}`);
+				}
+			}
 			Log.info(`Processed attendance submission: ${selectedEvents.length} event(s) from ${submittedByEmail}`);
 		}
 

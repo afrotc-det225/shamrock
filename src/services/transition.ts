@@ -703,7 +703,19 @@ namespace TransitionService {
         created_by: 'transition_v2',
       });
     }
-    return rows;
+    const eventTypePriority = (row: Record<string, any>) => {
+      const value = `${row['event_type'] || ''} ${row['display_name'] || ''}`.toLowerCase();
+      if (value.includes('mando')) return 0;
+      if (value.includes('secondary')) return 1;
+      if (value.includes('llab')) return 2;
+      if (value.includes('third hour')) return 3;
+      return 4;
+    };
+    return rows.sort((a, b) => {
+      const weekA = Number(String(a['training_week'] || '').match(/\d+/)?.[0] || Number.MAX_SAFE_INTEGER);
+      const weekB = Number(String(b['training_week'] || '').match(/\d+/)?.[0] || Number.MAX_SAFE_INTEGER);
+      return weekA - weekB || eventTypePriority(a) - eventTypePriority(b);
+    });
   }
 
   function resetSchemaSheet(sheetName: string) {

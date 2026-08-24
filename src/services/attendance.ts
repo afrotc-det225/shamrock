@@ -11,6 +11,8 @@ namespace AttendanceService {
     eventId: string;
     eventType: string;
     expectedGroup: string;
+    trainingWeek: string;
+    sourceIndex: number;
   }
 
   const ATTENDANCE_SCHEMA = Schemas.getTabSchema('Attendance');
@@ -71,13 +73,32 @@ namespace AttendanceService {
     if (!sheet) return [];
     return SheetUtils.readTable(sheet)
       .rows
-      .map((r) => ({
+      .map((r, sourceIndex) => ({
         name: r['display_name'] || r['attendance_column_label'] || r['event_id'] || '',
         eventId: r['event_id'] || r['display_name'] || '',
         eventType: String(r['event_type'] || '').toLowerCase(),
         expectedGroup: String(r['expected_group'] || '').toLowerCase(),
+        trainingWeek: String(r['training_week'] || ''),
+        sourceIndex,
       }))
-      .filter((e) => e.name);
+      .filter((e) => e.name)
+      .sort((a, b) => {
+        const weekNumber = (event: EventDef) => {
+          const match = (event.trainingWeek || event.name).match(/TW-(\d+)/i);
+          return match ? Number(match[1]) : Number.MAX_SAFE_INTEGER;
+        };
+        const typePriority = (event: EventDef) => {
+          const value = `${event.eventType} ${event.name}`.toLowerCase();
+          if (value.includes('mando')) return 0;
+          if (value.includes('secondary')) return 1;
+          if (value.includes('llab')) return 2;
+          if (value.includes('third hour')) return 3;
+          return 4;
+        };
+        return weekNumber(a) - weekNumber(b)
+          || typePriority(a) - typePriority(b)
+          || a.sourceIndex - b.sourceIndex;
+      });
   }
 
   function readAttendanceLog(): any[] {
