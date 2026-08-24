@@ -199,6 +199,7 @@ function runShamrockProgressAction(action: string, runId: string) {
       case 'menu.restore_core_sheets': return restoreCoreSheetsFromArchive();
       case 'menu.refresh_excusals_form': return refreshExcusalsForm();
       case 'menu.debug_attendance_response_sheet': return debugAttendanceResponseSheet();
+      case 'menu.repair_attendance_backend_from_responses': return repairAttendanceBackendFromResponses();
       case 'menu.setup_excusals_management': return setupExcusalsManagementSpreadsheet();
       case 'menu.share_excusals_management': return shareExcusalsManagementSpreadsheet();
       case 'menu.reinitialize_excusals_management': return reinitializeExcusalsManagementSheets();
