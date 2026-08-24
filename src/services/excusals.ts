@@ -1044,21 +1044,35 @@ SHAMROCK Automations`;
     if (!sheet || sheet.getParent().getId() !== mgmtId) return;
     if (!Arrays.OPERATIONAL_SQUADRONS.includes(sheet.getName())) return;
 
-    const row = range.getRow();
-    const col = range.getColumn();
-    const decision = String((e as any)?.value ?? range.getValue() ?? '').trim();
-
     const decisionCol = Schemas.EXCUSALS_MANAGEMENT_SCHEMA.machineHeaders?.indexOf('decision') ?? -1;
     const requestCol = Schemas.EXCUSALS_MANAGEMENT_SCHEMA.machineHeaders?.indexOf('request_id') ?? -1;
     if (decisionCol < 0 || requestCol < 0) return;
-    if (row < 3 || col !== decisionCol + 1) return;
-    if (!isDecisionValue(decision)) return;
+    const firstRow = range.getRow();
+    const lastRow = range.getLastRow();
+    const firstCol = range.getColumn();
+    const lastCol = range.getLastColumn();
+    const decisionSheetCol = decisionCol + 1;
+    if (lastRow < 3 || decisionSheetCol < firstCol || decisionSheetCol > lastCol) return;
 
-    const requestId = String(sheet.getRange(row, requestCol + 1).getValue() || '').trim();
-    if (!requestId) {
-      Log.warn(`Management edit ignored: missing request_id on row ${row}`);
-      return;
-    }
+    const firstDataRow = Math.max(3, firstRow);
+    const rowCount = lastRow - firstDataRow + 1;
+    const decisions = sheet.getRange(firstDataRow, decisionSheetCol, rowCount, 1).getValues();
+    const requestIds = sheet.getRange(firstDataRow, requestCol + 1, rowCount, 1).getValues();
+    const pending = decisions
+      .map((values, index) => ({
+        row: firstDataRow + index,
+        decision: String(values[0] || '').trim(),
+        requestId: String(requestIds[index][0] || '').trim(),
+      }))
+      .filter((item) => isDecisionValue(item.decision));
+    if (!pending.length) return;
+
+    // Rapid dropdown edits can start overlapping installable-trigger executions.
+    // Serialize the backend/log/matrix writes so no decision loses an append or
+    // overwrites another trigger's in-flight matrix update.
+    const lock = LockService.getScriptLock();
+    lock.waitLock(120000);
+    try {
 
     const backendId = Config.getBackendId();
     const backendSheet = SheetUtils.getSheet(backendId, 'Excusals Backend');
@@ -1091,88 +1105,255 @@ SHAMROCK Automations`;
     if (idx.request < 0) return;
 
     const data = backendSheet.getRange(3, 1, backendSheet.getLastRow() - 2, headers.length).getValues();
-    let targetRow = -1;
-    for (let i = 0; i < data.length; i++) {
-      if (String(data[i][idx.request] || '').trim() === requestId) {
-        targetRow = i;
-        break;
-      }
-    }
-
-    if (targetRow < 0) {
-      Log.warn(`Request ${requestId} not found in Excusals Backend; cannot mirror decision`);
-      return;
-    }
-
-    const rowNumber = targetRow + 3; // account for two header rows
-    const oldDecision = idx.decision >= 0 ? String(data[targetRow][idx.decision] || '').trim() : '';
-    if (oldDecision === decision) return;
-    const nowIso = new Date().toISOString();
     const activeEmail = currentUserEmail();
+    let updated = 0;
+    let missing = 0;
 
-    const lastName = idx.last >= 0 ? String(data[targetRow][idx.last] || '') : '';
-    const firstName = idx.first >= 0 ? String(data[targetRow][idx.first] || '') : '';
-    const eventName = idx.event >= 0 ? String(data[targetRow][idx.event] || '') : '';
-    const cadetEmail = idx.email >= 0 ? String(data[targetRow][idx.email] || '') : '';
-    const squadron = idx.squadron >= 0 ? String(data[targetRow][idx.squadron] || '') : '';
-    const reason = idx.reason >= 0 ? String(data[targetRow][idx.reason] || '') : '';
-    const requestedOutcome = idx.requestedOutcome >= 0 ? String(data[targetRow][idx.requestedOutcome] || 'E') : 'E';
-    const priorAttendanceCode = idx.priorAttendanceCode >= 0 ? String(data[targetRow][idx.priorAttendanceCode] || '') : '';
+    pending.forEach((item) => {
+      if (!item.requestId) {
+        missing++;
+        Log.warn(`Management edit ignored: missing request_id on row ${item.row}`);
+        return;
+      }
+      const result = applyManagementDecision({
+        backendSheet,
+        headers,
+        data,
+        idx,
+        requestId: item.requestId,
+        decision: item.decision,
+        actorEmail: activeEmail,
+        actorRole: 'squadron_commander',
+        source: 'ExcusalsService.handleExcusalsManagementEdit',
+        managementSheet: sheet.getName(),
+        notifyCadet: true,
+      });
+      if (result === 'updated') updated++;
+      if (result === 'missing') missing++;
+    });
+
+    if (updated > 0) repairAttendancePresentation();
+    Log.info(`Processed ${pending.length} management decision edit(s): updated=${updated}, missing=${missing}`);
+    } finally {
+      lock.releaseLock();
+    }
+  }
+
+  type ManagementDecisionResult = 'updated' | 'unchanged' | 'missing';
+
+  function applyManagementDecision(opts: {
+    backendSheet: GoogleAppsScript.Spreadsheet.Sheet;
+    headers: string[];
+    data: any[][];
+    idx: Record<string, number>;
+    requestId: string;
+    decision: string;
+    actorEmail: string;
+    actorRole: string;
+    source: string;
+    managementSheet: string;
+    notifyCadet: boolean;
+  }): ManagementDecisionResult {
+    const targetRow = opts.data.findIndex((row) => String(row[opts.idx.request] || '').trim() === opts.requestId);
+    if (targetRow < 0) {
+      Log.warn(`Request ${opts.requestId} not found in Excusals Backend; cannot mirror decision`);
+      return 'missing';
+    }
+
+    const oldDecision = opts.idx.decision >= 0
+      ? String(opts.data[targetRow][opts.idx.decision] || '').trim()
+      : '';
+    if (oldDecision === opts.decision) return 'unchanged';
+
+    const rowNumber = targetRow + 3;
+    const nowIso = new Date().toISOString();
+    const value = (index: number, fallback = '') => index >= 0
+      ? String(opts.data[targetRow][index] || fallback)
+      : fallback;
+    const lastName = value(opts.idx.last);
+    const firstName = value(opts.idx.first);
+    const eventName = value(opts.idx.event);
+    const cadetEmail = value(opts.idx.email);
+    const squadron = value(opts.idx.squadron);
+    const reason = value(opts.idx.reason);
+    const requestedOutcome = value(opts.idx.requestedOutcome, 'E');
+    const priorAttendanceCode = value(opts.idx.priorAttendanceCode);
     const attendanceEffect = effectForDecision({
-      decision,
+      decision: opts.decision,
       requestedOutcome,
       priorAttendanceCode,
       currentAttendanceCode: lookupMatrixValue(eventName, lastName, firstName),
       eventName,
     });
-    const isDecisionChange = !!(oldDecision && oldDecision !== decision);
+    const isDecisionChange = !!(oldDecision && oldDecision !== opts.decision);
 
-    if (idx.status >= 0) backendSheet.getRange(rowNumber, idx.status + 1).setValue(decision);
-    if (idx.decision >= 0) backendSheet.getRange(rowNumber, idx.decision + 1).setValue(decision);
-    if (idx.decidedBy >= 0) backendSheet.getRange(rowNumber, idx.decidedBy + 1).setValue(activeEmail);
-    if (idx.decidedAt >= 0) backendSheet.getRange(rowNumber, idx.decidedAt + 1).setValue(nowIso);
-    if (idx.lastUpdated >= 0) backendSheet.getRange(rowNumber, idx.lastUpdated + 1).setValue(nowIso);
-    if (idx.attendanceEffect >= 0) backendSheet.getRange(rowNumber, idx.attendanceEffect + 1).setValue(attendanceEffect);
+    const setValue = (index: number, cellValue: any) => {
+      if (index < 0) return;
+      opts.backendSheet.getRange(rowNumber, index + 1).setValue(cellValue);
+      opts.data[targetRow][index] = cellValue;
+    };
+    setValue(opts.idx.status, opts.decision);
+    setValue(opts.idx.decision, opts.decision);
+    setValue(opts.idx.decidedBy, opts.actorEmail);
+    setValue(opts.idx.decidedAt, nowIso);
+    setValue(opts.idx.lastUpdated, nowIso);
+    setValue(opts.idx.attendanceEffect, attendanceEffect);
 
     updateAttendanceOnExcusalDecision({
       lastName,
       firstName,
       eventName,
-      decision,
+      decision: opts.decision,
       requestedOutcome,
       priorAttendanceCode,
       attendanceEffect,
     });
 
-    sendExcusalDecisionEmail({
-      cadetEmail,
-      cadetFirstName: firstName,
-      cadetLastName: lastName,
-      event: eventName,
-      decision,
-      previousDecision: isDecisionChange ? oldDecision : undefined,
-      reason,
-      squadron,
-    });
+    if (opts.notifyCadet) {
+      sendExcusalDecisionEmail({
+        cadetEmail,
+        cadetFirstName: firstName,
+        cadetLastName: lastName,
+        event: eventName,
+        decision: opts.decision,
+        previousDecision: isDecisionChange ? oldDecision : undefined,
+        reason,
+        squadron,
+      });
+    }
 
     Log.info(
-      `Mirrored management decision for request ${requestId}: ${decision}${isDecisionChange ? ` (was ${oldDecision})` : ''}`,
+      `Mirrored management decision for request ${opts.requestId}: ${opts.decision}`
+      + `${isDecisionChange ? ` (was ${oldDecision})` : ''}`,
     );
     AuditService.log({
       action: 'excusal_decision_recorded',
       result: 'ok',
-      actorEmail: activeEmail || undefined,
-      role: 'squadron_commander',
+      actorEmail: opts.actorEmail || undefined,
+      role: opts.actorRole,
       targetSheet: 'Excusals Backend',
       targetTable: 'Excusals Backend',
-      targetKey: requestId,
-      requestId,
+      targetKey: opts.requestId,
+      requestId: opts.requestId,
       field: 'decision',
       oldValue: oldDecision,
-      newValue: decision,
-      source: 'ExcusalsService.handleExcusalsManagementEdit',
-      metadata: { event: eventName, squadron, attendanceEffect, managementSheet: sheet.getName() },
+      newValue: opts.decision,
+      source: opts.source,
+      metadata: { event: eventName, squadron, attendanceEffect, managementSheet: opts.managementSheet },
     });
+    return 'updated';
+  }
+
+  function repairAttendancePresentation() {
+    const frontendId = Config.getFrontendId();
+    if (!frontendId) return;
+    try {
+      FrontendFormattingService.repairAttendanceInputs(frontendId);
+    } catch (err) {
+      Log.warn(`Unable to restore Attendance presentation after excusal decisions: ${err}`);
+    }
+  }
+
+  /**
+   * Repair decisions that are present in the commander-facing workbook but did
+   * not reach the authoritative backend. This intentionally does not resend
+   * cadet notification emails for historical decisions.
+   */
+  export function reconcileManagementDecisions(): { scanned: number; repaired: number; missing: number } {
+    const lock = LockService.getScriptLock();
+    lock.waitLock(120000);
+    try {
+    const managementId = Config.getScriptProperty(Config.PROPERTY_KEYS.EXCUSAL_MANAGEMENT_SPREADSHEET_ID);
+    const backendId = Config.getBackendId();
+    if (!managementId || !backendId) {
+      throw new Error('Excusals Management or backend workbook is not configured.');
+    }
+
+    const backendSheet = SheetUtils.getSheet(backendId, 'Excusals Backend');
+    if (!backendSheet || backendSheet.getLastRow() < 3) {
+      throw new Error('Excusals Backend is missing or has no request rows.');
+    }
+
+    const headers = backendSheet
+      .getRange(1, 1, 1, backendSheet.getLastColumn())
+      .getValues()[0]
+      .map((header) => String(header || '').trim());
+    const idx: Record<string, number> = {
+      request: headers.indexOf('request_id'),
+      decision: headers.indexOf('decision'),
+      status: headers.indexOf('status'),
+      decidedBy: headers.indexOf('decided_by'),
+      decidedAt: headers.indexOf('decided_at'),
+      lastUpdated: headers.indexOf('last_updated_at'),
+      event: headers.indexOf('event'),
+      email: headers.indexOf('email'),
+      last: headers.indexOf('last_name'),
+      first: headers.indexOf('first_name'),
+      squadron: headers.indexOf('squadron'),
+      reason: headers.indexOf('reason'),
+      requestedOutcome: headers.indexOf('requested_outcome'),
+      priorAttendanceCode: headers.indexOf('prior_attendance_code'),
+      attendanceEffect: headers.indexOf('attendance_effect'),
+    };
+    if (idx.request < 0 || idx.decision < 0) {
+      throw new Error('Excusals Backend is missing request_id or decision.');
+    }
+
+    const data = backendSheet.getRange(3, 1, backendSheet.getLastRow() - 2, headers.length).getValues();
+    const management = SpreadsheetApp.openById(managementId);
+    const managementHeaders = Schemas.EXCUSALS_MANAGEMENT_SCHEMA.machineHeaders || [];
+    const requestCol = managementHeaders.indexOf('request_id');
+    const decisionCol = managementHeaders.indexOf('decision');
+    if (requestCol < 0 || decisionCol < 0) {
+      throw new Error('Excusals Management schema is missing request_id or decision.');
+    }
+
+    const actorEmail = currentUserEmail();
+    let scanned = 0;
+    let repaired = 0;
+    let missing = 0;
+    const sheets = management.getSheets().filter((sheet) => Arrays.OPERATIONAL_SQUADRONS.includes(sheet.getName()));
+
+    sheets.forEach((sheet, sheetIndex) => {
+      ProgressService.report({
+        title: `Checking ${sheet.getName()} decisions`,
+        detail: 'Comparing commander selections with the authoritative excusals records.',
+        percent: 20 + Math.round((sheetIndex / Math.max(1, sheets.length)) * 55),
+        step: sheetIndex + 1,
+        totalSteps: sheets.length + 1,
+      });
+      const lastRow = sheet.getLastRow();
+      if (lastRow < 3) return;
+      const rows = sheet.getRange(3, 1, lastRow - 2, managementHeaders.length).getValues();
+      rows.forEach((row) => {
+        const requestId = String(row[requestCol] || '').trim();
+        const decision = String(row[decisionCol] || '').trim();
+        if (!requestId || !isDecisionValue(decision)) return;
+        scanned++;
+        const result = applyManagementDecision({
+          backendSheet,
+          headers,
+          data,
+          idx,
+          requestId,
+          decision,
+          actorEmail,
+          actorRole: 'admin_repair',
+          source: 'ExcusalsService.reconcileManagementDecisions',
+          managementSheet: sheet.getName(),
+          notifyCadet: false,
+        });
+        if (result === 'updated') repaired++;
+        if (result === 'missing') missing++;
+      });
+    });
+
+    if (repaired > 0) repairAttendancePresentation();
+    Log.info(`Reconciled Excusals Management decisions: scanned=${scanned}, repaired=${repaired}, missing=${missing}`);
+    return { scanned, repaired, missing };
+    } finally {
+      lock.releaseLock();
+    }
   }
 
   export function auditExcusalSubmission(excusalRow: Record<string, any>) {

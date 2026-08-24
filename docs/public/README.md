@@ -194,6 +194,7 @@ The separate management workbook has one active tab for each operational squadro
 - Excusal Form submit trigger.
 - Excusals Backend decision edits.
 - Excusals Management workbook edit trigger.
+- Excusals Management supports multi-row Decision edits. The backend `Reconcile management decisions` action repairs any commander decisions that did not propagate, without resending historical decision emails.
 - Backend SHAMROCK menu actions for cleanup, backfill, sync, and repair.
 - Semester and academic-year transitions, which archive the prior term's management tabs into the restricted admin workbook, clear the active queues, and refresh access from current Leadership assignments.
 

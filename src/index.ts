@@ -205,6 +205,7 @@ function runShamrockProgressAction(action: string, runId: string) {
       case 'menu.setup_excusals_management': return setupExcusalsManagementSpreadsheet();
       case 'menu.share_excusals_management': return shareExcusalsManagementSpreadsheet();
       case 'menu.reinitialize_excusals_management': return reinitializeExcusalsManagementSheets();
+      case 'menu.reconcile_excusals_management': return reconcileExcusalsManagementDecisions();
       case 'menu.debug_excusals_response_columns': return debugExcusalsResponseColumnsVerbose();
       case 'menu.reinstall_triggers': return reinstallAllTriggers();
       case 'menu.add_leadership_entry': return addLeadershipEntry();
@@ -289,6 +290,7 @@ function addShamrockMenu() {
         .addItem('Setup management spreadsheet', 'setupExcusalsManagementSpreadsheet')
         .addItem('Share management spreadsheet', 'shareExcusalsManagementSpreadsheet')
         .addItem('Reinitialize management sheets', 'reinitializeExcusalsManagementSheets')
+        .addItem('Reconcile management decisions', 'reconcileExcusalsManagementDecisions')
         .addSeparator()
         .addItem('Debug Excusals response columns', 'debugExcusalsResponseColumnsVerbose')
     )
@@ -690,6 +692,41 @@ function reinitializeExcusalsManagementSheets() {
     const managementId = Config.getScriptProperty(Config.PROPERTY_KEYS.EXCUSAL_MANAGEMENT_SPREADSHEET_ID);
     const url = managementId ? `https://docs.google.com/spreadsheets/d/${managementId}` : 'N/A';
     SpreadsheetApp.getUi().alert(`Excusals management sheets reinitialized and protected:\n${url}`);
+  });
+}
+
+function reconcileExcusalsManagementDecisions() {
+  runMenuAction({
+    label: 'Reconcile Excusals management decisions',
+    category: 'Excusals',
+    action: 'menu.reconcile_excusals_management',
+    targetSheet: 'Excusals Backend',
+  }, () => {
+    confirmMenuAction(
+      'Reconcile Excusals management decisions',
+      'This applies commander decisions that are visible in Excusals Management but missing from Excusals Backend and Attendance. It does not resend decision emails. Continue?',
+    );
+    ProgressService.report({
+      title: 'Preparing decision reconciliation',
+      detail: 'Reading the management tabs and authoritative excusals records.',
+      hint: 'Only missing or mismatched decisions are repaired; matching decisions are left unchanged.',
+      percent: 10,
+      step: 1,
+      totalSteps: 3,
+    });
+    const result = ExcusalsService.reconcileManagementDecisions();
+    ProgressService.report({
+      title: 'Excusal decisions reconciled',
+      detail: `Repaired ${result.repaired} decision(s); ${result.missing} management row(s) had no backend match.`,
+      hint: 'Historical decision emails were not resent.',
+      percent: 100,
+      step: 3,
+      totalSteps: 3,
+    });
+    SpreadsheetApp.getUi().alert(
+      `Excusal reconciliation complete.\nDecisions checked: ${result.scanned}\nDecisions repaired: ${result.repaired}`
+      + `\nMissing backend matches: ${result.missing}\nDecision emails were not resent.`,
+    );
   });
 }
 
