@@ -438,7 +438,7 @@ namespace FormService {
     return questions;
   }
 
-  function isAttendanceCadetQuestionTitle(title: string): boolean {
+  export function isAttendanceCadetQuestionTitle(title: string): boolean {
     return /^Cadets \(.+\) (?:AS )?(?:AS\d+|AF Civ)(?: \((?:Mando|LLAB)\))?$/.test(String(title || '').trim());
   }
 

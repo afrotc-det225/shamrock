@@ -275,6 +275,7 @@ function addShamrockMenu() {
         .createMenu('Attendance')
         .addItem('Fix Attendance headers', 'fixAttendanceHeaders')
         .addItem('Fill Attendance event cells', 'fillAttendanceEventPrompt')
+        .addItem('Repair Attendance Backend from responses', 'repairAttendanceBackendFromResponses')
         .addItem('Debug Attendance response columns', 'debugAttendanceResponseSheet')
     )
     .addSubMenu(
@@ -550,6 +551,38 @@ function debugAttendanceResponseSheet() {
     SpreadsheetApp.getUi().alert(
       `Attendance Form Responses: ${diagnostics.columnCount} columns, ${diagnostics.uniqueHeaderCount} unique headers, `
       + `${diagnostics.duplicateHeaderCount} duplicated header names (maximum ${diagnostics.maxHeaderOccurrences} copies). Check logs for details.`,
+    );
+  });
+}
+
+function repairAttendanceBackendFromResponses() {
+  runMenuAction({
+    label: 'Repair Attendance Backend from responses',
+    category: 'Attendance',
+    action: 'menu.repair_attendance_backend_from_responses',
+    targetSheet: 'Attendance Backend',
+  }, () => {
+    confirmMenuAction(
+      'Repair Attendance Backend',
+      'This compares preserved Attendance Form Responses with Attendance Backend, fills blank cadet lists, and appends any missing event rows. Existing populated rows are left unchanged. Continue?',
+    );
+    ProgressService.report({
+      title: 'Comparing Attendance responses',
+      detail: 'Finding missing event rows and blank cadet lists that can be safely restored from preserved form responses.',
+      percent: 35,
+      step: 1,
+      totalSteps: 2,
+    });
+    const result = SetupService.processAttendanceFormBacklog();
+    ProgressService.report({
+      title: 'Attendance repair complete',
+      detail: `Restored ${result.repaired} blank cadet list(s) and added ${result.appended} missing event row(s).`,
+      percent: 100,
+      step: 2,
+      totalSteps: 2,
+    });
+    SpreadsheetApp.getUi().alert(
+      `Attendance repair complete.\nBlank cadet lists restored: ${result.repaired}\nMissing event rows added: ${result.appended}`,
     );
   });
 }

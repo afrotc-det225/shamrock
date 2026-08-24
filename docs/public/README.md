@@ -158,6 +158,7 @@ AS500 is a GMC year. AS500 cadets are excluded from POC Third Hour form groups a
 ### Safeguards
 
 - Normal Directory/Event refreshes update existing Attendance Form questions and choices in place, avoiding full-form question recreation and repeated linked-sheet columns. Within each cadet subsection, the questions are restored to the canonical senior-to-junior AS-year order. Question labels use forms such as `Cadets (Delta) AS400 (Mando)` and `Cadets (Delta) AF Civ (Mando)`, without a duplicated `AS` prefix.
+- Attendance parsing recognizes those canonical question labels and retains compatibility with legacy duplicated-`AS` labels. The backend Attendance menu can repair blank cadet lists or missing event rows from preserved raw form responses without overwriting populated log rows.
 - The explicit `Rebuild Attendance Form (archive responses)` action briefly closes the form, preserves the existing linked response tab as a hidden timestamped archive, links a fresh clean response tab, verifies that it has no duplicate header names, and restores the prior open/closed state.
 - Historical raw response tabs are preserved rather than merged or pruned in place. Attendance Backend remains the operational attendance log.
 
@@ -174,6 +175,7 @@ AS500 is a GMC year. AS500 cadets are excluded from POC Third Hour form groups a
 - Confirm `Overall` and `LLAB` use the archive-style red-at-80%, amber-at-90%, and green-at-100% summary gradient.
 - Confirm stale blank rows are removed from the frontend matrix after cadets are removed or marked non-operational.
 - Run `Debug Attendance response columns` and confirm the current response tab reports no duplicate header names. After a structural rebuild, confirm the prior response tab is hidden and the new visible tab is named `Attendance Form Responses`.
+- For recovery validation, run `Repair Attendance Backend from responses`, confirm its completion counts, verify previously blank `cadets` cells are populated from the raw response, and rebuild Attendance if a full deterministic matrix check is needed.
 
 ## Excusals
 

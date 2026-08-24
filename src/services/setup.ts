@@ -1280,14 +1280,14 @@ namespace SetupService {
    * Process any existing rows in the Attendance Form Responses sheet that haven't been
    * inserted into Attendance Backend yet (backfill for new multi-category form structure).
    */
-  export function processAttendanceFormBacklog() {
+  export function processAttendanceFormBacklog(): { appended: number; repaired: number } {
     try {
       const respSheet = Config.getBackendSheet(Config.RESOURCE_NAMES.ATTENDANCE_FORM_SHEET);
       const lastCol = respSheet.getLastColumn();
       const lastRow = respSheet.getLastRow();
       if (lastCol === 0 || lastRow < 2) {
         Log.info('No attendance form responses found; nothing to backfill.');
-        return;
+        return { appended: 0, repaired: 0 };
       }
 
       const headers = respSheet.getRange(1, 1, 1, lastCol).getValues()[0].map((h) => String(h || '').trim());
@@ -1308,10 +1308,10 @@ namespace SetupService {
         }
       });
 
-      // Find all cadet checkbox columns (pattern: "Cadets (...) AS AS... (...)")
+      // Find all canonical cadet checkbox columns, including legacy duplicated-AS titles.
       const cadetColumnIndices: Array<{ idx: number; title: string }> = [];
       headers.forEach((h, idx) => {
-        if (h.toLowerCase().includes('cadets') && h.toLowerCase().includes('as ')) {
+        if (FormService.isAttendanceCadetQuestionTitle(h)) {
           cadetColumnIndices.push({ idx, title: h });
         }
       });
@@ -1323,15 +1323,21 @@ namespace SetupService {
       Log.info(`Found ${selectEventIndices.length} "Select Event" columns and ${cadetColumnIndices.length} cadet columns`);
       Log.info(`Email col: ${emailIdx}, Name col: ${nameIdx}, Flight col: ${flightCrosstownIdx}`);
 
-      // Build existing key set from Attendance Backend to avoid duplicates
+      // Index Attendance Backend rows so existing blank log entries can be repaired
+      // without appending duplicates.
       const backendSheet = Config.getBackendSheet('Attendance Backend');
       const backend = SheetUtils.readTable(backendSheet);
-      const existingKeys = new Set<string>();
-      backend.rows.forEach((row) => {
+      const existingByKey = new Map<string, { rowNumber: number; cadets: string }>();
+      backend.rows.forEach((row, idx) => {
         const e = String(row['email'] || '').toLowerCase().trim();
         const ev = String(row['event'] || '').trim();
         const ts = String(row['submitted_at'] || '').trim();
-        if (e && ev && ts) existingKeys.add(`${e}|${ev}|${ts}`);
+        if (e && ev && ts) {
+          existingByKey.set(`${e}|${ev}|${ts}`, {
+            rowNumber: idx + 3,
+            cadets: String(row['cadets'] || '').trim(),
+          });
+        }
       });
 
       // Helper: normalize cadet list from response value
@@ -1339,8 +1345,18 @@ namespace SetupService {
         if (!val) return [];
         const s = String(val).trim();
         if (!s) return [];
-        // Google Forms checkbox responses are semicolon-separated: "Last, First; Last, First; ..."
-        return s.split(';').map((n) => n.trim()).filter(Boolean);
+        if (s.includes(';')) {
+          return s.split(';').map((n) => n.trim()).filter(Boolean);
+        }
+
+        // Linked response sheets serialize checkbox choices with commas even though
+        // each choice is itself "Last, First". Reconstruct those name pairs.
+        const parts = s.split(',').map((part) => part.trim()).filter(Boolean);
+        const names: string[] = [];
+        for (let idx = 0; idx + 1 < parts.length; idx += 2) {
+          names.push(`${parts[idx]}, ${parts[idx + 1]}`);
+        }
+        return names;
       };
 
       // Helper: lookup cadet by email for flight/squadron info
@@ -1355,6 +1371,7 @@ namespace SetupService {
       };
 
       const toAppend: Record<string, any>[] = [];
+      const toRepair: Array<{ rowNumber: number; cadets: string }> = [];
       const logEntries: Array<{ event: string; attendance_type: string; cadets: string }> = [];
 
       const values = respSheet.getRange(2, 1, lastRow - 1, lastCol).getValues();
@@ -1394,7 +1411,6 @@ namespace SetupService {
         // For each selected event, determine event type and collect relevant cadets
         selectedEvents.forEach((eventName) => {
           const key = `${email.toLowerCase()}|${eventName}|${submittedAt}`;
-          if (existingKeys.has(key)) return;
 
           // Determine event type from event name pattern
           let eventType = '';
@@ -1434,6 +1450,16 @@ namespace SetupService {
           });
 
           const cadetField = relevantCadets.join('; ');
+          const existing = existingByKey.get(key);
+          if (existing) {
+            if (!existing.cadets && cadetField) {
+              toRepair.push({ rowNumber: existing.rowNumber, cadets: cadetField });
+              logEntries.push({ event: eventName, attendance_type: 'P', cadets: cadetField });
+              existing.cadets = cadetField;
+            }
+            return;
+          }
+
           const cadet = lookupCadetByEmail(email);
           const submissionId = `att-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
 
@@ -1462,6 +1488,7 @@ namespace SetupService {
           };
 
           toAppend.push(backendRow);
+          existingByKey.set(key, { rowNumber: -1, cadets: cadetField });
           logEntries.push({
             event: eventName,
             attendance_type: 'P',
@@ -1477,12 +1504,20 @@ namespace SetupService {
         rowNum++;
       });
 
-      if (!toAppend.length) {
+      if (!toAppend.length && !toRepair.length) {
         Log.info('No unprocessed attendance responses found.');
-        return;
+        return { appended: 0, repaired: 0 };
       }
 
-      SheetUtils.appendRows(backendSheet, toAppend);
+      if (toAppend.length) SheetUtils.appendRows(backendSheet, toAppend);
+
+      const cadetsCol = backend.headers.indexOf('cadets') + 1;
+      if (toRepair.length && cadetsCol <= 0) {
+        throw new Error('Attendance Backend is missing the cadets column; cannot repair blank entries.');
+      }
+      toRepair.forEach((repair) => {
+        backendSheet.getRange(repair.rowNumber, cadetsCol).setValue(repair.cadets);
+      });
       
       // Apply each log entry to update the attendance matrix
       logEntries.forEach((entry) => {
@@ -1491,7 +1526,8 @@ namespace SetupService {
 
       applyAttendanceBackendFormatting();
 
-      Log.info(`Processed attendance form backlog: appended ${toAppend.length} event rows, updated matrix.`);
+      Log.info(`Processed attendance form backlog: appended ${toAppend.length} event rows, repaired ${toRepair.length} blank cadet lists, updated matrix.`);
+      return { appended: toAppend.length, repaired: toRepair.length };
     } catch (err) {
       Log.warn(`Failed to process attendance form backlog: ${err}`);
       throw err;

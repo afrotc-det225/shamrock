@@ -120,9 +120,11 @@ Post-deploy validation checklist:
 - Frontend Attendance matrix is derived; rebuild is available via admin menu.
 - Treat frontend attendance as derived state. Rebuild it instead of manually patching formulas or event columns.
 - Routine Directory and Event changes synchronize Attendance Form choices in place, restore each cadet subsection to the canonical senior-to-junior AS-year order, and remove duplicated `AS` prefixes from legacy question labels without replacing question IDs. Do not use a structural form rebuild just to refresh choices.
+- Attendance submission parsing accepts the canonical cadet question labels (`AS400`, `AF Civ`, and the other supported year labels) as well as legacy duplicated-`AS` labels.
 - Use `Rebuild Attendance Form (archive responses)` only when the form structure itself needs repair or at the transition phase that intentionally rebuilds it. The action briefly stops responses, keeps the former raw response tab as a hidden timestamped archive, verifies a fresh `Attendance Form Responses` destination, and restores the form's prior open/closed state.
 - Google may take tens of seconds to create and backfill the new linked tab from the Form response store. Historical email addresses and response rows in that newly linked tab are expected; the Form collects responder email and retains its own response store independently of the spreadsheet archive.
 - Use `Debug Attendance response columns` to review only header-count health. It does not log submission contents.
+- Use `Repair Attendance Backend from responses` after a known submit-processing failure. It compares the preserved raw responses with Attendance Backend, fills only blank cadet lists, appends missing event rows, leaves populated rows unchanged, and incrementally reapplies recovered entries to the attendance matrix.
 - V2 attendance codes are `P`, `T`, `A`, `R`, `D`, `U`, `E`, `ES`, `MED`, and `N/A`.
 - `A` requires follow-up, `R` is pending leadership review, and `D` means a denied advance request where the cadet is still expected to attend.
 

@@ -174,8 +174,9 @@ namespace FormHandlers {
 					});
 				}
 
-				// Collect cadet selections from columns like "Cadets (Alpha) AS AS400 (Mando)"
-				if (lower.includes('cadets') && lower.includes('as ')) {
+				// Collect canonical titles such as "Cadets (Alpha) AS400 (Mando)"
+				// while retaining support for the former duplicated "AS AS400" label.
+				if (FormService.isAttendanceCadetQuestionTitle(title)) {
 					const cadets = normalizeToList(resp);
 					if (cadets.length > 0) {
 						cadetsByColumn.set(title, cadets);
@@ -215,8 +216,7 @@ namespace FormHandlers {
 
 		if (cadetsByColumn.size === 0) {
 			Object.entries(namedValues).forEach(([key, vals]) => {
-				const lowerKey = key.toLowerCase();
-				if (lowerKey.includes('cadets') && lowerKey.includes('as ')) {
+				if (FormService.isAttendanceCadetQuestionTitle(key)) {
 					const cadets = normalizeToList(vals);
 					if (cadets.length > 0) {
 						cadetsByColumn.set(key, cadets);
