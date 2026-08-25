@@ -195,7 +195,7 @@ The separate management workbook has one active tab for each operational squadro
 - Excusal Form submit trigger.
 - Excusals Backend decision edits.
 - Excusals Management workbook edit trigger.
-- Excusals Management supports multi-row Decision edits. The backend `Reconcile management decisions` action repairs any commander decisions that did not propagate, without resending historical decision emails.
+- Excusals Backend and Excusals Management both process multi-row Decision edits row by row. The backend `Reconcile management decisions` action repairs missing backend decisions, verifies every authoritative decided excusal against the effective Attendance Backend log, and rebuilds both attendance matrices without resending historical decision emails.
 - Backend SHAMROCK menu actions for cleanup, backfill, sync, and repair.
 - Semester and academic-year transitions, which archive the prior term's management tabs into the restricted admin workbook, clear the active queues, and refresh access from current Leadership assignments.
 
@@ -212,6 +212,8 @@ The separate management workbook has one active tab for each operational squadro
 - Confirm the `Excusal Details` section displays the attendance-code explanations and the allowed requested outcomes.
 - Confirm it appears in Excusals Backend and management surfaces.
 - Record a decision and confirm attendance effect updates.
+- Paste or fill a controlled multi-row Decision range and confirm every edited request receives its expected Attendance Backend log entry and matrix effect.
+- Run `Reconcile management decisions` and confirm its attendance-effect counts, then verify backend and frontend Attendance agree with the authoritative decided excusals.
 - Confirm a squadron commander can edit only Decision cells on their squadron tab, while flight commanders/deputies have view-only workbook access.
 - Confirm Blue/Gold tabs are native Sheets tables, the hidden management Data Legend supplies the strict Decision dropdown, and Approved/Denied/Withdrawn/Superseded selections display their managed colors.
 - After a transition, confirm prior management rows are in hidden, locked term archives in the admin workbook and active Blue/Gold management tabs are empty with access derived from the new Leadership assignments.

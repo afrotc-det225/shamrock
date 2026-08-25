@@ -920,115 +920,74 @@ SHAMROCK Automations`;
     if (!range) return;
 
     const sheet = range.getSheet();
-    const row = range.getRow();
-    const col = range.getColumn();
-    const newValue = String((e as any)?.value ?? range.getValue() ?? '').trim();
-
-    // Get headers to find Decision column
-    const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0].map((h) => String(h || '').trim().toLowerCase());
+    const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0].map((h) => String(h || '').trim());
     const decisionColIdx = headers.indexOf('decision');
-    const statusIdx = headers.indexOf('status');
-    const decidedByIdx = headers.indexOf('decided_by');
-    const decidedAtIdx = headers.indexOf('decided_at');
-    const lastUpdatedIdx = headers.indexOf('last_updated_at');
+    if (decisionColIdx < 0) return;
+    const firstRow = Math.max(3, range.getRow());
+    const lastRow = range.getLastRow();
+    const firstCol = range.getColumn();
+    const lastCol = range.getLastColumn();
+    const decisionSheetCol = decisionColIdx + 1;
+    if (lastRow < 3 || decisionSheetCol < firstCol || decisionSheetCol > lastCol) return;
 
-    // Only process if Decision column was edited and value is a v2 workflow decision.
-    if (col - 1 !== decisionColIdx || row < 3) return;
-    if (!isDecisionValue(newValue)) return;
+    const rowCount = lastRow - firstRow + 1;
+    const decisions = sheet.getRange(firstRow, decisionSheetCol, rowCount, 1).getValues();
+    const singleCellEdit = rowCount === 1 && firstCol === decisionSheetCol && lastCol === decisionSheetCol;
+    const previousDecision = singleCellEdit ? String((e as any)?.oldValue ?? '').trim() : '';
 
+    const lock = LockService.getScriptLock();
+    lock.waitLock(120000);
     try {
-      const backendSheet = SheetUtils.getSheet(Config.getBackendId(), 'Excusals Backend');
-      if (!backendSheet) return;
-      const table = SheetUtils.readTable(backendSheet);
-      const rowData = table.rows[row - 3]; // data starts on sheet row 3
-      if (!rowData) return;
+      const data = sheet.getRange(3, 1, sheet.getLastRow() - 2, headers.length).getValues();
+      const idx = excusalsBackendIndexes(headers);
+      if (idx.request < 0) return;
+      const actorEmail = currentUserEmail();
+      let updated = 0;
 
-      // The sheet row already contains the new value by the time onEdit runs.
-      // Use the event's oldValue so reconsiderations are audited and messaged correctly.
-      const oldDecision = String((e as any)?.oldValue ?? '').trim();
-      if (oldDecision === newValue) return;
-      const requestId = String(rowData['request_id'] || '').trim();
-      const cadetEmail = String(rowData['email'] || '').trim();
-      const eventName = String(rowData['event'] || '').trim();
-      const reason = String(rowData['reason'] || '').trim();
-      const squadron = String(rowData['squadron'] || '').trim();
-      const firstName = String(rowData['first_name'] || '').trim();
-      const lastName = String(rowData['last_name'] || '').trim();
-
-      // Update status and decided_at in the same row
-      if (statusIdx >= 0) sheet.getRange(row, statusIdx + 1).setValue(newValue);
-      if (decidedByIdx >= 0) sheet.getRange(row, decidedByIdx + 1).setValue(currentUserEmail());
-      if (decidedAtIdx >= 0) sheet.getRange(row, decidedAtIdx + 1).setValue(new Date().toISOString());
-      if (lastUpdatedIdx >= 0) sheet.getRange(row, lastUpdatedIdx + 1).setValue(new Date().toISOString());
-
-      const requestedOutcomeIdx = headers.indexOf('requested_outcome');
-      const priorIdx = headers.indexOf('prior_attendance_code');
-      const effectIdx = headers.indexOf('attendance_effect');
-      const requestedOutcome = requestedOutcomeIdx >= 0 ? String(sheet.getRange(row, requestedOutcomeIdx + 1).getValue() || 'E') : 'E';
-      const priorAttendanceCode = priorIdx >= 0 ? String(sheet.getRange(row, priorIdx + 1).getValue() || '') : '';
-      const attendanceEffect = effectForDecision({
-        decision: newValue,
-        requestedOutcome,
-        priorAttendanceCode,
-        currentAttendanceCode: lookupMatrixValue(eventName, lastName, firstName),
-        eventName,
-      });
-      if (effectIdx >= 0) sheet.getRange(row, effectIdx + 1).setValue(attendanceEffect);
-
-      // Update attendance matrix based on decision
-      updateAttendanceOnExcusalDecision({
-        lastName,
-        firstName,
-        eventName,
-        decision: newValue,
-        requestedOutcome,
-        priorAttendanceCode,
-        attendanceEffect,
-      });
-      mirrorDecisionToManagementPanel(requestId, newValue);
-
-      // Check if decision is being changed (not initial decision)
-      const isDecisionChange = oldDecision && oldDecision !== newValue;
-
-      // Send decision email to cadet from squadron commander
-      sendExcusalDecisionEmail({
-        cadetEmail,
-        cadetFirstName: firstName,
-        cadetLastName: lastName,
-        event: eventName,
-        decision: newValue,
-        previousDecision: isDecisionChange ? oldDecision : undefined,
-        reason,
-        squadron,
+      decisions.forEach((values, offset) => {
+        const decision = String(values[0] || '').trim();
+        if (!isDecisionValue(decision)) return;
+        const dataIndex = firstRow + offset - 3;
+        const requestId = String(data[dataIndex]?.[idx.request] || '').trim();
+        if (!requestId) {
+          Log.warn(`Backend decision edit ignored: missing request_id on row ${firstRow + offset}`);
+          return;
+        }
+        const result = applyManagementDecision({
+          backendSheet: sheet,
+          headers,
+          data,
+          idx,
+          requestId,
+          decision,
+          actorEmail,
+          actorRole: 'admin_operator',
+          source: 'ExcusalsService.handleExcusalsBackendEdit',
+          managementSheet: '',
+          notifyCadet: true,
+          forceApply: true,
+          previousDecision: singleCellEdit ? previousDecision : '',
+        });
+        if (result !== 'updated') return;
+        mirrorDecisionToManagementPanel(requestId, decision);
+        updated++;
       });
 
-      Log.info(`Excusal decision recorded: row ${row} -> ${newValue}${isDecisionChange ? ` (changed from ${oldDecision})` : ''}`);
-      AuditService.log({
-        action: 'excusal_decision_recorded',
-        result: 'ok',
-        role: 'admin_operator',
-        targetSheet: 'Excusals Backend',
-        targetTable: 'Excusals Backend',
-        targetKey: requestId,
-        requestId,
-        field: 'decision',
-        oldValue: oldDecision,
-        newValue,
-        source: 'ExcusalsService.handleExcusalsBackendEdit',
-        metadata: { event: eventName, squadron, attendanceEffect },
-      });
+      if (updated > 0) repairAttendancePresentation();
+      Log.info(`Processed ${decisions.length} backend decision edit(s): updated=${updated}.`);
     } catch (err) {
-      Log.warn(`Failed to handle Excusals Backend edit: ${err}`);
+      Log.warn(`Failed to handle Excusals Backend edit range: ${err}`);
       AuditService.log({
         action: 'excusal_decision_recorded',
         result: 'failed',
         role: 'admin_operator',
         targetSheet: 'Excusals Backend',
         field: 'decision',
-        newValue,
         source: 'ExcusalsService.handleExcusalsBackendEdit',
         error: err,
       });
+    } finally {
+      lock.releaseLock();
     }
   }
 
@@ -1141,6 +1100,27 @@ SHAMROCK Automations`;
 
   type ManagementDecisionResult = 'updated' | 'unchanged' | 'missing';
 
+  function excusalsBackendIndexes(headers: string[]): Record<string, number> {
+    return {
+      request: headers.indexOf('request_id'),
+      decision: headers.indexOf('decision'),
+      status: headers.indexOf('status'),
+      decidedBy: headers.indexOf('decided_by'),
+      decidedAt: headers.indexOf('decided_at'),
+      lastUpdated: headers.indexOf('last_updated_at'),
+      submittedAt: headers.indexOf('submitted_at'),
+      event: headers.indexOf('event'),
+      email: headers.indexOf('email'),
+      last: headers.indexOf('last_name'),
+      first: headers.indexOf('first_name'),
+      squadron: headers.indexOf('squadron'),
+      reason: headers.indexOf('reason'),
+      requestedOutcome: headers.indexOf('requested_outcome'),
+      priorAttendanceCode: headers.indexOf('prior_attendance_code'),
+      attendanceEffect: headers.indexOf('attendance_effect'),
+    };
+  }
+
   function applyManagementDecision(opts: {
     backendSheet: GoogleAppsScript.Spreadsheet.Sheet;
     headers: string[];
@@ -1153,6 +1133,8 @@ SHAMROCK Automations`;
     source: string;
     managementSheet: string;
     notifyCadet: boolean;
+    forceApply?: boolean;
+    previousDecision?: string;
   }): ManagementDecisionResult {
     const targetRow = opts.data.findIndex((row) => String(row[opts.idx.request] || '').trim() === opts.requestId);
     if (targetRow < 0) {
@@ -1160,10 +1142,11 @@ SHAMROCK Automations`;
       return 'missing';
     }
 
-    const oldDecision = opts.idx.decision >= 0
+    const storedDecision = opts.idx.decision >= 0
       ? String(opts.data[targetRow][opts.idx.decision] || '').trim()
       : '';
-    if (oldDecision === opts.decision) return 'unchanged';
+    const oldDecision = opts.previousDecision !== undefined ? opts.previousDecision : storedDecision;
+    if (!opts.forceApply && storedDecision === opts.decision) return 'unchanged';
 
     const rowNumber = targetRow + 3;
     const nowIso = new Date().toISOString();
@@ -1207,6 +1190,7 @@ SHAMROCK Automations`;
       requestedOutcome,
       priorAttendanceCode,
       attendanceEffect,
+      requestId: opts.requestId,
     });
 
     if (opts.notifyCadet) {
@@ -1254,12 +1238,167 @@ SHAMROCK Automations`;
     }
   }
 
+  function attendanceStateKey(eventName: any, lastName: any, firstName: any): string {
+    const normalize = (value: any) => String(value || '').trim().toLowerCase();
+    return `${normalize(eventName)}|${normalize(lastName)}|${normalize(firstName)}`;
+  }
+
+  function attendanceLogCadets(raw: any): Array<{ last: string; first: string }> {
+    return String(raw || '')
+      .split(';')
+      .map((entry) => entry.trim())
+      .filter(Boolean)
+      .map((entry) => {
+        const [namePart] = entry.split('=');
+        const cleaned = namePart.replace(/\(AS[^)]*\)/gi, '').trim();
+        const [last, ...firstParts] = cleaned.split(',').map((part) => part.trim());
+        return { last: last || '', first: firstParts.join(',').trim() };
+      })
+      .filter((cadet) => !!(cadet.last || cadet.first));
+  }
+
+  function readEffectiveAttendanceLogState(): Map<string, string> {
+    const state = new Map<string, string>();
+    const sheet = SheetUtils.getSheet(Config.getBackendId(), 'Attendance Backend');
+    if (!sheet || sheet.getLastRow() < 3) return state;
+    const table = SheetUtils.readTable(sheet);
+    table.rows.forEach((row) => {
+      const eventName = String(row['event'] || '').trim();
+      if (!eventName) return;
+      const code = normalizeAttendanceCode(row['attendance_type']);
+      attendanceLogCadets(row['cadets']).forEach((cadet) => {
+        state.set(attendanceStateKey(eventName, cadet.last, cadet.first), code);
+      });
+    });
+    return state;
+  }
+
+  function decisionTimestamp(dataRow: any[], idx: Record<string, number>, rowIndex: number): number {
+    for (const index of [idx.decidedAt, idx.lastUpdated, idx.submittedAt]) {
+      if (index < 0) continue;
+      const time = new Date(dataRow[index]).getTime();
+      if (Number.isFinite(time)) return time;
+    }
+    return rowIndex;
+  }
+
+  function repairAuthoritativeAttendanceEffects(opts: {
+    backendSheet: GoogleAppsScript.Spreadsheet.Sheet;
+    data: any[][];
+    idx: Record<string, number>;
+  }): { checked: number; repaired: number; metadataRepaired: number } {
+    const effectiveLogState = readEffectiveAttendanceLogState();
+    const finalByCadetEvent = new Map<string, {
+      rowIndex: number;
+      timestamp: number;
+      requestId: string;
+      decision: string;
+      requestedOutcome: string;
+      priorAttendanceCode: string;
+      lastName: string;
+      firstName: string;
+      eventName: string;
+    }>();
+    let metadataRepaired = 0;
+
+    opts.data.forEach((row, rowIndex) => {
+      const value = (index: number, fallback = '') => index >= 0 ? String(row[index] || fallback).trim() : fallback;
+      const decision = value(opts.idx.decision);
+      const eventName = value(opts.idx.event);
+      const lastName = value(opts.idx.last);
+      const firstName = value(opts.idx.first);
+      if (!isDecisionValue(decision) || !eventName || (!lastName && !firstName)) return;
+
+      const key = attendanceStateKey(eventName, lastName, firstName);
+      const requestedOutcome = value(opts.idx.requestedOutcome, 'E');
+      const priorAttendanceCode = value(opts.idx.priorAttendanceCode);
+      const expectedEffect = effectForDecision({
+        decision,
+        requestedOutcome,
+        priorAttendanceCode,
+        currentAttendanceCode: effectiveLogState.get(key) || '',
+        eventName,
+      });
+      if (opts.idx.attendanceEffect >= 0 && value(opts.idx.attendanceEffect) !== expectedEffect) {
+        opts.backendSheet.getRange(rowIndex + 3, opts.idx.attendanceEffect + 1).setValue(expectedEffect);
+        row[opts.idx.attendanceEffect] = expectedEffect;
+        metadataRepaired++;
+      }
+
+      const candidate = {
+        rowIndex,
+        timestamp: decisionTimestamp(row, opts.idx, rowIndex),
+        requestId: value(opts.idx.request),
+        decision,
+        requestedOutcome,
+        priorAttendanceCode,
+        lastName,
+        firstName,
+        eventName,
+      };
+      const current = finalByCadetEvent.get(key);
+      if (!current || candidate.timestamp > current.timestamp || (
+        candidate.timestamp === current.timestamp && candidate.rowIndex > current.rowIndex
+      )) {
+        finalByCadetEvent.set(key, candidate);
+      }
+    });
+
+    let repaired = 0;
+    finalByCadetEvent.forEach((candidate, key) => {
+      const expectedEffect = effectForDecision({
+        decision: candidate.decision,
+        requestedOutcome: candidate.requestedOutcome,
+        priorAttendanceCode: candidate.priorAttendanceCode,
+        currentAttendanceCode: effectiveLogState.get(key) || '',
+        eventName: candidate.eventName,
+      });
+      if ((effectiveLogState.get(key) || '') === expectedEffect) return;
+      updateAttendanceOnExcusalDecision({
+        lastName: candidate.lastName,
+        firstName: candidate.firstName,
+        eventName: candidate.eventName,
+        decision: candidate.decision,
+        requestedOutcome: candidate.requestedOutcome,
+        priorAttendanceCode: candidate.priorAttendanceCode,
+        attendanceEffect: expectedEffect,
+        requestId: candidate.requestId,
+      });
+      AuditService.log({
+        action: 'excusal_attendance_repaired',
+        result: 'ok',
+        role: 'admin_repair',
+        targetSheet: 'Attendance Backend',
+        targetTable: 'Attendance Backend',
+        targetKey: candidate.requestId,
+        requestId: candidate.requestId,
+        field: 'attendance_type',
+        oldValue: effectiveLogState.get(key) || '',
+        newValue: expectedEffect,
+        source: 'ExcusalsService.reconcileManagementDecisions',
+        metadata: { event: candidate.eventName, decision: candidate.decision },
+      });
+      effectiveLogState.set(key, expectedEffect);
+      repaired++;
+    });
+
+    return { checked: finalByCadetEvent.size, repaired, metadataRepaired };
+  }
+
   /**
    * Repair decisions that are present in the commander-facing workbook but did
-   * not reach the authoritative backend. This intentionally does not resend
-   * cadet notification emails for historical decisions.
+   * not reach the authoritative backend, then verify that every authoritative
+   * decided excusal reached the effective Attendance Backend log. This
+   * intentionally does not resend cadet notification emails for historical decisions.
    */
-  export function reconcileManagementDecisions(): { scanned: number; repaired: number; missing: number } {
+  export function reconcileManagementDecisions(): {
+    scanned: number;
+    repaired: number;
+    missing: number;
+    attendanceChecked: number;
+    attendanceRepaired: number;
+    metadataRepaired: number;
+  } {
     const lock = LockService.getScriptLock();
     lock.waitLock(120000);
     try {
@@ -1278,23 +1417,7 @@ SHAMROCK Automations`;
       .getRange(1, 1, 1, backendSheet.getLastColumn())
       .getValues()[0]
       .map((header) => String(header || '').trim());
-    const idx: Record<string, number> = {
-      request: headers.indexOf('request_id'),
-      decision: headers.indexOf('decision'),
-      status: headers.indexOf('status'),
-      decidedBy: headers.indexOf('decided_by'),
-      decidedAt: headers.indexOf('decided_at'),
-      lastUpdated: headers.indexOf('last_updated_at'),
-      event: headers.indexOf('event'),
-      email: headers.indexOf('email'),
-      last: headers.indexOf('last_name'),
-      first: headers.indexOf('first_name'),
-      squadron: headers.indexOf('squadron'),
-      reason: headers.indexOf('reason'),
-      requestedOutcome: headers.indexOf('requested_outcome'),
-      priorAttendanceCode: headers.indexOf('prior_attendance_code'),
-      attendanceEffect: headers.indexOf('attendance_effect'),
-    };
+    const idx = excusalsBackendIndexes(headers);
     if (idx.request < 0 || idx.decision < 0) {
       throw new Error('Excusals Backend is missing request_id or decision.');
     }
@@ -1348,9 +1471,23 @@ SHAMROCK Automations`;
       });
     });
 
-    if (repaired > 0) repairAttendancePresentation();
-    Log.info(`Reconciled Excusals Management decisions: scanned=${scanned}, repaired=${repaired}, missing=${missing}`);
-    return { scanned, repaired, missing };
+    const attendance = repairAuthoritativeAttendanceEffects({ backendSheet, data, idx });
+    if (repaired > 0 || attendance.repaired > 0 || attendance.metadataRepaired > 0) {
+      repairAttendancePresentation();
+    }
+    Log.info(
+      `Reconciled excusal decisions: managementScanned=${scanned}, managementRepaired=${repaired}, missing=${missing} `
+      + `attendanceChecked=${attendance.checked}, attendanceRepaired=${attendance.repaired} `
+      + `metadataRepaired=${attendance.metadataRepaired}`,
+    );
+    return {
+      scanned,
+      repaired,
+      missing,
+      attendanceChecked: attendance.checked,
+      attendanceRepaired: attendance.repaired,
+      metadataRepaired: attendance.metadataRepaired,
+    };
     } finally {
       lock.releaseLock();
     }
@@ -1393,6 +1530,7 @@ SHAMROCK Automations`;
     requestedOutcome?: string;
     priorAttendanceCode?: string;
     attendanceEffect?: string;
+    requestId?: string;
   }) {
     const code = opts.attendanceEffect ?? effectForDecision({
       decision: opts.decision,
@@ -1402,8 +1540,9 @@ SHAMROCK Automations`;
       eventName: opts.eventName,
     });
 
+    const safeRequestId = String(opts.requestId || '').replace(/[^A-Za-z0-9_-]+/g, '').slice(0, 80);
     const logEntry = {
-      submission_id: `excusal-decision-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      submission_id: `excusal-decision-${safeRequestId ? `${safeRequestId}-` : ''}${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
       submitted_at: new Date(),
       event: opts.eventName,
       attendance_type: code,

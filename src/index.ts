@@ -695,6 +695,13 @@ function reinitializeExcusalsManagementSheets() {
   });
 }
 
+/** Non-interactive entry point used by the menu and authorized production repairs. */
+function repairExcusalDecisionAttendanceHistory() {
+  const result = ExcusalsService.reconcileManagementDecisions();
+  SetupService.rebuildAttendanceMatrix();
+  return result;
+}
+
 function reconcileExcusalsManagementDecisions() {
   runMenuAction({
     label: 'Reconcile Excusals management decisions',
@@ -704,20 +711,20 @@ function reconcileExcusalsManagementDecisions() {
   }, () => {
     confirmMenuAction(
       'Reconcile Excusals management decisions',
-      'This applies commander decisions that are visible in Excusals Management but missing from Excusals Backend and Attendance. It does not resend decision emails. Continue?',
+      'This applies commander decisions missing from Excusals Backend, repairs missing Attendance Backend effects for every decided excusal, and rebuilds both attendance matrices. It does not resend decision emails. Continue?',
     );
     ProgressService.report({
       title: 'Preparing decision reconciliation',
-      detail: 'Reading the management tabs and authoritative excusals records.',
-      hint: 'Only missing or mismatched decisions are repaired; matching decisions are left unchanged.',
+      detail: 'Reading management decisions, authoritative excusals, and the effective attendance log.',
+      hint: 'Matching decisions are still checked for missing downstream attendance effects.',
       percent: 10,
       step: 1,
       totalSteps: 3,
     });
-    const result = ExcusalsService.reconcileManagementDecisions();
+    const result = repairExcusalDecisionAttendanceHistory();
     ProgressService.report({
       title: 'Excusal decisions reconciled',
-      detail: `Repaired ${result.repaired} decision(s); ${result.missing} management row(s) had no backend match.`,
+      detail: `Repaired ${result.repaired} decision(s) and ${result.attendanceRepaired} missing attendance effect(s).`,
       hint: 'Historical decision emails were not resent.',
       percent: 100,
       step: 3,
@@ -725,7 +732,10 @@ function reconcileExcusalsManagementDecisions() {
     });
     SpreadsheetApp.getUi().alert(
       `Excusal reconciliation complete.\nDecisions checked: ${result.scanned}\nDecisions repaired: ${result.repaired}`
-      + `\nMissing backend matches: ${result.missing}\nDecision emails were not resent.`,
+      + `\nAuthoritative attendance effects checked: ${result.attendanceChecked}`
+      + `\nAttendance log effects repaired: ${result.attendanceRepaired}`
+      + `\nExcusal effect fields repaired: ${result.metadataRepaired}`
+      + `\nMissing backend matches: ${result.missing}\nBoth attendance matrices were rebuilt. Decision emails were not resent.`,
     );
   });
 }

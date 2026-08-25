@@ -209,7 +209,7 @@ Cadet groups and display order:
 - Attendance Form roster refreshes preserve existing question IDs while restoring that order within every cadet subsection. Question titles omit redundant `AS` prefixes (for example, `Cadets (Delta) AS400 (Mando)` and `Cadets (Delta) AF Civ (Mando)`).
 - Attendance matrix event columns sort by training week, then `Mando`, `Secondary`, `LLAB`, and `POC Third Hour`; the matrix does not depend on physical Events Backend row order.
 - Incremental Attendance Form submissions restore Attendance input validation and summary coloring after writing values so dropdown metadata and presentation remain stable.
-- Excusals Management edit handling processes every edited Decision row, including pasted or fill-down multi-row ranges. The reconciliation workflow compares management request IDs with Excusals Backend, applies only missing or mismatched decisions to attendance, records audit entries, and suppresses duplicate historical notification emails.
+- Excusals Backend and Excusals Management edit handling process every edited Decision row, including pasted or fill-down multi-row ranges, under the same serialized write discipline. Reconciliation first repairs management/backend decision mismatches, then compares the latest authoritative decided excusal for each cadet/event with the effective Attendance Backend log, appends missing corrective effects, rebuilds both attendance matrices, records audit entries, and suppresses duplicate historical notification emails.
 
 Percent metrics:
 - LLAB attendance % is based on LLAB event subset.
