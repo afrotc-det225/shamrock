@@ -1471,9 +1471,11 @@ function reconcilePendingDirectoryEdits() {
     const result = FrontendEditService.reconcilePendingDirectoryEdits();
     if (result.updated > 0) {
       Log.info(`Reconciled ${result.updated} Directory edits from frontend to backend`);
-      // After reconciling, sync backend -> frontend and rebuild attendance
+      // After reconciling, sync backend -> frontend and rebuild Attendance through
+      // the supported wrapper so resized rows also receive table-aware formatting,
+      // validations, and protections.
       SyncService.syncByBackendSheetName('Directory');
-      AttendanceService.rebuildMatrix();
+      SetupService.rebuildAttendanceMatrix();
     }
     if (result.missing > 0) {
       Log.warn(`${result.missing} frontend Directory rows not found in backend`);

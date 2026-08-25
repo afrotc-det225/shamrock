@@ -141,7 +141,7 @@ Attendance records form submissions in backend logs and derives the frontend att
 The v2 code set is `P`, `T`, `A`, `R`, `D`, `U`, `E`, `ES`, `MED`, and `N/A`.
 AS500 is a GMC year. AS500 cadets are excluded from POC Third Hour form groups and receive `N/A` for POC Third Hour in the matrix unless an explicit attendance entry exists. AF Civ is neither GMC nor POC and is also excluded from POC Third Hour groups. Year-grouped lists place AS500 below AS300 and above AS250, with AF Civ below AS100.
 
-Attendance event columns are grouped by training week and ordered Mando, Secondary, LLAB, then POC Third Hour. Each form submission restores the Attendance dropdown metadata and summary coloring after applying its incremental attendance values.
+Attendance event columns are grouped by training week and ordered Mando, Secondary, LLAB, then POC Third Hour. Each form submission restores the Attendance dropdown metadata and summary coloring after applying its incremental attendance values. Periodic Directory reconciliation also completes the full Attendance table, formatting, validation, and protection repair after a roster-driven matrix rebuild.
 
 ### Operator Entry Points
 
@@ -170,6 +170,7 @@ Attendance event columns are grouped by training week and ordered Mando, Seconda
 - Submit a controlled attendance response.
 - Confirm the response is appended to Attendance Backend.
 - Rebuild attendance and confirm the frontend matrix updates deterministically.
+- Change a roster field that affects Attendance, allow periodic Directory reconciliation to run, and confirm all active Attendance rows retain the standard table formatting, attendance-code validation, and protections.
 - Confirm AS500 cadets are counted as GMC, are absent from POC Third Hour choices, receive `N/A` for POC Third Hour when no entry exists, and sort between AS300 and AS250.
 - Confirm AF Civ is available in AS-year dropdowns, remains outside GMC/POC counts and POC Third Hour choices, accepts any class year, and sorts below AS100.
 - Confirm each Attendance Form cadet subsection follows the canonical senior-to-junior AS-year order and question labels do not contain duplicated prefixes such as `AS AS400` or `AS AF Civ`.
