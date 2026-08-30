@@ -637,12 +637,13 @@ function setupExcusalsManagementSpreadsheet() {
     confirmMenuAction('Setup Excusals management spreadsheet', 'This ensures the management spreadsheet exists, is formatted, shared, and protected. Continue?');
     ProgressService.report({
       title: 'Ensuring the Excusals management workbook',
-      detail: 'Creating or repairing the commander-facing sheets and supported structure.',
+      detail: 'Creating or repairing the commander-facing sheets, supported structure, and decision sync automation.',
       percent: 38,
       step: 1,
       totalSteps: 2,
     });
     const managementId = ExcusalsService.ensureManagementSpreadsheet();
+    SetupService.ensureExcusalsManagementTrigger(managementId);
     ProgressService.report({
       title: 'Applying sharing and protections',
       detail: 'Granting intended commander access and protecting managed ranges.',
@@ -675,12 +676,13 @@ function reinitializeExcusalsManagementSheets() {
     confirmMenuAction('Reinitialize Excusals management sheets', 'This refreshes the management spreadsheet structure and protections. Continue?');
     ProgressService.report({
       title: 'Reinitializing management sheets',
-      detail: 'Repairing the supported Excusals management structure and current workflow rows.',
+      detail: 'Repairing the supported Excusals management structure, current workflow rows, and decision sync automation.',
       percent: 40,
       step: 1,
       totalSteps: 2,
     });
     ExcusalsService.ensureManagementSpreadsheet();
+    SetupService.ensureExcusalsManagementTrigger();
     ProgressService.report({
       title: 'Restoring management access',
       detail: 'Reapplying commander sharing and protected ranges after the structural refresh.',

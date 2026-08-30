@@ -1725,8 +1725,30 @@ namespace SetupService {
       return;
     }
     const triggers = ScriptApp.getProjectTriggers();
-    const exists = triggers.some((t) => t.getHandlerFunction() === handlerName && t.getTriggerSourceId?.() === spreadsheetId);
-    if (exists) return;
+    const matching = triggers.filter((trigger) => trigger.getHandlerFunction() === handlerName);
+    const expectedEventType = event === 'open' ? ScriptApp.EventType.ON_OPEN : ScriptApp.EventType.ON_EDIT;
+    let keptCorrectTrigger = false;
+    matching.forEach((trigger) => {
+      let sourceId = '';
+      try {
+        sourceId = trigger.getTriggerSourceId?.() || '';
+      } catch {}
+      const eventTypeMatches = trigger.getEventType() === expectedEventType;
+      if (sourceId === spreadsheetId && eventTypeMatches && !keptCorrectTrigger) {
+        keptCorrectTrigger = true;
+        return;
+      }
+      try {
+        Log.warn(
+          `Deleting stale or duplicate ${event} trigger for handler=${handlerName}`
+          + `${sourceId ? ` sourceId=${sourceId}` : ''}`,
+        );
+        ScriptApp.deleteTrigger(trigger);
+      } catch (err) {
+        Log.warn(`Unable to delete stale trigger for handler=${handlerName}: ${err}`);
+      }
+    });
+    if (keptCorrectTrigger) return;
     Log.info(`Creating ${event} trigger for handler=${handlerName} spreadsheet=${spreadsheetId}`);
     const builder = ScriptApp.newTrigger(handlerName).forSpreadsheet(spreadsheetId);
     if (event === 'open') {
@@ -1734,6 +1756,12 @@ namespace SetupService {
     } else {
       builder.onEdit().create();
     }
+  }
+
+  export function ensureExcusalsManagementTrigger(spreadsheetId?: string) {
+    const managementId = spreadsheetId
+      || Config.getScriptProperty(Config.PROPERTY_KEYS.EXCUSAL_MANAGEMENT_SPREADSHEET_ID);
+    ensureSpreadsheetTrigger('onExcusalsManagementEdit', managementId, 'edit');
   }
 
   function ensureTimeTrigger(handlerName: string, weekDay: GoogleAppsScript.Base.Weekday, hour: number) {
@@ -1816,7 +1844,7 @@ namespace SetupService {
     ensureSpreadsheetTrigger('onFrontendEdit', frontendId, 'edit');
     ensureSpreadsheetTrigger('onBackendOpen', backendId, 'open');
     ensureSpreadsheetTrigger('onBackendEdit', backendId, 'edit');
-    ensureSpreadsheetTrigger('onExcusalsManagementEdit', managementId, 'edit');
+    ensureExcusalsManagementTrigger(managementId);
 
     // Time-based trigger: reconcile frontend Directory edits every 10 minutes (handles edits by unauthorized users).
     ensurePeriodicTrigger('reconcilePendingDirectoryEdits', 10);
@@ -3634,7 +3662,7 @@ namespace SetupService {
     ensureSpreadsheetTrigger('onBackendOpen', backend.id, 'open');
     ensureSpreadsheetTrigger('onBackendEdit', backend.id, 'edit');
     const managementId = Config.getScriptProperty(Config.PROPERTY_KEYS.EXCUSAL_MANAGEMENT_SPREADSHEET_ID);
-    ensureSpreadsheetTrigger('onExcusalsManagementEdit', managementId, 'edit');
+    ensureExcusalsManagementTrigger(managementId);
 
     // Time-based trigger: reconcile frontend Directory edits every 10 minutes (handles edits by unauthorized users).
     ensurePeriodicTrigger('reconcilePendingDirectoryEdits', 10);
