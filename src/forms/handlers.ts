@@ -1,6 +1,11 @@
 // Form submission handlers: send receipts and (future) processing hooks.
 
 namespace FormHandlers {
+	function isRetiredThirdHourEvent(eventName: string): boolean {
+		const normalized = String(eventName || '').toLowerCase();
+		return normalized.includes('third hour') || normalized.includes('thirdhour');
+	}
+
 	function getNamedValues(e: GoogleAppsScript.Events.FormsOnFormSubmit): Record<string, string[]> {
 		return ((e as any).namedValues as Record<string, string[]>) || {};
 	}
@@ -225,6 +230,12 @@ namespace FormHandlers {
 			});
 		}
 
+		for (let i = selectedEvents.length - 1; i >= 0; i--) {
+			if (!isRetiredThirdHourEvent(selectedEvents[i])) continue;
+			Log.warn('Ignoring retired Third Hour event in attendance form submission.');
+			selectedEvents.splice(i, 1);
+		}
+
 		if (selectedEvents.length === 0) {
 			Log.warn('No events selected in attendance form submission; skipping.');
 			return;
@@ -238,9 +249,7 @@ namespace FormHandlers {
 			// Determine event type from event name pattern
 			let eventType = '';
 			if (eventName.includes('LLAB') || eventName.includes('TW-')) {
-				if (eventName.includes('POC Third Hour')) {
-					eventType = 'POC';
-				} else if (eventName.includes('Secondary')) {
+				if (eventName.includes('Secondary')) {
 					eventType = 'Secondary';
 				} else if (eventName.includes('LLAB')) {
 					eventType = 'LLAB';
@@ -260,7 +269,6 @@ namespace FormHandlers {
 				const matches = 
 					(eventType === 'Mando' && columnLower.includes('(mando)')) ||
 					(eventType === 'LLAB' && columnLower.includes('(llab)')) ||
-					(eventType === 'POC' && columnLower.includes('(poc)')) ||
 					(eventType === 'Secondary' && columnLower.includes('(secondary)')) ||
 					(eventType === 'Other' && columnLower.includes('(all)'));
 
@@ -283,8 +291,6 @@ namespace FormHandlers {
 				flightValue = flightOrCrosstown || flightFromDirectory;
 			} else if (eventType === 'Secondary') {
 				flightValue = 'Secondary';
-			} else if (eventType === 'POC') {
-				flightValue = 'POC Third Hour';
 			} else if (eventType === 'Other') {
 				flightValue = 'Other';
 			}
@@ -377,6 +383,12 @@ namespace FormHandlers {
 			}
 		}
 		if (!Arrays.EXCUSAL_REQUESTED_OUTCOMES.includes(requestedOutcome)) requestedOutcome = 'E';
+
+		for (let i = events.length - 1; i >= 0; i--) {
+			if (!isRetiredThirdHourEvent(events[i])) continue;
+			Log.warn('Ignoring retired Third Hour event in excusal form submission.');
+			events.splice(i, 1);
+		}
 
 		if (events.length === 0) {
 			Log.warn(`Excusal submission from ${email} has no events; skipping backend append.`);

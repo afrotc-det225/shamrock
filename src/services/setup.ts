@@ -1,6 +1,23 @@
 // Setup service: idempotent provisioning of spreadsheets, sheets, and forms.
 
 namespace SetupService {
+  function removeRetiredThirdHourEvents(): number {
+    const sheet = Config.getBackendSheet('Events Backend');
+    const rows = SheetUtils.readTable(sheet).rows;
+    const retained = rows.filter((row) => {
+      const value = [
+        row['event_id'],
+        row['event_type'],
+        row['display_name'],
+        row['attendance_column_label'],
+      ].map((part) => String(part || '').toLowerCase()).join(' ');
+      return !value.includes('third hour') && !value.includes('thirdhour');
+    });
+    const removed = rows.length - retained.length;
+    if (removed) SheetUtils.writeTable(sheet, retained);
+    return removed;
+  }
+
   function extractFormIdFromUrl(url: string): string | null {
     if (!url) return null;
     // Common Forms URL formats:
@@ -1404,6 +1421,12 @@ namespace SetupService {
           }
         });
 
+        for (let i = selectedEvents.length - 1; i >= 0; i--) {
+          const normalized = selectedEvents[i].toLowerCase();
+          if (!normalized.includes('third hour') && !normalized.includes('thirdhour')) continue;
+          selectedEvents.splice(i, 1);
+        }
+
         if (selectedEvents.length === 0) {
           rowNum++;
           return;
@@ -1416,9 +1439,7 @@ namespace SetupService {
           // Determine event type from event name pattern
           let eventType = '';
           if (eventName.includes('LLAB') || eventName.includes('TW-')) {
-            if (eventName.includes('POC Third Hour')) {
-              eventType = 'POC';
-            } else if (eventName.includes('Secondary')) {
+            if (eventName.includes('Secondary')) {
               eventType = 'Secondary';
             } else if (eventName.includes('LLAB')) {
               eventType = 'LLAB';
@@ -1436,7 +1457,6 @@ namespace SetupService {
             const matches =
               (eventType === 'Mando' && titleLower.includes('(mando)')) ||
               (eventType === 'LLAB' && titleLower.includes('(llab)')) ||
-              (eventType === 'POC' && titleLower.includes('(poc)')) ||
               (eventType === 'Secondary' && titleLower.includes('(secondary)')) ||
               (eventType === 'Other' && titleLower.includes('(all)'));
 
@@ -1471,8 +1491,6 @@ namespace SetupService {
             flightValue = flightCrosstown || cadet?.flight || '';
           } else if (eventType === 'Secondary') {
             flightValue = 'Secondary';
-          } else if (eventType === 'POC') {
-            flightValue = 'POC Third Hour';
           } else if (eventType === 'Other') {
             flightValue = 'Other';
           }
@@ -3315,13 +3333,19 @@ namespace SetupService {
   }
 
   export function refreshEventsArtifacts() {
+    const removedThirdHourEvents = removeRetiredThirdHourEvents();
     ProgressService.report({
       title: 'Publishing current events',
-      detail: 'Syncing Events Backend definitions to their mapped surfaces.',
+      detail: removedThirdHourEvents
+        ? `Removed ${removedThirdHourEvents} retired Third Hour definition(s) and syncing the remaining events.`
+        : 'Syncing the supported Events Backend definitions to their mapped surfaces.',
       percent: 16,
       step: 1,
       totalSteps: 4,
     });
+    if (removedThirdHourEvents) {
+      Log.info(`Removed ${removedThirdHourEvents} retired Third Hour event definition(s).`);
+    }
     SyncService.syncByBackendSheetName('Events Backend');
     ProgressService.report({
       title: 'Rebuilding event-based attendance columns',

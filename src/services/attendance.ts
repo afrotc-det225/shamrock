@@ -82,6 +82,10 @@ namespace AttendanceService {
         sourceIndex,
       }))
       .filter((e) => e.name)
+      .filter((e) => {
+        const value = `${e.eventId} ${e.eventType} ${e.name}`.toLowerCase();
+        return !value.includes('third hour') && !value.includes('thirdhour');
+      })
       .sort((a, b) => {
         const weekNumber = (event: EventDef) => {
           const match = (event.trainingWeek || event.name).match(/TW-(\d+)/i);
@@ -92,8 +96,7 @@ namespace AttendanceService {
           if (value.includes('mando')) return 0;
           if (value.includes('secondary')) return 1;
           if (value.includes('llab')) return 2;
-          if (value.includes('third hour')) return 3;
-          return 4;
+          return 3;
         };
         return weekNumber(a) - weekNumber(b)
           || typePriority(a) - typePriority(b)
@@ -444,23 +447,6 @@ namespace AttendanceService {
         const row = rows[idx] as any;
         if (evName in row) {
           row[evName] = code;
-        }
-      });
-    });
-
-    const isPocThirdHour = (ev: EventDef): boolean => {
-      if (ev.expectedGroup.includes('poc')) return true;
-      if (ev.eventType.includes('third hour')) return true;
-      return ev.name.toLowerCase().includes('poc third hour');
-    };
-
-    // Auto-fill N/A for GMC cadets, including AS500, for POC Third Hour events when no log entry exists.
-    events.forEach((ev) => {
-      if (!isPocThirdHour(ev)) return;
-      rows.forEach((row: any) => {
-        if (!Arrays.isGmcAsYear(row['as_year'])) return;
-        if (row[ev.name] === '' || row[ev.name] === null || row[ev.name] === undefined) {
-          row[ev.name] = 'N/A';
         }
       });
     });

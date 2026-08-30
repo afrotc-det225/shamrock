@@ -231,11 +231,10 @@ namespace FormService {
   function readAttendanceEventBuckets(): {
     mando: string[];
     llab: string[];
-    poc: string[];
     secondary: string[];
     other: string[];
   } {
-    const buckets = { mando: [] as string[], llab: [] as string[], poc: [] as string[], secondary: [] as string[], other: [] as string[] };
+    const buckets = { mando: [] as string[], llab: [] as string[], secondary: [] as string[], other: [] as string[] };
     try {
       const backendId = Config.getBackendId();
       const eventsSheet = backendId ? SheetUtils.getSheet(backendId, 'Events Backend') : null;
@@ -246,13 +245,15 @@ namespace FormService {
         const name = String(r['display_name'] || r['attendance_column_label'] || r['event_id'] || '').trim();
         if (!name) return;
         const type = String(r['event_type'] || '').toLowerCase();
-        const expectedGroup = String(r['expected_group'] || '').toLowerCase();
         const nameLc = name.toLowerCase();
+        const eventId = String(r['event_id'] || '').toLowerCase();
+
+        // Third Hour is retired. Ignore legacy definitions that remain in archived/current data.
+        if (type.includes('third hour') || nameLc.includes('third hour') || eventId.includes('thirdhour')) return;
 
         if (type.includes('llab')) buckets.llab.push(name);
         else if (type.includes('mando')) buckets.mando.push(name);
         else if (type.includes('secondary')) buckets.secondary.push(name);
-        else if (expectedGroup.includes('poc') || type.includes('third hour') || nameLc.includes('poc third hour')) buckets.poc.push(name);
         else buckets.other.push(name);
       });
     } catch (err) {
@@ -275,7 +276,6 @@ namespace FormService {
     byCrosstown: Record<string, Record<string, string[]>>; // university -> AS -> labels
     allByAs: Record<string, string[]>; // AS -> labels
     nonAbroadByAs: Record<string, string[]>; // AS -> labels (exclude flight Abroad)
-    pocByAs: Record<string, string[]>; // AS -> labels (POC years only)
   }
 
   interface AttendanceCadetQuestion {
@@ -321,7 +321,7 @@ namespace FormService {
   }
 
   function buildCadetGroups(): CadetGroups {
-    const groups: CadetGroups = { byFlight: {}, byFlightAll: {}, byCrosstown: {}, allByAs: {}, nonAbroadByAs: {}, pocByAs: {} };
+    const groups: CadetGroups = { byFlight: {}, byFlightAll: {}, byCrosstown: {}, allByAs: {}, nonAbroadByAs: {} };
     try {
       const backendId = Config.getBackendId();
       const sheet = SheetUtils.getSheet(backendId, 'Directory Backend');
@@ -343,12 +343,6 @@ namespace FormService {
         if (!isAbroad) {
           groups.nonAbroadByAs[as] = groups.nonAbroadByAs[as] || [];
           groups.nonAbroadByAs[as].push(label);
-        }
-
-        // POC Third Hour: explicit POC years only; AS500 remains GMC. Exclude Abroad cadets.
-        if (Arrays.isPocAsYear(as) && !isAbroad) {
-          groups.pocByAs[as] = groups.pocByAs[as] || [];
-          groups.pocByAs[as].push(label);
         }
 
         const uniLc = university.toLowerCase().trim();
@@ -382,7 +376,6 @@ namespace FormService {
       };
       sortValues(groups.allByAs);
       sortValues(groups.nonAbroadByAs);
-      sortValues(groups.pocByAs);
       Object.values(groups.byFlight).forEach(sortValues);
       Object.values(groups.byFlightAll).forEach(sortValues);
       Object.values(groups.byCrosstown).forEach(sortValues);
@@ -432,7 +425,6 @@ namespace FormService {
       );
     });
 
-    addGroups(cadets.pocByAs, (asYear) => attendanceCadetQuestionTitle('POC', asYear), 'POC Branch');
     addGroups(cadets.nonAbroadByAs, (asYear) => attendanceCadetQuestionTitle('Secondary', asYear), 'Secondary Branch');
     addGroups(cadets.allByAs, (asYear) => attendanceCadetQuestionTitle('All', asYear), 'Attendance Branch');
     return questions;
@@ -689,11 +681,6 @@ namespace FormService {
     const llabEventList = addListItemSafe(workingForm, 'Select Event (LLAB)', undefined, true);
     workingForm = llabEventList.form;
 
-    const pocEventsPage = addPageBreakItemSafe(workingForm, 'Third Hour Events', FormApp.PageNavigationType.CONTINUE);
-    workingForm = pocEventsPage.form;
-    const pocEventList = addListItemSafe(workingForm, 'Select Event (POC Third Hour)', undefined, true);
-    workingForm = pocEventList.form;
-
     const secondaryEventsPage = addPageBreakItemSafe(workingForm, 'Secondary Events', FormApp.PageNavigationType.CONTINUE);
     workingForm = secondaryEventsPage.form;
     const secondaryEventList = addListItemSafe(workingForm, 'Select Event (Secondary)', undefined, true);
@@ -765,21 +752,7 @@ namespace FormService {
     llabFlightItem.setChoices(llabFlights.map((f) => llabFlightItem.createChoice(f, llabFlightPages[f])));
     Log.info(`Attendance form: LLAB flight pages=${llabFlights.length}`);
 
-    // Section 6: POC Third Hour branch (explicit POC years only, excludes Abroad)
-    const pocPage = addPageBreakItemSafe(workingForm, 'POC Branch', FormApp.PageNavigationType.SUBMIT);
-    workingForm = pocPage.form;
-    const pocStart = pocPage.item;
-    Object.keys(cadets.pocByAs)
-      .sort(Arrays.compareAsYearsForDisplay)
-      .forEach((as) => {
-        const opts = cadets.pocByAs[as];
-        if (!opts || !opts.length) return;
-        const result = addCheckboxItemSafe(workingForm, attendanceCadetQuestionTitle('POC', as), opts);
-        workingForm = result.form;
-      });
-    Log.info(`Attendance form: POC groups=${Object.keys(cadets.pocByAs).length}`);
-
-    // Section 7: Secondary branch (non-abroad) -> submit
+    // Section 6: Secondary branch (non-abroad) -> submit
     const secondaryPage = addPageBreakItemSafe(workingForm, 'Secondary Branch', FormApp.PageNavigationType.SUBMIT);
     workingForm = secondaryPage.form;
     const secondaryStart = secondaryPage.item;
@@ -793,7 +766,7 @@ namespace FormService {
       });
     Log.info(`Attendance form: Secondary groups=${Object.keys(cadets.nonAbroadByAs).length}`);
 
-    // Section 8: Other branch (all cadets) -> submit
+    // Section 7: Other branch (all cadets) -> submit
     const fallbackPage = addPageBreakItemSafe(workingForm, 'Attendance Branch', FormApp.PageNavigationType.SUBMIT);
     workingForm = fallbackPage.form;
     const fallbackStart = fallbackPage.item;
@@ -810,14 +783,12 @@ namespace FormService {
     // Populate event lists per category and wire navigation
     const mandoEventChoices: GoogleAppsScript.Forms.Choice[] = [];
     const llabEventChoices: GoogleAppsScript.Forms.Choice[] = [];
-    const pocEventChoices: GoogleAppsScript.Forms.Choice[] = [];
     const secondaryEventChoices: GoogleAppsScript.Forms.Choice[] = [];
     const otherEventChoices: GoogleAppsScript.Forms.Choice[] = [];
     const eventBuckets = readAttendanceEventBuckets();
     eventBuckets.llab.forEach((name) => llabEventChoices.push(llabEventList.item.createChoice(name, llabBranch.item)));
     eventBuckets.mando.forEach((name) => mandoEventChoices.push(mandoEventList.item.createChoice(name, mandoBranch.item)));
     eventBuckets.secondary.forEach((name) => secondaryEventChoices.push(secondaryEventList.item.createChoice(name, secondaryPage.item)));
-    eventBuckets.poc.forEach((name) => pocEventChoices.push(pocEventList.item.createChoice(name, pocPage.item)));
     eventBuckets.other.forEach((name) => otherEventChoices.push(otherEventList.item.createChoice(name, fallbackPage.item)));
 
     // Set choices for each event list (with fallback if empty)
@@ -826,9 +797,6 @@ namespace FormService {
 
     if (llabEventChoices.length) llabEventList.item.setChoices(llabEventChoices);
     else llabEventList.item.setChoices([llabEventList.item.createChoice('(no events)', llabBranch.item)]);
-
-    if (pocEventChoices.length) pocEventList.item.setChoices(pocEventChoices);
-    else pocEventList.item.setChoices([pocEventList.item.createChoice('(no events)', pocPage.item)]);
 
     if (secondaryEventChoices.length) secondaryEventList.item.setChoices(secondaryEventChoices);
     else secondaryEventList.item.setChoices([secondaryEventList.item.createChoice('(no events)', secondaryPage.item)]);
@@ -840,14 +808,13 @@ namespace FormService {
     const categoryChoices: GoogleAppsScript.Forms.Choice[] = [];
     if (mandoEventChoices.length) categoryChoices.push(eventCategoryItem.item.createChoice('Mando PT', mandoEventsPage.item));
     if (llabEventChoices.length) categoryChoices.push(eventCategoryItem.item.createChoice('LLAB', llabEventsPage.item));
-    if (pocEventChoices.length) categoryChoices.push(eventCategoryItem.item.createChoice('POC Third Hour', pocEventsPage.item));
     if (secondaryEventChoices.length) categoryChoices.push(eventCategoryItem.item.createChoice('Secondary', secondaryEventsPage.item));
     if (otherEventChoices.length) categoryChoices.push(eventCategoryItem.item.createChoice('Other', otherEventsPage.item));
 
     if (categoryChoices.length) {
       eventCategoryItem.item.setChoices(categoryChoices);
       Log.info(
-        `Attendance form: event categories wired mando=${mandoEventChoices.length} llab=${llabEventChoices.length} poc=${pocEventChoices.length} secondary=${secondaryEventChoices.length} other=${otherEventChoices.length}`
+        `Attendance form: event categories wired mando=${mandoEventChoices.length} llab=${llabEventChoices.length} secondary=${secondaryEventChoices.length} other=${otherEventChoices.length}`
       );
     } else {
       eventCategoryItem.item.setChoices([
@@ -957,23 +924,20 @@ namespace FormService {
     const eventTypeItem = findMultipleChoiceItem(form, 'Event Type');
     const mandoEventList = findListItem(form, 'Select Event (Mando)');
     const llabEventList = findListItem(form, 'Select Event (LLAB)');
-    const pocEventList = findListItem(form, 'Select Event (POC Third Hour)');
     const secondaryEventList = findListItem(form, 'Select Event (Secondary)');
     const otherEventList = findListItem(form, 'Select Event (Other)');
 
-    if (!eventTypeItem || !mandoEventList || !llabEventList || !pocEventList || !secondaryEventList || !otherEventList) {
+    if (!eventTypeItem || !mandoEventList || !llabEventList || !secondaryEventList || !otherEventList) {
       Log.warn('Attendance form: cannot refresh events; expected multi-page attendance items are missing');
       return;
     }
 
     const mandoEventsPage = findPageBreakItem(form, 'Mando Events');
     const llabEventsPage = findPageBreakItem(form, 'LLAB Events');
-    const pocEventsPage = findPageBreakItem(form, 'Third Hour Events');
     const secondaryEventsPage = findPageBreakItem(form, 'Secondary Events');
     const otherEventsPage = findPageBreakItem(form, 'Other Events');
     const mandoStart = findPageBreakItem(form, 'Mando Branch');
     const llabStart = findPageBreakItem(form, 'LLAB Branch');
-    const pocStart = findPageBreakItem(form, 'POC Branch');
     const secondaryStart = findPageBreakItem(form, 'Secondary Branch');
     const otherStart = findPageBreakItem(form, 'Attendance Branch');
 
@@ -995,21 +959,19 @@ namespace FormService {
 
     const mandoCount = setListChoices(mandoEventList, eventBuckets.mando, mandoStart);
     const llabCount = setListChoices(llabEventList, eventBuckets.llab, llabStart);
-    const pocCount = setListChoices(pocEventList, eventBuckets.poc, pocStart);
     const secondaryCount = setListChoices(secondaryEventList, eventBuckets.secondary, secondaryStart);
     const otherCount = setListChoices(otherEventList, eventBuckets.other, otherStart);
 
     const categoryChoices: GoogleAppsScript.Forms.Choice[] = [];
     if (mandoCount && mandoEventsPage) categoryChoices.push(eventTypeItem.createChoice('Mando PT', mandoEventsPage));
     if (llabCount && llabEventsPage) categoryChoices.push(eventTypeItem.createChoice('LLAB', llabEventsPage));
-    if (pocCount && pocEventsPage) categoryChoices.push(eventTypeItem.createChoice('POC Third Hour', pocEventsPage));
     if (secondaryCount && secondaryEventsPage) categoryChoices.push(eventTypeItem.createChoice('Secondary', secondaryEventsPage));
     if (otherCount && otherEventsPage) categoryChoices.push(eventTypeItem.createChoice('Other', otherEventsPage));
 
     if (categoryChoices.length) {
       eventTypeItem.setChoices(categoryChoices);
       Log.info(
-        `Attendance form: refreshed event choices mando=${mandoCount} llab=${llabCount} poc=${pocCount} secondary=${secondaryCount} other=${otherCount}`
+        `Attendance form: refreshed event choices mando=${mandoCount} llab=${llabCount} secondary=${secondaryCount} other=${otherCount}`
       );
       return;
     }
@@ -1060,11 +1022,6 @@ namespace FormService {
     const llabEventList = addCheckboxItemSafe(workingForm, 'Select Event(s) (LLAB)', []);
     workingForm = llabEventList.form;
 
-    const pocEventsPage = addPageBreakItemSafe(workingForm, 'Third Hour Events', FormApp.PageNavigationType.CONTINUE);
-    workingForm = pocEventsPage.form;
-    const pocEventList = addCheckboxItemSafe(workingForm, 'Select Event(s) (POC Third Hour)', []);
-    workingForm = pocEventList.form;
-
     const secondaryEventsPage = addPageBreakItemSafe(workingForm, 'Secondary Events', FormApp.PageNavigationType.CONTINUE);
     workingForm = secondaryEventsPage.form;
     const secondaryEventList = addCheckboxItemSafe(workingForm, 'Select Event(s) (Secondary)', []);
@@ -1091,43 +1048,16 @@ namespace FormService {
     // progression), so this doesn't affect the submit flow.
     mandoEventsPage.item.setGoToPage(eventCategoryPage.item);
     llabEventsPage.item.setGoToPage(eventCategoryPage.item);
-    pocEventsPage.item.setGoToPage(eventCategoryPage.item);
     secondaryEventsPage.item.setGoToPage(eventCategoryPage.item);
     otherEventsPage.item.setGoToPage(eventCategoryPage.item);
     detailsPage.item.setGoToPage(eventCategoryPage.item);
 
     // Populate event lists per category
-    const backendId = Config.getBackendId();
-    const eventsSheet = backendId ? SheetUtils.getSheet(backendId, 'Events Backend') : null;
-
-    const mandoEventChoices: string[] = [];
-    const llabEventChoices: string[] = [];
-    const pocEventChoices: string[] = [];
-    const secondaryEventChoices: string[] = [];
-    const otherEventChoices: string[] = [];
-
-    if (eventsSheet) {
-      const eventsTable = SheetUtils.readTable(eventsSheet);
-      eventsTable.rows.forEach((r) => {
-        const name = r['display_name'] || r['attendance_column_label'] || r['event_id'];
-        if (!name) return;
-        const type = String(r['event_type'] || '').toLowerCase();
-        const expectedGroup = String(r['expected_group'] || '').toLowerCase();
-        const nameLc = String(name || '').toLowerCase();
-
-        if (type.includes('llab')) {
-          llabEventChoices.push(name);
-        } else if (type.includes('mando')) {
-          mandoEventChoices.push(name);
-        } else if (type.includes('secondary')) {
-          secondaryEventChoices.push(name);
-        } else if (expectedGroup.includes('poc') || type.includes('third hour') || nameLc.includes('poc third hour')) {
-          pocEventChoices.push(name);
-        } else {
-          otherEventChoices.push(name);
-        }
-      });
-    }
+    const eventBuckets = readAttendanceEventBuckets();
+    const mandoEventChoices = eventBuckets.mando;
+    const llabEventChoices = eventBuckets.llab;
+    const secondaryEventChoices = eventBuckets.secondary;
+    const otherEventChoices = eventBuckets.other;
 
     // Set choices for each event list
     if (mandoEventChoices.length) {
@@ -1142,13 +1072,6 @@ namespace FormService {
       llabEventList.item.setChoices(choices);
     } else {
       llabEventList.item.setChoices([llabEventList.item.createChoice('(no events)')]);
-    }
-
-    if (pocEventChoices.length) {
-      const choices = pocEventChoices.map(c => pocEventList.item.createChoice(c));
-      pocEventList.item.setChoices(choices);
-    } else {
-      pocEventList.item.setChoices([pocEventList.item.createChoice('(no events)')]);
     }
 
     if (secondaryEventChoices.length) {
@@ -1169,7 +1092,6 @@ namespace FormService {
     const categoryChoices: GoogleAppsScript.Forms.Choice[] = [];
     if (mandoEventChoices.length) categoryChoices.push(eventCategoryItem.item.createChoice('Mando PT', mandoEventsPage.item));
     if (llabEventChoices.length) categoryChoices.push(eventCategoryItem.item.createChoice('LLAB', llabEventsPage.item));
-    if (pocEventChoices.length) categoryChoices.push(eventCategoryItem.item.createChoice('POC Third Hour', pocEventsPage.item));
     if (secondaryEventChoices.length) categoryChoices.push(eventCategoryItem.item.createChoice('Secondary', secondaryEventsPage.item));
     if (otherEventChoices.length) categoryChoices.push(eventCategoryItem.item.createChoice('Other', otherEventsPage.item));
     
@@ -1179,7 +1101,7 @@ namespace FormService {
     if (categoryChoices.length > 1) {
       eventCategoryItem.item.setChoices(categoryChoices);
       Log.info(
-        `Excusals form: event categories wired mando=${mandoEventChoices.length} llab=${llabEventChoices.length} poc=${pocEventChoices.length} secondary=${secondaryEventChoices.length} other=${otherEventChoices.length}`
+        `Excusals form: event categories wired mando=${mandoEventChoices.length} llab=${llabEventChoices.length} secondary=${secondaryEventChoices.length} other=${otherEventChoices.length}`
       );
     } else {
       eventCategoryItem.item.setChoices([
@@ -1215,16 +1137,6 @@ namespace FormService {
         }
       })
       ?.asCheckboxItem() || null;
-    const pocEventList = form
-      .getItems(FormApp.ItemType.CHECKBOX)
-      .find((item) => {
-        try {
-          return String(item.getTitle() || '').trim() === 'Select Event(s) (POC Third Hour)';
-        } catch {
-          return false;
-        }
-      })
-      ?.asCheckboxItem() || null;
     const secondaryEventList = form
       .getItems(FormApp.ItemType.CHECKBOX)
       .find((item) => {
@@ -1246,14 +1158,13 @@ namespace FormService {
       })
       ?.asCheckboxItem() || null;
 
-    if (!eventTypeItem || !mandoEventList || !llabEventList || !pocEventList || !secondaryEventList || !otherEventList) {
+    if (!eventTypeItem || !mandoEventList || !llabEventList || !secondaryEventList || !otherEventList) {
       Log.warn('Excusals form: cannot refresh events; expected multi-page excusals items are missing');
       return;
     }
 
     const mandoEventsPage = findPageBreakItem(form, 'Mando Events');
     const llabEventsPage = findPageBreakItem(form, 'LLAB Events');
-    const pocEventsPage = findPageBreakItem(form, 'Third Hour Events');
     const secondaryEventsPage = findPageBreakItem(form, 'Secondary Events');
     const otherEventsPage = findPageBreakItem(form, 'Other Events');
 
@@ -1270,14 +1181,12 @@ namespace FormService {
 
     const mandoCount = setCheckboxChoices(mandoEventList, eventBuckets.mando);
     const llabCount = setCheckboxChoices(llabEventList, eventBuckets.llab);
-    const pocCount = setCheckboxChoices(pocEventList, eventBuckets.poc);
     const secondaryCount = setCheckboxChoices(secondaryEventList, eventBuckets.secondary);
     const otherCount = setCheckboxChoices(otherEventList, eventBuckets.other);
 
     const categoryChoices: GoogleAppsScript.Forms.Choice[] = [];
     if (mandoCount && mandoEventsPage) categoryChoices.push(eventTypeItem.createChoice('Mando PT', mandoEventsPage));
     if (llabCount && llabEventsPage) categoryChoices.push(eventTypeItem.createChoice('LLAB', llabEventsPage));
-    if (pocCount && pocEventsPage) categoryChoices.push(eventTypeItem.createChoice('POC Third Hour', pocEventsPage));
     if (secondaryCount && secondaryEventsPage) categoryChoices.push(eventTypeItem.createChoice('Secondary', secondaryEventsPage));
     if (otherCount && otherEventsPage) categoryChoices.push(eventTypeItem.createChoice('Other', otherEventsPage));
     if (detailsPage) categoryChoices.push(eventTypeItem.createChoice('Done selecting events', detailsPage));
@@ -1285,7 +1194,7 @@ namespace FormService {
     if (categoryChoices.length) {
       eventTypeItem.setChoices(categoryChoices);
       Log.info(
-        `Excusals form: refreshed event choices mando=${mandoCount} llab=${llabCount} poc=${pocCount} secondary=${secondaryCount} other=${otherCount}`
+        `Excusals form: refreshed event choices mando=${mandoCount} llab=${llabCount} secondary=${secondaryCount} other=${otherCount}`
       );
       return;
     }

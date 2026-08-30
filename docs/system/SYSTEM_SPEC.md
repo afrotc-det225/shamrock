@@ -202,12 +202,13 @@ Roster status:
 - Directory `Flight Path` values `Inactive`, `Commissioned`, and `Dropped` are non-operational statuses. Rows with those statuses remain in Directory Backend for recordkeeping but are excluded from frontend Directory, derived Leadership, Attendance, and form cadet choices.
 
 Cadet groups and display order:
-- GMC years are `AS100`, `AS150`, `AS200`, `AS250`, and `AS500`; AS500 is not eligible for POC Third Hour and receives `N/A` for those events when no explicit attendance log exists.
+- GMC years are `AS100`, `AS150`, `AS200`, `AS250`, and `AS500`.
 - POC years are `AS300`, `AS400`, `AS700`, `AS800`, and `AS900`.
-- `AF Civ` is an independent non-cadet AS-year option. It may be paired with any `class_year`, is neither GMC nor POC, and is not included in POC Third Hour groups.
+- `AF Civ` is an independent non-cadet AS-year option. It may be paired with any `class_year` and is neither GMC nor POC.
 - Cadet lists and year-based Dashboard summaries display in this order: `AS900`, `AS800`, `AS700`, `AS400`, `AS300`, `AS500`, `AS250`, `AS200`, `AS150`, `AS100`, `AF Civ`.
 - Attendance Form roster refreshes preserve existing question IDs while restoring that order within every cadet subsection. Question titles omit redundant `AS` prefixes (for example, `Cadets (Delta) AS400 (Mando)` and `Cadets (Delta) AF Civ (Mando)`).
-- Attendance matrix event columns sort by training week, then `Mando`, `Secondary`, `LLAB`, and `POC Third Hour`; the matrix does not depend on physical Events Backend row order.
+- Attendance matrix event columns sort by training week, then `Mando`, `Secondary`, and `LLAB`; the matrix does not depend on physical Events Backend row order.
+- POC Third Hour is outside the supported active event model. Event refresh removes legacy active definitions, matrix rebuilds ignore them, new transitions do not generate them, and Attendance/Excusals form submissions reject them.
 - Incremental Attendance Form submissions restore Attendance input validation and summary coloring after writing values so dropdown metadata and presentation remain stable.
 - Excusals Backend and Excusals Management edit handling process every edited Decision row, including pasted or fill-down multi-row ranges, under the same serialized write discipline. Reconciliation first repairs management/backend decision mismatches, then compares the latest authoritative decided excusal for each cadet/event with the effective Attendance Backend log, appends missing corrective effects, rebuilds both attendance matrices, records audit entries, and suppresses duplicate historical notification emails.
 

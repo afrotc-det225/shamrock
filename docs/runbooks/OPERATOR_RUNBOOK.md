@@ -122,7 +122,7 @@ Post-deploy validation checklist:
 - Treat frontend attendance as derived state. Rebuild it instead of manually patching formulas or event columns.
 - Routine Directory and Event changes synchronize Attendance Form choices in place, restore each cadet subsection to the canonical senior-to-junior AS-year order, and remove duplicated `AS` prefixes from legacy question labels without replacing question IDs. Do not use a structural form rebuild just to refresh choices.
 - Attendance submission parsing accepts the canonical cadet question labels (`AS400`, `AF Civ`, and the other supported year labels) as well as legacy duplicated-`AS` labels.
-- Within each training week, Attendance displays event columns as Mando, Secondary, LLAB, then POC Third Hour. Form submissions reapply the Attendance dropdown rules and percentage gradient after their incremental value update.
+- Within each training week, Attendance displays event columns as Mando, Secondary, then LLAB. POC Third Hour is retired and is removed from active Events, Attendance columns, and Attendance/Excusals form choices when event artifacts refresh. Form submissions reapply the Attendance dropdown rules and percentage gradient after their incremental value update.
 - Periodic Directory reconciliation uses the complete Attendance rebuild path, including table-aware cell formatting, validation, and protection repair for any resized roster rows.
 - Use `Rebuild Attendance Form (archive responses)` only when the form structure itself needs repair or at the transition phase that intentionally rebuilds it. The action briefly stops responses, keeps the former raw response tab as a hidden timestamped archive, verifies a fresh `Attendance Form Responses` destination, and restores the form's prior open/closed state.
 - Google may take tens of seconds to create and backfill the new linked tab from the Form response store. Historical email addresses and response rows in that newly linked tab are expected; the Form collects responder email and retains its own response store independently of the spreadsheet archive.
@@ -160,7 +160,7 @@ Before starting:
 - Prepare dropped cadets as emails or `Last, First` identifiers.
 - Prepare non-standard AS-year overrides as `identifier=AS500` or similar.
 - Prepare leadership changes as `identifier=Role|Rank`.
-- Know the Sunday date for the first generated training week and the weekly Mando PT, LLAB, and POC Third Hour times.
+- Know the Sunday date for the first generated training week and the weekly Mando PT and LLAB times.
 
 During the wizard:
 - The draft is saved after each prompt. Cancelling before final confirmation does not archive or rewrite workbook data.

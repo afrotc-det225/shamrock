@@ -128,7 +128,7 @@ The v2 transition workflow prepares SHAMROCK for a new semester or academic year
 ### Validation
 
 - Confirm archived frontend tabs exist, are hidden, use the previous term label, and have matching table names.
-- Confirm Events Backend contains the new term, expected training weeks, and Mando/LLAB/Secondary/POC events.
+- Confirm Events Backend contains the new term, expected training weeks, and Mando/LLAB/Secondary events, with no Third Hour definitions.
 - Confirm Directory marks dropped/commissioned cadets inactive, applies AS-year overrides when applicable, clears role/flight/squadron, and resets default ranks.
 - Confirm Leadership reflects Directory roles plus cadre/manual contacts.
 - Confirm Attendance matrix and both Attendance/Excusals forms were rebuilt from the new Events Backend.
@@ -139,9 +139,9 @@ The v2 transition workflow prepares SHAMROCK for a new semester or academic year
 
 Attendance records form submissions in backend logs and derives the frontend attendance matrix from attendance events, excusals, and directory state.
 The v2 code set is `P`, `T`, `A`, `R`, `D`, `U`, `E`, `ES`, `MED`, and `N/A`.
-AS500 is a GMC year. AS500 cadets are excluded from POC Third Hour form groups and receive `N/A` for POC Third Hour in the matrix unless an explicit attendance entry exists. AF Civ is neither GMC nor POC and is also excluded from POC Third Hour groups. Year-grouped lists place AS500 below AS300 and above AS250, with AF Civ below AS100.
+AS500 is a GMC year. AF Civ is neither GMC nor POC. Year-grouped lists place AS500 below AS300 and above AS250, with AF Civ below AS100.
 
-Attendance event columns are grouped by training week and ordered Mando, Secondary, LLAB, then POC Third Hour. Each form submission restores the Attendance dropdown metadata and summary coloring after applying its incremental attendance values. Periodic Directory reconciliation also completes the full Attendance table, formatting, validation, and protection repair after a roster-driven matrix rebuild.
+Attendance event columns are grouped by training week and ordered Mando, Secondary, then LLAB. POC Third Hour is retired: event refreshes remove its active definitions, attendance rebuilds ignore legacy definitions, and the Attendance and Excusals forms do not offer it. Each form submission restores the Attendance dropdown metadata and summary coloring after applying its incremental attendance values. Periodic Directory reconciliation also completes the full Attendance table, formatting, validation, and protection repair after a roster-driven matrix rebuild.
 
 ### Operator Entry Points
 
@@ -171,8 +171,9 @@ Attendance event columns are grouped by training week and ordered Mando, Seconda
 - Confirm the response is appended to Attendance Backend.
 - Rebuild attendance and confirm the frontend matrix updates deterministically.
 - Change a roster field that affects Attendance, allow periodic Directory reconciliation to run, and confirm all active Attendance rows retain the standard table formatting, attendance-code validation, and protections.
-- Confirm AS500 cadets are counted as GMC, are absent from POC Third Hour choices, receive `N/A` for POC Third Hour when no entry exists, and sort between AS300 and AS250.
-- Confirm AF Civ is available in AS-year dropdowns, remains outside GMC/POC counts and POC Third Hour choices, accepts any class year, and sorts below AS100.
+- Confirm Events Backend, Attendance, and both event-selection forms contain no POC Third Hour choices or columns after refreshing event artifacts.
+- Confirm AS500 cadets are counted as GMC and sort between AS300 and AS250.
+- Confirm AF Civ is available in AS-year dropdowns, remains outside GMC/POC counts, accepts any class year, and sorts below AS100.
 - Confirm each Attendance Form cadet subsection follows the canonical senior-to-junior AS-year order and question labels do not contain duplicated prefixes such as `AS AS400` or `AS AF Civ`.
 - Confirm attendance codes use the same validation presentation as the newest Attendance archive, validate against Data Legend options, and leave frontend table column types unset.
 - Confirm visible Attendance headers are left-aligned, event headers wrap, event/code cells use Plain text display with bold text, and `Overall`/`LLAB` percentage values are bold.

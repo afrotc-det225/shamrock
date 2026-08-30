@@ -20,9 +20,6 @@ namespace TransitionService {
     llabWeekday: number;
     llabStartTime: string;
     llabMinutes: number;
-    thirdHourWeekday: number;
-    thirdHourStartTime: string;
-    thirdHourMinutes: number;
     removedCadets: string[];
     asYearOverrides: Record<string, string>;
     roleUpdates: Record<string, RoleUpdate>;
@@ -112,7 +109,7 @@ namespace TransitionService {
     },
     events: {
       title: 'Generating the new term events',
-      detail: 'Writing training-week Mando, LLAB, Secondary, and POC Third Hour definitions.',
+      detail: 'Writing training-week Mando, LLAB, and Secondary definitions.',
     },
     leadership: {
       title: 'Rebuilding Leadership assignments',
@@ -332,9 +329,6 @@ namespace TransitionService {
       llabWeekday: 2,
       llabStartTime: '15:30',
       llabMinutes: 120,
-      thirdHourWeekday: 4,
-      thirdHourStartTime: '15:30',
-      thirdHourMinutes: 60,
       removedCadets: [],
       asYearOverrides: {},
       roleUpdates: {},
@@ -356,11 +350,6 @@ namespace TransitionService {
     draft.llabWeekday = parseWeekday(promptValue('LLAB weekday', 'Enter the weekday for LLAB.', 'Tuesday'), draft.llabWeekday);
     draft.llabStartTime = promptValue('LLAB start time', 'Enter start time using 24-hour HH:MM.', draft.llabStartTime);
     draft.llabMinutes = parsePositiveInt(promptValue('LLAB duration', 'Enter duration in minutes.', String(draft.llabMinutes)), draft.llabMinutes);
-    saveDraft(draft);
-
-    draft.thirdHourWeekday = parseWeekday(promptValue('POC Third Hour weekday', 'Enter the weekday for POC Third Hour.', 'Thursday'), draft.thirdHourWeekday);
-    draft.thirdHourStartTime = promptValue('POC Third Hour start time', 'Enter start time using 24-hour HH:MM.', draft.thirdHourStartTime);
-    draft.thirdHourMinutes = parsePositiveInt(promptValue('POC Third Hour duration', 'Enter duration in minutes.', String(draft.thirdHourMinutes)), draft.thirdHourMinutes);
     saveDraft(draft);
 
     draft.removedCadets = parseList(promptValue('Dropped cadets', 'Optional. Enter emails or "Last, First" identifiers for cadets to remove, separated by semicolons or new lines.', ''));
@@ -684,32 +673,13 @@ namespace TransitionService {
         created_by: 'transition_v2',
       });
 
-      const thirdStart = dateForWeekday(weekStart, draft.thirdHourWeekday, draft.thirdHourStartTime);
-      rows.push({
-        event_id: `${idBase}-POC-THIRDHOUR`,
-        term: draft.term,
-        training_week: twLabel,
-        event_type: 'Third Hour',
-        display_name: `${twLabel} POC Third Hour`,
-        attendance_column_label: `POC Third Hour ${twLabel}`,
-        expected_group: 'POC',
-        flight_scope: 'All',
-        status: 'Active',
-        start_datetime: isoLocal(thirdStart),
-        end_datetime: isoLocal(dateForWeekday(weekStart, draft.thirdHourWeekday, draft.thirdHourStartTime, draft.thirdHourMinutes)),
-        location: '',
-        notes: '',
-        created_at: createdAt,
-        created_by: 'transition_v2',
-      });
     }
     const eventTypePriority = (row: Record<string, any>) => {
       const value = `${row['event_type'] || ''} ${row['display_name'] || ''}`.toLowerCase();
       if (value.includes('mando')) return 0;
       if (value.includes('secondary')) return 1;
       if (value.includes('llab')) return 2;
-      if (value.includes('third hour')) return 3;
-      return 4;
+      return 3;
     };
     return rows.sort((a, b) => {
       const weekA = Number(String(a['training_week'] || '').match(/\d+/)?.[0] || Number.MAX_SAFE_INTEGER);
