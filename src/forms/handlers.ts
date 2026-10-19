@@ -91,7 +91,20 @@ namespace FormHandlers {
 	}
 
 	function getEmail(e: GoogleAppsScript.Events.FormsOnFormSubmit): string {
-		const fromResponse = e.response.getRespondentEmail();
+		// This read can time out before the handler has recorded any attendance.
+		// Retry only the read, never the handler's writes or notifications.
+		let fromResponse = '';
+		for (let attempt = 1; attempt <= 3; attempt++) {
+			try {
+				fromResponse = e.response.getRespondentEmail();
+				break;
+			} catch (err) {
+				const transient = /timed out|timeout|internal error|server error|temporarily unavailable|service unavailable|failed to retrieve form data/i.test(String(err));
+				if (!transient || attempt === 3) throw err;
+				Log.warn(`Responder email read temporarily failed; retrying (attempt ${attempt + 1} of 3).`);
+				Utilities.sleep(400 * attempt);
+			}
+		}
 		if (fromResponse) return String(fromResponse).trim();
 		const nv = (e as any).namedValues || {};
 		const keys = ['Email'];

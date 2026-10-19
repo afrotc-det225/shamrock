@@ -7,7 +7,7 @@ Review date: October 18, 2026. Requested scope: the past few months, interpreted
 - Read all 2,985 existing Audit Backend data rows, including 1,733 dated July–October. Found 26 failed actions, dated July 2–August 30; no later failed rows were present. This does not prove trigger executions were error-free because some trigger handlers swallowed errors without recording failed audit entries.
 - Compared all deployed Apps Script JavaScript files with the compiled repository baseline at `43038b8`; they matched before this change.
 - Checked GitHub issues and the connected mailbox for Apps Script failure summaries; neither supplied additional failure records.
-- Cloud Logging could not be read through clasp because no GCP project ID is configured. The Apps Script process-list API rejected the available credential scopes. Therefore a complete execution-level error history was not available.
+- Cloud Logging could not be read through clasp because no GCP project ID is configured. The Apps Script process-list API rejected the available credential scopes. After browser sign-in, the execution page exposed the last seven days: one attendance responder-email timeout and three zero-duration scheduled-run failures, in addition to the deployment-check API failure described below. One scheduled failure reported Google storage `INTERNAL`; the other two had no available logs. A complete execution-level history for July–October was not available.
 - Inspected 1,276 Attendance Backend records, 396 excusal requests, 312 management rows, current event definitions, and both 90-cadet attendance matrices. No raw operational records, IDs, or personal data are included in this report or committed tests.
 
 ## Recorded failures
@@ -34,6 +34,7 @@ Review date: October 18, 2026. Requested scope: the past few months, interpreted
 - Backend-edit and periodic reconciliation exceptions now produce failed audit entries and failed executions instead of silent success.
 - Excusal attendance repair could overwrite later attendance reports, manual corrections, or newly pending requests with an older decision. It now preserves those newer independent records and reports the preservation count.
 - Management edit handling now resolves actual machine headers and reports an empty backend explicitly rather than requesting a zero/negative-height range.
+- The newly accessible October 16 attendance failure occurred while reading the responder email, before any backend write. Transient read failures now receive at most three attempts; permission errors fail immediately. Only the read is retried, so recovery does not duplicate writes or notifications.
 
 ## Live data correction
 
@@ -45,13 +46,20 @@ One old malformed Attendance Backend row targets a non-event header value and ha
 
 Native browser visual verification was unavailable because the browser connection closed. Cell-level readback verified all changed values, validation rules, and formatting.
 
+After deployment and browser sign-in, live no-email reconciliation checked 307 management decisions and 305 authoritative attendance effects, preserved 62 newer attendance records, repaired three saved excusal-effect fields, and rebuilt both matrices. It found no missing backend matches or attendance effects requiring new log entries. The three withdrawal blanks in each matrix survived the rebuild.
+
+The October 16 responder-email timeout left one preserved attendance response unprocessed. Its four cadet selections were checked against the effective logs: one was already Present, two had later automated closeout Absence entries, and one retained an older excusal. Appended one recovered attendance log with the original response timestamp and all four selections; corrected the three affected entries to Present in both matrices. Readback confirmed the appended record, all six corrected cells, unchanged formatting/validation, and the six earlier withdrawal blanks. Paired `attendance_response_recovery` audit entries document the repair. No notifications were sent.
+
 ## Validation and release status
 
-- `npm run build`, `npm test` (20 regression cases), and `git diff --check` pass.
+- `npm run build`, `npm test` (23 regression cases), and `git diff --check` pass.
 - The initial 15-case regression suite produced 14 failures against the original source, confirming it detects the original defects.
 - Tests use synthetic data and Apps Script IO doubles. They do not substitute for Google Forms, sharing, trigger, and live-progress smoke tests.
-- Source changes are prepared on `dev`; production code has not been deployed as part of this review.
-- Until the blank-replay fix is deployed, a production Attendance rebuild can recreate the three incorrect Present values. Avoid historical excusal reconciliation until the newer-record preservation fix is deployed.
-- After approved deployment, follow the October regression checks in `OPERATOR_RUNBOOK.md`, verify form-trigger uniqueness, and validate management sharing as the workbook owner. Do not resend historical emails during recovery.
+- After explicit approval, merged source commit `a5d41d0` into `main`, pushed `main` to GitHub, and deployed through `npm run push` on October 18, 2026, at approximately 8:00 PM Central.
+- Before deployment, verified that production still matched the reviewed baseline; no intervening remote edits were overwritten. After deployment, downloaded the project and verified all 27 files, including the manifest, against the committed source's build output with no differences.
+- Post-deployment workbook readback confirmed all six corrected attendance cells remained blank. The frontend cells retained their formatting and strict Data Legend-backed dropdown validation.
+- A command-line attempt to run the no-op `onFrontendOpen` returned Google's storage `NOT_FOUND` error without a script stack. Browser execution subsequently succeeded: Show menu help displayed live progress and completed; no-email excusal reconciliation and the full Attendance rebuild completed.
+- The project trigger page showed 11 triggers, including exactly one form-submit trigger for each of the three form handlers, the management edit trigger, and the supported scheduled handlers. All belong to a different account from the signed-in admin; they were inspected without replacing their ownership.
+- The responder-email retry follow-up has passed local validation; its deployment and the remaining management/Form checks are recorded after completion. No synthetic submissions or historical notification emails were sent during validation.
 
-Rollback: retain the audited data corrections, revert only the source change that causes a verified regression, and deploy the reviewed revert through the normal approval process. Do not delete raw responses or backend logs. Reverting the blank-replay fix reintroduces the risk described above.
+Rollback: retain the audited data corrections, revert only the source change that causes a verified regression, and deploy the reviewed revert through the normal approval process. Do not delete raw responses or backend logs. Reverting the blank-replay fix can recreate incorrect Present values when attendance is rebuilt.

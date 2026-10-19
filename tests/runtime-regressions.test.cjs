@@ -45,6 +45,65 @@ function readTable(s) {
   return { headers: s.cells[0], rows: s.cells.slice(2).map(row => Object.fromEntries(s.cells[0].map((h, i) => [h, row[i]]))) };
 }
 
+function attendanceSubmissionFixture(readEmail) {
+  const appended = [], applied = [], sleeps = [];
+  const { FormHandlers } = load(['forms/handlers.ts'], {
+    Config: { getBackendId: () => '', getFrontendId: () => '', getBackendSheet: () => ({}) },
+    SheetUtils: { appendRows: (_, rows) => appended.push(...rows) },
+    AttendanceService: { applyAttendanceLogEntry: row => applied.push(row) },
+    SetupService: { applyAttendanceBackendFormattingPublic() {} },
+    FormService: { isAttendanceCadetQuestionTitle: title => title.startsWith('Cadets (') },
+    Utilities: { sleep: delay => sleeps.push(delay) },
+    GmailApp: { sendEmail() { throw new Error('Attendance must not send receipts'); } },
+  });
+  const event = { response: {
+    getRespondentEmail: readEmail,
+    getTimestamp: () => new Date('2026-10-16T20:15:10Z'),
+    getItemResponses: () => [
+      ['Select Event (Secondary)', 'TW-8 Secondary'],
+      ['Cadets (Secondary) AS200', ['Example, Cadet']],
+    ].map(([title, value]) => ({ getItem: () => ({ getTitle: () => title }), getResponse: () => value })),
+  } };
+  return { run: () => FormHandlers.onAttendanceFormSubmit(event), appended, applied, sleeps };
+}
+
+test('transient responder email failures recover before one attendance write', () => {
+  let reads = 0;
+  const c = attendanceSubmissionFixture(() => {
+    if (++reads < 3) throw new Error('Service Drive timed out while accessing document');
+    return 'cadet@example.test';
+  });
+  c.run();
+  assert.equal(reads, 3);
+  assert.deepEqual(c.sleeps, [400, 800]);
+  assert.equal(c.appended.length, 1);
+  assert.equal(c.applied.length, 1);
+  assert.equal(c.appended[0].email, 'cadet@example.test');
+  assert.equal(c.appended[0].cadets, 'Example, Cadet');
+  assert.equal(c.appended[0].attendance_type, 'P');
+});
+
+test('persistent responder email failures stop before any attendance write', () => {
+  let reads = 0;
+  const failure = new Error('Service Drive timed out while accessing document');
+  const c = attendanceSubmissionFixture(() => { reads++; throw failure; });
+  assert.throws(c.run, err => err === failure);
+  assert.equal(reads, 3);
+  assert.deepEqual(c.sleeps, [400, 800]);
+  assert.equal(c.appended.length, 0);
+  assert.equal(c.applied.length, 0);
+});
+
+test('responder permission failures are not retried or treated as an empty email', () => {
+  let reads = 0;
+  const c = attendanceSubmissionFixture(() => { reads++; throw new Error('Permission denied'); });
+  assert.throws(c.run, /Permission denied/);
+  assert.equal(reads, 1);
+  assert.deepEqual(c.sleeps, []);
+  assert.equal(c.appended.length, 0);
+  assert.equal(c.applied.length, 0);
+});
+
 test('pause with an operator reason blocks updates and resume recognizes the pause', () => {
   let value;
   const { PauseService } = load(['services/pause.ts'], { Config: {

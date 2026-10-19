@@ -121,6 +121,7 @@ Post-deploy validation checklist:
 
 ### 5.3 Attendance processing
 - Attendance submissions append to Attendance Backend.
+- Transient Google failures while reading the responder email are retried up to three times before processing starts. Permission errors and exhausted retries remain failed executions; check the preserved response before recovering a missing submission. The retry never repeats attendance writes or notifications.
 - Frontend Attendance matrix is derived; rebuild is available via admin menu.
 - Treat frontend attendance as derived state. Rebuild it instead of manually patching formulas or event columns.
 - Routine Directory and Event changes synchronize Attendance Form choices in place, restore each cadet subsection to the canonical senior-to-junior AS-year order, and remove duplicated `AS` prefixes from legacy question labels without replacing question IDs. Do not use a structural form rebuild just to refresh choices.
