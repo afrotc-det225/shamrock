@@ -254,20 +254,46 @@ test('management access failure never provisions a replacement workbook', () => 
   assert.equal(propertyWritten, false);
 });
 
+function managementProtectionMetadata() {
+  const protection = (description, range, extra = []) => ({ description, range, editors: { users: ['admin@example.test', ...extra] } });
+  return { sheets: [
+    { properties: { sheetId: 1, title: 'Blue', gridProperties: { rowCount: 10, columnCount: 3 } }, protectedRanges: [
+      protection('Blue: Headers protected', { sheetId: 1, endRowIndex: 2, endColumnIndex: 3 }),
+      protection('Blue: Managed request fields 1', { sheetId: 1, startRowIndex: 2, endRowIndex: 10, endColumnIndex: 1 }),
+      protection('Blue: Managed request fields 2', { sheetId: 1, startRowIndex: 2, endRowIndex: 10, startColumnIndex: 2, endColumnIndex: 3 }),
+      protection('Blue: Decisions editable only by squadron commander', { sheetId: 1, startRowIndex: 2, endRowIndex: 10, startColumnIndex: 1, endColumnIndex: 2 }, ['commander@example.test']),
+    ] },
+    { properties: { sheetId: 2, title: '_Excusals Data Legend' }, protectedRanges: [protection('Excusals Management Data Legend', { sheetId: 2 })] },
+  ] };
+}
+
 test('management sharing preserves backend administrators and removes former role access', () => {
   const removed = [], added = [], viewers = [];
-  const user = email => ({ getEmail: () => email });
-  const backend = { getEditors: () => [user('admin@example.test')], getOwner: () => user('owner@example.test') };
+  const roles = new Map([['admin@example.test', 'reader'], ['owner@example.test', 'owner'], ['former@example.test', 'writer']]);
+  let failAdminRead = false;
   const management = {
-    getOwner: () => user('owner@example.test'), getEditors: () => [user('admin@example.test'), user('former@example.test')],
-    getViewers: () => [], getSheets: () => [],
-    addEditors(emails) { added.push(...emails); }, addEditor(email) { added.push(email); },
-    removeEditor(email) { removed.push(email); }, addViewer(email) { viewers.push(email); },
+    getEditors() { throw new Error('Profile-based emails must not determine access'); },
+    getSheets: () => [], getSheetByName: () => null, getId: () => 'management',
+    addEditors(emails) { added.push(...emails); emails.forEach(email => { if (roles.get(email) !== 'owner') roles.set(email, 'writer'); }); },
+    addEditor(email) { added.push(email); roles.set(email, 'writer'); },
+    removeEditor(email) { removed.push(email); roles.delete(email); },
+    removeViewer(email) { removed.push(email); roles.delete(email); },
+    addViewer(email) { viewers.push(email); roles.set(email, 'reader'); },
   };
   const c = load(['services/excusals.ts'], {
     Config: { PROPERTY_KEYS: {}, getScriptProperty: () => 'management', getBackendId: () => 'backend' },
-    Arrays: { FLIGHTS: ['Alpha'], OPERATIONAL_SQUADRONS: ['Blue'], getSquadronCommanderUnit: role => role === 'blue squadron commander' ? 'Blue' : '' },
-    SpreadsheetApp: { openById: id => id === 'backend' ? backend : management },
+    Arrays: { FLIGHTS: ['Alpha'], OPERATIONAL_SQUADRONS: ['Blue'], getSquadronCommanderUnit: role => role.toLowerCase() === 'blue squadron commander' ? 'Blue' : '' },
+    Schemas: { EXCUSALS_MANAGEMENT_SCHEMA: { machineHeaders: ['timestamp', 'decision', 'event'] } },
+    Sheets: { Spreadsheets: { get: managementProtectionMetadata } },
+    SpreadsheetApp: { openById: () => management },
+    ScriptApp: { getOAuthToken: () => 'test-token' },
+    UrlFetchApp: { fetch(url) {
+      if (url.includes('/backend/') && failAdminRead) throw new Error('admin lookup failed');
+      const permissions = url.includes('/backend/')
+        ? [{ type: 'user', role: 'writer', emailAddress: 'admin@example.test' }, { type: 'user', role: 'owner', emailAddress: 'owner@example.test' }]
+        : [...roles].map(([emailAddress, role]) => ({ type: 'user', role, emailAddress }));
+      return { getResponseCode: () => 200, getContentText: () => JSON.stringify({ permissions }) };
+    } },
     SheetUtils: { getSheet: () => ({}), readTable: () => ({ rows: [
       { role: 'Blue Squadron Commander', email: 'commander@example.test' },
       { role: 'Alpha Flight Commander', email: 'admin@example.test' },
@@ -280,10 +306,90 @@ test('management sharing preserves backend administrators and removes former rol
   assert.ok(added.includes('owner@example.test'));
   assert.ok(added.includes('commander@example.test'));
   assert.deepEqual(viewers, []);
-  backend.getEditors = () => { throw new Error('admin lookup failed'); };
+  assert.equal(roles.get('admin@example.test'), 'writer');
+  failAdminRead = true;
   const removals = removed.length;
   assert.throws(() => c.ExcusalsService.shareAndProtectManagementSpreadsheet(), /admin lookup failed/);
   assert.equal(removed.length, removals);
+});
+
+test('management protection verification rejects missing admins, extra access and incomplete ranges', () => {
+  let metadata;
+  const c = load(['services/excusals.ts'], {
+    Config: { getBackendId: () => 'backend' },
+    Arrays: { OPERATIONAL_SQUADRONS: ['Blue'], getSquadronCommanderUnit: () => 'Blue' },
+    SheetUtils: { getSheet: () => ({}), readTable: () => ({ rows: [{ role: 'Blue Squadron Commander', email: 'commander@example.test' }] }) },
+    Schemas: { EXCUSALS_MANAGEMENT_SCHEMA: { machineHeaders: ['timestamp', 'decision', 'event'] } },
+    Sheets: { Spreadsheets: { get: () => metadata } },
+  }, ['verifyManagementProtections']);
+  const verify = () => c.ExcusalsService.verifyManagementProtections({ getId: () => 'management' }, ['admin@example.test', 'owner@example.test'], 'owner@example.test');
+  metadata = managementProtectionMetadata();
+  verify();
+  for (const mutate of [
+    m => { m.sheets[0].protectedRanges[0].editors.users = []; },
+    m => { m.sheets[0].protectedRanges[0].editors.users.push('commander@example.test'); },
+    m => { m.sheets[0].protectedRanges[3].range.endRowIndex = 9; },
+    m => { m.sheets[1].protectedRanges[0].warningOnly = true; },
+    m => { m.sheets[1].protectedRanges[0].editors.domainUsersCanEdit = true; },
+    m => { m.sheets[0].protectedRanges.pop(); },
+  ]) {
+    metadata = managementProtectionMetadata();
+    mutate(metadata);
+    assert.throws(verify, /Management protection/);
+  }
+});
+
+test('management administrator lookup reads every permission page without losing cross-domain editors', () => {
+  const urls = [];
+  const c = load(['services/excusals.ts'], {
+    Config: { getBackendId: () => 'backend' },
+    ScriptApp: { getOAuthToken: () => 'test-token' },
+    UrlFetchApp: { fetch(url) {
+      urls.push(url);
+      const page = url.includes('pageToken=next')
+        ? { permissions: [{ type: 'user', role: 'writer', emailAddress: 'Admin@Example.test' }, { type: 'user', role: 'reader', emailAddress: 'reader@example.test' }] }
+        : { nextPageToken: 'next', permissions: [{ type: 'user', role: 'owner', emailAddress: 'owner@example.test' }] };
+      return { getResponseCode: () => 200, getContentText: () => JSON.stringify(page) };
+    } },
+  }, ['managementAdminEmails']);
+  assert.deepEqual(Array.from(c.ExcusalsService.managementAdminEmails()), ['owner@example.test', 'admin@example.test']);
+  assert.equal(urls.length, 2);
+});
+
+test('incomplete or denied administrator lookup cannot become an empty sharing allowlist', () => {
+  let status = 403, permissions = [];
+  const c = load(['services/excusals.ts'], {
+    Config: { getBackendId: () => 'backend' }, ScriptApp: { getOAuthToken: () => 'test-token' },
+    UrlFetchApp: { fetch: () => ({ getResponseCode: () => status, getContentText: () => JSON.stringify({ permissions }) }) },
+  }, ['managementAdminEmails']);
+  assert.throws(() => c.ExcusalsService.managementAdminEmails(), /HTTP 403/);
+  status = 200;
+  assert.throws(() => c.ExcusalsService.managementAdminEmails(), /No backend administrators/);
+  permissions = [{ type: 'user', role: 'owner', emailAddress: 'owner@example.test' }, { type: 'user', role: 'writer' }];
+  assert.throws(() => c.ExcusalsService.managementAdminEmails(), /resolved completely/);
+});
+
+test('editor sharing recovery audits success without requiring a spreadsheet dialog', () => {
+  const audit = [];
+  let context, calls = 0;
+  const c = load(['index.ts'], {
+    Utilities: { getUuid: () => 'test-run' },
+    Config: { PROPERTY_KEYS: {}, getScriptProperty: () => 'management' },
+    SpreadsheetApp: { getUi() { throw new Error('Cannot call SpreadsheetApp.getUi() from this context'); } },
+    ProgressService: {
+      currentRunId: () => context, prepareAndShow: () => false,
+      withExecutionContext(id, action, fn) { context = id; try { return fn(); } finally { context = undefined; } },
+      begin() {}, report() {}, complete() {}, fail() {},
+    },
+    AuditService: { actorEmail: () => 'owner@example.test', log: row => audit.push(row) },
+    ExcusalsService: { shareAndProtectManagementSpreadsheet() { calls++; } },
+  });
+  c.shareExcusalsManagementSpreadsheet();
+  assert.equal(calls, 1);
+  assert.deepEqual(audit.map(row => row.result), ['started', 'ok']);
+  c.ExcusalsService.shareAndProtectManagementSpreadsheet = () => { throw new Error('sharing denied'); };
+  assert.throws(() => c.shareExcusalsManagementSpreadsheet(), /sharing denied/);
+  assert.equal(audit.at(-1).result, 'failed');
 });
 
 test('backend pasted range checks every affected Directory field', () => {

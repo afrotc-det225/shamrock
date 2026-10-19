@@ -667,7 +667,11 @@ function shareExcusalsManagementSpreadsheet() {
     ExcusalsService.shareAndProtectManagementSpreadsheet();
     const managementId = Config.getScriptProperty(Config.PROPERTY_KEYS.EXCUSAL_MANAGEMENT_SPREADSHEET_ID);
     const url = managementId ? `https://docs.google.com/spreadsheets/d/${managementId}` : 'N/A';
-    SpreadsheetApp.getUi().alert(`Excusals management spreadsheet shared with commanders and protected:\n${url}`);
+    // Script-editor recovery has no dialog host; completed sharing must still
+    // receive a successful audit result in that supported execution context.
+    let ui: GoogleAppsScript.Base.Ui | undefined;
+    try { ui = SpreadsheetApp.getUi(); } catch {}
+    if (ui) ui.alert(`Excusals management spreadsheet shared with commanders and protected:\n${url}`);
   });
 }
 

@@ -221,14 +221,106 @@ SHAMROCK Automations`;
     return `${squadron}${MANAGEMENT_TABLE_SUFFIX}`;
   }
 
+  interface ManagementPermission {
+    type: string;
+    role: string;
+    emailAddress?: string;
+    deleted?: boolean;
+  }
+
+  function managementPermissions(fileId: string): ManagementPermission[] {
+    // User.getEmail() can omit cross-domain collaborators. Read the actual file
+    // permission addresses instead of treating unavailable profiles as no access.
+    const permissions: ManagementPermission[] = [];
+    const seen = new Set<string>();
+    let pageToken = '';
+    do {
+      const query = 'pageSize=100&supportsAllDrives=true&fields='
+        + encodeURIComponent('nextPageToken,permissions(type,role,emailAddress,deleted)')
+        + (pageToken ? `&pageToken=${encodeURIComponent(pageToken)}` : '');
+      const response = UrlFetchApp.fetch(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}/permissions?${query}`, {
+        headers: { Authorization: `Bearer ${ScriptApp.getOAuthToken()}` },
+        muteHttpExceptions: true,
+      });
+      if (response.getResponseCode() !== 200) {
+        throw new Error(`Unable to read workbook sharing (HTTP ${response.getResponseCode()}); access was not refreshed.`);
+      }
+      const page = JSON.parse(response.getContentText());
+      if (!Array.isArray(page.permissions)) throw new Error('Workbook sharing returned an incomplete permission list.');
+      permissions.push(...page.permissions.filter((permission: ManagementPermission) => !permission.deleted));
+      pageToken = String(page.nextPageToken || '');
+      if (pageToken && seen.has(pageToken)) throw new Error('Workbook sharing pagination did not complete.');
+      seen.add(pageToken);
+    } while (pageToken);
+    return permissions;
+  }
+
   function managementAdminEmails(): string[] {
-    // Read this before changing sharing. A failed admin lookup must never be
-    // interpreted as an empty allowlist and revoke the automation owner's access.
-    const backend = SpreadsheetApp.openById(Config.getBackendId());
-    const emails = backend.getEditors().map((user) => user.getEmail());
-    const owner = backend.getOwner()?.getEmail();
-    if (owner) emails.push(owner);
-    return Array.from(new Set(emails.map((email) => String(email || '').trim().toLowerCase()).filter(Boolean)));
+    // Resolve every explicit backend administrator before changing sharing.
+    const permissions = managementPermissions(Config.getBackendId());
+    const editors = permissions.filter((permission) => ['owner', 'writer'].includes(permission.role));
+    if (editors.some((permission) => !['user', 'group'].includes(permission.type) || !permission.emailAddress)) {
+      throw new Error('Backend administrator sharing could not be resolved completely; access was not refreshed.');
+    }
+    const emails = Array.from(new Set(editors.map((permission) => String(permission.emailAddress).trim().toLowerCase())));
+    if (!emails.length) throw new Error('No backend administrators could be resolved; access was not refreshed.');
+    return emails;
+  }
+
+  function protectManagementLegend(sheet: GoogleAppsScript.Spreadsheet.Sheet, admins: string[]) {
+    sheet.getProtections(SpreadsheetApp.ProtectionType.SHEET).forEach((protection) => protection.remove());
+    const protection = sheet.protect().setDescription('Excusals Management Data Legend');
+    protection.setWarningOnly(false);
+    try { protection.removeEditors(protection.getEditors()); } catch {}
+    protection.addEditors(admins);
+    if (protection.canDomainEdit()) protection.setDomainEdit(false);
+  }
+
+  function verifyManagementProtections(ss: GoogleAppsScript.Spreadsheet.Spreadsheet, admins: string[], owner: string) {
+    const metadata = (globalThis as any).Sheets.Spreadsheets.get(ss.getId(), {
+      fields: 'sheets(properties(sheetId,title,gridProperties),protectedRanges(description,range,warningOnly,editors,unprotectedRanges))',
+    });
+    let checked = 0;
+    for (const name of [...Arrays.OPERATIONAL_SQUADRONS, MANAGEMENT_LEGEND_SHEET]) {
+      const sheet = metadata.sheets?.find((entry: any) => entry.properties?.title === name);
+      if (!sheet) throw new Error(`Management protection verification could not find ${name}.`);
+      const expected = name === MANAGEMENT_LEGEND_SHEET
+        ? [{ description: 'Excusals Management Data Legend', range: { sheetId: sheet.properties.sheetId }, editors: admins }]
+        : (() => {
+          const rowEnd = sheet.properties.gridProperties.rowCount;
+          const colEnd = sheet.properties.gridProperties.columnCount;
+          const decision = (Schemas.EXCUSALS_MANAGEMENT_SCHEMA.machineHeaders || []).indexOf('decision');
+          const range = (startRowIndex: number, endRowIndex: number, startColumnIndex: number, endColumnIndex: number) =>
+            ({ sheetId: sheet.properties.sheetId, startRowIndex, endRowIndex, startColumnIndex, endColumnIndex });
+          const fields = [];
+          if (decision > 0) fields.push(range(2, rowEnd, 0, decision));
+          if (decision + 1 < colEnd) fields.push(range(2, rowEnd, decision + 1, colEnd));
+          return [
+            { description: `${name}: Headers protected`, range: range(0, 2, 0, colEnd), editors: admins },
+            ...fields.map((field, index) => ({ description: `${name}: Managed request fields ${index + 1}`, range: field, editors: admins })),
+            { description: `${name}: Decisions editable only by squadron commander`, range: range(2, rowEnd, decision, decision + 1), editors: [...admins, getSquadronCommanderEmail(name)].filter(Boolean) },
+          ];
+        })();
+      const actual = sheet.protectedRanges || [];
+      if (actual.length !== expected.length) throw new Error(`Management protection count is incorrect on ${name}.`);
+      for (const requirement of expected) {
+        const protection = actual.find((entry: any) => entry.description === requirement.description);
+        const allowed = new Set([...requirement.editors, owner].filter(Boolean).map((email) => email.toLowerCase()));
+        const editors = new Set<string>([...(protection?.editors?.users || []), ...(protection?.editors?.groups || []), owner]
+          .filter(Boolean).map((email: string) => email.toLowerCase()));
+        const rangeMatches = protection && ['sheetId', 'startRowIndex', 'endRowIndex', 'startColumnIndex', 'endColumnIndex'].every((key) => {
+          const expectedValue = (requirement.range as any)[key];
+          const actualValue = protection.range?.[key];
+          return key.startsWith('start') ? (actualValue || 0) === (expectedValue || 0) : actualValue === expectedValue;
+        });
+        if (!rangeMatches || protection.warningOnly || protection.editors?.domainUsersCanEdit || protection.unprotectedRanges?.length
+          || [...allowed].some((email) => !editors.has(email)) || [...editors].some((email) => !allowed.has(email))) {
+          throw new Error(`Management protection verification failed for ${requirement.description}. Run sharing again as the owner.`);
+        }
+        checked++;
+      }
+    }
+    Log.info(`Verified ${checked} management protections and backend administrator access.`);
   }
 
   function ensureManagementDecisionLegend(
@@ -269,11 +361,7 @@ SHAMROCK Automations`;
       sheet.setColumnWidth(1, 180);
       ss.setNamedRange(MANAGEMENT_DECISION_RANGE, sourceRange);
     } finally {
-      const protection = sheet.protect().setDescription('Excusals Management Data Legend');
-      protection.setWarningOnly(false);
-      try { protection.removeEditors(protection.getEditors()); } catch {}
-      if (admins.length) protection.addEditors(admins);
-      if (protection.canDomainEdit()) protection.setDomainEdit(false);
+      protectManagementLegend(sheet, admins);
       if (!sheet.isSheetHidden()) sheet.hideSheet();
     }
     if (!sourceRange) throw new Error('Unable to prepare the Excusals Management decision legend.');
@@ -843,11 +931,6 @@ SHAMROCK Automations`;
 
     try {
       const ss = SpreadsheetApp.openById(managementId);
-      try {
-        DriveApp.getFileById(managementId).setSharing(DriveApp.Access.PRIVATE, DriveApp.Permission.NONE);
-      } catch (err) {
-        Log.warn(`Unable to enforce private link/domain sharing on the Excusals management workbook: ${err}`);
-      }
       const backendId = Config.getBackendId();
       if (!backendId) {
         throw new Error('The backend workbook is not configured; management access was not refreshed.');
@@ -873,10 +956,8 @@ SHAMROCK Automations`;
       });
 
       const adminEmails = managementAdminEmails();
-
-      const ownerEmail = (() => {
-        try { return String(ss.getOwner()?.getEmail() || '').trim().toLowerCase(); } catch { return ''; }
-      })();
+      const existingPermissions = managementPermissions(managementId);
+      const ownerEmail = existingPermissions.find((permission) => permission.role === 'owner')?.emailAddress?.trim().toLowerCase();
       const intendedEditors = new Set([...squadronEditorEmails, ...adminEmails]);
       if (ownerEmail) intendedEditors.add(ownerEmail);
       intendedEditors.forEach((email) => flightViewerEmails.delete(email));
@@ -884,41 +965,39 @@ SHAMROCK Automations`;
       // Restore intended administrator access before removing stale assignments.
       // Fail visibly if this cannot be done instead of reporting a repaired panel.
       if (adminEmails.length) ss.addEditors(adminEmails);
+      DriveApp.getFileById(managementId).setSharing(DriveApp.Access.PRIVATE, DriveApp.Permission.NONE);
 
       // Remove stale role-based access before applying current Leadership state.
-      ss.getEditors().forEach((user) => {
-        const email = String(user.getEmail() || '').trim().toLowerCase();
-        if (email && !intendedEditors.has(email)) {
-          try { ss.removeEditor(email); } catch (err) { Log.warn(`Failed to remove stale management editor ${email}: ${err}`); }
-        }
-      });
-      ss.getViewers().forEach((user) => {
-        const email = String(user.getEmail() || '').trim().toLowerCase();
-        if (email && !flightViewerEmails.has(email)) {
-          try { ss.removeViewer(email); } catch (err) { Log.warn(`Failed to remove stale management viewer ${email}: ${err}`); }
-        }
+      existingPermissions.forEach((permission) => {
+        const email = String(permission.emailAddress || '').trim().toLowerCase();
+        if (!email || intendedEditors.has(email)) return;
+        if (permission.role === 'writer') ss.removeEditor(email);
+        else if (['reader', 'commenter'].includes(permission.role) && !flightViewerEmails.has(email)) ss.removeViewer(email);
       });
 
-      squadronEditorEmails.forEach((email) => {
-        try {
-          ss.addEditor(email);
-        } catch (err) {
-          Log.warn(`Failed to add editor ${email}: ${err}`);
-        }
-      });
-      flightViewerEmails.forEach((email) => {
-        try {
-          ss.addViewer(email);
-        } catch (err) {
-          Log.warn(`Failed to add viewer ${email}: ${err}`);
-        }
-      });
+      squadronEditorEmails.forEach((email) => ss.addEditor(email));
+      flightViewerEmails.forEach((email) => ss.addViewer(email));
 
       // Apply range protections: each squadron sheet editable only by its commander
-      applyManagementSheetProtections(ss);
+      applyManagementSheetProtections(ss, adminEmails);
+      const legend = ss.getSheetByName(MANAGEMENT_LEGEND_SHEET);
+      if (legend) protectManagementLegend(legend, adminEmails);
+
+      ProgressService.report({
+        title: 'Checking management access',
+        detail: 'Confirming administrator access and protected fields on both squadron tabs and the decision legend.',
+        percent: 92,
+      });
+      const actualPermissions = managementPermissions(managementId);
+      const actualEditors = new Set(actualPermissions.filter((permission) => ['owner', 'writer'].includes(permission.role))
+        .map((permission) => String(permission.emailAddress || '').trim().toLowerCase()));
+      if ([...intendedEditors].some((email) => !actualEditors.has(email))) {
+        throw new Error('Management editor access did not persist. Run sharing again as the workbook owner.');
+      }
+      verifyManagementProtections(ss, adminEmails, ownerEmail || '');
 
       Log.info(
-        `Management access refreshed: ${squadronEditorEmails.size} squadron commander editor(s), `
+        `Management access refreshed: ${adminEmails.length} backend administrator(s), ${squadronEditorEmails.size} squadron commander editor(s), `
         + `${flightViewerEmails.size} flight leadership viewer(s)`,
       );
     } catch (err) {
@@ -1804,10 +1883,9 @@ C/${commanderLastName}`;
   }
 
   /** Apply protections so only each squadron commander can edit Decision cells on their squadron tab. */
-  function applyManagementSheetProtections(ss: GoogleAppsScript.Spreadsheet.Spreadsheet) {
+  function applyManagementSheetProtections(ss: GoogleAppsScript.Spreadsheet.Spreadsheet, admins = managementAdminEmails()) {
     const sheets = ss.getSheets();
     const squadrons = Arrays.OPERATIONAL_SQUADRONS;
-    const admins = managementAdminEmails();
 
     sheets.forEach((sheet) => {
       const sheetName = sheet.getName();

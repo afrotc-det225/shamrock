@@ -35,6 +35,7 @@ Review date: October 18, 2026. Requested scope: the past few months, interpreted
 - Excusal attendance repair could overwrite later attendance reports, manual corrections, or newly pending requests with an older decision. It now preserves those newer independent records and reports the preservation count.
 - Management edit handling now resolves actual machine headers and reports an empty backend explicitly rather than requesting a zero/negative-height range.
 - The newly accessible October 16 attendance failure occurred while reading the responder email, before any backend write. Transient read failures now receive at most three attempts; permission errors fail immediately. Only the read is retried, so recovery does not duplicate writes or notifications.
+- Owner-level validation exposed an incomplete administrator recovery and a false failure from the editor's missing spreadsheet dialog. Management sharing now resolves administrator addresses from the full Drive permission list, preserves promoted editors during stale-viewer cleanup, refreshes the hidden legend protection, and verifies workbook editors and all managed protections. Editor runs keep the same audit wrapper and no longer require a final UI alert. Google documents that [user email values can be unavailable](https://developers.google.com/apps-script/reference/base/user); unavailable profile values must not become a partial administrator allowlist.
 
 ## Live data correction
 
@@ -52,7 +53,7 @@ The October 16 responder-email timeout left one preserved attendance response un
 
 ## Validation and release status
 
-- `npm run build`, `npm test` (23 regression cases), and `git diff --check` pass.
+- `npm run build`, `npm test` (27 regression cases), and `git diff --check` pass.
 - The initial 15-case regression suite produced 14 failures against the original source, confirming it detects the original defects.
 - The three responder-read regression cases produced two failures and one permission-error pass against the pre-retry source; all three pass with the follow-up fix.
 - Tests use synthetic data and Apps Script IO doubles. They do not substitute for Google Forms, sharing, trigger, and live-progress smoke tests.
