@@ -17,7 +17,7 @@ Every feature must comply with docs/system/SYSTEM_SPEC.md.
 
 Confirm explicitly:
 - Provisioning is idempotent ensure-exists (safe to re-run).
-- Tables use row 1 machine headers and start data tables at row 2.
+- Tables use row 1 machine headers, row 2 display headers, and data starting at row 3. Raw Google Form response tabs retain Google's own header layout.
 - Column access is header-driven (no hardcoded column indexes).
 - Dropdowns and validations reference Data Legend ranges.
 - Validation inside a Sheets Table is applied through cell-level Sheets API `setDataValidation` or validation-only `copyPaste` requests after table columns are reset to `COLUMN_TYPE_UNSPECIFIED`; do not apply a single `Range.setDataValidation(...)` rule across a table column.

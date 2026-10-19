@@ -20,6 +20,7 @@ Each environment consists of:
 - Backend workbook
 - Attendance form
 - Excusals form
+- Directory form
 
 IDs and resource references:
 - Store environment-specific IDs in a configuration mechanism designed not to leak secrets.
@@ -44,6 +45,7 @@ Setup outputs to verify:
 - Custom menus appear in the backend/admin workbook.
 - Admin menus do not appear in the frontend/main workbook.
 - Triggers exist and are correctly bound.
+- Form handlers each have one matching form-submit trigger. Setup removes stale, duplicate, and wrong-event form triggers.
 - No frontend open trigger is installed; the frontend open handler is intentionally a no-op.
 - The canonical clock triggers are the daily 5:00 AM event-aware attendance notice dispatcher and the Sunday 5:00 PM prior-week attendance closeout. Fixed weekday Mando PT and LLAB triggers should not remain after `Reinstall triggers`.
 
@@ -99,6 +101,7 @@ Post-deploy validation checklist:
 - After a progress-poller deployment, reload any backend workbook tab that already had a progress dialog open; deployed HTML cannot replace a stale dialog frame that the browser already loaded.
 
 ### 5.1 Directory maintenance
+- Pause/resume applies to frontend/backend edit propagation and periodic Directory reconciliation; it does not disable Forms submissions or scheduled attendance notices. A pause reason is retained and honored. Failed flag writes are reported as failures.
 - Directory source of truth is maintained in the backend.
 - Frontend Directory is a mirror.
 - Frontend Directory displays cadet organization before leadership details: `Year`, `Flight`, `Sqdn`, `Rank`, `Role`, then `University` and the remaining fields.
@@ -113,7 +116,7 @@ Post-deploy validation checklist:
 
 ### 5.2 Event maintenance
 - Events are maintained in the backend.
-- Frontend Events is a mirror.
+- There is no active frontend Events tab; Events Backend drives Attendance columns and form choices.
 - Event changes may require attendance matrix and form choice refreshes.
 
 ### 5.3 Attendance processing
@@ -124,20 +127,24 @@ Post-deploy validation checklist:
 - Attendance submission parsing accepts the canonical cadet question labels (`AS400`, `AF Civ`, and the other supported year labels) as well as legacy duplicated-`AS` labels.
 - Within each training week, Attendance displays event columns as Mando, Secondary, then LLAB. POC Third Hour is retired and is removed from active Events, Attendance columns, and Attendance/Excusals form choices when event artifacts refresh. Form submissions reapply the Attendance dropdown rules and percentage gradient after their incremental value update.
 - Periodic Directory reconciliation uses the complete Attendance rebuild path, including table-aware cell formatting, validation, and protection repair for any resized roster rows.
+- Periodic Directory reconciliation also refreshes derived Leadership and Attendance Form choices. Backend multi-column pastes inspect every edited field when deciding which dependent views need rebuilding.
 - Use `Rebuild Attendance Form (archive responses)` only when the form structure itself needs repair or at the transition phase that intentionally rebuilds it. The action briefly stops responses, keeps the former raw response tab as a hidden timestamped archive, verifies a fresh `Attendance Form Responses` destination, and restores the form's prior open/closed state.
 - Google may take tens of seconds to create and backfill the new linked tab from the Form response store. Historical email addresses and response rows in that newly linked tab are expected; the Form collects responder email and retains its own response store independently of the spreadsheet archive.
 - Use `Debug Attendance response columns` to review only header-count health. It does not log submission contents.
 - Use `Repair Attendance Backend from responses` after a known submit-processing failure. It compares the preserved raw responses with Attendance Backend, fills only blank cadet lists, appends missing event rows, leaves populated rows unchanged, and incrementally reapplies recovered entries to the attendance matrix.
 - V2 attendance codes are `P`, `T`, `A`, `R`, `D`, `U`, `E`, `ES`, `MED`, and `N/A`.
 - `A` requires follow-up, `R` is pending leadership review, and `D` means a denied advance request where the cadet is still expected to attend.
+- A withdrawal that restores blank must remain blank after a full rebuild. Rebuilds do not turn empty attendance effects into Present. Incremental writes match frontend rows by cadet identity and columns by event header.
 
 ### 5.4 Excusals processing
 - Requests append via form.
 - Decisions are made in Excusals Backend by authorized staff or in the separate Excusals Management workbook by the applicable Blue/Gold squadron commander.
 - In Excusals Management, link/domain sharing is private, squadron commanders are editors, canonical flight commanders/deputies are viewers, and only the applicable squadron commander's Decision cells are editable. Headers and request detail fields remain protected. Active Blue/Gold tabs are native Sheets tables using the frontend Directory table style. A hidden protected local Data Legend supplies strict Decision dropdown validation, with Approved green, Denied red, Withdrawn amber, and Superseded purple.
 - Decisions drive notifications and attendance effects.
+- Management sharing preserves backend administrators (including the backend owner) in workbook and range permissions. An access error must be repaired on the configured workbook by its owner; setup will not silently create a replacement. Permission recovery may require the owner to run setup/sharing once to repair older protected ranges.
 - Single-cell and multi-row Decision edits in both Excusals Backend and Excusals Management are processed row by row under a shared write lock. If any decided request is missing from Attendance, run `SHAMROCK → Excusals → Reconcile management decisions`; it repairs management/backend mismatches, compares every authoritative decided excusal with the effective Attendance Backend log, appends only missing corrective effects, rebuilds both attendance matrices, and does not resend historical decision emails.
 - If management dropdown edits stop reaching SHAMROCK, run `SHAMROCK → Excusals → Setup management spreadsheet`. The action removes stale or duplicate management edit triggers and installs the canonical trigger on the active management workbook; then run `Reconcile management decisions` once to recover decisions made while the trigger was missing.
+- Reconciliation preserves independent attendance records newer than a decision, including actual attendance and a reopened pending request. Review its `Newer attendance records preserved` count; differences from an older approval are not automatically missing effects.
 - Requested outcomes are `P`, `T`, `E`, `ES`, and `MED`.
 - Confirm the Excusals Form's `Excusal Details` section explains all attendance codes and lists the allowed requested outcomes. `Refresh Excusals Form choices` reapplies this description without replacing question IDs.
 - Routine setup and `Refresh Excusals Form choices` preserve existing question IDs. Use `Rebuild Excusals Form (archive responses)` only for structural repair or a transition; it archives the linked response tab and verifies a clean replacement.
@@ -149,6 +156,16 @@ Post-deploy validation checklist:
 ### 5.5 Audit review
 - Review Audit Backend after setup, repair, and bulk operator actions.
 - Matching `started` and terminal rows with the same `run_id` indicate a menu action completed, failed, or was cancelled.
+- Trigger failures from backend edits and periodic Directory reconciliation also have failed audit entries. The absence of failed menu rows alone does not establish that all trigger executions succeeded.
+
+### 5.5.1 Regression validation after the October error review
+- Run `npm run build`, `npm test`, and `git diff --check` locally.
+- In a test environment, pause with a reason and verify edit propagation stays paused until resume; Forms and scheduled notices remain enabled.
+- Refresh Attendance Form choices twice and confirm stable question IDs/order, including recovery from a temporary Forms read failure.
+- Reinstall triggers twice and verify one form-submit trigger per configured form handler.
+- Withdraw a controlled request whose prior code was blank; rebuild Attendance and verify both matrices remain blank. A newer actual attendance report must survive excusal reconciliation.
+- Refresh management sharing as its owner and verify backend admins retain access, while flight viewers and commander Decision-only restrictions remain intact.
+- See `docs/runbooks/ERROR_REVIEW_2026-10.md` for review coverage, known historical failures, and production validation limits.
 
 ### 5.6 Semester and academic-year transition
 Use the backend/admin workbook SHAMROCK menu:

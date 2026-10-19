@@ -439,7 +439,9 @@ namespace AttendanceService {
     logRows.forEach((entry) => {
       const evName = entry['event'] || entry['display_name'] || '';
       if (!evName) return;
-      const code = String(entry['attendance_type'] || 'P');
+      // A blank log entry intentionally clears a withdrawn/superseded request.
+      // Replay must agree with the incremental path, including that blank.
+      const code = String(entry['attendance_type'] ?? '').trim();
       const cadets = parseCadetEntries(entry['cadets'] || '');
       cadets.forEach((c) => {
         const idx = keyToIndex.get(buildKey(c.last, c.first));
@@ -518,14 +520,20 @@ namespace AttendanceService {
     const colValues = data.map((row) => [row[eventColIdx]]);
     matrixSheet.getRange(3, eventColIdx + 1, colValues.length, 1).setValues(colValues);
 
-    // Mirror to frontend matrix if available
+    // Resolve the frontend's own headers and cadet rows. Its order can differ
+    // after a sort or an interrupted rebuild; backend positions are not keys.
     if (frontendId) {
       const frontendSheet = SheetUtils.getSheet(frontendId, 'Attendance');
       if (frontendSheet) {
-        try {
-          frontendSheet.getRange(3, eventColIdx + 1, colValues.length, 1).setValues(colValues);
-        } catch (err) {
-          Log.warn(`Failed to mirror attendance to frontend: ${err}`);
+        const frontend = SheetUtils.readTable(frontendSheet);
+        const frontendEventIndex = frontend.headers.indexOf(eventName);
+        if (frontendEventIndex < 0) {
+          throw new Error('Frontend Attendance is missing the event column. Rebuild Attendance to restore it.');
+        }
+        const affected = new Set(cadets.map((cadet) => buildKey(cadet.last, cadet.first)));
+        if (frontend.rows.length) {
+          const values = frontend.rows.map((row) => [affected.has(cadetKey(row)) ? code : (row[eventName] ?? '')]);
+          frontendSheet.getRange(3, frontendEventIndex + 1, values.length, 1).setValues(values);
         }
       }
     }

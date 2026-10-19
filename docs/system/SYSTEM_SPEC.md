@@ -14,7 +14,7 @@ SHAMROCK is an Apps Script system (TypeScript, V8 runtime) that provisions and o
 - Primary surfaces:
   - A Frontend Google Sheet workbook used by end users.
   - A Backend Google Sheet workbook used as the source of truth.
-  - Google Forms (Attendance, Excusals) used for controlled data entry.
+  - Google Forms (Directory, Attendance, Excusals) used for controlled data entry.
 - Interaction model:
   - End users do not edit tables directly; edits flow through forms and scripted operations.
   - Admins operate the system via custom menus and controlled backend edits.
@@ -47,6 +47,7 @@ Provisioning responsibilities:
 
 Idempotency rules:
 - Do not duplicate sheets, named ranges, triggers, or form items when re-run.
+- Form-trigger repair retains exactly one matching form-submit trigger per handler and removes duplicates, stale sources, and incorrect event/source types. Failure to remove a stale trigger stops the repair.
 - Prefer deterministic resource naming.
 - Where a resource exists but differs from desired state, setup should update it.
 - Setup must avoid destructive operations unless explicitly invoked by an admin “reset” action.
@@ -197,6 +198,7 @@ Attendance codes:
 - `D` means a pre-event request was denied and attendance is still required.
 - `N/A` means the cadet was not expected for that event.
 - Blank means not yet taken / not applicable yet.
+- Blank log effects are intentional clears, including withdrawn requests with no prior attendance. Full replay and incremental updates must preserve them; neither may substitute `P` for blank. Incremental frontend writes resolve the frontend's event header and cadet identity independently of backend row/column order.
 
 Roster status:
 - Directory `Flight Path` values `Inactive`, `Commissioned`, and `Dropped` are non-operational statuses. Rows with those statuses remain in Directory Backend for recordkeeping but are excluded from frontend Directory, derived Leadership, Attendance, and form cadet choices.
@@ -211,6 +213,7 @@ Cadet groups and display order:
 - POC Third Hour is outside the supported active event model. Event refresh removes legacy active definitions, matrix rebuilds ignore them, new transitions do not generate them, and Attendance/Excusals form submissions reject them.
 - Incremental Attendance Form submissions restore Attendance input validation and summary coloring after writing values so dropdown metadata and presentation remain stable.
 - Excusals Backend and Excusals Management edit handling process every edited Decision row, including pasted or fill-down multi-row ranges, under the same serialized write discipline. Reconciliation first repairs management/backend decision mismatches, then compares the latest authoritative decided excusal for each cadet/event with the effective Attendance Backend log, appends missing corrective effects, rebuilds both attendance matrices, records audit entries, and suppresses duplicate historical notification emails.
+- An independent Attendance Backend record newer than the decision takes precedence during historical effect repair. This includes a subsequent attendance report, manual correction, or newly pending request. A malformed effect belonging to that same decision remains repairable. Reconciliation reports how many newer records it preserved.
 
 Percent metrics:
 - LLAB attendance % is based on LLAB event subset.
@@ -227,7 +230,7 @@ Workflow summary:
 - Decision propagates to attendance computation.
 - Approved requests apply the requested outcome; denied requests become `D` before the event or `U` after the event unless the prior state proves the cadet attended.
 - Notifications are sent to appropriate leadership derived from Cadre & Leadership.
-- The Excusals Management workbook uses private link/domain sharing, grants edit access only to canonical operational squadron commanders, and grants view access to canonical flight commanders/deputies. Active tabs protect all fields except the owning squadron commander's Decision cells.
+- The Excusals Management workbook uses private link/domain sharing. Backend workbook editors and its owner retain administrator access to managed ranges; canonical operational squadron commanders can edit only their own Decision cells, and canonical flight commanders/deputies have view access unless they are also administrators. Sharing refresh must resolve and retain administrators before removing stale role assignments. Failure to open the configured management workbook must not create or repoint to a replacement workbook.
 - The management workbook contains its own hidden, fully protected Data Legend because Google Sheets validation cannot reference another workbook. Its `EXCUSAL_DECISIONS` range mirrors the canonical decision array. Decision cells use strict cell-level `ONE_OF_RANGE` validation while table column types remain unset; conditional formatting colors Approved green, Denied red, Withdrawn amber, and Superseded purple.
 - Semester/year transitions preserve management history as hidden, locked term-labeled tabs in the restricted backend/admin workbook, then reset active squadron queues and derive management-workbook access from refreshed Leadership assignments.
 - Excusal submissions and decisions append request-keyed Audit Backend rows; decision reconsiderations preserve the previous decision from the edit event.
@@ -236,6 +239,7 @@ Workflow summary:
 Audit logging is required for key data mutations.
 
 - Audit is append-only.
+- Backend-edit and periodic Directory-reconciliation failures write failed audit entries and propagate the error so Apps Script does not report a successful execution.
 - Record actor identity when available, anonymous actor key, action category/label, what changed, where, old/new values where relevant, result, duration, source, run ID, and structured metadata.
 - Menu actions write paired start and completion rows. Failures include error message/stack so copied logs and Audit Backend rows can be debugged later.
 - Avoid storing unnecessary sensitive data.

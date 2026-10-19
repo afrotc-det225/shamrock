@@ -9,6 +9,7 @@ This repository contains the **Apps Script codebase**, developed locally in **VS
 ## Development quickstart
 - Install deps: `npm install`
 - Build TypeScript locally: `npm run build`
+- Run local regression tests: `npm test`
 - Deploy to Apps Script: `npm run push` (requires `clasp` auth to the target script)
 - Pull remote changes (if any): `npm run pull`
 - Clean build output: `npm run clean`

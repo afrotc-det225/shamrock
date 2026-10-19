@@ -736,6 +736,7 @@ function reconcileExcusalsManagementDecisions() {
       `Excusal reconciliation complete.\nDecisions checked: ${result.scanned}\nDecisions repaired: ${result.repaired}`
       + `\nAuthoritative attendance effects checked: ${result.attendanceChecked}`
       + `\nAttendance log effects repaired: ${result.attendanceRepaired}`
+      + `\nNewer attendance records preserved: ${result.attendancePreserved}`
       + `\nExcusal effect fields repaired: ${result.metadataRepaired}`
       + `\nMissing backend matches: ${result.missing}\nBoth attendance matrices were rebuilt. Decision emails were not resent.`,
     );
@@ -1240,9 +1241,10 @@ function onBackendEdit(e: GoogleAppsScript.Events.SheetsOnEdit) {
     }
 
     if (sheetName === 'Directory Backend') {
+      const editedHeaders = headers.slice(col - 1, e.range.getLastColumn());
       SetupService.refreshDirectoryArtifacts({
-        rebuildAttendanceMatrix: DirectoryService.shouldRebuildAttendanceMatrixForField(header),
-        refreshAttendanceForm: DirectoryService.shouldRefreshAttendanceFormForField(header),
+        rebuildAttendanceMatrix: editedHeaders.some(DirectoryService.shouldRebuildAttendanceMatrixForField),
+        refreshAttendanceForm: editedHeaders.some(DirectoryService.shouldRefreshAttendanceFormForField),
       });
       return;
     }
@@ -1268,6 +1270,8 @@ function onBackendEdit(e: GoogleAppsScript.Events.SheetsOnEdit) {
     SyncService.syncByBackendSheetName(sheetName);
   } catch (err) {
     Log.warn(`onBackendEdit failed: ${err}`);
+    AuditService.log({ action: 'backend_edit_processing', result: 'failed', source: 'onBackendEdit', error: err });
+    throw err;
   }
 }
 
@@ -1486,13 +1490,14 @@ function reconcilePendingDirectoryEdits() {
       // After reconciling, sync backend -> frontend and rebuild Attendance through
       // the supported wrapper so resized rows also receive table-aware formatting,
       // validations, and protections.
-      SyncService.syncByBackendSheetName('Directory');
-      SetupService.rebuildAttendanceMatrix();
+      SetupService.refreshDirectoryArtifacts({ rebuildAttendanceMatrix: true, refreshAttendanceForm: true });
     }
     if (result.missing > 0) {
       Log.warn(`${result.missing} frontend Directory rows not found in backend`);
     }
   } catch (err) {
     Log.warn(`reconcilePendingDirectoryEdits failed: ${err}`);
+    AuditService.log({ action: 'directory_reconciliation', result: 'failed', source: 'reconcilePendingDirectoryEdits', error: err });
+    throw err;
   }
 }

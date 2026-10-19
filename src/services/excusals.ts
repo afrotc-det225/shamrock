@@ -221,9 +221,20 @@ SHAMROCK Automations`;
     return `${squadron}${MANAGEMENT_TABLE_SUFFIX}`;
   }
 
+  function managementAdminEmails(): string[] {
+    // Read this before changing sharing. A failed admin lookup must never be
+    // interpreted as an empty allowlist and revoke the automation owner's access.
+    const backend = SpreadsheetApp.openById(Config.getBackendId());
+    const emails = backend.getEditors().map((user) => user.getEmail());
+    const owner = backend.getOwner()?.getEmail();
+    if (owner) emails.push(owner);
+    return Array.from(new Set(emails.map((email) => String(email || '').trim().toLowerCase()).filter(Boolean)));
+  }
+
   function ensureManagementDecisionLegend(
     ss: GoogleAppsScript.Spreadsheet.Spreadsheet,
   ): GoogleAppsScript.Spreadsheet.Range {
+    const admins = managementAdminEmails();
     const values = decisionValues();
     let sheet = ss.getSheetByName(MANAGEMENT_LEGEND_SHEET);
     if (!sheet) sheet = ss.insertSheet(MANAGEMENT_LEGEND_SHEET);
@@ -261,6 +272,7 @@ SHAMROCK Automations`;
       const protection = sheet.protect().setDescription('Excusals Management Data Legend');
       protection.setWarningOnly(false);
       try { protection.removeEditors(protection.getEditors()); } catch {}
+      if (admins.length) protection.addEditors(admins);
       if (protection.canDomainEdit()) protection.setDomainEdit(false);
       if (!sheet.isSheetHidden()) sheet.hideSheet();
     }
@@ -342,7 +354,8 @@ SHAMROCK Automations`;
       try {
         existing = SpreadsheetApp.openById(existingId);
       } catch (err) {
-        Log.warn(`Stored management spreadsheet ID invalid; creating new. Error: ${err}`);
+        Log.error(`Cannot open the configured management spreadsheet: ${err}`);
+        throw new Error('Cannot access the configured Excusals Management workbook. Ask its owner to restore administrator access, then retry setup. The configured workbook has not been replaced.');
       }
       if (existing) {
         // Ensure squadron sheets exist and are initialized even if spreadsheet already exists.
@@ -825,8 +838,7 @@ SHAMROCK Automations`;
   export function shareAndProtectManagementSpreadsheet() {
     const managementId = Config.getScriptProperty(Config.PROPERTY_KEYS.EXCUSAL_MANAGEMENT_SPREADSHEET_ID);
     if (!managementId) {
-      Log.warn('Excusals management spreadsheet not found; cannot share or protect');
-      return;
+      throw new Error('Excusals Management is not configured. Run Setup management spreadsheet first.');
     }
 
     try {
@@ -838,16 +850,14 @@ SHAMROCK Automations`;
       }
       const backendId = Config.getBackendId();
       if (!backendId) {
-        Log.warn('Cannot share management spreadsheet: backend ID missing');
-        return;
+        throw new Error('The backend workbook is not configured; management access was not refreshed.');
       }
 
       // Squadron commanders are workbook editors. Flight commanders and deputies
       // are viewers so they can monitor excusals without changing decisions.
       const leadershipSheet = SheetUtils.getSheet(backendId, 'Leadership Backend');
       if (!leadershipSheet) {
-        Log.warn('Cannot share management spreadsheet: Leadership Backend not found');
-        return;
+        throw new Error('Leadership Backend is unavailable; management access was not refreshed.');
       }
 
       const table = SheetUtils.readTable(leadershipSheet);
@@ -862,14 +872,18 @@ SHAMROCK Automations`;
         else if (flightRoles.has(role)) flightViewerEmails.add(email);
       });
 
-      // An editor cannot simultaneously be a viewer.
-      squadronEditorEmails.forEach((email) => flightViewerEmails.delete(email));
+      const adminEmails = managementAdminEmails();
 
       const ownerEmail = (() => {
         try { return String(ss.getOwner()?.getEmail() || '').trim().toLowerCase(); } catch { return ''; }
       })();
-      const intendedEditors = new Set(squadronEditorEmails);
+      const intendedEditors = new Set([...squadronEditorEmails, ...adminEmails]);
       if (ownerEmail) intendedEditors.add(ownerEmail);
+      intendedEditors.forEach((email) => flightViewerEmails.delete(email));
+
+      // Restore intended administrator access before removing stale assignments.
+      // Fail visibly if this cannot be done instead of reporting a repaired panel.
+      if (adminEmails.length) ss.addEditors(adminEmails);
 
       // Remove stale role-based access before applying current Leadership state.
       ss.getEditors().forEach((user) => {
@@ -909,6 +923,7 @@ SHAMROCK Automations`;
       );
     } catch (err) {
       Log.warn(`Failed to share and protect management spreadsheet: ${err}`);
+      throw err;
     }
   }
 
@@ -1003,8 +1018,9 @@ SHAMROCK Automations`;
     if (!sheet || sheet.getParent().getId() !== mgmtId) return;
     if (!Arrays.OPERATIONAL_SQUADRONS.includes(sheet.getName())) return;
 
-    const decisionCol = Schemas.EXCUSALS_MANAGEMENT_SCHEMA.machineHeaders?.indexOf('decision') ?? -1;
-    const requestCol = Schemas.EXCUSALS_MANAGEMENT_SCHEMA.machineHeaders?.indexOf('request_id') ?? -1;
+    const managementHeaders = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0].map((value) => String(value || '').trim());
+    const decisionCol = managementHeaders.indexOf('decision');
+    const requestCol = managementHeaders.indexOf('request_id');
     if (decisionCol < 0 || requestCol < 0) return;
     const firstRow = range.getRow();
     const lastRow = range.getLastRow();
@@ -1035,9 +1051,8 @@ SHAMROCK Automations`;
 
     const backendId = Config.getBackendId();
     const backendSheet = SheetUtils.getSheet(backendId, 'Excusals Backend');
-    if (!backendSheet) {
-      Log.warn('Excusals Backend not found; cannot mirror management decision');
-      return;
+    if (!backendSheet || backendSheet.getLastRow() < 3) {
+      throw new Error('Excusals Backend has no request rows to match this decision. Restore the request before retrying.');
     }
 
     const headers = backendSheet.getRange(1, 1, 1, backendSheet.getLastColumn()).getValues()[0].map((h) => String(h || '').trim());
@@ -1257,8 +1272,14 @@ SHAMROCK Automations`;
       .filter((cadet) => !!(cadet.last || cadet.first));
   }
 
-  function readEffectiveAttendanceLogState(): Map<string, string> {
-    const state = new Map<string, string>();
+  interface EffectiveAttendanceState {
+    code: string;
+    timestamp: number;
+    submissionId: string;
+  }
+
+  function readEffectiveAttendanceLogState(): Map<string, EffectiveAttendanceState> {
+    const state = new Map<string, EffectiveAttendanceState>();
     const sheet = SheetUtils.getSheet(Config.getBackendId(), 'Attendance Backend');
     if (!sheet || sheet.getLastRow() < 3) return state;
     const table = SheetUtils.readTable(sheet);
@@ -1266,8 +1287,13 @@ SHAMROCK Automations`;
       const eventName = String(row['event'] || '').trim();
       if (!eventName) return;
       const code = normalizeAttendanceCode(row['attendance_type']);
+      const timestamp = new Date(row['submitted_at']).getTime();
       attendanceLogCadets(row['cadets']).forEach((cadet) => {
-        state.set(attendanceStateKey(eventName, cadet.last, cadet.first), code);
+        state.set(attendanceStateKey(eventName, cadet.last, cadet.first), {
+          code,
+          timestamp: Number.isFinite(timestamp) ? timestamp : 0,
+          submissionId: String(row['submission_id'] || ''),
+        });
       });
     });
     return state;
@@ -1286,7 +1312,7 @@ SHAMROCK Automations`;
     backendSheet: GoogleAppsScript.Spreadsheet.Sheet;
     data: any[][];
     idx: Record<string, number>;
-  }): { checked: number; repaired: number; metadataRepaired: number } {
+  }): { checked: number; repaired: number; metadataRepaired: number; preserved: number } {
     const effectiveLogState = readEffectiveAttendanceLogState();
     const finalByCadetEvent = new Map<string, {
       rowIndex: number;
@@ -1316,7 +1342,7 @@ SHAMROCK Automations`;
         decision,
         requestedOutcome,
         priorAttendanceCode,
-        currentAttendanceCode: effectiveLogState.get(key) || '',
+        currentAttendanceCode: effectiveLogState.get(key)?.code || '',
         eventName,
       });
       if (opts.idx.attendanceEffect >= 0 && value(opts.idx.attendanceEffect) !== expectedEffect) {
@@ -1345,15 +1371,24 @@ SHAMROCK Automations`;
     });
 
     let repaired = 0;
+    let preserved = 0;
     finalByCadetEvent.forEach((candidate, key) => {
+      const effective = effectiveLogState.get(key);
+      // Reconciliation repairs a missing decision effect; it must not roll back
+      // a later attendance report, manual correction, or newly pending request.
+      const sameDecisionLog = effective?.submissionId.startsWith(`excusal-decision-${candidate.requestId}-`);
+      if (effective && effective.timestamp > candidate.timestamp && !sameDecisionLog) {
+        preserved++;
+        return;
+      }
       const expectedEffect = effectForDecision({
         decision: candidate.decision,
         requestedOutcome: candidate.requestedOutcome,
         priorAttendanceCode: candidate.priorAttendanceCode,
-        currentAttendanceCode: effectiveLogState.get(key) || '',
+        currentAttendanceCode: effective?.code || '',
         eventName: candidate.eventName,
       });
-      if ((effectiveLogState.get(key) || '') === expectedEffect) return;
+      if ((effective?.code || '') === expectedEffect) return;
       updateAttendanceOnExcusalDecision({
         lastName: candidate.lastName,
         firstName: candidate.firstName,
@@ -1373,16 +1408,16 @@ SHAMROCK Automations`;
         targetKey: candidate.requestId,
         requestId: candidate.requestId,
         field: 'attendance_type',
-        oldValue: effectiveLogState.get(key) || '',
+        oldValue: effective?.code || '',
         newValue: expectedEffect,
         source: 'ExcusalsService.reconcileManagementDecisions',
         metadata: { event: candidate.eventName, decision: candidate.decision },
       });
-      effectiveLogState.set(key, expectedEffect);
+      effectiveLogState.set(key, { code: expectedEffect, timestamp: Date.now(), submissionId: '' });
       repaired++;
     });
 
-    return { checked: finalByCadetEvent.size, repaired, metadataRepaired };
+    return { checked: finalByCadetEvent.size, repaired, metadataRepaired, preserved };
   }
 
   /**
@@ -1398,6 +1433,7 @@ SHAMROCK Automations`;
     attendanceChecked: number;
     attendanceRepaired: number;
     metadataRepaired: number;
+    attendancePreserved: number;
   } {
     const lock = LockService.getScriptLock();
     lock.waitLock(120000);
@@ -1478,7 +1514,7 @@ SHAMROCK Automations`;
     Log.info(
       `Reconciled excusal decisions: managementScanned=${scanned}, managementRepaired=${repaired}, missing=${missing} `
       + `attendanceChecked=${attendance.checked}, attendanceRepaired=${attendance.repaired} `
-      + `metadataRepaired=${attendance.metadataRepaired}`,
+      + `metadataRepaired=${attendance.metadataRepaired}, attendancePreserved=${attendance.preserved}`,
     );
     return {
       scanned,
@@ -1487,6 +1523,7 @@ SHAMROCK Automations`;
       attendanceChecked: attendance.checked,
       attendanceRepaired: attendance.repaired,
       metadataRepaired: attendance.metadataRepaired,
+      attendancePreserved: attendance.preserved,
     };
     } finally {
       lock.releaseLock();
@@ -1770,6 +1807,7 @@ C/${commanderLastName}`;
   function applyManagementSheetProtections(ss: GoogleAppsScript.Spreadsheet.Spreadsheet) {
     const sheets = ss.getSheets();
     const squadrons = Arrays.OPERATIONAL_SQUADRONS;
+    const admins = managementAdminEmails();
 
     sheets.forEach((sheet) => {
       const sheetName = sheet.getName();
@@ -1787,12 +1825,13 @@ C/${commanderLastName}`;
         try { p.remove(); } catch {}
       });
 
-      // Protect header rows (1-2): owner/script only.
+      // Protect header rows (1-2): owner and backend administrators only.
       const headerRange = sheet.getRange(1, 1, 2, lastCol);
       try {
         const headerProt = headerRange.protect().setDescription(`${sheetName}: Headers protected`);
         headerProt.setWarningOnly(false);
         try { headerProt.removeEditors(headerProt.getEditors()); } catch {}
+        if (admins.length) headerProt.addEditors(admins);
         if (headerProt.canDomainEdit()) headerProt.setDomainEdit(false);
       } catch (err) {
         Log.warn(`Failed to protect headers on ${sheetName}: ${err}`);
@@ -1812,6 +1851,7 @@ C/${commanderLastName}`;
             const protection = range.protect().setDescription(`${sheetName}: Managed request fields ${index + 1}`);
             protection.setWarningOnly(false);
             try { protection.removeEditors(protection.getEditors()); } catch {}
+            if (admins.length) protection.addEditors(admins);
             if (protection.canDomainEdit()) protection.setDomainEdit(false);
           } catch (err) {
             Log.warn(`Failed to protect managed request fields on ${sheetName}: ${err}`);
@@ -1826,9 +1866,10 @@ C/${commanderLastName}`;
               .setDescription(`${sheetName}: Decisions editable only by squadron commander`);
             decisionProtection.setWarningOnly(false);
             try { decisionProtection.removeEditors(decisionProtection.getEditors()); } catch {}
+            if (admins.length) decisionProtection.addEditors(admins);
             if (decisionProtection.canDomainEdit()) decisionProtection.setDomainEdit(false);
             if (commanderEmail) decisionProtection.addEditor(commanderEmail);
-            else Log.warn(`No commander email found for ${sheetName}; Decision cells will be owner-only`);
+            else Log.warn(`No commander email found for ${sheetName}; Decision cells will be administrator-only`);
           } catch (err) {
             Log.warn(`Failed to protect Decision cells on ${sheetName}: ${err}`);
           }

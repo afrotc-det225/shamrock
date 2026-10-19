@@ -6,7 +6,13 @@ namespace PauseService {
   export function isPaused(): boolean {
     try {
       const raw = Config.getScriptProperty(KEY);
-      return String(raw).toLowerCase() === 'true';
+      if (String(raw).trim().toLowerCase() === 'true') return true;
+      if (!raw) return false;
+      try {
+        return JSON.parse(raw)?.paused === true;
+      } catch {
+        return false;
+      }
     } catch (err) {
       Log.warn(`Unable to read pause flag: ${err}`);
       return false;
@@ -19,6 +25,7 @@ namespace PauseService {
       Config.setScriptProperty(KEY, payload);
     } catch (err) {
       Log.warn(`Unable to set pause flag: ${err}`);
+      throw err;
     }
   }
 
@@ -28,6 +35,7 @@ namespace PauseService {
       Config.deleteScriptProperty(KEY);
     } catch (err) {
       Log.warn(`Unable to clear pause flag: ${err}`);
+      throw err;
     }
     return wasPaused;
   }

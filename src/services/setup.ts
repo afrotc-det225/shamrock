@@ -1616,27 +1616,22 @@ namespace SetupService {
 
     const triggers = ScriptApp.getProjectTriggers();
     const matching = triggers.filter((t) => t.getHandlerFunction() === handlerName);
-    const alreadyCorrect = matching.some((t) => {
-      try {
-        return t.getTriggerSourceId && t.getTriggerSourceId() === formId;
-      } catch {
-        return false;
-      }
-    });
-    if (alreadyCorrect) return;
-
-    // Clean up stale triggers for the same handler so we don't keep firing against old/deleted forms.
+    let keptCorrectTrigger = false;
     matching.forEach((t) => {
+      let correct = false;
       try {
-        const sourceId = t.getTriggerSourceId?.();
-        if (sourceId && sourceId !== formId) {
-          Log.warn(`Deleting stale trigger for handler=${handlerName} sourceId=${sourceId}`);
-          ScriptApp.deleteTrigger(t);
-        }
-      } catch {
-        // Ignore; we'll create a new correct trigger below.
+        correct = t.getTriggerSourceId() === formId
+          && t.getTriggerSource() === ScriptApp.TriggerSource.FORMS
+          && t.getEventType() === ScriptApp.EventType.ON_FORM_SUBMIT;
+      } catch {}
+      if (correct && !keptCorrectTrigger) {
+        keptCorrectTrigger = true;
+        return;
       }
+      Log.warn(`Deleting stale or duplicate form trigger for handler=${handlerName}`);
+      ScriptApp.deleteTrigger(t);
     });
+    if (keptCorrectTrigger) return;
 
     Log.info(`Creating form submit trigger for handler=${handlerName} formId=${formId}`);
     ScriptApp.newTrigger(handlerName).forForm(formId).onFormSubmit().create();

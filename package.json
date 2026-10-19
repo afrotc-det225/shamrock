@@ -5,6 +5,7 @@
   "main": "index.js",
   "scripts": {
     "build": "tsc",
+    "test": "node --test tests/*.test.cjs",
     "create": "clasp create --title \"SHAMROCK\" --type standalone --rootDir dist",
     "push": "npm run build && cp appsscript.json dist/appsscript.json && clasp push",
     "pull": "clasp pull && cp dist/appsscript.json appsscript.json",

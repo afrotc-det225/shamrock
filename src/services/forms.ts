@@ -85,6 +85,11 @@ namespace FormService {
       } catch (err) {
         lastErr = err;
         Log.warn(`Attendance form: ${label} failed (attempt ${attempt}): ${err}`);
+        if (attempt === 3) break;
+        ProgressService.report({
+          title: 'Retrying the form update',
+          detail: 'Google could not finish the form operation. Reopening the form before trying again.',
+        });
         Utilities.sleep(400 * attempt);
         try {
           working = FormApp.openById(working.getId());
@@ -465,36 +470,41 @@ namespace FormService {
 
     let reordered = 0;
     expectedBySection.forEach((sectionQuestions, sectionTitle) => {
-      const section = findPageBreakItem(form, sectionTitle);
-      if (!section) return;
-
-      const desiredItems = sectionQuestions
+      const desiredIds = sectionQuestions
         .map((question) => activeItemsByTitle.get(question.title))
-        .map((item) => item ? form.getItemById(item.getId()) : null)
-        .filter((item): item is GoogleAppsScript.Forms.Item => Boolean(item));
-      if (desiredItems.length < 2) return;
-
-      const desiredIds = desiredItems.map((item) => item.getId());
+        .filter((item): item is GoogleAppsScript.Forms.CheckboxItem => Boolean(item))
+        .map((item) => item.getId());
+      if (desiredIds.length < 2) return;
       const desiredIdSet = new Set(desiredIds);
-      const allItems = form.getItems();
-      const sectionIndex = section.getIndex();
-      const nextSection = allItems.find((item) => (
-        item.getIndex() > sectionIndex && item.getType() === FormApp.ItemType.PAGE_BREAK
-      ));
-      const sectionEnd = nextSection ? nextSection.getIndex() : allItems.length;
-      const currentIds = allItems
-        .slice(sectionIndex + 1, sectionEnd)
-        .map((item) => item.getId())
-        .filter((id) => desiredIdSet.has(id));
+      const attempt = withFormRetry(form, 'restore cadet question order', (working) => {
+        // Use one ordered snapshot instead of repeatedly asking stale Item
+        // handles for getIndex() after form mutations. Retrying this move-only
+        // operation is safe even if some moves succeeded before a read failed.
+        const items = working.getItems().map((item) => ({
+          id: item.getId(), type: item.getType(), title: item.getTitle(),
+        }));
+        const sectionIndex = items.findIndex((item) => item.type === FormApp.ItemType.PAGE_BREAK && item.title === sectionTitle);
+        if (sectionIndex < 0) return 0;
+        const nextSectionIndex = items.findIndex((item, index) => index > sectionIndex && item.type === FormApp.ItemType.PAGE_BREAK);
+        const sectionEnd = nextSectionIndex < 0 ? items.length : nextSectionIndex;
+        const currentIds = items.slice(sectionIndex + 1, sectionEnd).map((item) => item.id).filter((id) => desiredIdSet.has(id));
+        if (currentIds.length === desiredIds.length && currentIds.every((id, index) => id === desiredIds[index])) return 0;
 
-      if (currentIds.length === desiredIds.length && currentIds.every((id, index) => id === desiredIds[index])) return;
-
-      // Insert in reverse immediately after the section break so the final
-      // visible order matches the canonical AS-year display order.
-      desiredItems.slice().reverse().forEach((item) => {
-        form.moveItem(item, section.getIndex() + 1);
+        const order = items.map((item) => item.id);
+        const sectionId = items[sectionIndex].id;
+        desiredIds.slice().reverse().forEach((id) => {
+          const fromIndex = order.indexOf(id);
+          if (fromIndex < 0) throw new Error('A cadet question disappeared during refresh. Retry the Attendance Form refresh.');
+          const remaining = order.filter((itemId) => itemId !== id);
+          const targetIndex = remaining.indexOf(sectionId) + 1;
+          if (fromIndex === targetIndex) return;
+          working.moveItem(fromIndex, targetIndex);
+          order.splice(targetIndex, 0, order.splice(fromIndex, 1)[0]);
+        });
+        return desiredIds.length;
       });
-      reordered += desiredItems.length;
+      form = attempt.form;
+      reordered += attempt.result;
     });
     return reordered;
   }

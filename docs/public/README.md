@@ -160,6 +160,8 @@ Attendance event columns are grouped by training week and ordered Mando, Seconda
 ### Safeguards
 
 - Normal Directory/Event refreshes update existing Attendance Form questions and choices in place, avoiding full-form question recreation and repeated linked-sheet columns. Within each cadet subsection, the questions are restored to the canonical senior-to-junior AS-year order. Question labels use forms such as `Cadets (Delta) AS400 (Mando)` and `Cadets (Delta) AF Civ (Mando)`, without a duplicated `AS` prefix.
+- Roster question ordering retries temporary Forms failures without recreating questions. Setup keeps one correct submit trigger per form handler and removes stale or duplicate copies.
+- A blank attendance effect remains blank after rebuilding, including a withdrawn request with no prior attendance. Incremental updates match cadets and event headers separately in each workbook so a different frontend sort does not update another cadet.
 - Attendance parsing recognizes those canonical question labels and retains compatibility with legacy duplicated-`AS` labels. The backend Attendance menu can repair blank cadet lists or missing event rows from preserved raw form responses without overwriting populated log rows.
 - The explicit `Rebuild Attendance Form (archive responses)` action briefly closes the form, preserves the existing linked response tab as a hidden timestamped archive, links a fresh clean response tab, verifies that it has no duplicate header names, and restores the prior open/closed state.
 - Directory and Excusals have matching explicit archive-and-relink rebuild actions. Routine setup and refreshes preserve their existing question IDs; structural rebuilds are reserved for schema repair and transitions.
@@ -189,7 +191,7 @@ Attendance event columns are grouped by training week and ordered Mando, Seconda
 Excusals capture cadet requests, route decisions through backend/management sheets, update attendance effects, and send appropriate notifications.
 Requests use a requested outcome of `P`, `T`, `E`, `ES`, or `MED`; pending requests show as `R` in Attendance until leadership records a decision.
 The Excusals Form's `Excusal Details` section explains every attendance code and identifies `P`, `T`, `E`, `ES`, and `MED` as the available requested outcomes.
-The separate management workbook has one active tab for each operational squadron. Blue and Gold squadron commanders are editors, while canonical flight commanders and deputy flight commanders are viewers. On an active squadron tab, SHAMROCK protects the headers and request details; only that squadron commander's Decision cells are editable. Active tabs use native Google Sheets tables with the same green-header and white/gray-banded styling as frontend Directory. Decision dropdowns are backed by the workbook's hidden protected Data Legend and selected decisions are color-coded. The requested-outcome column is displayed as `Type` and its codes are centered.
+The separate management workbook has one active tab for each operational squadron. Backend administrators retain full operational access. Blue and Gold squadron commanders can edit only their own Decision cells; canonical flight commanders and deputy flight commanders are viewers unless they are also administrators. Headers and request details remain protected from commander edits. Active tabs use native Google Sheets tables with the same green-header and white/gray-banded styling as frontend Directory. Decision dropdowns are backed by the workbook's hidden protected Data Legend and selected decisions are color-coded. The requested-outcome column is displayed as `Type` and its codes are centered.
 
 ### Operator Entry Points
 
@@ -198,6 +200,8 @@ The separate management workbook has one active tab for each operational squadro
 - Excusals Management workbook edit trigger.
 - Excusals Backend and Excusals Management both process multi-row Decision edits row by row. The backend `Reconcile management decisions` action repairs missing backend decisions, verifies every authoritative decided excusal against the effective Attendance Backend log, and rebuilds both attendance matrices without resending historical decision emails.
 - `Setup management spreadsheet` and `Reinitialize management sheets` also repair the Excusals Management edit trigger, removing stale copies attached to an older workbook before installing the canonical trigger on the active workbook.
+- If the configured management workbook is inaccessible, setup reports the access problem and keeps that workbook configured. Ask its owner to restore administrator access rather than creating a replacement.
+- Historical decision reconciliation preserves later attendance reports, corrections, and newly pending requests; the completion message counts preserved newer records.
 - Backend SHAMROCK menu actions for cleanup, backfill, sync, and repair.
 - Semester and academic-year transitions, which archive the prior term's management tabs into the restricted admin workbook, clear the active queues, and refresh access from current Leadership assignments.
 
