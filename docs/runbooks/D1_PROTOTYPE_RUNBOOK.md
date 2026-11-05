@@ -2,6 +2,8 @@
 
 Status: isolated local implementation, not a production replacement. The existing `src/`, Forms, Sheets, triggers and Apps Script deployment remain the supported operational system. This prototype contains fictional fixtures only. Creating a shared Google/GitHub/Cloudflare account does not migrate resource ownership or install this code.
 
+The organization's private [SHAMROCK operations repository](https://github.com/afrotc-det225/shamrock-ops) now holds the handoff guide and placeholder configuration. The shared project GitHub account has verified repository admin access. This does not establish organization-owner status or Google/Cloudflare permissions; no live bindings or deployment workflows have been added.
+
 Read the [redesign plan](../plans/D1_REDESIGN_AND_MIGRATION.md), [current-system audit](../plans/D1_CURRENT_SYSTEM_AUDIT.md) and [feature-parity matrix](../plans/D1_FEATURE_PARITY_MATRIX.md) for the full migration scope. The matrix describes proposed acceptance evidence; it is not a list of implemented tests.
 
 ## Run it locally
@@ -77,7 +79,7 @@ The first slice deliberately does not reclaim an expired Google-publication leas
 ## Remaining work before a staging rehearsal
 
 1. Establish programmatic access to the intended organizational accounts and verify permissions and ownership. Prefer APIs and command-line tools; use interactive login only where the provider requires it. Verify organization ownership separately from membership, Cloudflare access separately from account creation, and Drive ownership separately from sharing.
-2. Create the private operations repository and document logical resource bindings, access roles and secret names. Store actual signing material in provider secret stores and Script Properties; retain recovery material in the organization's password vault. Neither a private repo nor an `.env` handoff is a secret store.
+2. Complete the private operations repository's logical resource bindings, access roles and secret names for the intended staging setup. Store actual signing material in provider secret stores and Script Properties; retain recovery material in the organization's password vault. Neither a private repo nor an `.env` handoff is a secret store.
 3. Add versioned, repeatable isolated provisioning and migration tooling, explicit deployment manifests, credential setup, secret rotation and restricted staging bindings. The initial SQL is applied to a fresh disposable database by local fixtures; it is not a general migration runner or an idempotent setup procedure.
 4. Wire standalone Apps Script triggers, verify the actual Form email-collection mode and allowed respondents, and test human editor identity across the participating Google accounts. Missing identity needs an authenticated confirmation flow that preserves the frozen target and payload.
 5. Implement physical Sheets projections, protections, filter views, draft slots, job consumption and recovery. Test real concurrent edits and sorting, Google API failures, and a round trip through the actual Form and sheet.
