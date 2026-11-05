@@ -52,6 +52,16 @@ Read the smallest set that applies to the task:
 
 There are currently no `src/sheets/` or `src/triggers/` directories. Put sheet helpers in `src/utils/sheets.ts` unless a larger refactor creates a dedicated module, and keep Apps Script trigger entry points in `src/index.ts`.
 
+### Isolated D1 Redesign
+
+The authorized redesign has a separate local/staging prototype in `packages/domain/`, `apps/worker/`, `apps/google-adapter/`, and `database/`. Read `docs/runbooks/D1_PROTOTYPE_RUNBOOK.md` before working there. These packages use ES modules and a separate `tsconfig.v3.json`; the namespace convention below remains applicable to the current `src/` runtime. Keep the two builds and resource bindings separate until an approved cutover.
+
+- Build prototype artifacts: `npm run build:v3` (ignored `.build/`, not `dist/`).
+- Run all current and prototype checks: `npm run check`.
+- Run the fictional local integration scenario: `npm run demo:v3`.
+- Tests and demo require no provider credentials or real records. They do not establish live Google behavior, production capacity or complete feature parity.
+- Do not use `npm run push` to deploy the prototype. It still targets the current Apps Script project.
+
 ## Build And Deploy Commands
 
 - Install dependencies: `npm install`

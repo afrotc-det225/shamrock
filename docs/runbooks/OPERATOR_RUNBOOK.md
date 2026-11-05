@@ -6,6 +6,8 @@ This runbook describes how operators and developers deploy, operate, repair, and
 - Scope: operational procedures and safety checks.
 - Non-goal: implementation details.
 
+For isolated D1 development, use the [prototype runbook](D1_PROTOTYPE_RUNBOOK.md). Its local tests and fictional demonstration do not install triggers, migrate records or deploy the production Apps Script project. The procedures below continue to apply to the running v2 system.
+
 ## 1. Roles
 - End users: interact via frontend sheets and forms; no direct table editing.
 - Operators/admins: run menu actions, review backend sheets, approve/deny excusals.

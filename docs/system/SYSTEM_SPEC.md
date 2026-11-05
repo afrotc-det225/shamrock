@@ -22,6 +22,8 @@ SHAMROCK is an Apps Script system (TypeScript, V8 runtime) that provisions and o
 ## 2. Supported Baseline
 The checked-in source and this documentation describe the supported SHAMROCK v2 baseline.
 
+An isolated D1 prototype now exists outside `src/`. Its separate ES-module domain, Worker and Google adapter packages implement an initial local/staging contract; they do not supersede this production baseline or make D1 authoritative for live records. The [prototype runbook](../runbooks/D1_PROTOTYPE_RUNBOOK.md) defines its supported operations and limitations, and the [redesign plan](../plans/D1_REDESIGN_AND_MIGRATION.md) defines the proposed migration. Production activation still requires the documented parity, policy, identity and recovery gates.
+
 - Current schemas, script properties, menu actions, and service boundaries are authoritative.
 - Historical CSV layouts, retired property names, and one-off migration paths are not automatically supported.
 - CSV imports require the current row-1 machine headers exactly.
