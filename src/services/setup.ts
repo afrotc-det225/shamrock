@@ -3356,12 +3356,21 @@ namespace SetupService {
   }
 
   export function refreshEventsArtifacts() {
+    // Resolve both configured forms before changing derived attendance. Event maintenance
+    // must not provision forms, rewrite the roster, or run full-workbook formatting.
+    const attendanceFormId = Config.getScriptProperty(Config.PROPERTY_KEYS.ATTENDANCE_FORM_ID);
+    const excusalsFormId = Config.getScriptProperty(Config.PROPERTY_KEYS.EXCUSAL_REQUEST_FORM_ID);
+    if (!attendanceFormId || !excusalsFormId) {
+      throw new Error('Attendance and Excusals Forms must be configured before refreshing events. Run setup first.');
+    }
+    const attendanceForm = FormApp.openById(attendanceFormId);
+    const excusalsForm = FormApp.openById(excusalsFormId);
     const removedThirdHourEvents = removeRetiredThirdHourEvents();
     ProgressService.report({
-      title: 'Publishing current events',
+      title: 'Reading current events',
       detail: removedThirdHourEvents
-        ? `Removed ${removedThirdHourEvents} retired Third Hour definition(s) and syncing the remaining events.`
-        : 'Syncing the supported Events Backend definitions to their mapped surfaces.',
+        ? `Removed ${removedThirdHourEvents} retired Third Hour definition(s) and preparing the remaining events.`
+        : 'Preparing the current event definitions for Attendance and both forms.',
       percent: 16,
       step: 1,
       totalSteps: 4,
@@ -3369,31 +3378,36 @@ namespace SetupService {
     if (removedThirdHourEvents) {
       Log.info(`Removed ${removedThirdHourEvents} retired Third Hour event definition(s).`);
     }
-    SyncService.syncByBackendSheetName('Events Backend');
     ProgressService.report({
       title: 'Rebuilding event-based attendance columns',
-      detail: 'Regenerating the Attendance matrix using the refreshed event list.',
-      percent: 38,
+      detail: 'Regenerating Attendance and restoring its layout, validation, and protections once.',
+      percent: 30,
       step: 2,
       totalSteps: 4,
     });
-    rebuildAttendanceMatrix();
-    ProgressService.report({
-      title: 'Refreshing Attendance Form choices',
-      detail: 'Publishing the current event and cadet choices without recreating the full form.',
-      percent: 66,
-      step: 3,
-      totalSteps: 4,
-    });
-    refreshAttendanceFormEventChoices();
-    ProgressService.report({
-      title: 'Finishing refreshed frontend views',
-      detail: 'Applying standard validation, formatting, tables, and protections.',
-      percent: 84,
-      step: 4,
-      totalSteps: 4,
-    });
-    applyFrontendFormatting();
+    SetupService.rebuildAttendanceMatrix();
+    const lock = LockService.getScriptLock();
+    lock.waitLock(30000);
+    try {
+      ProgressService.report({
+        title: 'Refreshing Attendance Form events',
+        detail: 'Updating selectable events while preserving cadet questions and response history.',
+        percent: 90,
+        step: 3,
+        totalSteps: 4,
+      });
+      FormService.refreshAttendanceFormEventChoices(attendanceForm);
+      ProgressService.report({
+        title: 'Refreshing Excusals Form events',
+        detail: 'Making the same current events available for cadet excusal requests.',
+        percent: 96,
+        step: 4,
+        totalSteps: 4,
+      });
+      FormService.refreshExcusalsFormEventChoices(excusalsForm);
+    } finally {
+      lock.releaseLock();
+    }
   }
 
   export function showMenuHelp() {

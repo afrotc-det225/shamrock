@@ -184,6 +184,12 @@ Attendance event columns are grouped by training week and ordered Mando, Seconda
 - Run `Debug Attendance response columns` and confirm the current response tab reports no duplicate header names. After a structural rebuild, confirm the prior response tab is hidden and the new visible tab is named `Attendance Form Responses`.
 - For recovery validation, run `Repair Attendance Backend from responses`, confirm its completion counts, verify previously blank `cadets` cells are populated from the raw response, and rebuild Attendance if a full deterministic matrix check is needed.
 
+### Event refresh scope
+
+`Sync & Refresh → Refresh Events artifacts` rebuilds both attendance matrices and updates selectable events in both Attendance and Excusals Forms. Attendance formatting, validation, tables, and frontend protections are restored once. The action preserves form questions and response history; cadet-roster changes use the Directory refresh workflow. It avoids the repeated roster update and full-workbook formatting that could exhaust the six-minute execution limit.
+
+After adding or removing an event, verify both matrices and both forms, then repeat the refresh to confirm no duplicate columns or questions. Missing form configuration fails before the matrix changes. To roll back an event change, restore its backend definition and refresh again.
+
 ## Excusals
 
 ### Purpose

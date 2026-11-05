@@ -459,3 +459,63 @@ for (const scenario of [
   assert.equal(applied.length, appended.length);
   if (appended.length) assert.equal(appended[0].attendance_type, 'MED');
 });
+
+
+function eventRefreshFixture() {
+  const calls = [];
+  const properties = { attendance_form: 'attendance-form', excusals_form: 'excusals-form' };
+  const c = load(['services/setup.ts'], {
+    Config: {
+      PROPERTY_KEYS: { ATTENDANCE_FORM_ID: 'attendance_form', EXCUSAL_REQUEST_FORM_ID: 'excusals_form' },
+      getScriptProperty: key => properties[key],
+      getBackendSheet: () => ({}),
+    },
+    SheetUtils: { readTable: () => ({ rows: [] }) },
+    FormApp: { openById: id => ({ id }) },
+    LockService: { getScriptLock: () => ({ waitLock() {}, releaseLock() { calls.push('unlock'); } }) },
+    FormService: {
+      refreshAttendanceFormEventChoices: form => calls.push(`attendance:${form.id}`),
+      refreshExcusalsFormEventChoices: form => calls.push(`excusals:${form.id}`),
+      refreshAttendanceFormCadetChoices() { throw new Error('Event refresh must preserve the roster'); },
+    },
+    FrontendFormattingService: new Proxy({}, { get() { throw new Error('Duplicate full-workbook formatting'); } }),
+  });
+  c.SetupService.rebuildAttendanceMatrix = () => calls.push('matrix-and-protections');
+  return { c, calls, properties };
+}
+
+test('event refresh publishes both forms without roster rewrites or duplicate formatting', () => {
+  const { c, calls } = eventRefreshFixture();
+  c.SetupService.refreshEventsArtifacts();
+  c.SetupService.refreshEventsArtifacts();
+  assert.deepEqual(calls, Array(2).fill([
+    'matrix-and-protections', 'attendance:attendance-form', 'excusals:excusals-form', 'unlock',
+  ]).flat());
+});
+
+test('event refresh rejects missing form configuration before rebuilding attendance', () => {
+  const { c, calls, properties } = eventRefreshFixture();
+  delete properties.excusals_form;
+  assert.throws(() => c.SetupService.refreshEventsArtifacts(), /must be configured/);
+  assert.deepEqual(calls, []);
+});
+
+test('event refresh reports form failures and releases its lock for a safe retry', () => {
+  const { c, calls } = eventRefreshFixture();
+  c.FormService.refreshExcusalsFormEventChoices = () => { throw new Error('form unavailable'); };
+  assert.throws(() => c.SetupService.refreshEventsArtifacts(), /form unavailable/);
+  assert.equal(calls.at(-1), 'unlock');
+});
+
+test('one-off ceremony events route to Other alongside normal training-week events', () => {
+  const c = load(['services/forms.ts'], {
+    Config: { getBackendId: () => 'backend' },
+    SheetUtils: { getSheet: () => ({}), readTable: () => ({ rows: [
+      { event_type: 'Mando', display_name: 'TW-12 Mando' },
+      { event_type: 'Other', display_name: 'Example Ceremony' },
+    ] }) },
+  }, ['readAttendanceEventBuckets']);
+  const buckets = c.FormService.readAttendanceEventBuckets();
+  assert.deepEqual([...buckets.other], ['Example Ceremony']);
+  assert.deepEqual([...buckets.mando], ['TW-12 Mando']);
+});

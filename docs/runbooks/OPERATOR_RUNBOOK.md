@@ -117,14 +117,16 @@ Post-deploy validation checklist:
 ### 5.2 Event maintenance
 - Events are maintained in the backend.
 - There is no active frontend Events tab; Events Backend drives Attendance columns and form choices.
-- Event changes may require attendance matrix and form choice refreshes.
+- After an event change, run `Sync & Refresh → Refresh Events artifacts`. It rebuilds both attendance matrices, restores Attendance layout/validation and frontend protections once, then updates event choices in both Attendance and Excusals Forms. It preserves cadet questions and response history and does not run the unrelated full-frontend formatting or roster refresh.
+- Validate that an added event appears in both matrices and both forms, and a removed event disappears from each. Repeating the action must not duplicate columns or questions. Missing configured forms stop the action before the matrix changes; repair configuration with setup first.
+- If an older refresh timed out during final formatting, use `Reapply frontend protections` to restore protections before retrying. Reverting an event definition and refreshing again restores derived event choices; keep historical submissions intact.
 
 ### 5.3 Attendance processing
 - Attendance submissions append to Attendance Backend.
 - Transient Google failures while reading the responder email are retried up to three times before processing starts. Permission errors and exhausted retries remain failed executions; check the preserved response before recovering a missing submission. The retry never repeats attendance writes or notifications.
 - Frontend Attendance matrix is derived; rebuild is available via admin menu.
 - Treat frontend attendance as derived state. Rebuild it instead of manually patching formulas or event columns.
-- Routine Directory and Event changes synchronize Attendance Form choices in place, restore each cadet subsection to the canonical senior-to-junior AS-year order, and remove duplicated `AS` prefixes from legacy question labels without replacing question IDs. Do not use a structural form rebuild just to refresh choices.
+- Routine Directory changes synchronize Attendance Form roster choices in place, restore each cadet subsection to the canonical senior-to-junior AS-year order, and remove duplicated `AS` prefixes from legacy question labels without replacing question IDs. Do not use a structural form rebuild just to refresh choices.
 - Attendance submission parsing accepts the canonical cadet question labels (`AS400`, `AF Civ`, and the other supported year labels) as well as legacy duplicated-`AS` labels.
 - Within each training week, Attendance displays event columns as Mando, Secondary, then LLAB. POC Third Hour is retired and is removed from active Events, Attendance columns, and Attendance/Excusals form choices when event artifacts refresh. Form submissions reapply the Attendance dropdown rules and percentage gradient after their incremental value update.
 - Periodic Directory reconciliation uses the complete Attendance rebuild path, including table-aware cell formatting, validation, and protection repair for any resized roster rows.
