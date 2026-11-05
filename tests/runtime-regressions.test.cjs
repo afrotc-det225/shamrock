@@ -297,6 +297,8 @@ test('management sharing preserves backend administrators and removes former rol
     SheetUtils: { getSheet: () => ({}), readTable: () => ({ rows: [
       { role: 'Blue Squadron Commander', email: 'commander@example.test' },
       { role: 'Alpha Flight Commander', email: 'admin@example.test' },
+      { role: 'Cadet Wing Commander', email: 'wing@example.test' },
+      { role: 'Deputy Wing Commander', email: 'deputy@example.test' },
     ] }) },
     DriveApp: { Access: { PRIVATE: 'private' }, Permission: { NONE: 'none' }, getFileById: () => ({ setSharing() {} }) },
   });
@@ -305,7 +307,11 @@ test('management sharing preserves backend administrators and removes former rol
   assert.ok(added.includes('admin@example.test'));
   assert.ok(added.includes('owner@example.test'));
   assert.ok(added.includes('commander@example.test'));
-  assert.deepEqual(viewers, []);
+  assert.deepEqual(viewers, ['wing@example.test']);
+  assert.equal(roles.get('wing@example.test'), 'reader');
+  assert.equal(roles.has('deputy@example.test'), false);
+  c.ExcusalsService.shareAndProtectManagementSpreadsheet();
+  assert.equal(roles.get('wing@example.test'), 'reader');
   assert.equal(roles.get('admin@example.test'), 'writer');
   failAdminRead = true;
   const removals = removed.length;

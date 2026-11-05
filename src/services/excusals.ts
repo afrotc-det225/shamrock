@@ -921,7 +921,7 @@ SHAMROCK Automations`;
   }
 
   /**
-   * Share management spreadsheet with squadron and flight commanders, apply sheet protections.
+   * Share management spreadsheet with current commanders, apply sheet protections.
    */
   export function shareAndProtectManagementSpreadsheet() {
     const managementId = Config.getScriptProperty(Config.PROPERTY_KEYS.EXCUSAL_MANAGEMENT_SPREADSHEET_ID);
@@ -936,8 +936,8 @@ SHAMROCK Automations`;
         throw new Error('The backend workbook is not configured; management access was not refreshed.');
       }
 
-      // Squadron commanders are workbook editors. Flight commanders and deputies
-      // are viewers so they can monitor excusals without changing decisions.
+      // Squadron commanders are workbook editors. The wing commander, flight commanders,
+      // and flight deputies are viewers so they can monitor without changing decisions.
       const leadershipSheet = SheetUtils.getSheet(backendId, 'Leadership Backend');
       if (!leadershipSheet) {
         throw new Error('Leadership Backend is unavailable; management access was not refreshed.');
@@ -945,14 +945,14 @@ SHAMROCK Automations`;
 
       const table = SheetUtils.readTable(leadershipSheet);
       const squadronEditorEmails = new Set<string>();
-      const flightViewerEmails = new Set<string>();
+      const leadershipViewerEmails = new Set<string>();
       const flightRoles = canonicalFlightLeadershipRoles();
       table.rows.forEach((row) => {
         const role = String(row['role'] || '').toLowerCase().trim();
         const email = String(row['email'] || '').trim().toLowerCase();
         if (!email) return;
         if (Arrays.getSquadronCommanderUnit(role)) squadronEditorEmails.add(email);
-        else if (flightRoles.has(role)) flightViewerEmails.add(email);
+        else if (flightRoles.has(role) || role === 'cadet wing commander' || role === 'wing commander') leadershipViewerEmails.add(email);
       });
 
       const adminEmails = managementAdminEmails();
@@ -960,7 +960,7 @@ SHAMROCK Automations`;
       const ownerEmail = existingPermissions.find((permission) => permission.role === 'owner')?.emailAddress?.trim().toLowerCase();
       const intendedEditors = new Set([...squadronEditorEmails, ...adminEmails]);
       if (ownerEmail) intendedEditors.add(ownerEmail);
-      intendedEditors.forEach((email) => flightViewerEmails.delete(email));
+      intendedEditors.forEach((email) => leadershipViewerEmails.delete(email));
 
       // Restore intended administrator access before removing stale assignments.
       // Fail visibly if this cannot be done instead of reporting a repaired panel.
@@ -972,11 +972,11 @@ SHAMROCK Automations`;
         const email = String(permission.emailAddress || '').trim().toLowerCase();
         if (!email || intendedEditors.has(email)) return;
         if (permission.role === 'writer') ss.removeEditor(email);
-        else if (['reader', 'commenter'].includes(permission.role) && !flightViewerEmails.has(email)) ss.removeViewer(email);
+        else if (['reader', 'commenter'].includes(permission.role) && !leadershipViewerEmails.has(email)) ss.removeViewer(email);
       });
 
       squadronEditorEmails.forEach((email) => ss.addEditor(email));
-      flightViewerEmails.forEach((email) => ss.addViewer(email));
+      leadershipViewerEmails.forEach((email) => ss.addViewer(email));
 
       // Apply range protections: each squadron sheet editable only by its commander
       applyManagementSheetProtections(ss, adminEmails);
@@ -994,11 +994,16 @@ SHAMROCK Automations`;
       if ([...intendedEditors].some((email) => !actualEditors.has(email))) {
         throw new Error('Management editor access did not persist. Run sharing again as the workbook owner.');
       }
+      const actualViewers = new Set(actualPermissions.filter((permission) => permission.role === 'reader')
+        .map((permission) => String(permission.emailAddress || '').trim().toLowerCase()));
+      if ([...leadershipViewerEmails].some((email) => !actualViewers.has(email))) {
+        throw new Error('Management viewer access did not persist. Run sharing again as the workbook owner.');
+      }
       verifyManagementProtections(ss, adminEmails, ownerEmail || '');
 
       Log.info(
         `Management access refreshed: ${adminEmails.length} backend administrator(s), ${squadronEditorEmails.size} squadron commander editor(s), `
-        + `${flightViewerEmails.size} flight leadership viewer(s)`,
+        + `${leadershipViewerEmails.size} leadership viewer(s)`,
       );
     } catch (err) {
       Log.warn(`Failed to share and protect management spreadsheet: ${err}`);

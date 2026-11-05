@@ -140,7 +140,7 @@ Post-deploy validation checklist:
 ### 5.4 Excusals processing
 - Requests append via form.
 - Decisions are made in Excusals Backend by authorized staff or in the separate Excusals Management workbook by the applicable Blue/Gold squadron commander.
-- In Excusals Management, link/domain sharing is private, squadron commanders are editors, canonical flight commanders/deputies are viewers, and only the applicable squadron commander's Decision cells are editable. Headers and request detail fields remain protected. Active Blue/Gold tabs are native Sheets tables using the frontend Directory table style. A hidden protected local Data Legend supplies strict Decision dropdown validation, with Approved green, Denied red, Withdrawn amber, and Superseded purple.
+- In Excusals Management, link/domain sharing is private, squadron commanders are editors, the wing commander and canonical flight commanders/deputies are viewers, and only the applicable squadron commander's Decision cells are editable. Headers and request detail fields remain protected. Active Blue/Gold tabs are native Sheets tables using the frontend Directory table style. A hidden protected local Data Legend supplies strict Decision dropdown validation, with Approved green, Denied red, Withdrawn amber, and Superseded purple.
 - Decisions drive notifications and attendance effects.
 - Management sharing preserves backend administrators (including the backend owner) in workbook and range permissions. An access error must be repaired on the configured workbook by its owner; setup will not silently create a replacement. Permission recovery may require the owner to run setup/sharing once to repair older protected ranges.
 - Sharing reads the paginated Drive permission list, including cross-domain administrators, before changing access. It refreshes the hidden decision legend's protection as well as both squadron tabs, then verifies editor access and all managed protections before reporting success. Unreadable or incomplete administrator permissions stop the repair.
@@ -154,7 +154,7 @@ Post-deploy validation checklist:
 - `Debug Excusals response columns` is read-only and reports header/duplicate counts without merging, deleting, or hiding response columns.
 - Denied post-event absences become `U`; denied pre-event requests become `D` until attendance is taken or closeout marks the absence.
 - Use cleanup/backfill actions only when repairing a known data issue.
-- Use `Share management spreadsheet` after an out-of-cycle Leadership change to remove stale access, refresh current editors/viewers, and reapply Decision-only protections.
+- Use `Share management spreadsheet` after an out-of-cycle Leadership change to remove stale access, refresh current editors/viewers, and reapply Decision-only protections. Verify the current wing commander has Viewer access after repeated refreshes and the former wing commander loses access unless another current role or administrator assignment still grants it.
 
 ### 5.5 Audit review
 - Review Audit Backend after setup, repair, and bulk operator actions.
