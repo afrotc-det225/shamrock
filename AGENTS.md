@@ -61,6 +61,7 @@ The authorized redesign has a separate local/staging prototype in `packages/doma
 - Run the fictional local integration scenario: `npm run demo:v3`.
 - Tests and demo require no provider credentials or real records. They do not establish live Google behavior, production capacity or complete feature parity.
 - Do not use `npm run push` to deploy the prototype. It still targets the current Apps Script project.
+- Read `docs/runbooks/D1_STAGING_RUNBOOK.md` before release preparation or isolated Cloudflare work. Staging uses fictional data and is paused between rehearsals; a successful API smoke test does not establish live Google integration or production readiness.
 
 ## Build And Deploy Commands
 

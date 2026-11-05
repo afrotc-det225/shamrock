@@ -1,6 +1,6 @@
 # D1 prototype: development and handoff
 
-Status: isolated local implementation, not a production replacement. The existing `src/`, Forms, Sheets, triggers and Apps Script deployment remain the supported operational system. This prototype contains fictional fixtures only. Creating a shared Google/GitHub/Cloudflare account does not migrate resource ownership or install this code.
+Status: isolated local and Cloudflare staging implementation, not a production replacement. The staging Worker/D1 passed a fictional API smoke test on 2026-11-05 and was left paused. The existing `src/`, Forms, Sheets, triggers and Apps Script deployment remain the supported operational system. Creating a shared Google/GitHub/Cloudflare account does not migrate existing resource ownership or install replacement Google automation.
 
 The organization's private [SHAMROCK operations repository](https://github.com/afrotc-det225/shamrock-ops) now holds the handoff guide and placeholder configuration. The shared project GitHub account has verified repository admin access. This does not establish organization-owner status or Google/Cloudflare permissions; no live bindings or deployment workflows have been added.
 
@@ -45,7 +45,7 @@ If npm blocks dependency installation scripts, inspect its reported packages and
 
 `npm run build:v3` uses TypeScript and esbuild. It writes ignored `.build/v3/` modules and `.build/v3-artifacts/worker.mjs`, `GoogleAdapter.js`, and a checksum manifest marked `productionReady: false`. The Google artifact exports the `SHAMROCKV3` namespace but registers no trigger. It is separate from `dist/`; `npm run push` remains the existing production Apps Script deployment command and must not be used to install this prototype.
 
-The local emulator uses its own pinned workerd release and a supported compatibility date. Local success does not establish production CPU time, real Google quotas, actual D1 daily usage or account entitlements. There is no deployment configuration or cloud provisioning command in this first slice.
+The local emulator uses its own pinned workerd release and a supported compatibility date. Local success does not establish production CPU time, real Google quotas, actual D1 daily usage or account entitlements. The [staging runbook](D1_STAGING_RUNBOOK.md) describes committed release preparation, an atomic initial migration, API provisioning and the fictional cloud smoke test. No production deployment or live Google consumer is configured.
 
 ## Implemented contract
 
@@ -76,11 +76,11 @@ Projection jobs serialize by event/unit. An adapter must claim a job, fetch curr
 
 The first slice deliberately does not reclaim an expired Google-publication lease automatically: an older Google request might still finish and overwrite newer output. A lost claim response or expired lease can therefore block that resource pending operator review. A safe recovery operation, visible backlog monitoring and real publication/read-back must be implemented before production. Do not clear leased rows or acknowledge uncertain output merely to make the queue look healthy.
 
-## Remaining work before a staging rehearsal
+## Remaining work before a Google staging rehearsal
 
-1. Establish programmatic access to the intended organizational accounts and verify permissions and ownership. Prefer APIs and command-line tools; use interactive login only where the provider requires it. Verify organization ownership separately from membership, Cloudflare access separately from account creation, and Drive ownership separately from sharing.
+1. Complete Google programmatic access and verify permissions and ownership. The SHAMROCK Cloudflare plugin connection and private repository admin access have been verified. Prefer APIs and command-line tools; use interactive login only where the provider requires it. Verify organization ownership separately from membership, account billing separately from API access, and Drive ownership separately from sharing.
 2. Complete the private operations repository's logical resource bindings, access roles and secret names for the intended staging setup. Store actual signing material in provider secret stores and Script Properties; retain recovery material in the organization's password vault. Neither a private repo nor an `.env` handoff is a secret store.
-3. Add versioned, repeatable isolated provisioning and migration tooling, explicit deployment manifests, credential setup, secret rotation and restricted staging bindings. The initial SQL is applied to a fresh disposable database by local fixtures; it is not a general migration runner or an idempotent setup procedure.
+3. Extend the initial staging release/migration tooling to subsequent schema versions, secret rotation, rollback and successor recovery. The current helper records hashes and the source commit, applies the initial migration atomically to an empty staging database, verifies matching repeat state and stops on unknown schema. It is not a general migration or repair engine.
 4. Wire standalone Apps Script triggers, verify the actual Form email-collection mode and allowed respondents, and test human editor identity across the participating Google accounts. Missing identity needs an authenticated confirmation flow that preserves the frozen target and payload.
 5. Implement physical Sheets projections, protections, filter views, draft slots, job consumption and recovery. Test real concurrent edits and sorting, Google API failures, and a round trip through the actual Form and sheet.
 

@@ -2,6 +2,8 @@
 
 This procedure applies only to the fictional staging prototype. It does not deploy the current Apps Script project or authorize production data migration. Read the [prototype runbook](D1_PROTOTYPE_RUNBOOK.md) first. Keep account/database IDs and secret values out of Git, terminal output and release manifests.
 
+Observed on 2026-11-05: source `ea258715d890697b389b788c5caffc57eca6cf98` was deployed to isolated staging through the connected API. The initial schema/ledger, integrity checks and fictional cloud smoke passed. Three synthetic commands and their audit entries were recorded, three projection jobs were consumed by the smoke test, and the database was returned to `accepting_commands=0`. A correctly signed mutation was then rejected by the pause fence. Live Google publication was not tested. The private operations repository holds the release record.
+
 ## Prepare a reviewed release
 
 From a clean, committed public checkout whose checks have passed:
@@ -12,7 +14,7 @@ node scripts/prepare-v3-release.mjs --environment staging --generation 1
 node scripts/prepare-v3-release.mjs --environment staging --generation 1 --verify
 ```
 
-The helper rebuilds the Worker and Google adapter from that commit and writes ignored `.build/v3-release/` artifacts. The manifest records the source commit, checksums, migration version, environment, generation and runtime compatibility date. The metadata template contains placeholders; it never contains a real database ID or signing secret. `--verify` checks the prepared files without rebuilding or deploying them. Local emulator tests and the cloud runtime may have different compatibility dates; real staging validation is required.
+The helper rebuilds the Worker and Google adapter from that commit and writes ignored `.build/v3-release/` artifacts. The manifest records the source commit, checksums, migration version, environment, generation and runtime compatibility date. The metadata template contains placeholders; it never contains a real database ID or signing secret. `--verify` checks the prepared files without rebuilding or deploying them. To verify an older release, use its recorded source checkout; verification intentionally rejects a different current commit. Local emulator tests and the cloud runtime may have different compatibility dates; real staging validation is required.
 
 Deployment is through the connected Cloudflare API in this phase. No paid subscription, custom domain, extra storage service or GitHub deployment feature is needed for this procedure. API resource creation does not itself verify an account's billing subscriptions. If the OAuth connection lacks billing access, report that limit instead of claiming the account's plan was verified.
 
