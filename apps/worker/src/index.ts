@@ -104,9 +104,8 @@ async function context(db: D1Database, command: Command): Promise<Context> {
     const { unitId, ...record } = current;
     return { eventId: current.eventId, unitId, personId: current.personId, current: record };
   }
-  const units = await statement(db, `SELECT m.unit_id AS unitId FROM memberships m
-    JOIN event_units eu ON eu.unit_id=m.unit_id AND eu.event_id=?
-    WHERE m.person_id=? AND m.active=1 LIMIT 2`, command.payload.eventId, command.payload.personId)
+  const units = await statement(db, `SELECT unit_id AS unitId FROM memberships
+    WHERE person_id=? AND active=1 LIMIT 2`, command.payload.personId)
     .all<{ unitId: string }>();
   if (units.results.length !== 1) throw new HttpError(409, 'AMBIGUOUS_SCOPE', 'Resolve the event membership before submitting.');
   return { eventId: command.payload.eventId, unitId: units.results[0].unitId, personId: command.payload.personId };
@@ -117,6 +116,21 @@ const permissionSql = `EXISTS (SELECT 1 FROM principals p JOIN access_grants g O
   WHERE p.principal_id=? AND p.active=1 AND g.capability=? AND g.unit_id=?
   AND (g.subject_scope='unit' OR (g.subject_scope='self' AND p.person_id=?)))`;
 const sourceSql = `EXISTS (SELECT 1 FROM adapter_sources WHERE source_kind=? AND resource_key=? AND active=1)`;
+// The current projection/outbox is scoped by one unit, while attendance evidence is
+// keyed by event/person. Multiple active units require explicit revision/job fan-out;
+// reject that unsupported topology rather than publish stale views in another unit.
+const singleUnitScopeSql = `NOT EXISTS (SELECT 1 FROM memberships scoped JOIN memberships other
+  ON other.person_id=scoped.person_id AND other.active=1 AND other.unit_id<>scoped.unit_id
+  WHERE scoped.unit_id=? AND scoped.active=1)`;
+
+function membershipGuard(ctx: Context): { sql: string; values: (string | number | null)[] } {
+  return {
+    sql: `${singleUnitScopeSql}${ctx.personId === null ? '' : ` AND
+      (SELECT COUNT(*) FROM memberships WHERE person_id=? AND active=1)=1
+      AND EXISTS (SELECT 1 FROM memberships WHERE person_id=? AND unit_id=? AND active=1)`}`,
+    values: ctx.personId === null ? [ctx.unitId] : [ctx.unitId, ctx.personId, ctx.personId, ctx.unitId],
+  };
+}
 
 function guardParts(env: Env, command: Command, ctx: Context): { sql: string; values: (string | number | null)[] } {
   return {
@@ -160,11 +174,17 @@ async function priorReceipt(db: D1Database, commandId: string, hash: string): Pr
 async function acceptCommand(env: Env, command: Command): Promise<Receipt> {
   const ctx = await context(env.DB, command);
   await authorize(env, command, ctx);
+  const membership = membershipGuard(ctx);
+  const scope = await statement(env.DB, `SELECT (${membership.sql}) AS supported`, ...membership.values).first<{ supported: number }>();
+  if (scope?.supported !== 1) throw new HttpError(409, 'AMBIGUOUS_SCOPE', 'This prototype requires one active unit per person in the command scope.');
   const hash = await digest(JSON.stringify(command)); // parseCommand emits deterministic property order.
   const prior = await priorReceipt(env.DB, command.commandId, hash);
   if (prior) return prior;
   const now = new Date().toISOString();
   const guard = guardParts(env, command, ctx);
+  // Recheck membership inside the same atomic batch as the accepted mutation.
+  guard.sql += ` AND ${membership.sql}`;
+  guard.values.push(...membership.values);
   const writes: D1PreparedStatement[] = [];
   let result: unknown;
   let targetId: string;
@@ -280,7 +300,7 @@ async function projectJob(env: Env, input: Record<string, string | number>): Pro
   const job = await leasedJob(env, input);
   // D1 batch gives these related reads one transactional snapshot. Bounded to
   // the interactive prototype's maximum roster; larger views need pagination.
-  const [event, unit, members, requests] = await env.DB.batch([
+  const [event, unit, members, requests, revision, membership] = await env.DB.batch([
     statement(env.DB, 'SELECT event_id AS eventId,label FROM events WHERE event_id=?', job.eventId),
     statement(env.DB, 'SELECT unit_id AS unitId,label FROM organizational_units WHERE unit_id=?', job.unitId),
     statement(env.DB, `SELECT p.person_id AS personId,p.display_name AS displayName,a.observed_code AS observedCode
@@ -288,19 +308,31 @@ async function projectJob(env: Env, input: Record<string, string | number>): Pro
       ON a.person_id=p.person_id AND a.event_id=? WHERE m.unit_id=? AND m.active=1 ORDER BY p.person_id LIMIT 501`, job.eventId, job.unitId),
     statement(env.DB, `SELECT request_id AS requestId,person_id AS personId,status,requested_outcome AS requestedOutcome,version
       FROM excusal_requests WHERE event_id=? AND unit_id=? ORDER BY request_id LIMIT 1001`, job.eventId, job.unitId),
+    // All current prototype mutations append an audit record atomically. Future
+    // roster/event/name mutations must also advance this scope's revision.
+    statement(env.DB, `SELECT COALESCE(MAX(a.audit_id),0) AS revision FROM audit_events a
+      JOIN operation_commands c ON c.command_id=a.command_id WHERE c.event_id=? AND c.unit_id=?`, job.eventId, job.unitId),
+    statement(env.DB, `SELECT (${singleUnitScopeSql}) AS supported`, job.unitId),
   ]);
+  if ((membership.results[0] as { supported: number }).supported !== 1) {
+    throw new HttpError(409, 'AMBIGUOUS_SCOPE', 'This prototype requires one active unit per person in the projection scope.');
+  }
   if (members.results.length > 500 || requests.results.length > 1000) {
     throw new HttpError(409, 'PROJECTION_TOO_LARGE', 'Use a reviewed paginated publication workflow.');
   }
   const memberRows = members.results as { personId: string; displayName: string; observedCode: string | null }[];
   const requestRows = requests.results as { personId: string; requestId: string; status: string; requestedOutcome: string; version: number }[];
+  const memberIds = new Set(memberRows.map(member => member.personId));
+  if (requestRows.some(request => !memberIds.has(request.personId))) {
+    throw new HttpError(409, 'PROJECTION_INCOMPLETE', 'A request outside the current roster needs a reviewed publication workflow.');
+  }
   const byPerson = new Map<string, Omit<typeof requestRows[number], 'personId'>[]>();
   for (const { personId, ...request } of requestRows) {
     const existing = byPerson.get(personId);
     if (existing) existing.push(request);
     else byPerson.set(personId, [request]);
   }
-  return { event: event.results[0], unit: unit.results[0], rows: memberRows.map(member => ({
+  return { revision: (revision.results[0] as { revision: number }).revision, event: event.results[0], unit: unit.results[0], rows: memberRows.map(member => ({
     ...member, requests: byPerson.get(member.personId) ?? [],
   })) };
 }

@@ -212,12 +212,63 @@ test('publication jobs serialize a resource, publish latest facts and require cu
   const identity = jobRequest({ jobId, claimToken });
   const projection = await f.send(identity, { path: '/v1/jobs/project' });
   assert.equal(projection.status, 200);
+  assert.equal(projection.body.revision, 2);
   assert.deepEqual(projection.body.rows[0], { personId: 'person-a', displayName: 'Example A', observedCode: 'P', requests: [{ requestId: 'request-one', status: 'Submitted', requestedOutcome: 'E', version: 1 }] });
   assert.equal(projection.body.rows[1].observedCode, null);
   assert.equal((await f.send({ ...identity, claimToken: 'wrong-token' }, { path: '/v1/jobs/ack' })).status, 409);
   assert.equal((await f.send(identity, { path: '/v1/jobs/ack' })).status, 200);
   assert.equal((await f.send(identity, { path: '/v1/jobs/ack' })).status, 409);
   assert.ok((await f.send(jobRequest(), { path: '/v1/jobs/claim' })).body.job);
+});
+
+test('projection revision advances with decisions and omitted request subjects fail closed', async t => {
+  const f = await fixture(t);
+  await f.send(command()); await f.send(command('excusal.submit'));
+  const { body } = await f.send(jobRequest(), { path: '/v1/jobs/claim' });
+  const identity = jobRequest({ jobId: body.job.jobId, claimToken: body.job.claimToken });
+  const first = await f.send(identity, { path: '/v1/jobs/project' });
+  await f.send(command('excusal.decide'));
+  const second = await f.send(identity, { path: '/v1/jobs/project' });
+  assert.equal(second.body.revision, first.body.revision + 1);
+  assert.equal(second.body.rows[0].requests[0].version, 2);
+  await f.db.prepare("UPDATE memberships SET active=0 WHERE person_id='person-a'").run();
+  const missing = await f.send(identity, { path: '/v1/jobs/project' });
+  assert.equal(missing.status, 409);
+  assert.equal(missing.body.error.code, 'PROJECTION_INCOMPLETE');
+  assert.equal((await f.db.prepare("SELECT state FROM outbox_jobs WHERE job_id=?").bind(identity.jobId).first()).state, 'leased');
+});
+
+test('multiple active units fail closed for reports, requests and decision scope', async t => {
+  const f = await fixture(t);
+  await f.send(command('excusal.submit'));
+  // Even a second unit not participating in this event is unsupported: evidence
+  // is event/person keyed and would otherwise escape per-unit publication revisions.
+  await f.db.batch([
+    f.db.prepare("DELETE FROM event_units WHERE unit_id='bravo'"),
+    f.db.prepare("INSERT INTO memberships VALUES('person-a','bravo',1)"),
+  ]);
+  for (const input of [command(), command('excusal.submit'), command('excusal.decide')]) {
+    const response = await f.send(input);
+    assert.equal(response.status, 409);
+    assert.equal(response.body.error.code, 'AMBIGUOUS_SCOPE');
+  }
+  assert.equal(await f.count('operation_commands'), 1);
+  assert.equal(await f.count('audit_events'), 1);
+  assert.equal(await f.count('outbox_jobs'), 1);
+  assert.equal(await f.count('attendance_current'), 0);
+  assert.equal((await f.db.prepare("SELECT version FROM excusal_requests WHERE request_id='request-one'").first()).version, 1);
+});
+
+test('a membership ambiguity introduced after acceptance blocks projection without acknowledging it', async t => {
+  const f = await fixture(t);
+  await f.send(command());
+  const { body } = await f.send(jobRequest(), { path: '/v1/jobs/claim' });
+  await f.db.prepare("INSERT INTO memberships VALUES('person-b','bravo',1)").run();
+  const identity = jobRequest({ jobId: body.job.jobId, claimToken: body.job.claimToken });
+  const projection = await f.send(identity, { path: '/v1/jobs/project' });
+  assert.equal(projection.status, 409);
+  assert.equal(projection.body.error.code, 'AMBIGUOUS_SCOPE');
+  assert.equal((await f.db.prepare('SELECT state FROM outbox_jobs WHERE job_id=?').bind(identity.jobId).first()).state, 'leased');
 });
 
 test('expired publication lease is never stolen while a prior Google request may still be active', async t => {

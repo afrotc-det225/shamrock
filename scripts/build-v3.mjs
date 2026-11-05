@@ -25,14 +25,16 @@ await build({
 });
 await build({
   absWorkingDir: root,
-  entryPoints: ['apps/google-adapter/src/apps-script.ts'],
+  entryPoints: ['apps/google-adapter/src/staging-entry.ts'],
   outfile: fileURLToPath(new URL('GoogleAdapter.js', artifacts)),
   bundle: true, format: 'iife', globalName: 'SHAMROCKV3', platform: 'browser', target: 'es2019',
   sourcemap: false, legalComments: 'none',
+  footer: { js: await readFile(new URL('../apps/google-adapter/staging-globals.js', import.meta.url), 'utf8') },
 });
+await writeFile(new URL('appsscript.json', artifacts), await readFile(new URL('../apps/google-adapter/appsscript.staging.json', import.meta.url)));
 
 const files = {};
-for (const name of ['worker.mjs', 'GoogleAdapter.js']) {
+for (const name of ['worker.mjs', 'GoogleAdapter.js', 'appsscript.json']) {
   const bytes = await readFile(new URL(name, artifacts));
   files[name] = { bytes: bytes.length, sha256: createHash('sha256').update(bytes).digest('hex') };
 }

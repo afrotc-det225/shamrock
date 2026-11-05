@@ -1,0 +1,69 @@
+# SHAMROCK account handoff
+
+Transfer operational responsibility while preserving the existing production script, spreadsheets, Forms, response history and links. This is separate from the D1 migration; the [production operator runbook](OPERATOR_RUNBOOK.md) remains authoritative for current workflows. Keep real accounts, resource IDs, permission inventories and recovery material out of this public document.
+
+## Current checkpoint
+
+As of the initial November 2026 handoff preparation, the incoming automation account has been granted writer access to six privately owned resources, and its edit capability has been verified for all six. The outgoing owner remains in place. The main workbook and archive have inherited Shared Drive access. All 27 existing script files match the pre-handoff snapshot. No content, resource IDs or production triggers were changed by that access grant. The operator reported successful incoming-account execution of the authorization-only probe and confirmed that production uses a default Google Cloud project. The outgoing trigger inventory, ownership disposition and trigger cutover are still pending. **Access preparation does not mean the handoff is complete.**
+
+## Establish the baseline
+
+Record the following in restricted operational storage, with credential recovery in the shared password manager. Repository notes should contain logical names and recovery instructions, not raw runtime bindings or secrets.
+
+- The deployed source commit, existing Apps Script project, manifest/timezone, deployments and their execution identity, plus the matching private local deployment configuration. Do not create a replacement project or change the production deployment target.
+- Every configured workbook, Form, response destination, archive and parent location: logical purpose, owner or Shared Drive, inherited/direct permissions, current sharing restrictions, and the incoming account's effective access. Verify all six access grants from that account, including opening the existing script and reading its settings.
+- All current Script Properties, preserving their values in approved restricted recovery storage. Include resource bindings, editor allowlists, formatting flags, resumable operation state and any delivery/reconciliation state. Do not run property cleanup or reset during the handoff. The documented key catalog is [Config properties](../../src/config/properties.ts); it is not a substitute for inspecting the actual project.
+- The associated Google Cloud project: default versus standard, project identity, enabled APIs, OAuth client/consent configuration, access administrators and billing status. For a standard project, establish incoming administrative access separately from Drive sharing. Inventory existing settings before considering any Cloud project change; changing projects can require reauthorization and API reconfiguration. [Google Cloud project guidance](https://developers.google.com/apps-script/guides/cloud-platform-projects).
+- Trigger manifests under the outgoing creator and any other known historic creators: handler, event type, source, schedule/timezone, trigger UID, creator and last successful execution. A script editor or a single API credential cannot inventory every owner's triggers. Google runs installable triggers as their creator and hides another account's triggers from the current account. [Installable trigger restrictions](https://developers.google.com/apps-script/guides/triggers/installable).
+
+Confirm no Form rebuild, term transition or other resumable operation is running. A one-time continuation trigger is an unfinished operation to resolve, not a duplicate to delete casually. Record the latest source-response counts/timestamps, backend row counts, last successful reconciliations and recent failures so a handoff gap is detectable.
+
+## Authorize the incoming account without changing production
+
+Use a browser profile signed in only as the incoming account. Open the **existing** production Apps Script project, select `getShamrockProgress` in the function selector, and run it with no arguments. Complete Google's consent prompts for that account. This function returns `null` for a missing/invalid run ID; it does not install triggers, process a Form, mutate a Sheet or send mail. Its implementation is in [src/index.ts](../../src/index.ts), with the invalid-ID guard in [ProgressService](../../src/services/progress.ts).
+
+This authorizes the production script's existing requested scopes; it is not a resource-access test or trigger migration. A CLI login or Drive permission grant alone is not this authorization. Verify incoming access to each configured file separately. Do not select setup, trigger installation, notice dispatch, cleanup or replay functions as authorization probes.
+
+## Decide durable ownership
+
+Writer access can support the controlled trigger change while the outgoing owner remains available for recovery. Record separately whether each private resource will remain under a stable existing owner or transfer to the project account. If transferring between consumer accounts, the incoming account must accept the ownership request; writer access and a pending request are not completed ownership. Workspace transfer restrictions differ. Shared Drive files are owned by the organization and do not use individual ownership transfer. [Google Drive ownership guidance](https://developers.google.com/workspace/drive/api/guides/transfer-file).
+
+Retain outgoing recovery access through validation. Do not move or copy resources to work around an ownership restriction: that can change access, links or runtime assumptions. An account handoff also needs password-manager vault access, recovery factors, GitHub organization/repository administration and Cloudflare account access. Being able to sign in once does not prove a successor can recover the account.
+
+## Cut over triggers once
+
+Use a quiet maintenance window away from attendance submissions and scheduled notices. The current normal production manifest is **11 triggers**, matching [the installer](../../src/services/setup.ts):
+
+| Handler | Binding or schedule |
+| --- | --- |
+| `onFrontendEdit` | Main workbook, edit |
+| `onBackendOpen` | Admin workbook, open |
+| `onBackendEdit` | Admin workbook, edit |
+| `onExcusalsManagementEdit` | Excusals Management workbook, edit |
+| `onAttendanceFormSubmit` | Existing attendance Form, submit |
+| `onExcusalsFormSubmit` | Existing excusal Form, submit |
+| `onDirectoryFormSubmit` | Existing directory Form, submit |
+| `reconcilePendingDirectoryEdits` | Every 10 minutes |
+| `cleanupExpiredTransitionArchivesV2` | Daily, 03:00 hour |
+| `sendDailyEventAttendanceNotices` | Daily, 05:00 hour |
+| `sendSundayAttendanceCloseout` | Sunday, 17:00 hour |
+
+Clock schedules use the manifest's `America/Indiana/Indianapolis` timezone and are not exact-to-the-minute appointments. There is no frontend open trigger. Three retired weekly attendance handlers and temporary continuation handlers are not part of this normal set.
+
+1. Save each Form's current accepting-responses state, temporarily close intake, and hold spreadsheet edits with appropriate temporary protections/operator coordination. Preserve existing Forms and destinations. Capture the final intake/decision baseline and wait until existing executions have finished.
+2. Under the outgoing trigger creator, remove the inventoried production triggers. Verify removal in that account's trigger view and wait for any already-started execution to finish. Retire any additional known creator's production triggers in that creator's session too. Record this checkpoint before creating replacements.
+3. Under the already-authorized incoming account, run the existing backend menu **SHAMROCK → Setup & Automations → Reinstall triggers** once. Review its confirmation. This repairs the current user's trigger set; it cannot remove another creator's hidden triggers. Do not run full provisioning or rebuild Forms for an account change.
+4. Inspect the actual incoming manifest: exactly the 11 handlers above, one per expected binding/type, correct schedules and creator. Read back all IDs privately against the original inventory. The current installer catches some deletion failures, so a success message alone does not prove duplicate-free installation. Stop and inspect any mismatch before reopening intake.
+5. Recheck the outgoing account's trigger view. Restore the saved Form accepting states and ordinary spreadsheet protections only after both ownership views agree. Record the cutover time and new trigger UIDs in restricted operational storage.
+
+**Do not use `AUTOMATIONS_PAUSED` as the cutover barrier.** Current code checks it on selected edit/reconciliation paths, while Form submission and scheduled attendance-notice wrappers do not universally enforce it. Removing the old triggers, holding intake and waiting for in-flight work is the actual transition boundary. Likewise, the D1 staging pause flag controls only that isolated system.
+
+## Verify and recover
+
+Observe the first legitimate Form submissions, spreadsheet decisions and Directory reconciliation under the new creator. Verify one expected backend/audit outcome per input, retained response history, unchanged attendance codes, unchanged source/destination IDs and no duplicate executions. Review the sender identity and recipient configuration before the next normal notification; changing the trigger creator changes whose account sends mail. Do not manually invoke notification or closeout handlers just to test authorization.
+
+Compare the cutover baseline against raw responses and decisions. Inputs made while triggers were absent are not guaranteed to replay automatically. Reconcile an identified gap through the existing supported workflow after duplicate checks; do not blindly replay the latest Form response or rerun bulk operations. Preserve all source input while investigating.
+
+If validation fails, close intake again, remove the new account's triggers and verify they are gone before reinstating the old creator's recorded set. Wait for active executions to finish, preserve all data and Script Properties, then restore the prior intake/protection state. Keep both accounts available until recovery is proven. Missing authorization or access is a reason to keep the old installation operating during preparation, not to install both sets concurrently.
+
+Mark the handoff complete only after incoming access and consent, the two-account trigger checks, observed workflow validation, ownership dispositions, Cloud project access and account/password-manager recovery have been recorded. Until then, report the last verified checkpoint and the remaining owner-dependent action.

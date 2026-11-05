@@ -9,7 +9,7 @@ const migrationName = '0001_prototype.sql';
 const compatibilityDate = '2026-11-05'; // Staging target; local workerd is older, so remote smoke verification is required.
 const ledgerName = 'shamrock_migrations';
 const guardName = 'shamrock_bootstrap_guard';
-const releaseFiles = ['worker.mjs', 'GoogleAdapter.js', 'migration.sql', 'migration-plan.json', 'upload-metadata.template.json'];
+const releaseFiles = ['worker.mjs', 'GoogleAdapter.js', 'appsscript.json', 'migration.sql', 'migration-plan.json', 'upload-metadata.template.json'];
 const sha256 = value => createHash('sha256').update(value).digest('hex');
 const normalizeSql = value => value.trim().replace(/;\s*$/, '').replace(/\s+/g, ' ');
 const isEngineObject = name => name.startsWith('sqlite_') || ['_cf_KV', '_cf_METADATA'].includes(name);
@@ -193,7 +193,7 @@ async function main() {
   const builtManifest = JSON.parse(await readFile(resolve(root, '.build/v3-artifacts/manifest.json'), 'utf8'));
   const files = {};
   await mkdir(output, { recursive: true });
-  for (const name of ['worker.mjs', 'GoogleAdapter.js']) {
+  for (const name of ['worker.mjs', 'GoogleAdapter.js', 'appsscript.json']) {
     const bytes = await readFile(resolve(root, '.build/v3-artifacts', name));
     if (sha256(bytes) !== builtManifest.files[name]?.sha256 || bytes.length !== builtManifest.files[name]?.bytes) {
       throw new Error('Build artifact and build manifest disagree.');

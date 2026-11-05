@@ -40,10 +40,13 @@ If npm blocks dependency installation scripts, inspect its reported packages and
 | `database/migrations/0001_prototype.sql` | Initial isolated SQL schema; no environment credentials or real records |
 | `apps/google-adapter/src/index.ts` | Form mapping, frozen decision drafts, command journal and publication contracts |
 | `apps/google-adapter/src/apps-script.ts` | Google service ports for signing, transport, Sheets journal and locks |
+| `apps/google-adapter/src/staging-host.ts` | Paused staging intake, native source identity and versioned trigger setup |
+| `apps/google-adapter/src/native-runtime.ts` | Live Google ACL/protection checks, literal Sheets API writes and private projection claims |
+| `apps/google-adapter/src/projection.ts` | Stable keyed projection publication and read-back before job acknowledgement |
 | `tests/v3/` | Domain, adapter, actual local D1 and cross-component regression tests |
 | `scripts/lib/v3-local-scenario.mjs` | Reusable fictional integration scenario |
 
-`npm run build:v3` uses TypeScript and esbuild. It writes ignored `.build/v3/` modules and `.build/v3-artifacts/worker.mjs`, `GoogleAdapter.js`, and a checksum manifest marked `productionReady: false`. The Google artifact exports the `SHAMROCKV3` namespace but registers no trigger. It is separate from `dist/`; `npm run push` remains the existing production Apps Script deployment command and must not be used to install this prototype.
+`npm run build:v3` uses TypeScript and esbuild. It writes ignored `.build/v3/` modules and `.build/v3-artifacts/worker.mjs`, `GoogleAdapter.js`, `appsscript.json`, and a checksum manifest marked `productionReady: false`. The Google artifact exposes versioned top-level staging entry points. Loading it performs no Google IO; explicit setup validates bindings and installs only the configured staging triggers, paused by default. It is separate from `dist/`; `npm run push` remains the existing production Apps Script deployment command and must not be used to install this prototype.
 
 The local emulator uses its own pinned workerd release and a supported compatibility date. Local success does not establish production CPU time, real Google quotas, actual D1 daily usage or account entitlements. The [staging runbook](D1_STAGING_RUNBOOK.md) describes committed release preparation, an atomic initial migration, API provisioning and the fictional cloud smoke test. No production deployment or live Google consumer is configured.
 
@@ -66,6 +69,8 @@ All paths except health require a key ID, timestamp and HMAC-SHA256 signature ov
 
 Complete attendance reports currently assert the entire active unit roster at the referenced roster version; partial reports may cover a subset. The stored covered roster and selected members are explicit. Presence evidence is append-only in this slice. Corrections, including removing a mistaken `P`, require a later explicit correction operation. Excusal requests remain independent of observed attendance. No attendance credit, percentage, final absence or notification-recipient policy is guessed.
 
+This prototype requires exactly one active unit membership per person in an affected scope. Commands and projections reject ambiguous memberships. Membership movement, overlapping units, name changes and event/catalog changes need a reviewed revision and projection-job strategy before they can be supported. The current projection revision advances for the three implemented commands; direct database edits are not a supported directory workflow.
+
 Interactive reports have a 500-member domain limit and a 64 KiB Worker request limit. The Google journal additionally bounds payload characters and retained entries, so some large-ID reports can reach a lower limit. Oversized workflows need a designed batch protocol; input is never silently truncated. Attendance writes use SQL JSON input sets and bounded statements rather than a query per person. This addresses per-request query growth, but quota and CPU headroom still need measurement in staging.
 
 ## Retry and publication behavior
@@ -81,8 +86,10 @@ The first slice deliberately does not reclaim an expired Google-publication leas
 1. Complete Google programmatic access and verify permissions and ownership. The SHAMROCK Cloudflare plugin connection and private repository admin access have been verified. Prefer APIs and command-line tools; use interactive login only where the provider requires it. Verify organization ownership separately from membership, account billing separately from API access, and Drive ownership separately from sharing.
 2. Complete the private operations repository's logical resource bindings, access roles and secret names for the intended staging setup. Store actual signing material in provider secret stores and Script Properties; retain recovery material in the organization's password vault. Neither a private repo nor an `.env` handoff is a secret store.
 3. Extend the initial staging release/migration tooling to subsequent schema versions, secret rotation, rollback and successor recovery. The current helper records hashes and the source commit, applies the initial migration atomically to an empty staging database, verifies matching repeat state and stops on unknown schema. It is not a general migration or repair engine.
-4. Wire standalone Apps Script triggers, verify the actual Form email-collection mode and allowed respondents, and test human editor identity across the participating Google accounts. Missing identity needs an authenticated confirmation flow that preserves the frozen target and payload.
-5. Implement physical Sheets projections, protections, filter views, draft slots, job consumption and recovery. Test real concurrent edits and sorting, Google API failures, and a round trip through the actual Form and sheet.
+4. Rehearse the implemented standalone host and native runtime against actual Google Forms and Sheets. Verify email collection, native item IDs, protections, account consent and installed trigger identity. Test human editor identity across the participating accounts. Missing identity still needs an authenticated confirmation flow that preserves the frozen target and payload.
+5. Rehearse literal-value publication and read-back, protected fixed draft slots, durable claims, real concurrent edits/sorting and API failures. Full spreadsheet presentation, filter views, automated lease recovery and the complete workflow remain unfinished.
+
+Current production account succession is a separate workstream. Follow the [account handoff runbook](ACCOUNT_HANDOFF_RUNBOOK.md); adding editor access or transferring file ownership does not transfer installable triggers.
 
 Before migration/cutover, complete directory and leadership workflows, corrections, multi-event excusal expansion, notifications, reports/charts, imports/exports, term transitions, backups/restore, diagnostics and the rest of the parity matrix. The current unique source key supports one command per operation and native source revision; a multi-event response needs explicit child identities before multiple request commands can share that response. No production records have been imported or reconciled by this prototype.
 
