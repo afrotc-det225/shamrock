@@ -281,7 +281,7 @@ export async function authorizeDirectoryReview(env: AdminEnv, input: unknown): P
 export async function frontendSnapshot(env: AdminEnv, input: unknown): Promise<FrontendSnapshot> {
   const req = readInput(input, env);
   const guard = readerGuard(env, req.principalId);
-  const bounds = [0, 0, 500, 200, 50, 20, 20, 200, 10000, 10000, 5000, 0, 10000, 25000, 10000];
+  const bounds = [0, 0, 500, 200, 50, 20, 20, 200, 10000, 10000, 5000, 0, 10000, 25000, 10000, 25000];
   const results = await env.DB.batch<Record<string, unknown>>([
     stmt(env.DB, `SELECT (${guard.sql}) AS allowed`, ...guard.values),
     stmt(env.DB, `SELECT (SELECT COALESCE(MAX(audit_id),0) FROM audit_events) AS operations,(SELECT COALESCE(MAX(audit_id),0) FROM admin_audit_events) AS administration`),
@@ -306,6 +306,9 @@ export async function frontendSnapshot(env: AdminEnv, input: unknown): Promise<F
     stmt(env.DB, `SELECT term_id AS termId,person_id AS personId,last_name AS lastName,first_name AS firstName,as_year AS asYear,
       flight_id AS flightId,flight_path_status AS flightPathStatus,date_of_birth AS dateOfBirth
       FROM term_roster_snapshots ORDER BY term_id,person_id LIMIT 10001`),
+    stmt(env.DB, `SELECT b.baseline_id AS baselineId,b.person_id AS personId,b.event_id AS eventId,b.code
+      FROM legacy_attendance_baselines b JOIN legacy_import_runs i ON i.import_run_id=b.import_run_id AND i.state='complete'
+      ORDER BY b.person_id,b.event_id LIMIT 25001`),
   ]);
   if (results[0].results[0]?.allowed !== 1)
     throw new HttpError(403, 'NOT_AUTHORIZED', 'A current Wing frontend read grant is required.');
@@ -353,7 +356,7 @@ export async function frontendSnapshot(env: AdminEnv, input: unknown): Promise<F
     { code: 'FLIGHTS_MISSING_SQUADRON', count: flights.filter(f => f.squadronId === null).length },
     { code: 'EVENTS_MISSING_ROSTER', count: events.filter(event => event.eligiblePersonIds === null).length }].filter(d => d.count > 0);
   return { contractVersion: 1, environment: req.environment as 'local' | 'staging', generation: req.generation, revision: results[1].results[0] as unknown as FrontendSnapshot['revision'], people, leadership, flights, squadrons,
-    terms: results[6].results.map(t => ({ ...t, isCurrent: !!t.isCurrent, ...(rosters.has(String(t.termId)) ? {roster:rosters.get(String(t.termId))} : {}) })) as unknown as FrontendSnapshot['terms'], events, corrections: results[12].results as unknown as FrontendSnapshot['corrections'], attendanceVersions: results[13].results as unknown as FrontendSnapshot['attendanceVersions'], eventFlights: results[8].results as unknown as FrontendSnapshot['eventFlights'], observations: results[9].results as unknown as FrontendSnapshot['observations'], requests: results[10].results as unknown as FrontendSnapshot['requests'], diagnostics };
+    terms: results[6].results.map(t => ({ ...t, isCurrent: !!t.isCurrent, ...(rosters.has(String(t.termId)) ? {roster:rosters.get(String(t.termId))} : {}) })) as unknown as FrontendSnapshot['terms'], events, corrections: results[12].results as unknown as FrontendSnapshot['corrections'], attendanceVersions: results[13].results as unknown as FrontendSnapshot['attendanceVersions'], eventFlights: results[8].results as unknown as FrontendSnapshot['eventFlights'], observations: results[9].results as unknown as FrontendSnapshot['observations'], requests: results[10].results as unknown as FrontendSnapshot['requests'], legacyBaselines:results[15].results as unknown as FrontendSnapshot['legacyBaselines'], diagnostics };
 }
 export async function getAdminReceipt(env: AdminEnv, url: URL): Promise<unknown> {
   const id = adminIdentifier(url.pathname.slice('/v1/admin/commands/'.length));

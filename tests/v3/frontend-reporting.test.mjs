@@ -27,6 +27,29 @@ const matrix = result => result.matrices.find(m => m.termId === result.currentTe
 const row = (result, id = 'cadet-a') => matrix(result).rows.find(r => r.personId === id);
 const cell = (result, id = 'cadet-a', eventId = 'event-mando') => row(result, id).cells.find(c => c.eventId === eventId);
 
+test('legacy effective baseline is distinct from observed evidence and genuine operations supersede it', () => {
+  const input=fixture();input.legacyBaselines=[{baselineId:'baseline-a',personId:'cadet-a',eventId:'event-mando',code:'P'}];
+  let value=cell(buildFrontendReporting(input));assert.equal(value.effectiveCode,'P');assert.equal(value.observedCode,null);assert.equal(value.observationId,null);assert.equal(value.source,'legacy-baseline');
+  input.corrections=[observation('clear-imported', 'cadet-a','event-mando',null,1)];
+  value=cell(buildFrontendReporting(input));assert.equal(value.effectiveCode,null);assert.equal(value.source,'correction');assert.equal(value.legacyBaselineId,'baseline-a');
+  input.observations=[observation('later-present','cadet-a','event-mando','P',2)];
+  value=cell(buildFrontendReporting(input));assert.equal(value.effectiveCode,'P');assert.equal(value.source,'observation');
+});
+
+test('imported P/T retains presence semantics against new pending and denied excusals',()=>{
+  for(const code of ['P','T'])for(const status of ['Submitted','Denied']){
+    const input=fixture();input.legacyBaselines=[{baselineId:'baseline-a',personId:'cadet-a',eventId:'event-mando',code}];input.requests=[request({status})];
+    const value=cell(buildFrontendReporting(input));assert.equal(value.effectiveCode,code);assert.equal(value.observedCode,null);
+  }
+});
+
+test('explicit blank baseline stays blank and duplicate pair baselines fail closed',()=>{
+  const input=fixture();input.legacyBaselines=[{baselineId:'baseline-a',personId:'cadet-a',eventId:'event-mando',code:null}];
+  assert.equal(cell(buildFrontendReporting(input)).effectiveCode,null);
+  input.legacyBaselines.push({...input.legacyBaselines[0],baselineId:'duplicate'});
+  assert.throws(()=>buildFrontendReporting(input),ReportingInputError);
+});
+
 test('each operational code has the exact legacy credit and denominator treatment', () => {
   for (const code of ['P', 'T', 'E', 'ES', 'MED', 'A', 'U', 'R', 'D', 'N/A', null]) {
     const result = calculateAttendanceCredit([{ effectiveCode: code, eligible: true }]);

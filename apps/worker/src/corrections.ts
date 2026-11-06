@@ -21,6 +21,7 @@ export const attendanceVersionsSql = `SELECT personId,eventId,MAX(version) AS ve
     JOIN attendance_reports r ON r.report_id=o.report_id JOIN audit_events a ON a.command_id=r.command_id
   UNION ALL SELECT r.person_id,r.event_id,a.audit_id FROM excusal_requests r JOIN audit_events a ON a.command_id=r.last_command_id
   UNION ALL SELECT c.person_id,c.event_id,a.audit_id FROM attendance_corrections c JOIN audit_events a ON a.command_id=c.command_id
+  UNION ALL SELECT b.person_id,b.event_id,0 FROM legacy_attendance_baselines b JOIN legacy_import_runs i ON i.import_run_id=b.import_run_id AND i.state='complete'
 ) GROUP BY personId,eventId ORDER BY personId,eventId LIMIT 25001`;
 function authorization(env: CorrectionEnv, command: AttendanceCorrectionCommand, flightId: string) {
   return {

@@ -53,6 +53,8 @@ export interface ReportingCorrection extends Omit<ReportingObservation, 'code'> 
   /** Null is an explicit clear. It must remain distinguishable from no correction. */
   code: AttendanceCode | null;
 }
+/** Reviewed imported effective state, before every genuine operation in the new database. */
+export interface ReportingLegacyBaseline { baselineId:string;personId:string;eventId:string;code:AttendanceCode|null }
 export interface ReportingRequest {
   requestId: string;
   personId: string;
@@ -75,6 +77,7 @@ export interface FrontendReportingInput {
   events: readonly ReportingEvent[];
   observations: readonly ReportingObservation[];
   corrections: readonly ReportingCorrection[];
+  legacyBaselines?: readonly ReportingLegacyBaseline[];
   requests: readonly ReportingRequest[];
   scope?: ReportingScope;
 }
@@ -93,9 +96,10 @@ export interface ReportingAttendanceCell {
   observationId: string | null;
   correctionId: string | null;
   correctionCode: AttendanceCode | null;
+  legacyBaselineId?: string;
   attendanceCode: AttendanceCode | null;
   effectiveCode: AttendanceCode | null;
-  source: 'none' | 'observation' | 'correction' | 'approval' | 'pending-request' | 'review';
+  source: 'none' | 'observation' | 'correction' | 'legacy-baseline' | 'approval' | 'pending-request' | 'review';
   requests: { requestId: string; status: ExcusalStatus; requestedOutcome: RequestedOutcome }[];
   needsReview: boolean;
 }
@@ -192,16 +196,17 @@ export function calculateAttendancePercent(codes: readonly (AttendanceCode | nul
 
 function resolveCell(event: ReportingEvent, personId: string, observations: readonly ReportingObservation[],
   corrections: readonly ReportingCorrection[], requests: readonly ReportingRequest[], eligible: boolean | null,
-  diagnostics: ReportingDiagnostic[]): ReportingAttendanceCell {
+  diagnostics: ReportingDiagnostic[], baseline?: ReportingLegacyBaseline): ReportingAttendanceCell {
   const ordered = [...observations.map(f => ({ ...f, kind: 'observation' as const })),
     ...corrections.map(f => ({ ...f, kind: 'correction' as const }))].sort((a, b) => b.order - a.order || compareText(a.factId, b.factId));
   const observation = [...observations].sort((a, b) => b.order - a.order || compareText(a.factId, b.factId))[0];
   const correction = [...corrections].sort((a, b) => b.order - a.order || compareText(a.factId, b.factId))[0];
   const ambiguousObservation = observation && observations.some(f => f.order === observation.order && f.code !== observation.code);
-  const base = ordered[0];
+  const base = ordered[0] ?? (baseline ? {factId:baseline.baselineId,code:baseline.code,order:0,kind:'legacy-baseline' as const} : undefined);
   const cell: ReportingAttendanceCell = { eventId: event.eventId, eligible,
     observedCode: ambiguousObservation ? null : observation?.code ?? null, observationId: ambiguousObservation ? null : observation?.factId ?? null,
     correctionId: correction?.factId ?? null, correctionCode: correction?.code ?? null,
+    ...(baseline?{legacyBaselineId:baseline.baselineId}:{}),
     attendanceCode: base?.code ?? null, effectiveCode: base?.code ?? null, source: base?.kind ?? 'none',
     requests: [...requests].sort((a, b) => compareText(a.requestId, b.requestId)).map(r => ({ requestId: r.requestId, status: r.status, requestedOutcome: r.requestedOutcome })),
     needsReview: false };
@@ -232,7 +237,7 @@ function resolveCell(event: ReportingEvent, personId: string, observations: read
     }
     // Denial is a request state, never proof of absence or an automatic U/D.
   }
-  if (eligible === false && (ordered.length || active.length)) review('evidence-outside-eligibility');
+  if (eligible === false && (ordered.length || active.length || baseline)) review('evidence-outside-eligibility');
   return cell;
 }
 
@@ -310,6 +315,14 @@ export function buildFrontendReporting(input: FrontendReportingInput) {
     integer(f.order, 'facts.order', 1);
   };
   const obsByPair = new Map<string, ReportingObservation[]>(), correctionByPair = new Map<string, ReportingCorrection[]>(), requestsByPair = new Map<string, ReportingRequest[]>();
+  const baselineByPair = new Map<string, ReportingLegacyBaseline>();
+  for (const baseline of unique(input.legacyBaselines??[], b=>b.baselineId, 'legacyBaselines').values()) {
+    if (!allPeople.has(baseline.personId)||!events.has(baseline.eventId)) fail('legacyBaselines.target');
+    if (baseline.code!==null&&!ATTENDANCE_CODES.includes(baseline.code)) fail('legacyBaselines.code');
+    const key=pairKey(baseline.personId,baseline.eventId);
+    if (baselineByPair.has(key)) fail('legacyBaselines.duplicatePair');
+    baselineByPair.set(key,baseline);
+  }
   const group = <T extends { personId: string; eventId: string }>(map: Map<string, T[]>, fact: T) => {
     const key = pairKey(fact.personId, fact.eventId); const values = map.get(key) ?? []; values.push(fact); map.set(key, values);
   };
@@ -349,7 +362,7 @@ export function buildFrontendReporting(input: FrontendReportingInput) {
       const flight = p.flightId ? flights.get(p.flightId)! : null;
       const cells = termEvents.map(event => {
         const key = pairKey(p.personId, event.eventId), eligible = eligibility.get(event.eventId);
-        return resolveCell(event, p.personId, obsByPair.get(key) ?? [], correctionByPair.get(key) ?? [], requestsByPair.get(key) ?? [], eligible ? eligible.has(p.personId) : null, diagnostics);
+        return resolveCell(event, p.personId, obsByPair.get(key) ?? [], correctionByPair.get(key) ?? [], requestsByPair.get(key) ?? [], eligible ? eligible.has(p.personId) : null, diagnostics, baselineByPair.get(key));
       });
       return { personId: p.personId, lastName: p.lastName, firstName: p.firstName, asYear: p.asYear,
         flightId: p.flightId, flight: flight?.label ?? '', squadronId: flight?.squadronId ?? null, squadron: flight ? squadrons.get(flight.squadronId)!.label : '',
