@@ -12,4 +12,3 @@ test('transition policy preserves inactive and AS400 records; validates calendar
  const result=prepareTransition(valid,snapshot);assert.equal(result.events.length,6);assert.equal(result.events[0].startAt,'2026-08-27T10:30:00.000Z');assert.equal(result.people[0].role,'Flight Commander');
  const dst=plan();dst.schedule.firstSunday='2026-11-01';dst.schedule.mando={weekday:0,hour:1,minute:30,durationMinutes:60};assert.throws(()=>prepareTransition(parseTransitionPlan(dst),snapshot),/ambiguous/);
 });
-

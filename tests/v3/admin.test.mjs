@@ -485,3 +485,39 @@ test('coalesced completion rolls back if the claimed effect cannot be completed'
   assert.equal((await f.db.prepare("SELECT COUNT(*) AS count FROM admin_effects WHERE state='leased'").first()).count,1);
   assert.equal(await f.count('command_assertions'),0);
 });
+
+test('accepted excusal versions enqueue one frozen task each; delayed task processing preserves submission and decision separately',async t=>{
+  const f=await notificationFixture(t);
+  const leader=command('leadership.upsert');leader.payload.profile.role='Blue Squadron Commander';assert.equal((await f.send(leader)).status,200);
+  const submitted={...f.attendance,commandId:'frozen-notice-request',source:{...f.attendance.source,submissionId:'frozen-notice-request'},operation:'excusal.submit',payload:{requestId:'frozen-notice-request',eventId:'event-one',personId:'person-a',requestedOutcome:'E',reason:'Fictional original reason.'}};
+  assert.equal((await f.send(submitted,'/v1/commands')).status,200);assert.equal((await f.send(submitted,'/v1/commands')).status,200);
+  const decision={...submitted,commandId:'frozen-notice-decision',source:{...submitted.source,submissionId:'frozen-notice-decision'},operation:'excusal.decide',payload:{requestId:'frozen-notice-request',expectedVersion:1,decision:'Denied',reason:'Fictional decision reason.'}};
+  assert.equal((await f.send(decision,'/v1/commands')).status,200);
+  const tasks=(await f.db.prepare('SELECT task_id,request_version,request_json FROM notification_tasks ORDER BY request_version').all()).results;
+  assert.equal(tasks.length,2);assert.equal(JSON.parse(tasks[0].request_json).status,'Submitted');assert.equal(JSON.parse(tasks[1].request_json).status,'Denied');
+  for(const task of tasks){const input=read({sourceKind:'test',sourceResource:'admin-console',taskId:task.task_id});const result=await f.send(input,'/v1/admin/notifications/process');assert.equal(result.status,200,JSON.stringify(result.body));assert.deepEqual(await f.send(input,'/v1/admin/notifications/process'),result);}
+  assert.equal(await f.count('notification_intents'),2);assert.equal(await f.count('notification_attempts'),0);
+  const notices=(await f.db.prepare('SELECT kind,state,body FROM notification_intents ORDER BY kind').all()).results;assert.deepEqual(notices.map(n=>n.kind),['excusal-decision','excusal-submitted']);assert.ok(notices.every(n=>n.state==='suppressed'));
+  assert.match(notices[1].body,/Status: Submitted/);assert.match(notices[0].body,/Status: Denied/);
+});
+
+test('delivery claim/result HTTP protocol retains ambiguous claims and idempotent results without exposing staging mail',async t=>{
+  const f=await localDeliveryFixture(t);
+  const claimInput=effect({claimId:'durable-mail-claim'});const path='/v1/admin/notifications/delivery/';
+  const claim=await f.send(claimInput,path+'claim');assert.equal(claim.status,200,JSON.stringify(claim.body));assert.equal(claim.body.attempted,true);
+  assert.deepEqual(await f.send(claimInput,path+'claim'),claim);assert.equal(await f.count('notification_attempts'),1);
+  const complete=effect({attemptId:claim.body.attemptId,claimToken:claim.body.claimToken,outcome:'confirmed',providerReference:'fictional-result'});
+  const result=await f.send(complete,path+'complete');assert.equal(result.status,200,JSON.stringify(result.body));assert.equal(result.body.state,'sent');assert.deepEqual(await f.send(complete,path+'complete'),result);
+  assert.equal((await f.send({...complete,outcome:'lost-result'},path+'complete')).status,409);
+  assert.equal((await f.send({...complete,workerId:'other-adapter'},path+'complete')).status,403);
+  const stage={...claimInput,environment:'staging'};await f.db.prepare("UPDATE system_control SET environment='staging'").run();
+  const response=await worker.fetch(nativeRequest(stage,path+'claim'),{...f.env,ENVIRONMENT:'staging'});assert.equal(response.status,200);assert.deepEqual(await response.json(),{attempted:false,deliveryEnabled:false,reason:'staging-suppressed'});assert.equal(await f.count('notification_attempts'),1);
+});
+
+test('concurrent notification results return one durable receipt and completion remains possible after a pause',async t=>{
+ const f=await localDeliveryFixture(t);const path='/v1/admin/notifications/delivery/';const claim=(await f.send(effect({claimId:'concurrent-mail'}),path+'claim')).body;
+ await f.db.prepare('UPDATE system_control SET accepting_commands=0').run();
+ const input=effect({attemptId:claim.attemptId,claimToken:claim.claimToken,outcome:'confirmed',providerReference:null});
+ const results=await Promise.all([f.send(input,path+'complete'),f.send(input,path+'complete')]);assert.equal(results[0].status,200,JSON.stringify(results));assert.deepEqual(results[0],results[1]);
+ assert.equal((await f.db.prepare("SELECT COUNT(*) AS n FROM notification_delivery_events WHERE action='confirmed'").first()).n,1);
+});

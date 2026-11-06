@@ -60,7 +60,7 @@ the uncertain-delivery boundary using fictional addresses.
 
 ## Isolated durable foundation (migration 0005)
 
-The Worker now exposes signed `POST /v1/admin/notifications/plan` and `/status` endpoints. This is a suppressed staging foundation, not an enabled mail service. There is no HTTP sender, Gmail credential, paid queue or external email transport in this implementation. The current production notification triggers remain separate.
+The Worker now exposes signed `POST /v1/admin/notifications/plan` and `/status` endpoints. This is a suppressed staging foundation, not an enabled mail service. There is no enabled hosted sender, Gmail credential, paid queue or external email transport binding. Migration 0006 adds the local-only signed delivery protocol described below. The current production notification triggers remain separate.
 
 Planning uses the standard command envelope with `operation: 'notifications.plan'` and this strict payload:
 
@@ -78,12 +78,66 @@ All HTTP-planned intents are persisted as terminal `suppressed`, including when 
 
 Migration `0005_notification_ledger.sql` adds private intent, attempt and delivery-event tables plus a delivery control record defaulting to suppressed with a zero recipient budget. The default ledger limit is 1,000 intents; the reviewed configurable range stops at 10,000. Planning is bounded to 100 intents and one megabyte of serialized content per command. Reaching a bound stops the plan rather than silently dropping notices or purging history. Retention/export and operational scheduling of these calls remain separate work.
 
-The ordinary planning path was measured locally at **25 prepared statements**, including the coherent snapshot and atomic batch; status uses four. A regression requires planning to stay below 50 prepared statements. Set-based inserts keep this count independent of the number of planned notices. This is a query-count check, not a hosted CPU, daily-quota, storage-retention or complete free-tier capacity result.
+The ordinary planning path was measured locally at **25 prepared statements**, including the coherent snapshot and atomic batch; status now uses five, including its bounded pending-task list. A regression requires planning to stay below 50 prepared statements. Set-based inserts keep this count independent of the number of planned notices. This is a query-count check, not a hosted CPU, daily-quota, storage-retention or complete free-tier capacity result.
 
 ### Local delivery-state rehearsal
 
-`deliverLocalNotification` and `recoverLocalNotificationAttempts` are exported test helpers, not HTTP routes or Apps Script entry points. They reject a staging environment before database access. A local harness must explicitly seed `local-test` mode and queued fictional intents; the API cannot activate that mode or unsuppress a record. Only fictional `.invalid` recipients are accepted, and the harness injects the transport. No real provider integration is included.
+`deliverLocalNotification` and `recoverLocalNotificationAttempts` remain exported local test helpers. Migration 0006 adds explicit signed claim/result/recovery routes that retain the same local-only delivery fence. They reject a staging environment before database access. A local harness must explicitly seed `local-test` mode and queued fictional intents; the API cannot activate that mode or unsuppress a record. Only fictional `.invalid` recipients are accepted, and the harness injects the transport. No real provider integration is included.
 
 Before calling the injected transport, the helper reloads the trusted snapshot and compares routing/content, checks authority and a per-day recipient budget, then atomically saves `sending`, an attempt row and a delivery event. Every attempt counts conservatively against that local budget. A changed route/content blocks the intent; an exhausted budget blocks it without a delivery attempt. A confirmed outcome records `sent`; a proven no-send result records the failed attempt and returns the intent to queued. A thrown, malformed or lost result becomes `uncertain` and is never automatically resent. An expired attempt also becomes uncertain. A late claimed success cannot overwrite that uncertainty or add a false sent event. Failure to persist a result leaves the sending record for explicit recovery.
 
 Local tests cover deterministic suppressed planning, trusted excusal routing, rejected forged delivery/recipient fields, receipt replay and revocation, atomic capacity failure, query count, persist-before-transport, confirmed/no-send outcomes, lost results, expiry/late-result races and quota exhaustion. These tests exercise local D1 with a fictional transport. They do not establish Gmail delivery, scheduled hosted planning, production notification parity or authorization to enable a real sender.
+
+## Committed-version tasks and provider ports (migration 0006)
+
+Every newly accepted excusal submission/decision atomically saves one notification
+task per request/version with its frozen request content. Duplicate command
+receipt delivery creates no second task. An earlier submission notice cannot
+silently become a later decision when processing is delayed. Existing historical
+records are not backfilled into the queue. Task identities are bounded hashes;
+all newly queued tasks and resulting intents are permanently suppressed in this
+isolated implementation, including import/replay work. No API can unsuppress them.
+
+`/v1/admin/notifications/process` takes
+`{environment,generation,principalId,sourceKind,sourceResource,taskId}`. It requires
+current Wing notification authority and a registered source, reads current trusted
+Directory/Leadership routing, and atomically saves the intent/receipt/audit and
+marks the frozen task done. Planning uses `registered-automation` audit evidence,
+not a fabricated human Google editor. `/status` now includes at most fifty pending
+opaque task IDs without recipients or content. A full ledger stops processing
+without losing or silently purging pending tasks.
+
+The adapter's `planNotificationWork` uses deterministic commands for canonical
+05:00 local daily and 17:00 local Sunday windows and processes at most five tasks
+per call. Repeated scheduler ticks reuse the exact same body/key. There is no
+installed scheduler or live secret/property binding in this module; the host
+must supply its explicit private configuration and pause gate.
+
+Signed `/v1/admin/notifications/delivery/claim`, `/complete` and `/recover` routes
+exercise the durable delivery protocol only in the local environment with
+explicit fixture `local-test` mode and fictional `.invalid` recipients. Staging
+returns a suppressed response and never exposes a deliverable message, even if
+a caller forges mode fields or a local record exists. Claim accepts a durable
+`claimId`; unknown claim responses reuse it instead of leasing another message.
+The attempt, quota reservation, message and token persist before provider IO.
+Completion names the original attempt/token and records confirmed, known-no-send
+or lost-result. Current authority and original worker ownership are required;
+results are idempotent and conflicting acknowledgements fail. Pausing new work
+does not prevent recording a result for an already issued local attempt.
+
+`flushNotificationDelivery` retains its claim and writes `dispatching` before
+invoking the injected provider. A restart from `dispatching` reports uncertain
+rather than resending. It saves the provider result before ACK; an unknown ACK
+retries that saved result without another provider call. Expiry and lost provider
+results never silently requeue. Both D1 and the provider enforce recipient quota.
+The dependency-injected MailApp wrapper preserves To/CC/Reply-To and SHAMROCK's
+sender name. A normal MailApp return confirms API acceptance, not inbox delivery;
+MailApp supplies no message receipt ID. No staging global binds MailApp or adds
+mail OAuth scope, so this code sends no actual email during staging or imports.
+
+The protocol/consumer/provider port have local regression tests, including frozen
+request versions, retry/uncertainty, suppression, quotas and continuations. Native
+Google installation, real provider delivery, account quotas and operational
+notification parity remain separate live acceptance checks. See the
+[MailApp API contract](https://developers.google.com/apps-script/reference/mail/mail-app)
+and [D1 transactional batch contract](https://developers.cloudflare.com/d1/worker-api/d1-database/).

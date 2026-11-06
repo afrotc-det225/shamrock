@@ -1,4 +1,5 @@
-import { planNotifications, notificationStatus } from './notifications.js';
+import { transitionCommand, transitionStatus, transitionArchive } from './transitions.js';
+import { planNotifications, notificationStatus, processNotificationTask, notificationDelivery } from './notifications.js';
 import { acceptAttendanceCorrection } from './corrections.js';
 import { acceptAdminCommand, adminEffect, frontendSnapshot, getAdminReceipt } from './admin.js';
 import { HttpError } from './http-error.js';
@@ -202,6 +203,7 @@ async function acceptCommand(env: Env, command: Command): Promise<Receipt> {
   const writes: D1PreparedStatement[] = [];
   let result: unknown;
   let targetId: string;
+  let notificationRequests: { requestId: string; version: number }[] = [];
 
   if (command.operation === 'attendance.report') {
     const report = buildAttendanceReport(command, now);
@@ -226,6 +228,7 @@ async function acceptCommand(env: Env, command: Command): Promise<Receipt> {
       report.eventId, now, JSON.stringify(report.presentPersonIds)));
   } else if (command.operation === 'excusal.submit' || command.operation === 'excusal.submitMany') {
     const requests = command.operation === 'excusal.submit' ? [createExcusalRequest(command, now)] : createExcusalRequests(command, now);
+    notificationRequests = requests;
     result = command.operation === 'excusal.submit' ? requests[0] : { requests };
     targetId = command.operation === 'excusal.submit' ? requests[0].requestId : command.commandId;
     // One SQL input set keeps the batch bounded even at the maximum event count.
@@ -239,6 +242,7 @@ async function acceptCommand(env: Env, command: Command): Promise<Receipt> {
       JSON.stringify(requests.map(request => ({ requestId: request.requestId, eventId: request.eventId })))));
   } else {
     const request = decideExcusalRequest(ctx.current!, command, now);
+    notificationRequests = [request];
     result = request; targetId = request.requestId;
     guard.sql += ' AND EXISTS (SELECT 1 FROM excusal_requests WHERE request_id=? AND version=?)';
     guard.values.push(request.requestId, command.payload.expectedVersion);
@@ -248,6 +252,15 @@ async function acceptCommand(env: Env, command: Command): Promise<Receipt> {
       request.decisionReason, request.lastCommandId, request.requestId, command.payload.expectedVersion));
     writes.push(statement(env.DB, `INSERT INTO excusal_decisions VALUES (?,?,?,?,?,?,?)`, request.requestId,
       request.version, request.decision, request.decisionReason, command.actor.principalId, now, command.commandId));
+  }
+
+  if (notificationRequests.length) {
+    const tasks = await Promise.all(notificationRequests.map(async request => ({ ...request, taskId: await digest(JSON.stringify(['excusal-notice', request.requestId, request.version])) })));
+    writes.push(statement(env.DB, `INSERT INTO notification_tasks(task_id,source_command_id,request_id,request_version,request_json,state,mode,created_at)
+      SELECT json_extract(j.value,'$.taskId'),?,r.request_id,r.version,json_object('requestId',request_id,'personId',person_id,'eventId',event_id,
+        'flightId',unit_id,'status',status,'requestedOutcome',requested_outcome,'version',version,'reason',reason,'submittedAt',submitted_at,
+        'submittedBy',submitted_by,'updatedAt',updated_at,'decidedAt',decided_at,'decidedBy',decided_by,'decisionReason',decision_reason),
+        'pending','suppressed',? FROM excusal_requests r JOIN json_each(?) j ON r.request_id=json_extract(j.value,'$.requestId') AND r.version=json_extract(j.value,'$.version') WHERE last_command_id=?`, command.commandId, now, JSON.stringify(tasks), command.commandId));
   }
 
   const receipt: Receipt = { commandId: command.commandId, status: 'committed', operation: command.operation, result, pendingEffects: true };
@@ -406,7 +419,16 @@ export default {
         throw new HttpError(400, 'INVALID_REQUEST', 'Use an authenticated JSON operation.');
       }
       const input = parseJson(body);
+      if (url.pathname === '/v1/admin/transitions/commands' && !url.search) return json(await transitionCommand(env, input));
+      if (url.pathname === '/v1/admin/transitions/status' && !url.search) return json(await transitionStatus(env, input));
+      for (const action of ['claim', 'ack'] as const) {
+        if (url.pathname === `/v1/admin/transitions/archive/${action}` && !url.search) return json(await transitionArchive(env, action, input));
+      }
+      for (const action of ['claim', 'complete', 'recover'] as const) {
+        if (url.pathname === `/v1/admin/notifications/delivery/${action}` && !url.search) return json(await notificationDelivery(env, action, input));
+      }
       if (url.pathname === '/v1/admin/notifications/plan' && !url.search) return json(await planNotifications(env, input));
+      if (url.pathname === '/v1/admin/notifications/process' && !url.search) return json(await processNotificationTask(env, input));
       if (url.pathname === '/v1/admin/notifications/status' && !url.search) return json(await notificationStatus(env, input));
       if (url.pathname === '/v1/admin/commands' && !url.search) {
         if (input && typeof input === 'object' && 'operation' in input && input.operation === 'attendance.correct') {

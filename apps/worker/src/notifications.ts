@@ -17,7 +17,7 @@ interface PlanCommand {
   generation: number;
   actor: {
     principalId: string;
-    evidence: 'google-edit' | 'authenticated-confirmation';
+    evidence: 'google-edit' | 'authenticated-confirmation' | 'registered-automation';
   };
   source: {
     kind: 'sheet' | 'test';
@@ -57,7 +57,7 @@ function parsePlan(input: unknown, env: NotificationEnv): PlanCommand {
     return invalid();
   if (source.kind !== 'test' && source.kind !== 'sheet')
     return invalid();
-  if (actor.evidence !== 'authenticated-confirmation' && !(actor.evidence === 'google-edit' && source.kind === 'sheet'))
+  if (actor.evidence !== 'authenticated-confirmation' && actor.evidence !== 'registered-automation' && !(actor.evidence === 'google-edit' && source.kind === 'sheet'))
     return invalid();
   if (!Number.isSafeInteger(source.revision) || Number(source.revision) < 1)
     return invalid();
@@ -138,7 +138,8 @@ function planFromSnapshot(snapshot: FrontendSnapshot, recipe: PlanCommand['paylo
 function messageHash(intent: NotificationIntent): Promise<string> {
   return hash(JSON.stringify({ to: intent.to, cc: intent.cc, replyTo: intent.replyTo ?? null, subject: intent.subject, body: intent.body }));
 }
-export async function planNotifications(env: NotificationEnv, input: unknown): Promise<unknown> {
+interface NotificationTask { task_id: string; request_id: string; request_version: number; request_json: string; state: string; created_at: string }
+export async function planNotifications(env: NotificationEnv, input: unknown, task?: NotificationTask): Promise<unknown> {
   const command = parsePlan(input, env);
   const digest = await hash(JSON.stringify(command));
   const auth = authority(env, command.actor.principalId);
@@ -165,7 +166,8 @@ export async function planNotifications(env: NotificationEnv, input: unknown): P
   if (authorized?.allowed !== 1)
     throw new HttpError(403, 'NOT_AUTHORIZED', 'Current notification authority is required.');
   const snapshot = await frontendSnapshot(env, { environment: env.ENVIRONMENT, generation: Number(env.GENERATION), principalId: command.actor.principalId });
-  const intents = planFromSnapshot(snapshot, command.payload);
+  const frozenSnapshot = task ? { ...snapshot, requests: snapshot.requests.filter(request => request.requestId !== task.request_id).concat({ ...JSON.parse(task.request_json), order: 0 }) } : snapshot;
+  const intents = planFromSnapshot(frozenSnapshot, command.payload);
   if (intents.length > 100)
     throw new HttpError(409, 'NOTIFICATION_TOO_LARGE', 'Plan a smaller reviewed notification scope.');
   const records = await Promise.all(intents.map(async (intent) => ({ ...intent, noticeId: await hash(intent.key), payloadHash: await messageHash(intent), recipientCount: new Set([...intent.to, ...intent.cc]).size })));
@@ -180,7 +182,8 @@ export async function planNotifications(env: NotificationEnv, input: unknown): P
     AND (SELECT COALESCE(MAX(audit_id),0) FROM admin_audit_events)=?
     AND (SELECT COUNT(*) FROM notification_intents)+(SELECT COUNT(*) FROM json_each(?) j WHERE NOT EXISTS
      (SELECT 1 FROM notification_intents n WHERE n.notice_key=json_extract(j.value,'$.key')))
-     <=COALESCE((SELECT max_ledger_entries FROM notification_delivery_control WHERE singleton=1),0))`, command.commandId, ...auth.values, snapshot.revision.operations, snapshot.revision.administration, serialized),
+     <=COALESCE((SELECT max_ledger_entries FROM notification_delivery_control WHERE singleton=1),0)
+    AND (? IS NULL OR EXISTS(SELECT 1 FROM notification_tasks WHERE task_id=? AND state='pending' AND mode='suppressed' AND request_json=?)))`, command.commandId, ...auth.values, snapshot.revision.operations, snapshot.revision.administration, serialized, task?.task_id ?? null, task?.task_id ?? null, task?.request_json ?? null),
       statement(env.DB, `INSERT INTO command_registry VALUES(?,'admin')`, command.commandId),
       statement(env.DB, `INSERT INTO admin_commands VALUES(?,?,?,?,?,'notifications.manage','[]',?,?,?,?,?,?)`, command.commandId, digest, command.actor.principalId, command.operation, command.commandId, command.source.kind, command.source.resourceKey, command.source.submissionId, command.source.revision, now, '{}'),
       statement(env.DB, `INSERT INTO notification_intents(notice_id,notice_key,policy_version,kind,scope_id,local_date,environment,generation,mode,state,blocked_reason,
@@ -193,6 +196,7 @@ export async function planNotifications(env: NotificationEnv, input: unknown): P
     'result',json_object('planned',?,'created',(SELECT COUNT(*) FROM notification_intents WHERE origin_command_id=admin_commands.command_id),
      'suppressed',?,'missingRouting',?),'pendingEffects',json('false')) WHERE command_id=?`, intents.length, intents.length, intents.filter(intent => intent.blockedReason).length, command.commandId),
       statement(env.DB, `INSERT INTO admin_audit_events(command_id,actor_id,actor_evidence,operation,target_id,accepted_at,before_json,after_json) VALUES(?,?,?,?,?,?,'{}',?)`, command.commandId, command.actor.principalId, command.actor.evidence, command.operation, command.commandId, now, JSON.stringify({ recipe: command.payload, revision: snapshot.revision, planned: intents.length, mode: 'staging', delivery: 'suppressed' })),
+      ...(task ? [statement(env.DB, "UPDATE notification_tasks SET state='done',completed_at=?,planning_command_id=? WHERE task_id=? AND state='pending'", now, command.commandId, task.task_id)] : []),
       statement(env.DB, 'DELETE FROM command_assertions WHERE command_id=?', command.commandId),
       statement(env.DB, 'SELECT receipt_json AS receipt FROM admin_commands WHERE command_id=?', command.commandId),
     ]);
@@ -218,11 +222,30 @@ export async function notificationStatus(env: NotificationEnv, input: unknown): 
     statement(env.DB, `SELECT notice_id AS noticeId,kind,state,blocked_reason AS reason,created_at AS createdAt FROM notification_intents
    WHERE state IN ('blocked','uncertain','sending') OR blocked_reason IS NOT NULL ORDER BY created_at,notice_id LIMIT 51`),
     statement(env.DB, `SELECT state,COUNT(*) AS count FROM notification_attempts GROUP BY state ORDER BY state`),
+    statement(env.DB, "SELECT task_id AS taskId FROM notification_tasks WHERE state='pending' ORDER BY created_at,task_id LIMIT 51"),
   ]);
   if (result[0].results[0]?.allowed !== 1)
     throw new HttpError(403, 'NOT_AUTHORIZED', 'Current notification authority is required.');
-  return { deliveryEnabled: false, states: result[1].results, attention: result[2].results.slice(0, 50), moreAttention: result[2].results.length > 50, attempts: result[3].results };
+  return { deliveryEnabled: false, states: result[1].results, attention: result[2].results.slice(0, 50), moreAttention: result[2].results.length > 50, attempts: result[3].results, pendingTasks: result[4].results.slice(0,50), moreTasks: result[4].results.length > 50 };
 }
+/** Each committed excusal version is frozen at acceptance; later decisions cannot erase its notice. */
+export async function processNotificationTask(env: NotificationEnv, input: unknown): Promise<unknown> {
+  const r = record(input, ['environment', 'generation', 'principalId', 'sourceKind', 'sourceResource', 'taskId']);
+  if (r.environment !== env.ENVIRONMENT || r.generation !== Number(env.GENERATION) || !['sheet', 'test'].includes(String(r.sourceKind))) return invalid();
+  const principalId = adminIdentifier(r.principalId), taskId = adminIdentifier(r.taskId), resourceKey = adminIdentifier(r.sourceResource);
+  const auth = authority(env, principalId);
+  const allowed = await statement(env.DB, `SELECT (${auth.sql} AND EXISTS(SELECT 1 FROM adapter_sources WHERE source_kind=? AND resource_key=? AND active=1)) AS allowed`, ...auth.values, String(r.sourceKind), resourceKey).first<{allowed: number}>();
+  if (allowed?.allowed !== 1) throw new HttpError(403, 'NOT_AUTHORIZED', 'Current notification authority and source are required.');
+  const task = await statement(env.DB, 'SELECT * FROM notification_tasks WHERE task_id=?', taskId).first<NotificationTask>();
+  if (!task) throw new HttpError(404, 'NOT_FOUND', 'Notification task is unavailable.');
+  if (task.state === 'done') return { taskId, state: 'done' };
+  const commandId = 'notice-task-' + await hash(taskId);
+  await planNotifications(env, { commandId, contractVersion: 1, environment: env.ENVIRONMENT, generation: Number(env.GENERATION),
+    actor: { principalId, evidence: 'registered-automation' }, source: { kind: r.sourceKind, resourceKey, submissionId: taskId, revision: 1 },
+    operation: 'notifications.plan', payload: { kind: 'excusal', asOf: task.created_at, requestId: task.request_id } }, task);
+  return { taskId, state: 'done' };
+}
+
 export interface LocalNotificationTransport {
   send(message: {
     to: string[];
@@ -237,12 +260,17 @@ export interface LocalNotificationTransport {
     outcome: 'known-not-sent';
   }>;
 }
-/** Not an HTTP route. Test harnesses inject a fictional transport; staging is rejected before any IO. */
-export async function deliverLocalNotification(env: NotificationEnv, input: {
+export interface DeliveryMessage { to: string[]; cc: string[]; replyTo?: string; subject: string; body: string }
+export type DeliveryClaimResult = { attempted: false; reason?: string; state?: string } | {
+  attempted: true; noticeId: string; attemptId: string; claimToken: string; expiresAt: string; message: DeliveryMessage; mode: 'local-test';
+};
+/** Persist the delivery attempt and immutable claim before exposing a message to a provider. */
+export async function claimLocalNotification(env: NotificationEnv, input: {
   principalId: string;
   workerId: string;
   asOf: string;
-}, transport: LocalNotificationTransport): Promise<unknown> {
+  claimId: string;
+}): Promise<DeliveryClaimResult> {
   if (env.ENVIRONMENT !== 'local')
     throw new HttpError(403, 'DELIVERY_SUPPRESSED', 'Staging delivery is permanently suppressed.');
   adminIdentifier(input.principalId);
@@ -250,6 +278,16 @@ export async function deliverLocalNotification(env: NotificationEnv, input: {
   const now = instant(input.asOf);
   const clock = noticeLocalClock(now);
   const auth = authority(env, input.principalId);
+  adminIdentifier(input.claimId);
+  const oldClaim = await statement(env.DB, `SELECT c.principal_id AS principalId,c.worker_id AS workerId,c.claim_token AS claimToken,c.attempt_id AS attemptId,
+    c.message_json AS message,a.notice_id AS noticeId,a.state,a.expires_at AS expiresAt FROM notification_delivery_claims c JOIN notification_attempts a USING(attempt_id)
+    WHERE c.claim_id=? AND (${auth.sql})`, input.claimId, ...auth.values).first<Record<string, unknown>>();
+  if (oldClaim) {
+    if (oldClaim.principalId !== input.principalId || oldClaim.workerId !== input.workerId) throw new HttpError(409, 'CLAIM_CONFLICT', 'This delivery claim belongs to another consumer.');
+    if (oldClaim.state !== 'sending') return { attempted: false, state: String(oldClaim.state) };
+    if (String(oldClaim.expiresAt) <= now) { await recoverLocalNotificationAttempts(env, now); return { attempted: false, state: 'uncertain' }; }
+    return { attempted: true, noticeId: String(oldClaim.noticeId), attemptId: String(oldClaim.attemptId), claimToken: String(oldClaim.claimToken), expiresAt: String(oldClaim.expiresAt), message: JSON.parse(String(oldClaim.message)), mode: 'local-test' };
+  }
   const candidate = await statement(env.DB, `SELECT notice_id AS noticeId,notice_key AS noticeKey,recipe_json AS recipe,payload_hash AS payloadHash,recipient_count AS recipientCount
   FROM notification_intents WHERE environment='local' AND generation=? AND mode='local-test' AND state='queued' AND (${auth.sql})
   AND EXISTS(SELECT 1 FROM notification_delivery_control WHERE singleton=1 AND mode='local-test') ORDER BY created_at,notice_id LIMIT 1`, Number(env.GENERATION), ...auth.values).first<{
@@ -275,7 +313,8 @@ export async function deliverLocalNotification(env: NotificationEnv, input: {
   }
   if ([...intent.to, ...intent.cc, ...(intent.replyTo ? [intent.replyTo] : [])].some(address => !address.endsWith('.invalid')))
     throw new HttpError(409, 'LOCAL_TEST_RECIPIENT_REQUIRED', 'Local transport rehearsals require fictional recipients.');
-  const attemptId = crypto.randomUUID();
+  const attemptId = crypto.randomUUID(), claimToken = crypto.randomUUID();
+  const message = { to: intent.to, cc: intent.cc, ...(intent.replyTo ? { replyTo: intent.replyTo } : {}), subject: intent.subject, body: intent.body };
   const expiresAt = new Date(Date.parse(now) + 600000).toISOString();
   try {
     await env.DB.batch([
@@ -288,6 +327,7 @@ export async function deliverLocalNotification(env: NotificationEnv, input: {
       statement(env.DB, `UPDATE notification_intents SET state='sending',updated_at=? WHERE notice_id=?`, now, candidate.noticeId),
       statement(env.DB, `INSERT INTO notification_attempts VALUES(?,?,?,?,?,?,'sending',?,?,NULL,NULL,NULL)`, attemptId, candidate.noticeId, input.principalId, input.workerId, clock.date, candidate.recipientCount, now, expiresAt),
       statement(env.DB, `INSERT INTO notification_delivery_events(notice_id,attempt_id,action,principal_id,accepted_at,previous_state,state) VALUES(?,?,'claim',?,?,'queued','sending')`, candidate.noticeId, attemptId, input.principalId, now),
+      statement(env.DB, 'INSERT INTO notification_delivery_claims VALUES(?,?,?,?,?,?,NULL,NULL)', input.claimId, attemptId, input.principalId, input.workerId, claimToken, JSON.stringify(message)),
       statement(env.DB, 'DELETE FROM command_assertions WHERE command_id=?', attemptId),
     ]);
   }
@@ -303,30 +343,76 @@ export async function deliverLocalNotification(env: NotificationEnv, input: {
     ]);
     return { attempted: false, reason: blocked[1].results.length ? 'quota-exhausted' : 'authority-version-or-budget-conflict' };
   }
-  let outcome: 'confirmed' | 'known-not-sent' | 'lost-result' = 'lost-result';
-  let reference: string | null = null;
-  try {
-    const result = await transport.send({ to: intent.to, cc: intent.cc, replyTo: intent.replyTo, subject: intent.subject, body: intent.body });
-    if (result.outcome === 'confirmed') {
-      if (result.providerReference !== undefined && (!/^[A-Za-z0-9_.:-]{1,128}$/.test(result.providerReference)))
-        throw Error('Invalid provider reference.');
-      outcome = 'confirmed';
-      reference = result.providerReference ?? null;
-    }
-    else if (result.outcome === 'known-not-sent')
-      outcome = 'known-not-sent';
+  return { attempted: true, noticeId: candidate.noticeId, attemptId, claimToken, expiresAt, message, mode: 'local-test' };
+}
+/** An acknowledgement never requeues an expired/uncertain attempt, including a late success. */
+export async function completeLocalNotification(env: NotificationEnv, input: {
+  principalId: string; workerId: string; attemptId: string; claimToken: string; asOf: string;
+  outcome: 'confirmed' | 'known-not-sent' | 'lost-result'; providerReference: string | null;
+}): Promise<unknown> {
+  if (env.ENVIRONMENT !== 'local') throw new HttpError(403, 'DELIVERY_SUPPRESSED', 'Staging delivery is permanently suppressed.');
+  for (const value of [input.principalId, input.workerId, input.attemptId, input.claimToken]) adminIdentifier(value);
+  if (!['confirmed', 'known-not-sent', 'lost-result'].includes(input.outcome)
+    || input.providerReference !== null && !/^[A-Za-z0-9_.:-]{1,128}$/.test(input.providerReference)) return invalid();
+  const now = instant(input.asOf), auth = authority(env, input.principalId, false);
+  const digest = await hash(JSON.stringify({ outcome: input.outcome, providerReference: input.providerReference }));
+  const claim = await statement(env.DB, `SELECT c.completion_hash AS completionHash,c.receipt_json AS receipt,a.notice_id AS noticeId,a.state,a.expires_at AS expiresAt
+    FROM notification_delivery_claims c JOIN notification_attempts a USING(attempt_id)
+    WHERE c.attempt_id=? AND c.claim_token=? AND c.principal_id=? AND c.worker_id=? AND (${auth.sql})`, input.attemptId, input.claimToken, input.principalId, input.workerId, ...auth.values).first<Record<string, unknown>>();
+  if (!claim) throw new HttpError(403, 'NOT_AUTHORIZED', 'Current authority and the original delivery claim are required.');
+  if (claim.receipt) {
+    if (claim.completionHash !== digest) throw new HttpError(409, 'DELIVERY_RESULT_CONFLICT', 'A different delivery result was already recorded.');
+    return JSON.parse(String(claim.receipt));
   }
-  catch { /* A lost or malformed result is uncertain, never proof that no message was sent. */ }
-  const state = advanceDelivery('sending', outcome);
-  const completion = await env.DB.batch<Record<string, unknown>>([
-    statement(env.DB, `INSERT INTO notification_delivery_events(notice_id,attempt_id,action,principal_id,accepted_at,previous_state,state)
-   SELECT notice_id,attempt_id,?,?,?,'sending',? FROM notification_attempts WHERE attempt_id=? AND state='sending'`, outcome, input.principalId, now, state, attemptId),
-    statement(env.DB, `UPDATE notification_attempts SET state=?,finished_at=?,provider_reference=?,result_code=? WHERE attempt_id=? AND state='sending'`, outcome === 'known-not-sent' ? 'known-not-sent' : state, now, reference, outcome, attemptId),
-    statement(env.DB, `UPDATE notification_intents SET state=?,updated_at=? WHERE notice_id=? AND state='sending'
-   AND EXISTS(SELECT 1 FROM notification_attempts WHERE attempt_id=? AND result_code=?)`, state, now, candidate.noticeId, attemptId, outcome),
-    statement(env.DB, 'SELECT state FROM notification_intents WHERE notice_id=?', candidate.noticeId),
-  ]);
-  return { attempted: true, noticeId: candidate.noticeId, attemptId, state: completion.at(-1)!.results[0].state };
+  if (String(claim.expiresAt) <= now) await recoverLocalNotificationAttempts(env, now);
+  const outcome = input.outcome, state = advanceDelivery('sending', outcome), attemptState = outcome === 'known-not-sent' ? 'known-not-sent' : state;
+  try {
+    const result = await env.DB.batch<Record<string, unknown>>([
+      statement(env.DB, `INSERT INTO command_assertions VALUES(?,(${auth.sql}) AND EXISTS(SELECT 1 FROM notification_delivery_claims
+        WHERE attempt_id=? AND claim_token=? AND completion_hash IS NULL))`, input.claimToken, ...auth.values, input.attemptId, input.claimToken),
+      statement(env.DB, `INSERT INTO notification_delivery_events(notice_id,attempt_id,action,principal_id,accepted_at,previous_state,state)
+        SELECT notice_id,attempt_id,?,?,?,'sending',? FROM notification_attempts WHERE attempt_id=? AND state='sending'`, outcome, input.principalId, now, state, input.attemptId),
+      statement(env.DB, `UPDATE notification_attempts SET state=?,finished_at=?,provider_reference=?,result_code=? WHERE attempt_id=? AND state='sending'`, attemptState, now, input.providerReference, outcome, input.attemptId),
+      statement(env.DB, `UPDATE notification_intents SET state=?,updated_at=? WHERE notice_id=? AND state='sending'
+        AND EXISTS(SELECT 1 FROM notification_attempts WHERE attempt_id=? AND result_code=?)`, state, now, String(claim.noticeId), input.attemptId, outcome),
+      statement(env.DB, `UPDATE notification_delivery_claims SET completion_hash=?,receipt_json=(SELECT json_object('attempted',json('true'),'noticeId',notice_id,
+        'attemptId',?,'state',state) FROM notification_intents WHERE notice_id=?) WHERE attempt_id=?`, digest, input.attemptId, String(claim.noticeId), input.attemptId),
+      statement(env.DB, 'DELETE FROM command_assertions WHERE command_id=?', input.claimToken),
+      statement(env.DB, 'SELECT receipt_json AS receipt FROM notification_delivery_claims WHERE attempt_id=?', input.attemptId),
+    ]);
+    return JSON.parse(String(result.at(-1)!.results[0].receipt));
+  } catch {
+    const completed = await statement(env.DB, `SELECT receipt_json AS receipt FROM notification_delivery_claims
+      WHERE attempt_id=? AND claim_token=? AND principal_id=? AND worker_id=? AND completion_hash=? AND (${auth.sql})`, input.attemptId, input.claimToken, input.principalId, input.workerId, digest, ...auth.values).first<{receipt: string}>();
+    if (completed?.receipt) return JSON.parse(completed.receipt);
+    throw new HttpError(409, 'DELIVERY_RESULT_CONFLICT', 'The delivery result or its authority changed. Reconcile the saved attempt.');
+  }
+}
+/** A local-only composition retained for the in-process transport rehearsal. */
+export async function deliverLocalNotification(env: NotificationEnv, input: { principalId: string; workerId: string; asOf: string }, transport: LocalNotificationTransport): Promise<unknown> {
+  const claim = await claimLocalNotification(env, { ...input, claimId: crypto.randomUUID() });
+  if (!claim.attempted) return claim;
+  let outcome: 'confirmed' | 'known-not-sent' | 'lost-result' = 'lost-result', providerReference: string | null = null;
+  try {
+    const result = await transport.send(claim.message);
+    if (result.outcome === 'confirmed' && (result.providerReference === undefined || /^[A-Za-z0-9_.:-]{1,128}$/.test(result.providerReference))) {
+      outcome = 'confirmed'; providerReference = result.providerReference ?? null;
+    } else if (result.outcome === 'known-not-sent') outcome = 'known-not-sent';
+  } catch { /* A thrown provider call is uncertain, never proof of no send. */ }
+  return completeLocalNotification(env, { ...input, attemptId: claim.attemptId, claimToken: claim.claimToken, outcome, providerReference });
+}
+/** No caller can enable staging delivery or provide recipients through this protocol. */
+export async function notificationDelivery(env: NotificationEnv, action: 'claim' | 'complete' | 'recover', input: unknown): Promise<unknown> {
+  const keys = ['environment', 'generation', 'principalId', 'workerId'];
+  const r = record(input, [...keys, ...(action === 'claim' ? ['claimId'] : action === 'complete' ? ['attemptId', 'claimToken', 'outcome', 'providerReference'] : [])]);
+  if (r.environment !== env.ENVIRONMENT || r.generation !== Number(env.GENERATION)) return invalid();
+  const principalId = adminIdentifier(r.principalId), workerId = adminIdentifier(r.workerId), asOf = new Date().toISOString();
+  const auth = authority(env, principalId, false);
+  if ((await statement(env.DB, `SELECT (${auth.sql}) AS allowed`, ...auth.values).first<{allowed: number}>())?.allowed !== 1) throw new HttpError(403, 'NOT_AUTHORIZED', 'Current notification authority is required.');
+  if (env.ENVIRONMENT !== 'local') return { attempted: false, deliveryEnabled: false, reason: 'staging-suppressed' };
+  if (action === 'claim') return claimLocalNotification(env, { principalId, workerId, asOf, claimId: adminIdentifier(r.claimId) });
+  if (action === 'complete') return completeLocalNotification(env, { principalId, workerId, asOf, attemptId: adminIdentifier(r.attemptId), claimToken: adminIdentifier(r.claimToken), outcome: r.outcome as 'confirmed' | 'known-not-sent' | 'lost-result', providerReference: r.providerReference as string | null });
+  await recoverLocalNotificationAttempts(env, asOf); return { recovered: true };
 }
 /** A crashed local attempt is terminal uncertain. It is never reclaimed as queued. */
 export async function recoverLocalNotificationAttempts(env: NotificationEnv, asOf: string): Promise<void> {
