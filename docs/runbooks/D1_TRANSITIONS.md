@@ -84,9 +84,9 @@ private, protected, values-only archive against the hash. Only then may the
 consumer ACK with the original claim and proof. The Worker records the principal,
 worker, hash and archive receipt. A continuation or failed protection/read-back
 never advances the workflow. Lost ACKs reconcile the verified stored completion,
-including after lease expiry. The current implementation provides the provider
-contract and consumer; a native Google archive binding is still required and
-must pass real ACL/content checks. Hidden tabs alone are not private storage.
+including after lease expiry. The native Google host below implements the provider with an explicitly bound
+private workbook. Local provider tests are not evidence of live Google behavior.
+Hidden tabs alone are not private storage.
 
 Acceptance rechecks archive completion and the exact reviewed source revisions,
 then atomically changes the current term, applies only explicit person changes,
@@ -122,3 +122,63 @@ and proof that accepted writes are not discarded.
 Weekly blank→absence or denied→unexcused finalization, its deadline and its
 responsible reviewer remain operational policy questions. Neither transitions
 nor notification planning invent those attendance facts.
+
+## Native staging maintenance host
+
+The optional `SHAMROCK_V3_MAINTENANCE_CONFIG` is a JSON string in the existing
+private configuration file. It stays file-owned, rather than being copied into
+Script Properties. Import pauses intake, frontend publication and maintenance;
+resuming either of the other consumers does not resume maintenance. The existing
+flush invokes suppressed notification planning only when maintenance is enabled.
+No additional trigger, Google file, MailApp binding or mail OAuth scope is created.
+
+The strict binding contains `version: 1`, `environment: 'staging'`, the current
+`generation`, `enabled`, the exact review marker
+`EXISTING_PRIVATE_MAINTENANCE_REVIEWED_FOR_STAGING`, `principalId`, `workerId`,
+`sourceResource`, `stateFileId`, `archiveSpreadsheetId` and `archiveExpectedTitle`.
+The resources must already exist, be separate from current frontends and transport
+storage, and belong only to the executing automation account with owner-only
+permissions. The title must identify staging. The state JSON starts with
+`{version:1, environment:'staging', generation:CURRENT_GENERATION}`. Keep actual
+bindings outside Git. The archive is a private operations workbook, not an extra
+visible tab in the normal Main or Excusals frontend.
+
+Versioned entry points:
+
+- `shamrockV3StagingMaintenancePause()` and `MaintenanceResume()` control only this
+  consumer. Resume validates all resource bindings and sharing; it does not open
+  Forms, resume D1 or enable mail.
+- `shamrockV3StagingNotificationsPlan()` runs the bounded suppressed planner.
+- `shamrockV3StagingTransitionCommand({commandId,operation,payload})` signs the
+  reviewed command. It requires the actual active Google user to be the intended
+  automation account; a scheduled trigger's effective identity is insufficient.
+- `shamrockV3StagingTransitionArchive(transitionId)` advances one saved chunk.
+  Repeat the same invocation while its state is `continuing` or `verifying`.
+  No acceptance or completion command is silently invoked.
+
+Each transition has deterministic Directory, Leadership, Attendance, Excusals and
+recovery tabs in the archive workbook. Each uses a native Table, stable machine
+headers, display headers and a strict whole-sheet protection. The recovery tab
+is hidden for presentation, while owner-only file sharing supplies privacy.
+The values come from the frozen D1 snapshot, not from a possibly lagging frontend.
+Recovery rows retain the exact JSON plus snapshot/plan hashes, frozen local date
+and reporting-policy version. Photos archive their URI as a literal value; active
+file chips, validation and editable inputs are not duplicated into historical
+values-only tables. Existing history is never deleted.
+
+The writer handles at most 50 ordinary rows or ten recovery rows per call and
+persists its cursor under the ScriptLock. Read-back is independently resumable
+with the same bounds, inspects `userEnteredValue` and rejects formulas. It pins
+the archive's Drive revision across verification and rechecks all Tables,
+protections and complete ACLs. Revision drift stops for review, not automatic
+rewriting. Drive files are not technically immutable: the owner can still change
+them, so the checks detect drift rather than claiming an unchangeable provider.
+An ambiguous write reuses the same tab identity and chunk. A lost ACK retries
+verification without writing a second archive. Checkpoint storage has a 2-MB bound
+and each provider request is bounded; oversized snapshots stop without truncation.
+
+Local native-host tests cover default pause, active-user identity, owner-only
+sharing, ambiguous writes, literal grid read-back, native Tables, resumable
+verification, formula injection and revision drift. Live OAuth, Google Table
+creation/rendering, permissions, recovery and real-data historical reporting
+still require a separately reviewed staging rehearsal before parity is claimed.

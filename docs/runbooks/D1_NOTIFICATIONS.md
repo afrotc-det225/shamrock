@@ -109,9 +109,10 @@ without losing or silently purging pending tasks.
 
 The adapter's `planNotificationWork` uses deterministic commands for canonical
 05:00 local daily and 17:00 local Sunday windows and processes at most five tasks
-per call. Repeated scheduler ticks reuse the exact same body/key. There is no
-installed scheduler or live secret/property binding in this module; the host
-must supply its explicit private configuration and pause gate.
+per call. Repeated scheduler ticks reuse the exact same body/key. The optional native maintenance host now supplies a private configuration and
+separate pause gate, and the existing scheduled flush calls it when explicitly
+enabled. It does not install another scheduler or enable delivery. See the
+[native maintenance binding](D1_TRANSITIONS.md#native-staging-maintenance-host).
 
 Signed `/v1/admin/notifications/delivery/claim`, `/complete` and `/recover` routes
 exercise the durable delivery protocol only in the local environment with
@@ -136,8 +137,8 @@ MailApp supplies no message receipt ID. No staging global binds MailApp or adds
 mail OAuth scope, so this code sends no actual email during staging or imports.
 
 The protocol/consumer/provider port have local regression tests, including frozen
-request versions, retry/uncertainty, suppression, quotas and continuations. Native
-Google installation, real provider delivery, account quotas and operational
+request versions, retry/uncertainty, suppression, quotas and continuations. The native suppress-only host is implemented and tested through provider fakes.
+Live Google installation, real provider delivery, account quotas and operational
 notification parity remain separate live acceptance checks. See the
 [MailApp API contract](https://developers.google.com/apps-script/reference/mail/mail-app)
 and [D1 transactional batch contract](https://developers.cloudflare.com/d1/worker-api/d1-database/).

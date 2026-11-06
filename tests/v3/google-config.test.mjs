@@ -5,6 +5,7 @@ import { HOST_PROPERTIES as H } from '../../.build/v3/apps/google-adapter/src/st
 import { NATIVE_PROPERTIES as N } from '../../.build/v3/apps/google-adapter/src/native-runtime.js';
 
 const automation = 'automation@example.invalid';
+const M = {config: 'SHAMROCK_V3_MAINTENANCE_CONFIG', paused: 'SHAMROCK_V3_MAINTENANCE_PAUSED'};
 const F = { config: 'SHAMROCK_V3_FRONTEND_CONFIG', paused: 'SHAMROCK_V3_FRONTEND_PAUSED' };
 const code = expected => error => error.code === expected;
 function fixture() {
@@ -66,8 +67,8 @@ function fixture() {
 function assertOnlyPaused(f, expected) {
   const before = new Map(f.properties);
   assert.throws(() => f.run(), expected);
-  before.set(H.enabled, 'false'); before.set(F.paused, 'true'); assert.deepEqual(f.properties, before);
-  assert.deepEqual(f.state.mutations, [['set', H.enabled], ['set', F.paused]]);
+  before.set(H.enabled, 'false'); before.set(F.paused, 'true'); before.set(M.paused, 'true'); assert.deepEqual(f.properties, before);
+  assert.deepEqual(f.state.mutations, [['set', H.enabled], ['set', F.paused], ['set', M.paused]]);
   assert.equal(f.state.secretReads, 0);
 }
 
@@ -209,5 +210,12 @@ test('a property provider failure is never reported as an atomic successful impo
 test('an unconfirmed pause stops before downloading or replacing any configuration', () => {
   const f = fixture(); const before = new Map(f.properties); f.state.discardPause = true;
   assert.throws(() => f.run(), code('configuration_write_failed'));
-  assert.deepEqual(f.properties, before); assert.equal(f.state.calls.length, 0); assert.equal(f.state.mutations.length, 2);
+  assert.deepEqual(f.properties, before); assert.equal(f.state.calls.length, 0); assert.equal(f.state.mutations.length, 3);
+});
+
+
+test('optional maintenance configuration stays file-owned and imports pause it', () => {
+ const f=fixture();f.map[M.config]=JSON.stringify({version:1,environment:'staging',generation:1,enabled:true,
+ resourceReview:'EXISTING_PRIVATE_MAINTENANCE_REVIEWED_FOR_STAGING',principalId:'automation',workerId:'maintenance-worker',sourceResource:'maintenance-source',stateFileId:'maintenance-state',archiveSpreadsheetId:'maintenance-archive',archiveExpectedTitle:'SHAMROCK staging archives'});
+ f.properties.set(M.config,'stale-binding');assert.equal(f.run().propertyCount,5);assert.equal(f.properties.has(M.config),false);assert.equal(f.properties.get(M.paused),'true');
 });

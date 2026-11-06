@@ -24,6 +24,18 @@ function shamrockV3StagingFrontend_() {
   });
 }
 
+function shamrockV3StagingMaintenance_() {
+  return SHAMROCKV3.createNativeMaintenanceRuntime({
+    PropertiesService: PropertiesService, Utilities: Utilities, UrlFetchApp: UrlFetchApp,
+    ScriptApp: ScriptApp, Session: Session, LockService: LockService
+  });
+}
+function shamrockV3StagingMaintenancePause() { return shamrockV3StagingMaintenance_().pause(); }
+function shamrockV3StagingMaintenanceResume() { return shamrockV3StagingMaintenance_().resume(); }
+function shamrockV3StagingNotificationsPlan() { return shamrockV3StagingMaintenance_().planNotifications(); }
+function shamrockV3StagingTransitionArchive(transitionId) { return shamrockV3StagingMaintenance_().archive(transitionId); }
+function shamrockV3StagingTransitionCommand(input) { return shamrockV3StagingMaintenance_().command(input); }
+
 function shamrockV3StagingSetup() {
   var host = shamrockV3StagingHost_();
   shamrockV3StagingPauseBoth_(host);
@@ -37,6 +49,7 @@ function shamrockV3StagingPauseBoth_(host) {
   var failure;
   try { result = host.pause(); } catch (error) { failure = error; }
   try { shamrockV3StagingFrontend_().pause(); } catch (error) { if (!failure) failure = error; }
+  try { shamrockV3StagingMaintenance_().pause(); } catch (error) { if (!failure) failure = error; }
   if (failure) throw failure;
   return result;
 }
@@ -58,7 +71,8 @@ function shamrockV3StagingFlush() {
   var intake = shamrockV3StagingHost_().flush();
   // Frontend maintenance has a separate explicit gate; Forms may remain paused.
   var frontend = shamrockV3StagingFrontend_().refresh();
-  return Object.assign({}, intake, { frontend: frontend });
+  var maintenance = shamrockV3StagingMaintenance_().planNotifications();
+  return Object.assign({}, intake, { frontend: frontend, maintenance: maintenance });
 }
 function shamrockV3StagingFrontendRefresh() { return shamrockV3StagingFrontend_().refresh(); }
 function shamrockV3StagingFrontendPause() { return shamrockV3StagingFrontend_().pause(); }

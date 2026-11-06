@@ -1,3 +1,4 @@
+import { noticeLocalClock } from '../../../packages/domain/src/notifications.js';
 /** Isolated, explicitly reviewed term transitions. No Google or mail IO in the Worker. */
 import { adminIdentifier, type FrontendSnapshot } from '../../../packages/domain/src/admin.js';
 import { parseTransitionPlan, prepareTransition, type TransitionPlan } from '../../../packages/domain/src/transitions.js';
@@ -248,13 +249,13 @@ export async function transitionArchive(env: Env, action: 'claim' | 'ack', input
             stmt(env.DB, `UPDATE term_transitions SET state='archiving',updated_at=? WHERE transition_id=? AND state='proposed'
         AND EXISTS(SELECT 1 FROM transition_archive_jobs WHERE transition_id=? AND claim_token=?)`, now, transitionId, transitionId, token),
             stmt(env.DB, `INSERT INTO transition_archive_events(transition_id,principal_id,worker_id,action,accepted_at,snapshot_hash) SELECT transition_id,?,?,'claimed',?,snapshot_hash FROM transition_archive_jobs WHERE transition_id=? AND claim_token=?`, principal, worker, now, transitionId, token),
-            stmt(env.DB, `SELECT t.snapshot_json AS snapshot,t.snapshot_hash AS snapshotHash,t.plan_hash AS planHash,j.claim_token AS claimToken,j.lease_expires_at AS leaseExpiresAt
+            stmt(env.DB, `SELECT t.snapshot_json AS snapshot,t.snapshot_hash AS snapshotHash,t.plan_hash AS planHash,t.created_at AS preparedAt,j.claim_token AS claimToken,j.lease_expires_at AS leaseExpiresAt
         FROM term_transitions t JOIN transition_archive_jobs j USING(transition_id) WHERE t.transition_id=? AND j.claim_token=?`, transitionId, token),
         ]);
         if (!result[3].results.length)
             fail();
         const row = result[3].results[0];
-        return { ...row, transitionId, snapshot: JSON.parse(String(row.snapshot)) };
+        return { ...row, transitionId, asOfDate: noticeLocalClock(String(row.preparedAt)).date, snapshot: JSON.parse(String(row.snapshot)) };
     }
     const proof = record(r.proof, ['snapshotHash', 'archiveBinding', 'protected', 'private', 'valuesOnly']);
     if (typeof proof.snapshotHash !== 'string' || !/^[a-f0-9]{64}$/.test(proof.snapshotHash) || proof.protected !== true || proof.private !== true || proof.valuesOnly !== true)

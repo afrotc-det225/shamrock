@@ -1,6 +1,7 @@
 /** Import reviewed, nonsecret staging bindings from an automation-owned private JSON file.
  * This module never uploads files, installs triggers, enables processing or reads the bridge secret. */
 import { AdapterError } from './index.js';
+import { MAINTENANCE_PROPERTIES, parseNativeMaintenanceConfig } from './maintenance-config.js';
 import { HOST_PROPERTIES, parseStagingHostConfig, type StagingHostConfig } from './staging-host.js';
 import { NATIVE_PROPERTIES, parseNativePresentationConfig, type NativeProjectionConfig } from './native-runtime.js';
 
@@ -12,7 +13,7 @@ const FILE_LIMIT = 65_536;
 const FRONTEND_CONFIG_PROPERTY = 'SHAMROCK_V3_FRONTEND_CONFIG';
 const FRONTEND_PAUSE_PROPERTY = 'SHAMROCK_V3_FRONTEND_PAUSED';
 const ALLOWED: readonly string[] = [HOST_PROPERTIES.config, HOST_PROPERTIES.principals, HOST_PROPERTIES.attendanceCatalog,
-  HOST_PROPERTIES.excusalCatalog, NATIVE_PROPERTIES.projectionConfig, NATIVE_PROPERTIES.presentationConfig, FRONTEND_CONFIG_PROPERTY];
+  HOST_PROPERTIES.excusalCatalog, NATIVE_PROPERTIES.projectionConfig, NATIVE_PROPERTIES.presentationConfig, FRONTEND_CONFIG_PROPERTY, MAINTENANCE_PROPERTIES.config];
 const REQUIRED = [HOST_PROPERTIES.config, HOST_PROPERTIES.principals, HOST_PROPERTIES.attendanceCatalog, NATIVE_PROPERTIES.projectionConfig];
 type Json = Record<string, unknown>;
 export interface StagingConfigurationServices {
@@ -126,7 +127,8 @@ export function importStagingConfiguration(services: StagingConfigurationService
   try {
     properties.setProperty(HOST_PROPERTIES.enabled, 'false');
     properties.setProperty(FRONTEND_PAUSE_PROPERTY, 'true');
-    if (properties.getProperty(HOST_PROPERTIES.enabled) !== 'false' || properties.getProperty(FRONTEND_PAUSE_PROPERTY) !== 'true') throw new Error('Pause was not persisted.');
+    properties.setProperty(MAINTENANCE_PROPERTIES.paused, 'true');
+    if (properties.getProperty(HOST_PROPERTIES.enabled) !== 'false' || properties.getProperty(FRONTEND_PAUSE_PROPERTY) !== 'true' || properties.getProperty(MAINTENANCE_PROPERTIES.paused) !== 'true') throw new Error('Pause was not persisted.');
   } catch { return fail('configuration_write_failed', 'Processing could not be paused; configuration was not imported.'); }
   let executor = '';
   try { executor = email(services.Session.getEffectiveUser().getEmail()); } catch { /* fail closed below */ }
@@ -181,7 +183,7 @@ export function importStagingConfiguration(services: StagingConfigurationService
   for (const [key, value] of Object.entries(map)) {
     if (typeof value !== 'string') fail('configuration_invalid', 'Each imported property must contain a JSON string.');
     parsed[key] = json(value, key === FRONTEND_CONFIG_PROPERTY ? 16_000 : PROPERTY_LIMIT);
-    if (key !== FRONTEND_CONFIG_PROPERTY) pending[key] = value;
+    if (key !== FRONTEND_CONFIG_PROPERTY && key !== MAINTENANCE_PROPERTIES.config) pending[key] = value;
   }
   const host = parseStagingHostConfig(parsed[HOST_PROPERTIES.config]); sameShape(parsed[HOST_PROPERTIES.config], host);
   if (host.expectedAutomationEmail !== executor) fail('configuration_identity', 'The proposed staging configuration belongs to a different automation account.');
@@ -210,6 +212,8 @@ export function importStagingConfiguration(services: StagingConfigurationService
     // Import never copies this optional file-owned value into Script Properties.
   }
 
+  if (parsed[MAINTENANCE_PROPERTIES.config]) parseNativeMaintenanceConfig(parsed[MAINTENANCE_PROPERTIES.config], host.generation);
+
   // All file, ACL and configuration validation finishes before any configuration mutation.
   // PropertiesService offers no transaction guarantee: a provider write failure stays paused
   // with setup receipts removed, and must never be reported as a completed import.
@@ -218,6 +222,7 @@ export function importStagingConfiguration(services: StagingConfigurationService
     properties.deleteProperty(NATIVE_PROPERTIES.projectionReceipt);
     properties.deleteProperty(NATIVE_PROPERTIES.presentationReceipt);
     properties.deleteProperty(FRONTEND_CONFIG_PROPERTY);
+    properties.deleteProperty(MAINTENANCE_PROPERTIES.config);
     properties.setProperties(pending, false);
     if (!pending[HOST_PROPERTIES.excusalCatalog]) properties.deleteProperty(HOST_PROPERTIES.excusalCatalog);
     if (!pending[NATIVE_PROPERTIES.presentationConfig]) properties.deleteProperty(NATIVE_PROPERTIES.presentationConfig);
@@ -225,6 +230,7 @@ export function importStagingConfiguration(services: StagingConfigurationService
       || (!pending[HOST_PROPERTIES.excusalCatalog] && properties.getProperty(HOST_PROPERTIES.excusalCatalog) !== null)
       || (!pending[NATIVE_PROPERTIES.presentationConfig] && properties.getProperty(NATIVE_PROPERTIES.presentationConfig) !== null)
       || properties.getProperty(HOST_PROPERTIES.enabled) !== 'false'
+      || properties.getProperty(MAINTENANCE_PROPERTIES.paused) !== 'true' || properties.getProperty(MAINTENANCE_PROPERTIES.config) !== null
       || properties.getProperty(FRONTEND_PAUSE_PROPERTY) !== 'true' || properties.getProperty(FRONTEND_CONFIG_PROPERTY) !== null
       || properties.getProperty(HOST_PROPERTIES.setupReceipt) !== null || properties.getProperty(NATIVE_PROPERTIES.projectionReceipt) !== null
       || properties.getProperty(NATIVE_PROPERTIES.presentationReceipt) !== null) {

@@ -5,6 +5,7 @@ import { callMaintenance, type MaintenanceApi } from './notification-runtime.js'
 import type { FrontendSnapshot } from '../../../packages/domain/src/admin.js';
 export interface TransitionArchiveClaim {
     transitionId: string;
+    asOfDate: string;
     snapshotHash: string;
     planHash: string;
     claimToken: string;
@@ -18,20 +19,21 @@ export interface TransitionArchiveProof {
     private: true;
     valuesOnly: true;
 }
+export interface TransitionArchiveCheckpoint {
+    claim: TransitionArchiveClaim;
+    continuation?: string;
+    writeComplete?: boolean;
+    verificationContinuation?: string;
+    serverComplete?: boolean;
+}
 export interface TransitionArchivePorts {
     api: MaintenanceApi;
     lock: ScriptLockPort;
     enabled(): boolean;
     assertPrivateState(): void;
     state: {
-        load(): {
-            claim: TransitionArchiveClaim;
-            continuation?: string;
-        } | undefined;
-        save(value: {
-            claim: TransitionArchiveClaim;
-            continuation?: string;
-        }): void;
+        load(): TransitionArchiveCheckpoint | undefined;
+        save(value: TransitionArchiveCheckpoint): void;
         clear(): void;
     };
     /** Must resolve a stable transition ID before creating a new archive. Never overwrite a different hash.
@@ -44,6 +46,14 @@ export interface TransitionArchivePorts {
             done: true;
         };
         verify(claim: TransitionArchiveClaim): TransitionArchiveProof;
+        /** Optional bounded native read-back. Its cursor must pin a stable provider revision. */
+        verifyStep?(claim: TransitionArchiveClaim, continuation?: string): {
+            done: false;
+            continuation: string;
+        } | {
+            done: true;
+            proof: TransitionArchiveProof;
+        };
     };
 }
 export function continueTransitionArchive(ports: TransitionArchivePorts, transitionId: string): {
@@ -66,36 +76,51 @@ export function continueTransitionArchive(ports: TransitionArchivePorts, transit
                     state?: string;
                 } | undefined;
                 if (archive?.state === 'done' && status.snapshotHash === retained.claim.snapshotHash) {
-                    const proof = ports.archive.verify(retained.claim);
-                    if (proof.snapshotHash !== retained.claim.snapshotHash || !proof.protected || !proof.private || !proof.valuesOnly)
-                        throw new AdapterError('transition_archive', 'The retained archive failed verification.');
-                    ports.state.clear();
-                    return { state: 'ready-for-reviewed-acceptance' };
+                    retained = { ...retained, writeComplete: true, serverComplete: true };
+                    ports.state.save(retained);
                 }
             }
-            const raw = callMaintenance(ports.api, '/v1/admin/transitions/archive/claim', identity);
-            const claim: TransitionArchiveClaim = { transitionId: String(raw.transitionId), snapshotHash: String(raw.snapshotHash), planHash: String(raw.planHash),
-                claimToken: String(raw.claimToken), leaseExpiresAt: String(raw.leaseExpiresAt), snapshot: raw.snapshot as FrontendSnapshot };
-            if (claim.transitionId !== transitionId || !/^[a-f0-9]{64}$/.test(claim.snapshotHash) || ports.api.signer.sha256(JSON.stringify(claim.snapshot)) !== claim.snapshotHash)
-                throw new AdapterError('transition_snapshot', 'The immutable archive snapshot failed verification.');
-            if (retained && retained.claim.snapshotHash !== claim.snapshotHash)
-                throw new AdapterError('transition_snapshot', 'Archive content changed after preparation.');
-            retained = { claim, ...(retained?.continuation ? { continuation: retained.continuation } : {}) };
+            if (!retained?.serverComplete) {
+                const raw = callMaintenance(ports.api, '/v1/admin/transitions/archive/claim', identity);
+                const claim: TransitionArchiveClaim = { transitionId: String(raw.transitionId), asOfDate: String(raw.asOfDate), snapshotHash: String(raw.snapshotHash), planHash: String(raw.planHash),
+                    claimToken: String(raw.claimToken), leaseExpiresAt: String(raw.leaseExpiresAt), snapshot: raw.snapshot as FrontendSnapshot };
+                if (claim.transitionId !== transitionId || !/^[a-f0-9]{64}$/.test(claim.snapshotHash) || ports.api.signer.sha256(JSON.stringify(claim.snapshot)) !== claim.snapshotHash)
+                    throw new AdapterError('transition_snapshot', 'The immutable archive snapshot failed verification.');
+                if (retained && retained.claim.snapshotHash !== claim.snapshotHash)
+                    throw new AdapterError('transition_snapshot', 'Archive content changed after preparation.');
+                retained = { ...retained, claim };
+                ports.state.save(retained);
+            }
+        }
+        if (!retained)
+            throw new AdapterError('transition_claim', 'Archive claim was not retained.');
+        if (!retained.writeComplete) {
+            const result = ports.archive.write(retained.claim, retained.continuation);
+            if (!result.done) {
+                if (!result.continuation || result.continuation.length > 2000)
+                    throw new AdapterError('transition_continuation', 'Archive continuation is invalid.');
+                ports.state.save({ ...retained, continuation: result.continuation });
+                return { state: 'continuing' };
+            }
+            retained = { ...retained, writeComplete: true };
             ports.state.save(retained);
         }
-        const result = ports.archive.write(retained.claim, retained.continuation);
-        if (!result.done) {
-            if (!result.continuation || result.continuation.length > 2000)
-                throw new AdapterError('transition_continuation', 'Archive continuation is invalid.');
-            ports.state.save({ claim: retained.claim, continuation: result.continuation });
-            return { state: 'continuing' };
+        const verified = ports.archive.verifyStep ? ports.archive.verifyStep(retained.claim, retained.verificationContinuation)
+            : { done: true as const, proof: ports.archive.verify(retained.claim) };
+        if (!verified.done) {
+            if (!verified.continuation || verified.continuation.length > 2000)
+                throw new AdapterError('transition_continuation', 'Archive verification continuation is invalid.');
+            ports.state.save({ ...retained, verificationContinuation: verified.continuation });
+            return { state: 'verifying' };
         }
-        const proof = ports.archive.verify(retained.claim);
+        const proof = verified.proof;
         if (proof.snapshotHash !== retained.claim.snapshotHash || proof.protected !== true || proof.private !== true || proof.valuesOnly !== true)
             throw new AdapterError('transition_archive', 'A private, protected, values-only archive must pass read-back.');
-        const receipt = callMaintenance(ports.api, '/v1/admin/transitions/archive/ack', { ...identity, claimToken: retained.claim.claimToken, proof });
-        if (receipt.status !== 'done')
-            throw new AdapterError('transition_receipt', 'Archive completion was not confirmed.');
+        if (!retained.serverComplete) {
+            const receipt = callMaintenance(ports.api, '/v1/admin/transitions/archive/ack', { ...identity, claimToken: retained.claim.claimToken, proof });
+            if (receipt.status !== 'done')
+                throw new AdapterError('transition_receipt', 'Archive completion was not confirmed.');
+        }
         ports.state.clear();
         return { state: 'ready-for-reviewed-acceptance' };
     }
