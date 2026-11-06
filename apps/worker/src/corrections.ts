@@ -11,7 +11,7 @@ export const pairRevisionSql = `SELECT COALESCE(MAX(revision),0) FROM (
   SELECT MAX(a.audit_id) AS revision FROM attendance_observations o
     JOIN attendance_reports r ON r.report_id=o.report_id JOIN audit_events a ON a.command_id=r.command_id
     WHERE o.event_id=? AND o.person_id=?
-  UNION ALL SELECT MAX(a.audit_id) FROM excusal_requests r JOIN audit_events a ON a.command_id=r.last_command_id
+  UNION ALL SELECT MAX(a.audit_id) FROM excusal_records r JOIN audit_events a ON a.command_id=r.last_command_id
     WHERE r.event_id=? AND r.person_id=?
   UNION ALL SELECT MAX(a.audit_id) FROM attendance_corrections c JOIN audit_events a ON a.command_id=c.command_id
     WHERE c.event_id=? AND c.person_id=?
@@ -19,7 +19,7 @@ export const pairRevisionSql = `SELECT COALESCE(MAX(revision),0) FROM (
 export const attendanceVersionsSql = `SELECT personId,eventId,MAX(version) AS version FROM (
   SELECT o.person_id AS personId,o.event_id AS eventId,a.audit_id AS version FROM attendance_observations o
     JOIN attendance_reports r ON r.report_id=o.report_id JOIN audit_events a ON a.command_id=r.command_id
-  UNION ALL SELECT r.person_id,r.event_id,a.audit_id FROM excusal_requests r JOIN audit_events a ON a.command_id=r.last_command_id
+  UNION ALL SELECT r.person_id,r.event_id,COALESCE(a.audit_id,0) FROM excusal_records r LEFT JOIN audit_events a ON a.command_id=r.last_command_id WHERE r.origin='native' OR EXISTS(SELECT 1 FROM legacy_operational_adoptions l WHERE l.adoption_id=r.legacy_adoption_id AND l.state='complete')
   UNION ALL SELECT c.person_id,c.event_id,a.audit_id FROM attendance_corrections c JOIN audit_events a ON a.command_id=c.command_id
   UNION ALL SELECT b.person_id,b.event_id,0 FROM legacy_attendance_baselines b JOIN legacy_import_runs i ON i.import_run_id=b.import_run_id AND i.state='complete'
 ) GROUP BY personId,eventId ORDER BY personId,eventId LIMIT 25001`;

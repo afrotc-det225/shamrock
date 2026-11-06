@@ -19,6 +19,7 @@ export function closeoutCode(input: {
     requests: {
         status: string;
         order: number;
+        legacyStateOnly?: boolean;
     }[];
 }): 'A' | 'U' | null {
     const { cell } = input;
@@ -28,7 +29,7 @@ export function closeoutCode(input: {
         return 'U';
     if (cell.effectiveCode !== null && cell.effectiveCode !== 'A')
         return null;
-    const active = input.requests.filter(r => !['Withdrawn', 'Superseded'].includes(r.status));
+    const active = input.requests.filter(r => !r.legacyStateOnly && !['Withdrawn', 'Superseded'].includes(r.status));
     if (active.length === 1 && active[0].status === 'Denied' && active[0].order >= input.latestAttendanceOrder)
         return 'U';
     return cell.effectiveCode === null ? 'A' : null;

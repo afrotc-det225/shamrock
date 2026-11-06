@@ -64,3 +64,24 @@ export async function readLegacyHistory(env:Env,input:unknown):Promise<LegacyHis
     if(new TextEncoder().encode(JSON.stringify(report)).length>5000000)fail(409,'LEGACY_HISTORY_CAPACITY');return report;
   }catch(error){if(error instanceof HttpError)throw error;return fail(409,error instanceof LegacyHistoryError?error.code:'INVALID_LEGACY_HISTORY');}
 }
+
+/** Complete import accounting includes retired and unresolved requests as nonactionable history. */
+export async function listLegacyRequestHistory(env:Env,input:unknown):Promise<unknown>{
+  const req=request(env,input,false),g=guard(env,req.principalId);
+  const results=await env.DB.batch<Record<string,unknown>>([
+    stmt(env.DB,`SELECT (${g.sql}) AS allowed`,...g.params),
+    stmt(env.DB,`SELECT r.source_occurrence_id AS sourceOccurrenceId,r.disposition,r.target_id AS operationalRequestId,
+      json_extract(r.evidence_json,'$.record.request_id') AS sourceRequestId,json_extract(r.evidence_json,'$.record.status') AS sourceStatus,
+      json_extract(r.evidence_json,'$.record.event') AS eventLabel,json_extract(r.evidence_json,'$.record.submittedAt') AS submittedAt,
+      json_extract(r.evidence_json,'$.record.last_name') AS lastName,json_extract(r.evidence_json,'$.record.first_name') AS firstName,
+      json_extract(r.evidence_json,'$.record.flight') AS flight,json_extract(r.evidence_json,'$.record.squadron') AS squadron,
+      json_extract(r.evidence_json,'$.record.requested_outcome') AS requestedOutcome,json_extract(r.evidence_json,'$.record.reason') AS reason,
+      json_extract(r.evidence_json,'$.personId') AS subjectPersonId,json_extract(r.evidence_json,'$.retirement.reason') AS retirementReason,
+      json_extract(r.evidence_json,'$.issues') AS issuesJson
+      FROM legacy_operational_adoption_rows r JOIN legacy_operational_adoptions a ON a.adoption_id=r.adoption_id AND a.state='complete'
+      WHERE r.kind='excusal' AND (${g.sql}) ORDER BY r.source_occurrence_id LIMIT 1501`,...g.params),
+  ]);
+  if(results[0].results[0]?.allowed!==1)fail(403,'NOT_AUTHORIZED');if(results[1].results.length>1500)fail(409,'LEGACY_HISTORY_CAPACITY');
+  const rows=results[1].results.map(({issuesJson,...row})=>({...row,issues:JSON.parse(String(issuesJson)),historicalActorVerified:false}));
+  const report={contractVersion:'legacy-request-history-v1',readOnly:true,rows};if(new TextEncoder().encode(JSON.stringify(report)).length>5000000)fail(409,'LEGACY_HISTORY_CAPACITY');return report;
+}

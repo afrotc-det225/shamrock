@@ -1,5 +1,5 @@
 import { prepareCloseout, advanceCloseout, closeoutStatus } from './closeout.js';
-import { listLegacyHistory, readLegacyHistory } from './legacy-history.js';
+import { listLegacyHistory, readLegacyHistory, listLegacyRequestHistory } from './legacy-history.js';
 import { recoverAdminEffect } from './effect-recovery.js';
 import { transitionCommand, transitionStatus, transitionArchive } from './transitions.js';
 import { planNotifications, notificationStatus, processNotificationTask, notificationDelivery } from './notifications.js';
@@ -97,7 +97,7 @@ async function requestRecord(db: D1Database, requestId: string): Promise<(Excusa
     submitted_at AS submittedAt, submitted_by AS submittedBy, updated_at AS updatedAt,
     decided_at AS decidedAt, decided_by AS decidedBy, decision_reason AS decisionReason,
     source_json AS sourceJson, command_id AS commandId, last_command_id AS lastCommandId
-    FROM excusal_requests WHERE request_id = ?`, requestId).first<ExcusalRequest & { unitId: string; sourceJson: string }>();
+    FROM excusal_records WHERE request_id = ? AND (origin='native' OR EXISTS(SELECT 1 FROM legacy_operational_adoptions l WHERE l.adoption_id=legacy_adoption_id AND l.state='complete'))`, requestId).first<ExcusalRequest & { unitId: string; sourceJson: string }>();
   if (!row) return null;
   const { sourceJson, ...rest } = row;
   return { ...rest, source: JSON.parse(sourceJson) };
@@ -245,7 +245,7 @@ async function acceptCommand(env: Env, command: Command): Promise<Receipt> {
     result = command.operation === 'excusal.submit' ? requests[0] : { requests };
     targetId = command.operation === 'excusal.submit' ? requests[0].requestId : command.commandId;
     // One SQL input set keeps the batch bounded even at the maximum event count.
-    writes.push(statement(env.DB, `INSERT INTO excusal_requests
+    writes.push(statement(env.DB, `INSERT INTO excusal_records
       (request_id,event_id,person_id,unit_id,requested_outcome,reason,status,decision,version,
        submitted_at,submitted_by,updated_at,decided_at,decided_by,decision_reason,source_json,command_id,last_command_id)
       SELECT json_extract(value,'$.requestId'),json_extract(value,'$.eventId'),?, ?, ?, ?,'Submitted',NULL,1,
@@ -257,23 +257,23 @@ async function acceptCommand(env: Env, command: Command): Promise<Receipt> {
     const request = decideExcusalRequest(ctx.current!, command, now);
     notificationRequests = [request];
     result = request; targetId = request.requestId;
-    guard.sql += ' AND EXISTS (SELECT 1 FROM excusal_requests WHERE request_id=? AND version=?)';
+    guard.sql += ' AND EXISTS (SELECT 1 FROM excusal_records WHERE request_id=? AND version=?)';
     guard.values.push(request.requestId, command.payload.expectedVersion);
-    writes.push(statement(env.DB, `UPDATE excusal_requests SET status=?,decision=?,version=?,updated_at=?,
+    writes.push(statement(env.DB, `UPDATE excusal_records SET status=?,decision=?,version=?,updated_at=?,
       decided_at=?,decided_by=?,decision_reason=?,last_command_id=? WHERE request_id=? AND version=?`,
       request.status, request.decision, request.version, request.updatedAt, request.decidedAt, request.decidedBy,
       request.decisionReason, request.lastCommandId, request.requestId, command.payload.expectedVersion));
-    writes.push(statement(env.DB, `INSERT INTO excusal_decisions VALUES (?,?,?,?,?,?,?)`, request.requestId,
+    writes.push(statement(env.DB, `INSERT INTO excusal_record_decisions VALUES (?,?,?,?,?,?,?)`, request.requestId,
       request.version, request.decision, request.decisionReason, command.actor.principalId, now, command.commandId));
   }
 
   if (notificationRequests.length) {
     const tasks = await Promise.all(notificationRequests.map(async request => ({ ...request, taskId: await digest(JSON.stringify(['excusal-notice', request.requestId, request.version])) })));
-    writes.push(statement(env.DB, `INSERT INTO notification_tasks(task_id,source_command_id,request_id,request_version,request_json,state,mode,created_at)
+    writes.push(statement(env.DB, `INSERT INTO excusal_notification_tasks(task_id,source_command_id,request_id,request_version,request_json,state,mode,created_at)
       SELECT json_extract(j.value,'$.taskId'),?,r.request_id,r.version,json_object('requestId',request_id,'personId',person_id,'eventId',event_id,
         'flightId',unit_id,'status',status,'requestedOutcome',requested_outcome,'version',version,'reason',reason,'submittedAt',submitted_at,
         'submittedBy',submitted_by,'updatedAt',updated_at,'decidedAt',decided_at,'decidedBy',decided_by,'decisionReason',decision_reason),
-        'pending','suppressed',? FROM excusal_requests r JOIN json_each(?) j ON r.request_id=json_extract(j.value,'$.requestId') AND r.version=json_extract(j.value,'$.version') WHERE last_command_id=?`, command.commandId, now, JSON.stringify(tasks), command.commandId));
+        'pending','suppressed',? FROM excusal_records r JOIN json_each(?) j ON r.request_id=json_extract(j.value,'$.requestId') AND r.version=json_extract(j.value,'$.version') WHERE last_command_id=?`, command.commandId, now, JSON.stringify(tasks), command.commandId));
   }
 
   const receipt: Receipt = { commandId: command.commandId, status: 'committed', operation: command.operation, result, pendingEffects: true };
@@ -358,7 +358,7 @@ async function projectJob(env: Env, input: Record<string, string | number>): Pro
       FROM memberships m JOIN people p ON p.person_id=m.person_id LEFT JOIN attendance_current a
       ON a.person_id=p.person_id AND a.event_id=? WHERE m.unit_id=? AND m.active=1 ORDER BY p.person_id LIMIT 501`, job.eventId, job.unitId),
     statement(env.DB, `SELECT request_id AS requestId,person_id AS personId,status,requested_outcome AS requestedOutcome,version
-      FROM excusal_requests WHERE event_id=? AND unit_id=? ORDER BY request_id LIMIT 1001`, job.eventId, job.unitId),
+      FROM excusal_records WHERE event_id=? AND unit_id=? ORDER BY request_id LIMIT 1001`, job.eventId, job.unitId),
     // All current prototype mutations append an audit record atomically. Future
     // roster/event/name mutations must also advance this scope's revision.
     statement(env.DB, `SELECT COALESCE(MAX(a.audit_id),0) AS revision FROM audit_events a
@@ -454,6 +454,7 @@ export default {
       }
       if (url.pathname === '/v1/admin/directory/review-authorize' && !url.search) return json(await authorizeDirectoryReview(env, input));
       if (url.pathname === '/v1/admin/history/list' && !url.search) return json(await listLegacyHistory(env, input));
+      if (url.pathname === '/v1/admin/history/requests' && !url.search) return json(await listLegacyRequestHistory(env, input));
       if (url.pathname === '/v1/admin/history/read' && !url.search) return json(await readLegacyHistory(env, input));
       if (url.pathname === '/v1/admin/snapshot' && !url.search) return json(await frontendSnapshot(env, input));
       if (url.pathname === '/v1/admin/effects/recover' && !url.search) return json(await recoverAdminEffect(env, input));

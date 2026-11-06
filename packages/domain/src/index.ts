@@ -116,14 +116,14 @@ export interface ExcusalRequest extends ExcusalSubmitPayload {
   decision: ExcusalDecision | null;
   version: number;
   submittedAt: string;
-  submittedBy: string;
+  submittedBy: string | null;
   updatedAt: string;
   decidedAt: string | null;
   decidedBy: string | null;
   decisionReason: string | null;
-  source: CommandSource;
-  commandId: string;
-  lastCommandId: string;
+  source: CommandSource | { kind: 'legacy-import'; resourceKey:string; submissionId:string; revision:1; humanIdentityVerified:false };
+  commandId: string | null;
+  lastCommandId: string | null;
 }
 
 export interface AttendanceView {

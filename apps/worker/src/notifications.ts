@@ -102,6 +102,7 @@ function planFromSnapshot(snapshot: FrontendSnapshot, recipe: PlanCommand['paylo
     const request = snapshot.requests.find(row => row.requestId === recipe.requestId);
     if (!request)
       throw new HttpError(404, 'NOT_FOUND', 'The requested excusal is unavailable.');
+    if (request.legacyStateOnly) throw new HttpError(409, 'LEGACY_REQUEST_NOTICE_REQUIRES_NEW_ACTION', 'Imported request history does not replay a notification.');
     const person = snapshot.people.find(row => row.personId === request.personId);
     const event = snapshot.events.find(row => row.eventId === request.eventId);
     const flight = snapshot.flights.find(row => row.flightId === request.flightId);
@@ -186,7 +187,7 @@ export async function planNotifications(env: NotificationEnv, input: unknown, ta
     AND (SELECT COUNT(*) FROM notification_intents)+(SELECT COUNT(*) FROM json_each(?) j WHERE NOT EXISTS
      (SELECT 1 FROM notification_intents n WHERE n.notice_key=json_extract(j.value,'$.key')))
      <=COALESCE((SELECT max_ledger_entries FROM notification_delivery_control WHERE singleton=1),0)
-    AND (? IS NULL OR EXISTS(SELECT 1 FROM notification_tasks WHERE task_id=? AND state='pending' AND mode='suppressed' AND request_json=?)))`, command.commandId, ...auth.values, snapshot.revision.operations, snapshot.revision.administration, serialized, task?.task_id ?? null, task?.task_id ?? null, task?.request_json ?? null),
+    AND (? IS NULL OR EXISTS(SELECT 1 FROM excusal_notification_tasks WHERE task_id=? AND state='pending' AND mode='suppressed' AND request_json=?)))`, command.commandId, ...auth.values, snapshot.revision.operations, snapshot.revision.administration, serialized, task?.task_id ?? null, task?.task_id ?? null, task?.request_json ?? null),
       statement(env.DB, `INSERT INTO command_registry VALUES(?,'admin')`, command.commandId),
       statement(env.DB, `INSERT INTO admin_commands VALUES(?,?,?,?,?,'notifications.manage','[]',?,?,?,?,?,?)`, command.commandId, digest, command.actor.principalId, command.operation, command.commandId, command.source.kind, command.source.resourceKey, command.source.submissionId, command.source.revision, now, '{}'),
       statement(env.DB, `INSERT INTO notification_intents(notice_id,notice_key,policy_version,kind,scope_id,local_date,environment,generation,mode,state,blocked_reason,
@@ -199,7 +200,7 @@ export async function planNotifications(env: NotificationEnv, input: unknown, ta
     'result',json_object('planned',?,'created',(SELECT COUNT(*) FROM notification_intents WHERE origin_command_id=admin_commands.command_id),
      'suppressed',?,'missingRouting',?),'pendingEffects',json('false')) WHERE command_id=?`, intents.length, intents.length, intents.filter(intent => intent.blockedReason).length, command.commandId),
       statement(env.DB, `INSERT INTO admin_audit_events(command_id,actor_id,actor_evidence,operation,target_id,accepted_at,before_json,after_json) VALUES(?,?,?,?,?,?,'{}',?)`, command.commandId, command.actor.principalId, command.actor.evidence, command.operation, command.commandId, now, JSON.stringify({ recipe: command.payload, revision: snapshot.revision, planned: intents.length, mode: 'staging', delivery: 'suppressed' })),
-      ...(task ? [statement(env.DB, "UPDATE notification_tasks SET state='done',completed_at=?,planning_command_id=? WHERE task_id=? AND state='pending'", now, command.commandId, task.task_id)] : []),
+      ...(task ? [statement(env.DB, "UPDATE excusal_notification_tasks SET state='done',completed_at=?,planning_command_id=? WHERE task_id=? AND state='pending'", now, command.commandId, task.task_id)] : []),
       statement(env.DB, 'DELETE FROM command_assertions WHERE command_id=?', command.commandId),
       statement(env.DB, 'SELECT receipt_json AS receipt FROM admin_commands WHERE command_id=?', command.commandId),
     ]);
@@ -225,7 +226,7 @@ export async function notificationStatus(env: NotificationEnv, input: unknown): 
     statement(env.DB, `SELECT notice_id AS noticeId,kind,state,blocked_reason AS reason,created_at AS createdAt FROM notification_intents
    WHERE state IN ('blocked','uncertain','sending') OR blocked_reason IS NOT NULL ORDER BY created_at,notice_id LIMIT 51`),
     statement(env.DB, `SELECT state,COUNT(*) AS count FROM notification_attempts GROUP BY state ORDER BY state`),
-    statement(env.DB, "SELECT task_id AS taskId FROM notification_tasks WHERE state='pending' ORDER BY created_at,task_id LIMIT 51"),
+    statement(env.DB, "SELECT task_id AS taskId FROM excusal_notification_tasks WHERE state='pending' ORDER BY created_at,task_id LIMIT 51"),
   ]);
   if (result[0].results[0]?.allowed !== 1)
     throw new HttpError(403, 'NOT_AUTHORIZED', 'Current notification authority is required.');
@@ -239,7 +240,7 @@ export async function processNotificationTask(env: NotificationEnv, input: unkno
   const auth = authority(env, principalId);
   const allowed = await statement(env.DB, `SELECT (${auth.sql} AND EXISTS(SELECT 1 FROM adapter_sources WHERE source_kind=? AND resource_key=? AND active=1)) AS allowed`, ...auth.values, String(r.sourceKind), resourceKey).first<{allowed: number}>();
   if (allowed?.allowed !== 1) throw new HttpError(403, 'NOT_AUTHORIZED', 'Current notification authority and source are required.');
-  const task = await statement(env.DB, 'SELECT * FROM notification_tasks WHERE task_id=?', taskId).first<NotificationTask>();
+  const task = await statement(env.DB, 'SELECT * FROM excusal_notification_tasks WHERE task_id=?', taskId).first<NotificationTask>();
   if (!task) throw new HttpError(404, 'NOT_FOUND', 'Notification task is unavailable.');
   if (task.state === 'done') return { taskId, state: 'done' };
   const commandId = 'notice-task-' + await hash(taskId);

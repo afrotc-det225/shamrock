@@ -170,12 +170,14 @@ export interface FrontendSnapshot {
     eventId: string;
     flightId: string;
     order: number;
+    /** Retained request state is visible but does not replay an old attendance effect. */
+    legacyStateOnly?: boolean;
     status: string;
     requestedOutcome: string;
     version: number;
     reason: string;
     submittedAt: string;
-    submittedBy: string;
+    submittedBy: string | null;
     updatedAt: string;
     decidedAt: string | null;
     decidedBy: string | null;

@@ -6,7 +6,7 @@ test('Google command/signature contracts interoperate with the real local Worker
   const result = await runLocalScenario();
   assert.equal(result.receiptUnchangedOnRetry, true);
   assert.deepEqual(result.counts, { operation_commands: 3, audit_events: 3, attendance_reports: 1,
-    attendance_observations: 1, excusal_decisions: 1 });
+    attendance_observations: 1, excusal_record_decisions: 1 });
   assert.deepEqual(result.projectedRows, [
     { personId: 'person-a', displayName: 'Example A', observedCode: 'P',
       requests: [{ requestId: 'request-one', status: 'Approved', requestedOutcome: 'E', version: 2 }] },

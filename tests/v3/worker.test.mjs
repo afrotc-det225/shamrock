@@ -133,7 +133,7 @@ test('a submission retry cannot use a new-unit grant to read its old-unit receip
   const receipt = await f.send(null, { method: 'GET', path: `/v1/commands/${original.commandId}?principalId=cadet-a` });
   assert.equal(receipt.status, 404);
   assert.equal(await f.count('operation_commands'), 1);
-  assert.equal(await f.count('excusal_requests'), 1);
+  assert.equal(await f.count('excusal_records'), 1);
   assert.equal(await f.count('audit_events'), 1);
   assert.equal(await f.count('outbox_jobs'), 1);
 });
@@ -156,7 +156,7 @@ test('self-service excusals cannot target a different cadet and evidence must ma
   assert.equal((await f.send(request)).status, 403);
   const mismatch = command(); mismatch.actor.evidence = 'google-edit';
   assert.equal((await f.send(mismatch)).status, 400);
-  assert.equal(await f.count('excusal_requests'), 0);
+  assert.equal(await f.count('excusal_records'), 0);
 });
 
 test('roster-version and completed-scope assertions roll back the entire batch', async t => {
@@ -193,7 +193,7 @@ test('pending and approved excusals never overwrite an existing presence observa
   assert.equal(approved.body.result.version, 2);
   assert.equal(approved.body.result.status, 'Approved');
   assert.equal((await f.db.prepare('SELECT observed_code FROM attendance_current').first()).observed_code, 'P');
-  assert.equal(await f.count('excusal_decisions'), 1);
+  assert.equal(await f.count('excusal_record_decisions'), 1);
   assert.equal(await f.count('audit_events'), 3);
 });
 
@@ -205,10 +205,10 @@ test('stale reconsideration cannot mutate state; a retry of the accepted decisio
   assert.deepEqual(await f.send(decision), accepted);
   const stale = structuredClone(decision); stale.commandId = 'decision-two'; stale.source.submissionId = 'decision-two'; stale.payload.decision = 'Denied';
   assert.equal((await f.send(stale)).status, 409);
-  assert.equal(await f.count('excusal_decisions'), 1);
+  assert.equal(await f.count('excusal_record_decisions'), 1);
   stale.payload.expectedVersion = 2;
   assert.equal((await f.send(stale)).status, 200);
-  assert.equal((await f.db.prepare('SELECT version FROM excusal_requests').first()).version, 3);
+  assert.equal((await f.db.prepare('SELECT version FROM excusal_records').first()).version, 3);
 });
 
 test('concurrent decisions at one base version commit exactly once', async t => {
@@ -218,7 +218,7 @@ test('concurrent decisions at one base version commit exactly once', async t => 
   const b = structuredClone(a); b.commandId = 'competing-decision'; b.source.submissionId = 'competing-decision'; b.payload.decision = 'Denied';
   const results = await Promise.all([f.send(a), f.send(b)]);
   assert.deepEqual(results.map(r => r.status).sort(), [200, 409]);
-  assert.equal(await f.count('excusal_decisions'), 1);
+  assert.equal(await f.count('excusal_record_decisions'), 1);
   assert.equal(await f.count('operation_commands'), 2);
 });
 
@@ -286,7 +286,7 @@ test('multiple active units fail closed for reports, requests and decision scope
   assert.equal(await f.count('audit_events'), 1);
   assert.equal(await f.count('outbox_jobs'), 1);
   assert.equal(await f.count('attendance_current'), 0);
-  assert.equal((await f.db.prepare("SELECT version FROM excusal_requests WHERE request_id='request-one'").first()).version, 1);
+  assert.equal((await f.db.prepare("SELECT version FROM excusal_records WHERE request_id='request-one'").first()).version, 1);
 });
 
 test('a membership ambiguity introduced after acceptance blocks projection without acknowledging it', async t => {
@@ -397,7 +397,7 @@ test('multi-event excusals atomically create children, one receipt/audit and eve
   ]);
   input.payload.events.reverse();
   assert.deepEqual(await f.send(input), accepted, 'event selection order is not retry identity');
-  for (const [table, count] of Object.entries({ excusal_requests: 2, command_event_scopes: 2, operation_commands: 1, audit_events: 1, outbox_jobs: 2, attendance_current: 0 })) {
+  for (const [table, count] of Object.entries({ excusal_records: 2, command_event_scopes: 2, operation_commands: 1, audit_events: 1, outbox_jobs: 2, attendance_current: 0 })) {
     assert.equal(await f.count(table), count, table);
   }
   const events = [];
@@ -421,7 +421,7 @@ test('every selected event must remain active and authorized in the subject unit
     const input = command('excusal.submitMany');
     if (invalid === 'unknown') input.payload.events[1].eventId = 'unknown';
     assert.equal((await f.send(input)).status, 403, invalid);
-    assert.equal(await f.count('excusal_requests'), 0);
+    assert.equal(await f.count('excusal_records'), 0);
   }
   await f.db.prepare("UPDATE event_units SET unit_id='alpha' WHERE event_id='event-two'").run();
   const other = command('excusal.submitMany'); other.payload.personId = 'person-b';
@@ -434,11 +434,11 @@ test('a colliding child or failed second projection insertion rolls back every c
   await f.send(command('excusal.submit'));
   const collision = command('excusal.submitMany');
   assert.equal((await f.send(collision)).status, 409);
-  assert.equal(await f.count('excusal_requests'), 1);
+  assert.equal(await f.count('excusal_records'), 1);
   collision.payload.events[0].requestId = 'new-request';
   await f.db.prepare("CREATE TRIGGER fail_second_job BEFORE INSERT ON outbox_jobs WHEN NEW.event_id='event-two' BEGIN SELECT RAISE(ABORT, 'fixture publication unavailable'); END").run();
   assert.notEqual((await f.send(collision)).status, 200);
-  for (const table of ['operation_commands', 'excusal_requests', 'command_event_scopes', 'audit_events', 'outbox_jobs']) assert.equal(await f.count(table), 1, table);
+  for (const table of ['operation_commands', 'excusal_records', 'command_event_scopes', 'audit_events', 'outbox_jobs']) assert.equal(await f.count(table), 1, table);
 });
 
 test('native source identity prevents single/multi-event and revision changes from duplicating submissions', async t => {
@@ -453,7 +453,7 @@ test('native source identity prevents single/multi-event and revision changes fr
   many.source.revision = 2;
   assert.equal((await f.send(many)).status, 409);
   assert.equal(await f.count('operation_commands'), 1);
-  assert.equal(await f.count('excusal_requests'), 1);
+  assert.equal(await f.count('excusal_records'), 1);
 });
 
 test('concurrent identical multi-event deliveries return one receipt; competing parent IDs cannot split a source', async t => {
@@ -464,7 +464,7 @@ test('concurrent identical multi-event deliveries return one receipt; competing 
   const other = structuredClone(input); other.commandId = 'competing-parent';
   other.payload.events = other.payload.events.map(e => ({ ...e, requestId: `${e.requestId}-other` }));
   assert.equal((await f.send(other)).status, 409);
-  assert.equal(await f.count('operation_commands'), 1); assert.equal(await f.count('excusal_requests'), 2);
+  assert.equal(await f.count('operation_commands'), 1); assert.equal(await f.count('excusal_records'), 2);
 });
 
 test('a multi-event receipt and its retry recheck current permission for every event', async t => {
@@ -493,7 +493,7 @@ test('authority revocation between preflight and the D1 batch aborts all multi-e
   const response = await worker.fetch(new Request(`https://fixture.invalid${path}`, { method: 'POST', body,
     headers: { 'content-type': 'application/json', 'x-shamrock-key-id': keyId, 'x-shamrock-timestamp': timestamp, 'x-shamrock-signature': signature } }), { ...f.env, DB });
   assert.ok(intercepted); assert.equal(response.status, 409);
-  for (const table of ['operation_commands', 'command_event_scopes', 'excusal_requests', 'audit_events', 'outbox_jobs']) assert.equal(await f.count(table), 0, table);
+  for (const table of ['operation_commands', 'command_event_scopes', 'excusal_records', 'audit_events', 'outbox_jobs']) assert.equal(await f.count(table), 0, table);
 });
 
 test('maximum 25-event submission has complete child/job coverage and independent decision versions', async t => {
@@ -502,13 +502,13 @@ test('maximum 25-event submission has complete child/job coverage and independen
   const input = command('excusal.submitMany'); input.payload.events = ['event-one', ...ids].map((eventId, i) => ({ eventId, requestId: `child-${i}` }));
   const accepted = await f.send(input); assert.equal(accepted.status, 200, JSON.stringify(accepted.body));
   assert.equal(accepted.body.result.requests.length, 25);
-  assert.equal(await f.count('excusal_requests'), 25); assert.equal(await f.count('command_event_scopes'), 25); assert.equal(await f.count('outbox_jobs'), 25);
+  assert.equal(await f.count('excusal_records'), 25); assert.equal(await f.count('command_event_scopes'), 25); assert.equal(await f.count('outbox_jobs'), 25);
   const decisions = ['child-0', 'child-1'].map((requestId, i) => command('excusal.decide', {
     commandId: `decision-child-${i}`, source: { kind: 'test', resourceKey: 'fixture-console', submissionId: `decision-child-${i}`, revision: 1 },
     payload: { requestId, expectedVersion: 1, decision: i === 0 ? 'Approved' : 'Denied', reason: 'Fictional independent child decision.' },
   }));
   assert.deepEqual((await Promise.all(decisions.map(d => f.send(d)))).map(r => r.status), [200, 200]);
-  assert.equal((await f.db.prepare('SELECT COUNT(*) AS count FROM excusal_requests WHERE version=2').first()).count, 2);
+  assert.equal((await f.db.prepare('SELECT COUNT(*) AS count FROM excusal_records WHERE version=2').first()).count, 2);
   assert.equal(await f.count('audit_events'), 3);
 });
 
@@ -520,7 +520,7 @@ test('a secondary event scope revoked after preflight rolls the entire submissio
   } };
   const response = await worker.fetch(signedNativeRequest(command('excusal.submitMany')), { ...f.env, DB });
   assert.equal(response.status, 409);
-  for (const table of ['operation_commands', 'command_event_scopes', 'excusal_requests', 'audit_events', 'outbox_jobs']) assert.equal(await f.count(table), 0, table);
+  for (const table of ['operation_commands', 'command_event_scopes', 'excusal_records', 'audit_events', 'outbox_jobs']) assert.equal(await f.count(table), 0, table);
 });
 
 test('receipt retry cannot expose a committed submission if authority is revoked after preflight', async t => {
@@ -538,7 +538,7 @@ test('receipt retry cannot expose a committed submission if authority is revoked
   } }) };
   const response = await worker.fetch(signedNativeRequest(input), { ...f.env, DB });
   assert.ok(intercepted); assert.equal(response.status, 403);
-  assert.equal(await f.count('operation_commands'), 1); assert.equal(await f.count('excusal_requests'), 2);
+  assert.equal(await f.count('operation_commands'), 1); assert.equal(await f.count('excusal_records'), 2);
 });
 
 test('competing parent commands for one native response cannot split its event children', async t => {
@@ -549,8 +549,8 @@ test('competing parent commands for one native response cannot split its event c
   const b = structuredClone(a); b.commandId = 'competing-batch'; b.payload.events.forEach(e => { e.requestId += '-other'; });
   const results = await Promise.all([f.send(a), f.send(b)]);
   assert.deepEqual(results.map(r => r.status).sort(), [200, 409]);
-  assert.equal(await f.count('operation_commands'), 1); assert.equal(await f.count('excusal_requests'), 2);
-  const parents = await f.db.prepare('SELECT DISTINCT command_id FROM excusal_requests').all();
+  assert.equal(await f.count('operation_commands'), 1); assert.equal(await f.count('excusal_records'), 2);
+  const parents = await f.db.prepare('SELECT DISTINCT command_id FROM excusal_records').all();
   assert.equal(parents.results.length, 1);
   assert.equal(await f.count('command_event_scopes'), 2); assert.equal(await f.count('outbox_jobs'), 2);
 });

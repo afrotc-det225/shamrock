@@ -56,6 +56,7 @@ export interface ReportingCorrection extends Omit<ReportingObservation, 'code'> 
 /** Reviewed imported effective state, before every genuine operation in the new database. */
 export interface ReportingLegacyBaseline { baselineId:string;personId:string;eventId:string;code:AttendanceCode|null }
 export interface ReportingRequest {
+  legacyStateOnly?: boolean;
   requestId: string;
   personId: string;
   eventId: string;
@@ -217,7 +218,7 @@ function resolveCell(event: ReportingEvent, personId: string, observations: read
     review('ambiguous-attendance-order'); cell.attendanceCode = null; cell.effectiveCode = null; cell.source = 'review'; return cell;
   }
   // Terminal requests remove only their adjudication; no stale prior-code restoration.
-  const active = requests.filter(r => r.status !== 'Withdrawn' && r.status !== 'Superseded');
+  const active = requests.filter(r => !r.legacyStateOnly && r.status !== 'Withdrawn' && r.status !== 'Superseded');
   if (active.length > 1) {
     review('overlapping-excusal-requests'); cell.source = 'review';
   } else if (active.length === 1) {
@@ -336,7 +337,7 @@ export function buildFrontendReporting(input: FrontendReportingInput) {
     }
   }
   for (const r of unique(input.requests, r => r.requestId, 'requests').values()) {
-    validateFact(r);
+    if (r.legacyStateOnly===true) { if (r.order!==0||!allPeople.has(r.personId)||!events.has(r.eventId)) fail('requests.legacyState'); } else validateFact(r);
     if (!['Submitted', ...EXCUSAL_DECISIONS].includes(r.status) || !REQUESTED_OUTCOMES.includes(r.requestedOutcome)) fail('requests.state');
     group(requestsByPair, r);
   }

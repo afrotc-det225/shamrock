@@ -117,7 +117,7 @@ export async function runLocalScenario() {
       completedJobs++;
     }
     const counts = {};
-    for (const table of ['operation_commands', 'audit_events', 'attendance_reports', 'attendance_observations', 'excusal_decisions']) {
+    for (const table of ['operation_commands', 'audit_events', 'attendance_reports', 'attendance_observations', 'excusal_record_decisions']) {
       counts[table] = (await db.prepare(`SELECT COUNT(*) AS count FROM ${table}`).first()).count;
     }
     return {

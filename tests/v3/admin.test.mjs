@@ -287,7 +287,7 @@ test('late correction grant revocation and a racing request both reject the stal
     },
   };
   assert.equal((await worker.fetch(nativeRequest(f.correction), {...f.env, DB:changed})).status,409);
-  assert.equal(await f.count('attendance_corrections'),0);assert.equal(await f.count('excusal_requests'),1);
+  assert.equal(await f.count('attendance_corrections'),0);assert.equal(await f.count('excusal_records'),1);
   assert.equal(await f.count('command_registry'),3);
 });
 
@@ -493,7 +493,7 @@ test('accepted excusal versions enqueue one frozen task each; delayed task proce
   assert.equal((await f.send(submitted,'/v1/commands')).status,200);assert.equal((await f.send(submitted,'/v1/commands')).status,200);
   const decision={...submitted,commandId:'frozen-notice-decision',source:{...submitted.source,submissionId:'frozen-notice-decision'},operation:'excusal.decide',payload:{requestId:'frozen-notice-request',expectedVersion:1,decision:'Denied',reason:'Fictional decision reason.'}};
   assert.equal((await f.send(decision,'/v1/commands')).status,200);
-  const tasks=(await f.db.prepare('SELECT task_id,request_version,request_json FROM notification_tasks ORDER BY request_version').all()).results;
+  const tasks=(await f.db.prepare('SELECT task_id,request_version,request_json FROM excusal_notification_tasks ORDER BY request_version').all()).results;
   assert.equal(tasks.length,2);assert.equal(JSON.parse(tasks[0].request_json).status,'Submitted');assert.equal(JSON.parse(tasks[1].request_json).status,'Denied');
   for(const task of tasks){const input=read({sourceKind:'test',sourceResource:'admin-console',taskId:task.task_id});const result=await f.send(input,'/v1/admin/notifications/process');assert.equal(result.status,200,JSON.stringify(result.body));assert.deepEqual(await f.send(input,'/v1/admin/notifications/process'),result);}
   assert.equal(await f.count('notification_intents'),2);assert.equal(await f.count('notification_attempts'),0);

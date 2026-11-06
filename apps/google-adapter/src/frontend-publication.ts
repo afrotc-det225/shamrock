@@ -540,7 +540,7 @@ export function snapshotToFrontendReportingInput(snapshot: FrontendSnapshot, asO
       eligiblePersonIds: clone((e as typeof e & { eligiblePersonIds?: string[] | null }).eligiblePersonIds ?? null) })),
     observations: clone(snapshot.observations), corrections: clone(snapshot.corrections),
     legacyBaselines: clone(snapshot.legacyBaselines ?? []),
-    requests: snapshot.requests.map(r => ({ requestId: r.requestId, personId: r.personId, eventId: r.eventId, order: r.order, status: r.status as ExcusalStatus, requestedOutcome: r.requestedOutcome as RequestedOutcome })),
+    requests: snapshot.requests.map(r => ({ requestId: r.requestId, personId: r.personId, eventId: r.eventId, order: r.order, status: r.status as ExcusalStatus, requestedOutcome: r.requestedOutcome as RequestedOutcome, ...(r.legacyStateOnly ? { legacyStateOnly:true } : {}) })),
   };
 }
 

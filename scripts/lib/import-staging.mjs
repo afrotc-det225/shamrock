@@ -137,8 +137,9 @@ export function assertStagingImportTarget(plan,target,observed,approvedHash){
 }
 const PRIMARY_KEYS={legacy_source_occurrences:['import_run_id','occurrence_id'],squadrons:['squadron_id'],organizational_units:['unit_id'],flight_hierarchy:['unit_id'],terms:['term_id'],people:['person_id'],directory_profiles:['person_id'],memberships:['person_id','unit_id'],legacy_profile_sources:['person_id'],events:['event_id'],command_registry:['command_id'],admin_commands:['command_id'],admin_audit_events:['command_id'],event_details:['event_id'],event_units:['event_id','unit_id'],event_roster_versions:['event_id','version'],event_roster_members:['event_id','version','person_id'],legacy_event_sources:['event_id'],legacy_attendance_baselines:['baseline_id'],legacy_matrix_snapshots:['matrix_snapshot_id'],legacy_matrix_snapshot_rows:['matrix_snapshot_id','source_occurrence_id'],legacy_native_response_provenance:['import_run_id','source_occurrence_id']};
 /** Compare actual stored values (including raw typed evidence), not copied hash columns or counts alone. */
-export async function verifyStagingImportReadback(plan,{readBatch}){
+export async function verifyStagingImportReadback(plan,{readBatch,expectedRunState='loading'}){
   const {executionSha256,...body}=plan;check(importDigest(body)===executionSha256,'IMPORT_EXECUTION_HASH');
+  check(['loading','complete'].includes(expectedRunState),'IMPORT_READBACK_STATE');
   const tables=new Map(),differences=[];let checkedRows=0,checkedSteps=0;
   const queries=plan.steps.map(step=>{
     const keys=PRIMARY_KEYS[step.table];check(keys&&step.columns.every(c=>/^[a-z_]+$/.test(c)),'IMPORT_READBACK_TABLE');
@@ -162,7 +163,7 @@ export async function verifyStagingImportReadback(plan,{readBatch}){
   const counts=await readBatch([...tables].map(([table])=>sql(`SELECT COUNT(*) AS count FROM ${table}`)));
   check(counts.length===tables.size,'IMPORT_READBACK_RESPONSE');let index=0;for(const [table,expected]of tables){const values=counts[index++].results??counts[index-1];if(values[0]?.count!==expected)differences.push({code:'stored-table-count-mismatch',table});}
   const control=await readBatch([sql(`SELECT (${pausedGuard}) AS paused`,plan.generation),sql('SELECT state,snapshot_sha256 AS snapshotSha256,expected_batches AS expectedBatches FROM legacy_import_runs WHERE import_run_id=?',plan.importRunId)]);
-  const rows=control.map(r=>r.results??r);if(rows[0][0]?.paused!==1||rows[1][0]?.state!=='loading'||rows[1][0]?.snapshotSha256!==plan.snapshotSha256||rows[1][0]?.expectedBatches!==plan.steps.length)differences.push({code:'import-fence-or-binding-mismatch'});
+  const rows=control.map(r=>r.results??r);if(rows[0][0]?.paused!==1||rows[1][0]?.state!==expectedRunState||rows[1][0]?.snapshotSha256!==plan.snapshotSha256||rows[1][0]?.expectedBatches!==plan.steps.length)differences.push({code:'import-fence-or-binding-mismatch'});
   return {verified:differences.length===0,executionSha256,checkedRows,checkedSteps,differences};
 }
 
