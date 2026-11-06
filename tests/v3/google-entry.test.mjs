@@ -23,7 +23,7 @@ test('staging manifest authorizes required IO without mail or execution deployme
   const manifest = JSON.parse(await readFile(new URL('../../.build/v3-artifacts/appsscript.json', import.meta.url), 'utf8'));
   assert.equal(manifest.runtimeVersion, 'V8');
   assert.equal(manifest.timeZone, 'America/Indiana/Indianapolis');
-  assert.ok(manifest.oauthScopes.includes('https://www.googleapis.com/auth/forms.body.readonly'));
+  for (const scope of ['drive', 'forms.body', 'forms.responses.readonly']) assert.ok(manifest.oauthScopes.includes(`https://www.googleapis.com/auth/${scope}`));
   assert.ok(manifest.oauthScopes.includes('https://www.googleapis.com/auth/script.scriptapp'));
   assert.ok(!manifest.oauthScopes.some(scope => /gmail|mail\.google/.test(scope)));
   assert.equal(manifest.executionApi, undefined);
