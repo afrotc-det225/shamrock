@@ -2,11 +2,11 @@
 
 This procedure applies only to the fictional staging prototype. It does not deploy the current Apps Script project or authorize production data migration. Read the [prototype runbook](D1_PROTOTYPE_RUNBOOK.md) first. Keep account/database IDs and secret values out of Git, terminal output and release manifests.
 
-Observed on 2026-11-05: source `5e1057f4a13c45960e70844724aa5261e49f422e` is deployed to the isolated Cloudflare Worker and Google staging script. The owner-account rehearsal exercised real Google Forms, a sheet decision, D1 persistence and Google projection publication with fictional records. The Worker is fenced at `accepting_commands=0` and both staging Forms are closed. The operator confirmed `shamrockV3StagingPause`, and its completed execution was independently observed in the staging editor; Script Properties were not directly read back. A separate [production account handoff](ACCOUNT_HANDOFF_RUNBOOK.md) transferred six private resources and the 11 existing automations to the project account, preserving production source and resource bindings. This did not migrate production to D1 or reopen staging. The private operations repository holds the detailed release record.
+Observed on 2026-11-05: live checks used Cloudflare Worker source `23edbfabcde2b16f8b5cb894fd4b4ea814bb0cd1`, database migration version 2 and Google adapter fix `6202646bf68d94f0c7e64916d6f646aca16bff5e`. The Worker module bytes were unchanged by that fix. The second rehearsal accepted a real multi-event Form response, published dynamic decision slots, committed a native sheet decision and recovered its publication on a scheduled retry. D1 is fenced at `accepting_commands=0` and the Google host pause was observed complete. Final read-back verified both staging Forms unpublished and not accepting responses, with `VERIFIED` email collection unchanged. A separate [production account handoff](ACCOUNT_HANDOFF_RUNBOOK.md) transferred six private resources and the 11 existing automations to the project account, preserving production source and resource bindings. Production has not migrated to D1. The private operations repository holds deployment verification and the final release pin.
 
 ## Verified live Google checkpoint
 
-The operator linked the staging script to its standard Google Cloud project and completed Import and Setup. Headers were verified on all four journal/output tabs. The two uploaded script files still exactly match the deployed release; the rehearsal did not modify their source.
+**Historical milestone 1, source `5e1057f4a13c45960e70844724aa5261e49f422e`:** the operator linked the staging script to its standard Google Cloud project and completed Import and Setup. Headers were verified on all four journal/output tabs. The two uploaded script files exactly matched that release; the rehearsal did not modify their source.
 
 | Live check | Observed result |
 |---|---|
@@ -17,9 +17,35 @@ The operator linked the staging script to its standard Google Cloud project and 
 | Journal and publication | All three Google journal entries reached `committed` on attempt `1`; the three Google projection jobs were acknowledged as done. Output and cursor revision reached `9`. |
 | Final database | Nine commands, nine audit records and nine completed jobs, with zero unfinished jobs. Integrity checks passed and the foreign-key check reported no violations. The first six jobs were completed by earlier test clients; the latest three exercised Google publication. |
 
-The decision input's `draft_state` still reads `Queued: Denied` after the accepted decision. This is an unreconciled UI status, not a requirement to preserve. Use the command receipt and protected recorded result/version to establish completion until draft-status reconciliation is implemented.
+At this historical checkpoint, the decision input's `draft_state` incorrectly remained `Queued: Denied` after the accepted decision. Milestone 2 implements receipt-driven status reconciliation and verified `Committed: Denied` on its new dynamic-slot path. The retained historical fixed-slot tab was not migrated. Use the command receipt and protected recorded result/version to establish completion, never a queued label alone.
 
-This checkpoint validates the narrow owner-account path. Cross-domain `e.user`, authenticated confirmation for an unknown editor, dynamic input slots for newly submitted requests, concurrent human edits, failure recovery and full feature parity remain unfinished. The new excusal submission and the decision on the preseeded request were separate checks.
+The operator confirmed `shamrockV3StagingPause`, and its completed execution was independently observed in the staging editor at the end of milestone 1; Script Properties were not directly read back. This checkpoint validated the narrow owner-account path. The new excusal submission and the decision on the preseeded request were separate checks.
+
+## Milestone 2: migration and multi-event intake
+
+The following evidence belongs to the subsequent version 2 rehearsal, not the historical first slice:
+
+| Check | Observed result |
+|---|---|
+| Recovery preparation | The actual pre-upgrade SQL export restored successfully into disposable in-memory SQLite. The nine commands, nine audit records and nine jobs, paused control, schema/ledger and integrity were checked. This was not a hosted D1 or Time Travel restore. |
+| Versioned migration | Migration `0002_multi_event_excusals.sql` applied while staging was fenced. Exact schema and ordered hash ledger matched the reviewed release; the nine existing command/event scopes were backfilled. Integrity and foreign-key checks passed. |
+| Deployed release | Cloudflare and the two Google script files used source `23edbfabcde2b16f8b5cb894fd4b4ea814bb0cd1`. The new decision-input tab was configured separately; the old fixed-slot tab was retained. |
+| Multi-event Form | One real Google response committed one parent command, two event-specific child requests, one audit record and two projection jobs. Both jobs completed through Google publication. |
+| New decision slots | The protected dynamic input table received slots for the new requests. Publication did not require manually preseeded request targets. |
+| Preserved history | All nine previous receipts were retained. After the new submission, totals were ten commands, ten audit records and eleven completed jobs. |
+| Native decision contention | A decision edit overlapped a scheduled flush and could not obtain the adapter lock. That failed edit created no database command; its selected input was retained. |
+| Reviewed fix | Commit `6202646bf68d94f0c7e64916d6f646aca16bff5e` passed 199 local tests: 31 current-system regressions and 168 v3 tests. Both Google files matched the uploaded artifact. The existing Cloudflare Worker module was unchanged. |
+| Live decision retry | The native `D3` edit committed `Denied` as the eleventh command and audit record, with `google-edit` evidence. The protected draft state became `Committed: Denied`. The exact initial lock-contention overlap was not reproduced. |
+| Publication recovery | The first publication attempt received a non-200 Google API response; its exact status and cause are unknown. The durable claim was retained. A scheduled flush began at 20:44:08 local and completed the job at 20:44:26, before its 20:52:58 lease expiry. A manual flush at 20:45:42–48 was subsequent and made no changes. |
+| Preserved decision input | A new immutable version 2 slot was appended at row 8. The original version 1 row 3 and its frozen input remained intact, as did the original `P` observation. |
+| Final database and journal | Eleven commands, eleven audit records and twelve completed jobs, with zero unfinished jobs. All five Google journal entries were committed. Integrity passed and the foreign-key check found no violations. |
+| Current stop state | D1 is fenced at `accepting_commands=0`. The Google host pause ran at 20:46:19–20 local and was observed complete. Final read-back verified both Forms unpublished and not accepting responses, with `VERIFIED` email collection unchanged. |
+
+The contention fix freezes the native edit evidence before a bounded lock wait, rechecks the target after acquisition, and distinguishes durable capture with deferred delivery from an edit that was never captured. A capture timeout preserves the input and attempts a retry note; it does not claim the decision was accepted. See the [adapter contract](../../apps/google-adapter/README.md) for the bounds and note limitations. Local overlap tests and the successful live decision retry are separate evidence; no live recurrence of the original timing overlap or HTTP 429 diagnosis was established.
+
+Diagnostic-only follow-up `9ca5ce2` adds safe HTTP-status reporting and passed 201 local tests (31 current-system regressions and 170 v3 tests). It does not change claim or retry behavior and was not the source of the live results above. Record its deployment verification separately; it cannot recover the previously masked HTTP status.
+
+Cross-domain `e.user`, authenticated confirmation for an unknown editor, broader concurrency/failure recovery, hosted restore, provider capacity and full feature parity remain incomplete. Production source remained unchanged throughout this staging work.
 
 ## Prepare a reviewed release
 
@@ -33,7 +59,7 @@ node scripts/prepare-v3-release.mjs --environment staging --generation 1 --verif
 
 The helper rebuilds the Worker and Google adapter from that commit and writes ignored `.build/v3-release/` artifacts. Format 2 includes each ordered SQL source under `migrations/`; previously recorded format-1 releases remain historical rollback artifacts, not current upgrade plans. The manifest records the source commit, checksums, migration version, environment, generation and runtime compatibility date. The metadata template contains placeholders; it never contains a real database ID or signing secret. `--verify` checks the prepared files without rebuilding or deploying them. To verify an older release, use its recorded source checkout; verification intentionally rejects a different current commit. Local emulator tests and the cloud runtime may have different compatibility dates; real staging validation is required.
 
-Deployment is through the connected Cloudflare API in this phase. No paid subscription, custom domain, extra storage service or GitHub deployment feature is needed for this procedure. API resource creation does not itself verify an account's billing subscriptions. If the OAuth connection lacks billing access, report that limit instead of claiming the account's plan was verified.
+Deployment is through the connected Cloudflare API in this phase. No paid subscription, custom domain, extra storage service or GitHub deployment feature is needed for this procedure. On 2026-11-05, the actual Cloudflare dashboard showed Workers **Free**, **$0**, marked **Current plan**; D1 free-tier limits were also checked. No subscription was changed. The connected OAuth credential could not read billing subscriptions, so dashboard evidence supplies that verification. Account plan verification does not establish hosted CPU, daily workload or Google quota headroom.
 
 ## Provision only the intended staging account
 
@@ -112,7 +138,7 @@ Google CLI authorization and Apps Script runtime authorization are distinct. A s
 
 External OAuth apps left in **Testing** have test-user authorizations that expire after seven days; offline refresh tokens expire too. The basic profile/email exception does not cover this manifest's Forms, Sheets and Drive scopes. Plan reauthorization during staging and review the production consent publishing/verification configuration before unattended operation. This rehearsal did not test beyond seven days or establish an exact Apps Script trigger-expiry schedule. See [Google's app audience documentation](https://support.google.com/cloud/answer/15549945?hl=en).
 
-Prepare two private, explicitly named staging workbooks and two staging Forms containing only fictional data. The journal workbook contains separate command-journal and projection-cursor tabs. The operator workbook contains attendance results, recorded excusal results and a separate decision-input tab. The four journal/output tabs begin empty for the initializer; decision input uses the exact headers and fixed target slots in the [adapter contract](../../apps/google-adapter/README.md). Never bind these names to production by guessing or create replacements for missing configured resources.
+Prepare two private, explicitly named staging workbooks and two staging Forms containing only fictional data. The journal workbook contains separate command-journal and projection-cursor tabs. The operator workbook contains attendance results, recorded excusal results and a separate decision-input tab. The four journal/output tabs begin empty for the initializer. Use the exact headers and configured decision mode in the [adapter contract](../../apps/google-adapter/README.md): milestone 1 used fixed targets; milestone 2 uses a new tab with projection-created request/version slots. Retain an old fixed-slot tab and its drafts rather than reinterpreting them as the new schema. Never bind these names to production by guessing or create replacements for missing configured resources.
 
 Protect each output tab as a whole sheet, with no unprotected ranges and no ordinary protection editors. Protect decision metadata and permit only its draft-decision cells as inputs. Configure Forms to collect `VERIFIED` emails and restrict edit access to the automation owner. Keep them unpublished until a controlled rehearsal. Validate native Apps Script item IDs against the configured item roles; a REST item ID's textual encoding is not sufficient evidence.
 
