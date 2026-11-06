@@ -255,16 +255,30 @@ function profile(value: unknown): DirectoryProfile {
 export function operationallyActive(profile: Pick<DirectoryProfile, 'flightPathStatus'>): boolean {
   return !['Inactive', 'Commissioned', 'Dropped'].includes(profile.flightPathStatus);
 }
-/** Display-only role derivation mirrors DirectoryService; it never grants authority. */
+/** Display role derivation mirrors DirectoryService's canonical role and inclusion rules.
+ * Displaying a contact does not itself grant authority; named trusted bindings do that separately. */
 export function directoryLeadershipRole(role: string, flight: string, squadron: string): string | null {
-  const normalized = role.toLowerCase().replace(/&/g, ' and ').replace(/[^a-z0-9]+/g, ' ').trim();
-  if (!/(wing commander|operations group commander|operations group deputy|squadron commander|flight commander|senior gmc advisor|deputy gmc advisor)/.test(normalized))
-    return null;
-  if (normalized === 'squadron commander' && squadron)
-    return `${squadron} Squadron Commander`;
-  if (normalized.includes('flight commander') && flight && !/\b(alpha|bravo|charlie|delta|echo|foxtrot|abroad)\b/.test(normalized))
-    return `${flight} ${role}`;
-  return role;
+  const normalize = (value: string) => value.toLowerCase().replace(/&/g, ' and ').replace(/[^a-z0-9]+/g, ' ').replace(/\s+/g, ' ').trim();
+  let canonical = role.trim(), normalized = normalize(canonical);
+  const operationalSquadrons = ['Blue', 'Gold']; // Arrays.OPERATIONAL_SQUADRONS in the supported source runtime.
+  if (normalized.includes('flight commander') && flight
+    && !['Alpha','Bravo','Charlie','Delta','Echo','Foxtrot','Abroad',flight].some(name => normalized.includes(normalize(name)))) {
+    canonical = `${flight} ${canonical}`;
+  }
+  if (normalized === 'squadron commander') {
+    const operational = operationalSquadrons.find(name => normalize(name) === normalize(squadron));
+    if (operational) canonical = `${operational} Squadron Commander`;
+  }
+  normalized = normalize(canonical);
+  const deputy = normalized.includes('deputy');
+  const included = normalized.includes('wing commander') && !deputy
+    || normalized.includes('deputy wing commander')
+    || normalized.includes('operations group commander') && !deputy
+    || normalized.includes('operations group deputy commander') || normalized.includes('operations group deputy')
+    || operationalSquadrons.some(name => normalized === `${normalize(name)} squadron commander`) && !deputy
+    || normalized.includes('flight commander') && !deputy || normalized.includes('deputy flight commander')
+    || normalized.includes('senior gmc advisor') || normalized.includes('deputy gmc advisor');
+  return included ? canonical : null;
 }
 export function parseAdminCommand(value: unknown): AdminCommand {
   const c = object(value, 'command', ['commandId', 'contractVersion', 'environment', 'generation', 'actor', 'source', 'operation', 'payload']);
