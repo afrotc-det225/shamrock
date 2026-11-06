@@ -89,7 +89,8 @@ function choiceCandidates(snapshot: FrontendSnapshot, source: FormChoiceSource, 
     .sort((a, z) => `${a.lastName}\n${a.firstName}\n${a.personId}`.localeCompare(`${z.lastName}\n${z.firstName}\n${z.personId}`));
     for (const p of people) choices.push({ label: `${p.lastName}, ${p.firstName}`, key: p.personId, reference: { kind: 'person', personId: p.personId } });
   } else if (source.kind === 'profiles') {
-    for (const profile of source.profiles) choices.push({label: profile.label, key: profile.key, reference: {kind: 'scope-group', key: profile.key, scopes: frozenScopes(snapshot, profile.filter)}});
+    for (const profile of source.profiles) { const scopes = frozenScopes(snapshot, profile.filter);
+      if (scopes.length) choices.push({label: profile.label, key: profile.key, reference: {kind: 'scope-group', key: profile.key, scopes}}); }
   } else if (source.kind === 'categories') {
     for (const category of source.categories) if (snapshot.events.some(e => e.termId === termId && e.status === 'active' && category.types.includes(e.eventType))) choices.push({label: category.label, key: category.key, reference: {kind: 'category', key: category.key}});
   } else {
@@ -122,7 +123,8 @@ export function planNativeFormPublication(input: { snapshot: FrontendSnapshot; b
     if (choices.length > 500) fail('A native choice list exceeds the reviewed capacity.');
     const options = choices.map(({ label, key, reference }) => {
       if (!label || label.length > 500) fail('A choice label exceeds its bound.');
-      const token = hash(signer, { editionId, questionId: b.questionId, reference });
+      const token = hash(signer, { editionId, questionId: b.questionId, reference }).slice(0, 12);
+      if (edition.references[token]) fail('A short Form reference collided; publication needs review.');
       edition.references[token] = { ...reference, editionId, questionId: b.questionId } as RetainedChoice;
       const navigation = b.navigation?.[key] ?? b.navigationDefault;
       if ((b.navigation || b.navigationDefault) && !navigation) fail('A new branch requires an explicitly bound existing destination.');
@@ -144,6 +146,8 @@ export function planNativeFormPublication(input: { snapshot: FrontendSnapshot; b
 export function retainFormEdition(editions: Record<string, FormEdition>, edition: FormEdition): Record<string, FormEdition> {
   const prior = editions[edition.editionId];
   if (prior && !same(prior, {...edition, revision: prior.revision})) fail('An existing Form edition cannot be rebound.');
+  for (const old of Object.values(editions)) if (old.formId === edition.formId && old.editionId !== edition.editionId
+    && Object.keys(edition.references).some(token => old.references[token])) fail('A retained short Form reference collided; publication needs review.');
   const next = { ...copy(editions), [edition.editionId]: copy(prior ?? edition) };
   if (formsCanonical(next).length > 4_000_000) fail('Retained Form catalogs need reviewed archival before another publication.');
   return next;

@@ -29,7 +29,7 @@ function references(s: VerifiedFormSubmission, editions: Record<string, FormEdit
   for (const questionId of fields) {
     const answer = s.answers[questionId]; if (answer === undefined || answer === '') continue;
     for (const label of typeof answer === 'string' ? [answer] : answer) {
-      const token = /\[sr:([a-f0-9]{64})\]$/.exec(label)?.[1];
+      const token = /\[sr:([a-f0-9]{12})\]$/.exec(label)?.[1];
       const found = token ? Object.values(editions).filter(e => e.formId === s.formId && e.references[token]) : [];
       if (found.length !== 1) fail('forms_reference', 'A response needs its retained native choice catalog.');
       const reference = found[0].references[token!];

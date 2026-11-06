@@ -135,3 +135,13 @@ test('Google response timestamps retain native fractional precision without requ
  for(const stamp of ['2026-11-06T12:00:00Z','2026-11-06T12:00:00.123456Z','2026-11-06T12:00:00.123456789Z']){input.submission.lastSubmittedTime=stamp;assert.equal(commandsFromManagedForm(input)[0].source.revision,Date.parse(stamp));}
  const first=commandsFromManagedForm(input)[0];input.submission.lastSubmittedTime='2026-11-06T12:00:00.123456788Z';const second=commandsFromManagedForm(input)[0];assert.notEqual(first.commandId,second.commandId);assert.equal(first.source.revision,second.source.revision,'sub-millisecond collisions must conflict at backend source dedup, never silently replay');
 });
+
+test('visible references are compact and collisions stop publication or catalog retention',()=>{
+ const f=fixture(),p=plan(f);assert.match(option(p,0),/\[sr:[a-f0-9]{12}\]$/);assert.equal(Object.keys(p.edition.references)[0].length,12);
+ assert.throws(()=>planNativeFormPublication({...f,signer:{...signer,sha256:()=> 'a'.repeat(64)}}),{code:'forms_publication'});
+ const other=copy(p.edition);other.editionId='b'.repeat(64);assert.throws(()=>retainFormEdition({[p.edition.editionId]:p.edition},other),{code:'forms_publication'});
+});
+test('empty Flight and crosstown profiles are absent from active attendance branches',()=>{
+ const f=fixture();f.binding.choices[1].source={kind:'profiles',profiles:[{key:'alpha',label:'Alpha',filter:{flightIds:['alpha']}},{key:'empty',label:'Empty Flight',filter:{flightIds:['missing']}}]};
+ const p=plan(f);assert.equal(p.expectedAfter.items[1].questionItem.question.choiceQuestion.options.length,1);assert.match(option(p,1),/^Alpha /);
+});
