@@ -1,3 +1,4 @@
+import { calculateAttendancePercent } from '../../.build/v3/packages/domain/src/frontend-reporting.js';
 import { buildFrontendDashboard } from '../../.build/v3/apps/google-adapter/src/frontend-dashboard.js';
 
 // Synthetic presentation fixtures only. No provider bindings, D1 commands or production records.
@@ -105,6 +106,7 @@ export function buildFrontendPreview({ dashboardActions = [] } = {}) {
   const ids = { dashboard: 101, leadership: 102, directory: 103, attendance: 104, legend: 105, chartData: 106, blue: 201, gold: 202, excusalLegend: 203 };
   const cadets = Array.from({ length: 16 }, (_, i) => ({ last: `Cadet ${String(i + 1).padStart(2, '0')}`, first: 'Example', year: YEARS[i % 4], flight: FLIGHTS[Math.floor(i / 4)], squadron: i < 8 ? 'Blue' : 'Gold', rank: ['C/4C', 'C/3C', 'C/2d Lt', 'C/Capt'][i % 4] }));
   const marks = cadets.map((_c, i) => ['P', 'P', i % 5 === 0 ? 'E' : 'P', i % 7 === 0 ? 'A' : 'P', i % 4 === 0 ? 'T' : 'P', i % 6 === 0 ? 'MED' : 'P']);
+  const percentages = marks.map(codes => [calculateAttendancePercent(codes), calculateAttendancePercent([codes[2], codes[5]])]);
   const requests = [
     ['Blue', 0, '', 'TW-2 LLAB', 'Academic conflict', 'E'], ['Blue', 2, 'Approved', 'TW-1 LLAB', 'Scheduled appointment', 'E'],
     ['Blue', 5, 'Denied', 'TW-2 Mando', 'Schedule conflict', 'E'], ['Blue', 7, 'Withdrawn', 'TW-2 Secondary', 'Request withdrawn', 'E'],
@@ -119,7 +121,7 @@ export function buildFrontendPreview({ dashboardActions = [] } = {}) {
     ...FLIGHTS.map((f, i) => [`Leader ${String(i + 4).padStart(2, '0')}`, 'Example', 'C/Capt', `${f} Flight Commander`, `${i < 2 ? 'Blue' : 'Gold'} Squadron Commander`, '', '', '', '']),
   ], [115, 115, 95, 235, 235, 190, 125, 125, 150]);
   table(main, ids.directory, 'Directory', DIRECTORY, cadets.map((c, i) => [c.last, c.first, c.year, c.flight, c.squadron, c.rank, i % 4 === 3 ? 'Flight Commander' : 'Cadet', 'Notre Dame', '', '', 'Off-Campus', '14 - Engineering', '', '', '', '', 2030 - i % 4, '', 'Active 3/4', '']), [115, 115, 100, 120, 85, 95, 160, 110, 190, 125, 150, 155, 75, 190, 130, 110, 95, 100, 125, 150]);
-  table(main, ids.attendance, 'Attendance', ATTENDANCE, cadets.map((c, i) => [c.last, c.first, c.year, c.flight, c.squadron, '', '', ...marks[i]]), [115, 115, 100, 85, 85, 95, 95, 130, 130, 130, 130, 130, 130]);
+  table(main, ids.attendance, 'Attendance', ATTENDANCE, cadets.map((c, i) => [c.last, c.first, c.year, c.flight, c.squadron, ...percentages[i], ...marks[i]]), [115, 115, 100, 85, 85, 95, 95, 130, 130, 130, 130, 130, 130]);
   main.requests.push(height(ids.attendance, 1, 2, 56));
   main.requests.push(format(range(ids.attendance, 2, 32, 2, 13), { horizontalAlignment: 'CENTER' }), format(range(ids.attendance, 2, 32, 5, 7), { numberFormat: { type: 'PERCENT', pattern: '0.0%' } }));
   const sources = legend(main, ids.legend, 'Data Legend', [
@@ -193,8 +195,9 @@ export function buildFrontendPreview({ dashboardActions = [] } = {}) {
     ],
     metrics: [
       { label: 'Cadets', value: cadets.length }, { label: 'GMC cadets', value: 8 }, { label: 'POC cadets', value: 8 },
-      { label: 'Recorded P', value: marks.flat().filter(x => x === 'P').length },
-      { label: 'Pending excusals', value: requests.filter(r => !r[2]).length }, { label: 'Flights', value: FLIGHTS.length },
+      { label: 'Overall attendance', value: percentages.reduce((n, p) => n + p[0], 0) / cadets.length, format: 'percent' },
+      { label: 'LLAB attendance', value: percentages.reduce((n, p) => n + p[1], 0) / cadets.length, format: 'percent' },
+      { label: 'Pending excusals', value: requests.filter(r => !r[2]).length },
     ],
     charts: [
       { title: 'Recorded present by flight', axis: 'Flight', sourceColumn: 0, sourceEndRow: 5 },
