@@ -307,3 +307,105 @@ test('linked Leadership separates publication and command versions and hashes ma
   row=(await f.send(read(),'/v1/admin/snapshot')).body.leadership[0];
   assert.deepEqual([row.profileVersion,row.contactVersion,row.publicationVersion],[2,1,3]);
 });
+
+async function notificationFixture(t) {
+  const f=await correctionFixture(t);
+  await f.db.prepare("INSERT INTO admin_grants VALUES('admin','notifications.manage','wing','*')").run();
+  const plan={...f.correction,commandId:'notice-plan-one',operation:'notifications.plan',source:{...f.correction.source,submissionId:'notice-plan-one'},payload:{kind:'scheduled',asOf:'2026-01-01T10:00:00.000Z',requestId:null}};
+  return {...f,plan};
+}
+const noticePath='/v1/admin/notifications/plan';
+
+test('notification HTTP planning persists terminal suppressed intents with trusted routing and deterministic keys',async t=>{
+  const f=await notificationFixture(t);
+  const first=await f.send(f.plan,noticePath);assert.equal(first.status,200,JSON.stringify(first.body));
+  assert.deepEqual(first.body.result,{planned:2,created:2,suppressed:2,missingRouting:1});
+  assert.equal(await f.count('notification_intents'),2);assert.equal(await f.count('notification_attempts'),0);
+  const notices=(await f.db.prepare('SELECT state,to_json,cc_json FROM notification_intents ORDER BY scope_id').all()).results;
+  assert.ok(notices.every(n=>n.state==='suppressed'));assert.deepEqual(JSON.parse(notices[0].to_json),['cadet@example.invalid']);
+  assert.deepEqual(await f.send(f.plan,noticePath),first);
+  const newRun=structuredClone(f.plan);newRun.commandId='notice-plan-two';newRun.source.submissionId='notice-plan-two';
+  assert.equal((await f.send(newRun,noticePath)).body.result.created,0);assert.equal(await f.count('notification_intents'),2);
+  const forged=structuredClone(newRun);forged.payload.mode='live';assert.equal((await f.send(forged,noticePath)).status,400);
+  const injected=structuredClone(newRun);injected.payload.to=['attacker@example.invalid'];assert.equal((await f.send(injected,noticePath)).status,400);
+  const status=await f.send(read(),'/v1/admin/notifications/status');assert.equal(status.status,200);assert.equal(status.body.deliveryEnabled,false);
+  assert.deepEqual(status.body.states,[{state:'suppressed',count:2}]);assert.equal(JSON.stringify(status.body).includes('@'),false);
+});
+
+test('notification plan is atomic under backlog limits and revocation and uses fewer than 50 prepared queries',async t=>{
+  const f=await notificationFixture(t);let prepared=0;
+  const DB={prepare(sql){prepared++;return f.db.prepare(sql);},batch:statements=>f.db.batch(statements)};
+  const response=await worker.fetch(nativeRequest(f.plan,noticePath),{...f.env,DB});
+  assert.equal(response.status,200);assert.ok(prepared<50,`prepared ${prepared} statements`);t.diagnostic(`Notification plan used ${prepared} prepared statements, including its coherent snapshot and atomic batch.`);
+  await f.db.prepare("DELETE FROM admin_grants WHERE capability='notifications.manage'").run();
+  assert.equal((await f.send(f.plan,noticePath)).status,403);
+  await f.db.prepare("INSERT INTO admin_grants VALUES('admin','notifications.manage','wing','*')").run();
+  await f.db.prepare('UPDATE notification_delivery_control SET max_ledger_entries=2').run();
+  const another=structuredClone(f.plan);another.commandId='weekly-plan';another.source.submissionId='weekly-plan';another.payload.asOf='2026-01-04T22:00:00.000Z';
+  assert.equal((await f.send(another,noticePath)).status,409);
+  assert.equal(await f.count('notification_intents'),2);
+  assert.equal((await f.db.prepare("SELECT COUNT(*) AS count FROM command_registry WHERE command_id='weekly-plan'").first()).count,0);
+});
+
+test('excusal notification planning uses recorded request and current Squadron routing, never caller email fields',async t=>{
+  const f=await notificationFixture(t);
+  const leader=command('leadership.upsert');leader.payload.profile.role='Blue Squadron Commander';assert.equal((await f.send(leader)).status,200);
+  const request={...f.attendance,commandId:'notice-request',source:{...f.attendance.source,submissionId:'notice-request'},operation:'excusal.submit',payload:{requestId:'notice-request',eventId:'event-one',personId:'person-a',requestedOutcome:'E',reason:'Fictional recorded reason.'}};
+  assert.equal((await f.send(request,'/v1/commands')).status,200);
+  f.plan.payload={kind:'excusal',asOf:'2026-01-01T10:00:00.000Z',requestId:'notice-request'};
+  assert.equal((await f.send(f.plan,noticePath)).status,200);
+  const notice=await f.db.prepare('SELECT state,to_json,cc_json,reply_to,body FROM notification_intents').first();
+  assert.equal(notice.state,'suppressed');assert.deepEqual(JSON.parse(notice.to_json),['cadre@example.invalid']);
+  assert.deepEqual(JSON.parse(notice.cc_json),['cadet@example.invalid']);assert.equal(notice.reply_to,'cadet@example.invalid');
+  assert.match(notice.body,/Fictional recorded reason/);
+});
+
+async function localDeliveryFixture(t,budget=10) {
+  const f=await notificationFixture(t);assert.equal((await f.send(f.plan,noticePath)).status,200);
+  // Explicit fixture-only activation; no API can change suppression or activate this mode.
+  await f.db.batch([
+    f.db.prepare("UPDATE notification_delivery_control SET mode='local-test',daily_recipient_budget=?").bind(budget),
+    f.db.prepare("UPDATE notification_intents SET mode='local-test',state='queued' WHERE recipient_count>0"),
+  ]);
+  return f;
+}
+
+test('local injected transport sees a persisted attempt before delivery; confirmed and known-no-send outcomes are durable',async t=>{
+  const {deliverLocalNotification}=await import('../../.build/v3/apps/worker/src/notifications.js');
+  const f=await localDeliveryFixture(t);
+  const input={principalId:'admin',workerId:'fake-mail',asOf:'2026-01-01T10:00:00.000Z'};
+  let calls=0;
+  const transport={send:async message=>{
+    calls++;assert.deepEqual(message.to,['cadet@example.invalid']);
+    assert.equal((await f.db.prepare("SELECT COUNT(*) AS count FROM notification_attempts WHERE state='sending'").first()).count,1);
+    return calls===1?{outcome:'known-not-sent'}:{outcome:'confirmed',providerReference:'fictional-provider-result'};
+  }};
+  assert.equal((await deliverLocalNotification(f.env,input,transport)).state,'queued');
+  assert.equal((await deliverLocalNotification(f.env,input,transport)).state,'sent');
+  assert.equal(await f.count('notification_attempts'),2);assert.equal(calls,2);
+  assert.equal((await deliverLocalNotification(f.env,input,transport)).attempted,false);
+});
+
+test('ambiguous local delivery is terminal uncertain and staging cannot invoke the injected transport',async t=>{
+  const {deliverLocalNotification}=await import('../../.build/v3/apps/worker/src/notifications.js');
+  const f=await localDeliveryFixture(t);let calls=0;
+  const input={principalId:'admin',workerId:'fake-mail',asOf:'2026-01-01T10:00:00.000Z'};
+  const transport={send:async()=>{calls++;throw Error('fictional lost result');}};
+  assert.equal((await deliverLocalNotification(f.env,input,transport)).state,'uncertain');
+  assert.equal((await deliverLocalNotification(f.env,input,transport)).attempted,false);assert.equal(calls,1);
+  await assert.rejects(deliverLocalNotification({...f.env,ENVIRONMENT:'staging'},input,transport),{code:'DELIVERY_SUPPRESSED'});
+  assert.equal(calls,1);
+});
+
+test('expired local attempts stay uncertain even if a late result claims success, and quota failures do not attempt delivery',async t=>{
+  const {deliverLocalNotification,recoverLocalNotificationAttempts}=await import('../../.build/v3/apps/worker/src/notifications.js');
+  const f=await localDeliveryFixture(t);
+  const input={principalId:'admin',workerId:'fake-mail',asOf:'2026-01-01T10:00:00.000Z'};
+  const late=await deliverLocalNotification(f.env,input,{send:async()=>{await recoverLocalNotificationAttempts(f.env,'2026-01-01T10:11:00.000Z');return {outcome:'confirmed'};}});
+  assert.equal(late.state,'uncertain');assert.equal((await f.db.prepare('SELECT state FROM notification_attempts').first()).state,'uncertain');
+  assert.equal((await f.db.prepare("SELECT COUNT(*) AS count FROM notification_delivery_events WHERE state='sent'").first()).count,0);
+  const g=await localDeliveryFixture(t,0);let calls=0;
+  const quota=await deliverLocalNotification(g.env,input,{send:async()=>{calls++;return {outcome:'confirmed'};}});
+  assert.equal(quota.reason,'quota-exhausted');assert.equal(calls,0);assert.equal(await g.count('notification_attempts'),0);
+  assert.equal((await g.db.prepare("SELECT state FROM notification_intents WHERE mode='local-test'").first()).state,'blocked');
+});

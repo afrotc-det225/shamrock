@@ -1,3 +1,4 @@
+import { planNotifications, notificationStatus } from './notifications.js';
 import { acceptAttendanceCorrection } from './corrections.js';
 import { acceptAdminCommand, adminEffect, frontendSnapshot, getAdminReceipt } from './admin.js';
 import { HttpError } from './http-error.js';
@@ -405,6 +406,8 @@ export default {
         throw new HttpError(400, 'INVALID_REQUEST', 'Use an authenticated JSON operation.');
       }
       const input = parseJson(body);
+      if (url.pathname === '/v1/admin/notifications/plan' && !url.search) return json(await planNotifications(env, input));
+      if (url.pathname === '/v1/admin/notifications/status' && !url.search) return json(await notificationStatus(env, input));
       if (url.pathname === '/v1/admin/commands' && !url.search) {
         if (input && typeof input === 'object' && 'operation' in input && input.operation === 'attendance.correct') {
           return json(await acceptAttendanceCorrection(env, input));

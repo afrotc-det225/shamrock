@@ -57,3 +57,33 @@ Validation: `npm run build:v3` and
 `node --test tests/v3/notifications.test.mjs` cover routing, schedule windows,
 DST, cancellation, missing recipients, replay suppression, factual wording and
 the uncertain-delivery boundary using fictional addresses.
+
+## Isolated durable foundation (migration 0005)
+
+The Worker now exposes signed `POST /v1/admin/notifications/plan` and `/status` endpoints. This is a suppressed staging foundation, not an enabled mail service. There is no HTTP sender, Gmail credential, paid queue or external email transport in this implementation. The current production notification triggers remain separate.
+
+Planning uses the standard command envelope with `operation: 'notifications.plan'` and this strict payload:
+
+```ts
+{ kind: 'scheduled' | 'excusal', asOf: 'canonical UTC timestamp', requestId: null | 'stable request ID' }
+```
+
+Scheduled planning requires `requestId: null`; excusal planning requires the explicit request ID. The actor needs Wing `notifications.manage` and `frontend.read`, an active principal, a registered sheet/test source, and the current generation with command processing resumed. Receipts use the shared command registry, administrative ledger and audit. Receipt retries recheck current authority. There is no accepted recipient-address or delivery-mode parameter. A caller cannot turn staging plans into live mail by supplying `mode: live`.
+
+The planner reads one coherent, bounded frontend snapshot. Flight and Squadron recipients come from active Leadership records with the established exact named commander/deputy roles. Missing, ambiguous or malformed routing is retained as a missing-recipient issue. Excusal content comes from the recorded request and decision, never a caller-supplied email address, outcome or reason. The final atomic batch rechecks authorization, source, generation/fence and the snapshot's audit revisions before saving the receipt, audit and intents. A changed snapshot, exhausted ledger bound or failed write rolls everything back.
+
+All HTTP-planned intents are persisted as terminal `suppressed`, including when the request reaches a local Worker. Stable policy keys deduplicate repeated schedules and request versions; a later command or resume cannot release an old staging notice. Content and recipients remain private D1 data. New plans do not overwrite a previously saved intent for the same key.
+
+`/status` takes `{environment, generation, principalId}` and requires Wing `notifications.manage`. It reports state totals, attempt totals and at most 50 attention records, with `moreAttention` when additional records exist. It exposes no message body or recipient address and reports `deliveryEnabled: false`. Status remains readable while processing is paused.
+
+Migration `0005_notification_ledger.sql` adds private intent, attempt and delivery-event tables plus a delivery control record defaulting to suppressed with a zero recipient budget. The default ledger limit is 1,000 intents; the reviewed configurable range stops at 10,000. Planning is bounded to 100 intents and one megabyte of serialized content per command. Reaching a bound stops the plan rather than silently dropping notices or purging history. Retention/export and operational scheduling of these calls remain separate work.
+
+The ordinary planning path was measured locally at **25 prepared statements**, including the coherent snapshot and atomic batch; status uses four. A regression requires planning to stay below 50 prepared statements. Set-based inserts keep this count independent of the number of planned notices. This is a query-count check, not a hosted CPU, daily-quota, storage-retention or complete free-tier capacity result.
+
+### Local delivery-state rehearsal
+
+`deliverLocalNotification` and `recoverLocalNotificationAttempts` are exported test helpers, not HTTP routes or Apps Script entry points. They reject a staging environment before database access. A local harness must explicitly seed `local-test` mode and queued fictional intents; the API cannot activate that mode or unsuppress a record. Only fictional `.invalid` recipients are accepted, and the harness injects the transport. No real provider integration is included.
+
+Before calling the injected transport, the helper reloads the trusted snapshot and compares routing/content, checks authority and a per-day recipient budget, then atomically saves `sending`, an attempt row and a delivery event. Every attempt counts conservatively against that local budget. A changed route/content blocks the intent; an exhausted budget blocks it without a delivery attempt. A confirmed outcome records `sent`; a proven no-send result records the failed attempt and returns the intent to queued. A thrown, malformed or lost result becomes `uncertain` and is never automatically resent. An expired attempt also becomes uncertain. A late claimed success cannot overwrite that uncertainty or add a false sent event. Failure to persist a result leaves the sending record for explicit recovery.
+
+Local tests cover deterministic suppressed planning, trusted excusal routing, rejected forged delivery/recipient fields, receipt replay and revocation, atomic capacity failure, query count, persist-before-transport, confirmed/no-send outcomes, lost results, expiry/late-result races and quota exhaustion. These tests exercise local D1 with a fictional transport. They do not establish Gmail delivery, scheduled hosted planning, production notification parity or authorization to enable a real sender.
