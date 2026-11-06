@@ -2,13 +2,13 @@
  * This module never uploads files, installs triggers, enables processing or reads the bridge secret. */
 import { AdapterError } from './index.js';
 import { HOST_PROPERTIES, parseStagingHostConfig, type StagingHostConfig } from './staging-host.js';
-import { NATIVE_PROPERTIES } from './native-runtime.js';
+import { NATIVE_PROPERTIES, parseNativePresentationConfig, type NativeProjectionConfig } from './native-runtime.js';
 
 export const CONFIG_FILE_ID_PROPERTY = 'SHAMROCK_V3_CONFIG_FILE_ID';
 const PROPERTY_LIMIT = 8_000;
 const FILE_LIMIT = 65_536;
 const ALLOWED: readonly string[] = [HOST_PROPERTIES.config, HOST_PROPERTIES.principals, HOST_PROPERTIES.attendanceCatalog,
-  HOST_PROPERTIES.excusalCatalog, NATIVE_PROPERTIES.projectionConfig];
+  HOST_PROPERTIES.excusalCatalog, NATIVE_PROPERTIES.projectionConfig, NATIVE_PROPERTIES.presentationConfig];
 const REQUIRED = [HOST_PROPERTIES.config, HOST_PROPERTIES.principals, HOST_PROPERTIES.attendanceCatalog, NATIVE_PROPERTIES.projectionConfig];
 type Json = Record<string, unknown>;
 export interface StagingConfigurationServices {
@@ -183,6 +183,10 @@ export function importStagingConfiguration(services: StagingConfigurationService
   validatePrincipals(parsed[HOST_PROPERTIES.principals]); validateCatalog(parsed[HOST_PROPERTIES.attendanceCatalog]);
   if (parsed[HOST_PROPERTIES.excusalCatalog]) validateCatalog(parsed[HOST_PROPERTIES.excusalCatalog]);
   validateProjection(parsed[NATIVE_PROPERTIES.projectionConfig], host);
+  if (parsed[NATIVE_PROPERTIES.presentationConfig]) {
+    parseNativePresentationConfig(parsed[NATIVE_PROPERTIES.presentationConfig], host,
+      parsed[NATIVE_PROPERTIES.projectionConfig] as unknown as NativeProjectionConfig);
+  }
 
   // All file, ACL and configuration validation finishes before any configuration mutation.
   // PropertiesService offers no transaction guarantee: a provider write failure stays paused
@@ -190,12 +194,16 @@ export function importStagingConfiguration(services: StagingConfigurationService
   try {
     properties.deleteProperty(HOST_PROPERTIES.setupReceipt);
     properties.deleteProperty(NATIVE_PROPERTIES.projectionReceipt);
+    properties.deleteProperty(NATIVE_PROPERTIES.presentationReceipt);
     properties.setProperties(pending, false);
     if (!pending[HOST_PROPERTIES.excusalCatalog]) properties.deleteProperty(HOST_PROPERTIES.excusalCatalog);
+    if (!pending[NATIVE_PROPERTIES.presentationConfig]) properties.deleteProperty(NATIVE_PROPERTIES.presentationConfig);
     if (Object.entries(pending).some(([key, value]) => properties.getProperty(key) !== value)
       || (!pending[HOST_PROPERTIES.excusalCatalog] && properties.getProperty(HOST_PROPERTIES.excusalCatalog) !== null)
+      || (!pending[NATIVE_PROPERTIES.presentationConfig] && properties.getProperty(NATIVE_PROPERTIES.presentationConfig) !== null)
       || properties.getProperty(HOST_PROPERTIES.enabled) !== 'false'
-      || properties.getProperty(HOST_PROPERTIES.setupReceipt) !== null || properties.getProperty(NATIVE_PROPERTIES.projectionReceipt) !== null) {
+      || properties.getProperty(HOST_PROPERTIES.setupReceipt) !== null || properties.getProperty(NATIVE_PROPERTIES.projectionReceipt) !== null
+      || properties.getProperty(NATIVE_PROPERTIES.presentationReceipt) !== null) {
       fail('configuration_write_failed', 'Configuration persistence could not be verified; processing remains paused.');
     }
   } catch { return fail('configuration_write_failed', 'Configuration persistence could not be verified; run setup only after a successful import.'); }

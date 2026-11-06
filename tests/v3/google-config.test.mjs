@@ -25,7 +25,8 @@ function fixture() {
     [CONFIG_FILE_ID_PROPERTY, 'private-config-file'], [H.secret, 'fixture-secret-untouched-never-read'], [H.enabled, 'true'],
     [H.config, 'previous-host'], [H.principals, 'previous-principals'], [H.attendanceCatalog, 'previous-attendance'], [H.excusalCatalog, 'previous-excusal'],
     [N.projectionConfig, 'previous-projection'], [H.setupReceipt, 'previous-host-receipt'], [N.projectionReceipt, 'previous-projection-receipt'],
-    [N.projectionClaim, 'pending-claim-preserve'], ['UNRELATED_SETTING', 'preserve'],
+    [N.projectionClaim, 'pending-claim-preserve'], [N.presentationConfig, 'previous-presentation'],
+    [N.presentationReceipt, 'previous-presentation-receipt'], ['UNRELATED_SETTING', 'preserve'],
   ]);
   const metadata = { id: 'private-config-file', mimeType: 'application/json', owners: [{ emailAddress: automation }], trashed: false };
   const pages = [{ permissions: [{ type: 'user', role: 'owner', emailAddress: automation }] }];
@@ -74,6 +75,7 @@ test('private owner-only configuration imports nonsecret bindings while paused a
   assert.deepEqual(f.run(), { status: 'imported-paused', propertyCount: 5, next: 'setup-required' });
   for (const [key, value] of Object.entries(f.map)) assert.equal(f.properties.get(key), value);
   assert.equal(f.properties.get(H.enabled), 'false'); assert.equal(f.properties.has(H.setupReceipt), false); assert.equal(f.properties.has(N.projectionReceipt), false);
+  assert.equal(f.properties.has(N.presentationConfig), false); assert.equal(f.properties.has(N.presentationReceipt), false);
   assert.equal(f.properties.get(H.secret), 'fixture-secret-untouched-never-read'); assert.equal(f.state.secretReads, 0);
   assert.equal(f.properties.get(N.projectionClaim), 'pending-claim-preserve'); assert.equal(f.properties.get('UNRELATED_SETTING'), 'preserve');
   assert.equal(f.state.calls.length, 3); assert.equal(f.state.mutations.filter(m => m[0] === 'batch').length, 1);
@@ -113,11 +115,34 @@ test('missing owner proof and repeated permission page tokens fail closed', () =
 });
 
 test('secret, enabled, receipt, bootstrap and unknown property names are forbidden in the file', () => {
-  for (const key of [H.secret, H.enabled, H.setupReceipt, N.projectionReceipt, N.projectionClaim, CONFIG_FILE_ID_PROPERTY, 'UNEXPECTED']) {
+  for (const key of [H.secret, H.enabled, H.setupReceipt, N.projectionReceipt, N.projectionClaim, N.presentationReceipt, CONFIG_FILE_ID_PROPERTY, 'UNEXPECTED']) {
     const f = fixture(); f.map[key] = JSON.stringify({ fixture: true }); assertOnlyPaused(f, code('configuration_keys'));
   }
   const f = fixture(); delete f.map[N.projectionConfig]; assertOnlyPaused(f, code('configuration_keys'));
   const g = fixture(); delete g.map[H.excusalCatalog]; assertOnlyPaused(g, code('configuration_keys'));
+});
+
+test('optional presentation binds a distinct legend only within the reviewed staging operator workbook', () => {
+  const configure = f => {
+    delete f.host.decisionInput.slots; Object.assign(f.host.decisionInput, { mode: 'projection', maxSlots: 20 }); f.updateHost();
+    const value = { version: 1, environment: 'staging', generation: 1, legend: { spreadsheetId: 'operator-book', sheetId: 6 } };
+    f.map[N.presentationConfig] = JSON.stringify(value); return value;
+  };
+  const valid = fixture(); configure(valid); assert.equal(valid.run().propertyCount, 6);
+  assert.equal(valid.properties.get(N.presentationConfig), valid.map[N.presentationConfig]);
+  assert.equal(valid.properties.has(N.presentationReceipt), false);
+  assert.equal(valid.properties.get(N.projectionClaim), 'pending-claim-preserve');
+  for (const change of [
+    value => { value.environment = 'production'; }, value => { value.generation = 2; },
+    value => { value.legend.spreadsheetId = 'other-book'; }, value => { value.legend.sheetId = 3; },
+    value => { value.legend.sheetId = 4; }, value => { value.legend.sheetId = 5; },
+    value => { value.legend.unexpected = true; }, value => { value.extra = true; },
+  ]) {
+    const f = fixture(); const value = configure(f); change(value); f.map[N.presentationConfig] = JSON.stringify(value);
+    assertOnlyPaused(f, code('native_configuration'));
+  }
+  const fixed = fixture(); fixed.map[N.presentationConfig] = JSON.stringify({ version: 1, environment: 'staging', generation: 1, legend: { spreadsheetId: 'operator-book', sheetId: 6 } });
+  assertOnlyPaused(fixed, code('native_configuration'));
 });
 
 test('configuration must be explicit staging and its expected executor must match the actual account', () => {

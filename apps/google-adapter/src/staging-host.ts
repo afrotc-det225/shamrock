@@ -534,11 +534,21 @@ export function createStagingHost(runtime: StagingHostRuntime) {
       if (frozen.row < 3 || (binding.mode === 'projection' ? frozen.row > binding.maxSlots + 2 : !binding.slots.some(slot => slot.row === frozen.row))) {
         fail('unknown_draft_slot', 'This row is outside the configured decision input area.');
       }
+      // Capture protected target metadata before waiting too: a native table sort
+      // can move another request into this position with the very same selection.
+      // The event's row/value alone must never authorize that different request.
+      const beforeWait = slotsFor(ctx, sheet, binding).find(slot => slot.row === frozen.row);
+      if (!beforeWait) fail('unknown_draft_slot', 'This row has no reviewed immutable request binding.');
+      const frozenSlot = { ...beforeWait };
+      checkSlot(sheet, cols, frozenSlot);
+      const sameTarget = (slot: LocatedDecisionSlot | undefined) => slot?.slotId === frozenSlot.slotId
+        && slot.requestId === frozenSlot.requestId && slot.baseVersion === frozenSlot.baseVersion;
       function retryNote(show: boolean): 'shown' | 'cleared' | 'unavailable' | 'input-changed' {
         try {
           if (!event.range.getNote || !event.range.setNote) return 'unavailable';
           // A timeout notice describes this attempt, never a later selection. Notes
           // are presentation only; target/draft/status/journal cells need the lock.
+          if (!sameTarget(slotsFor(ctx!, sheet, binding!).find(slot => slot.row === frozen.row))) return 'input-changed';
           if (show && (decisionColumns(sheet, binding!.mode === 'projection').draft_decision !== frozen.column
             || sheet.getRange(frozen.row, frozen.column, 1, 1).getValues()[0][0] !== frozen.value)) return 'input-changed';
           const current = event.range.getNote();
@@ -562,6 +572,7 @@ export function createStagingHost(runtime: StagingHostRuntime) {
         if (currentCols.draft_decision !== frozen.column) fail('draft_target_changed', 'The decision columns moved after this edit.');
         const slot = slotsFor(ctx, sheet, binding).find(s => s.row === frozen.row);
         if (!slot) fail('unknown_draft_slot', 'This row has no reviewed immutable request binding.');
+        if (!sameTarget(slot)) fail('draft_target_changed', 'This decision row moved while the edit waited. Retain the input and select the decision again in its current row.');
         const read = checkSlot(sheet, currentCols, slot);
         if (read('draft_decision') !== frozen.value) fail('draft_input_changed', 'This delayed edit no longer matches the current input; no command was sent.');
         const prior = savedDraft(read, slot, binding);

@@ -18,8 +18,8 @@ function fixture() {
   };
   const projection = { version: 1, environment: 'staging', generation: 1, workerId: 'worker.fixture',
     attendance: { spreadsheetId: 'output-book', sheetId: 3 }, decisions: { spreadsheetId: 'output-book', sheetId: 4 }, cursors: { spreadsheetId: 'private-journal', sheetId: 5 } };
-  const properties = new Map([[H.config, JSON.stringify(config)], [H.enabled, 'false'], [N.projectionConfig, JSON.stringify(projection)]]);
-  const state = { executor: automation, calls: [], writes: [], flushes: 0, formOpens: 0, frozenNativeExtents: true };
+  const properties = new Map([[H.config, JSON.stringify(config)], [H.enabled, 'false'], [N.projectionConfig, JSON.stringify(projection)], [H.secret, 'fictional-signing-material-never-deploy']]);
+  const state = { executor: automation, calls: [], writes: [], presentationWrites: [], flushes: 0, formOpens: 0, frozenNativeExtents: true, discardPresentation: false };
   const files = new Map();
   const books = new Map();
   const ownerPermission = { type: 'user', role: 'owner', emailAddress: automation };
@@ -27,6 +27,8 @@ function fixture() {
   function addSheet(bookId, id, title, values = []) {
     if (!books.has(bookId)) { books.set(bookId, []); addFile(bookId, 'application/vnd.google-apps.spreadsheet'); }
     const sheet = { id, title, values: structuredClone(values), formulas: new Map(), initialRows: values.length,
+      properties: { sheetId: id, title, gridProperties: { rowCount: 30, columnCount: 20 } },
+      tables: [], filterViews: [], conditionalFormats: [], developerMetadata: [], cells: new Map(), rowMetadata: [], columnMetadata: [],
       initialColumns: Math.max(0, ...values.map(r => r.length)), protections: [{ range: { sheetId: id }, warningOnly: false,
         editors: { users: [automation], groups: [], domainUsersCanEdit: false }, unprotectedRanges: [] }] };
     books.get(bookId).push(sheet); return sheet;
@@ -81,7 +83,7 @@ function fixture() {
         result = suffix ? file.pages[Number(u.searchParams.get('pageToken') ?? 0)] : { id: file.id, mimeType: file.mimeType, owners: file.owners, ...(file.driveId ? { driveId: file.driveId } : {}) };
       } else {
         assert.equal(u.hostname, 'sheets.googleapis.com');
-        const [, bookId, suffix = ''] = /^\/v4\/spreadsheets\/([^/]+)(.*)$/.exec(u.pathname);
+        const [, bookId, suffix = ''] = /^\/v4\/spreadsheets\/([^/:]+)(.*)$/.exec(u.pathname);
         assert.ok(books.has(bookId));
         if (suffix === '/values:batchUpdate') {
           assert.equal(options.method, 'post');
@@ -89,24 +91,242 @@ function fixture() {
           state.writes.push(body); const d = body.data[0]; const range = locate(bookId, d.range);
           for (let r = 0; r < range.rows; r++) { range.sheet.values[range.row + r] ??= []; for (let c = 0; c < range.columns; c++) range.sheet.values[range.row + r][range.column + c] = d.values[r][c]; }
           result = { totalUpdatedCells: range.rows * range.columns };
+        } else if (suffix === ':batchUpdate') {
+          assert.equal(options.method, 'post');
+          const body = JSON.parse(options.payload); state.presentationWrites.push(body);
+          if (!state.discardPresentation) for (const request of body.requests) applyPresentationRequest(bookId, request);
+          result = { replies: body.requests.map(() => ({})) };
         } else if (suffix.startsWith('/values/')) {
           assert.equal(u.searchParams.get('valueRenderOption'), 'UNFORMATTED_VALUE');
           const range = locate(bookId, decodeURIComponent(suffix.slice('/values/'.length)));
           result = { values: Array.from({ length: range.rows }, (_, r) => Array.from({ length: range.columns }, (_, c) => range.sheet.values[range.row + r]?.[range.column + c] ?? '')) };
         } else if (u.searchParams.has('ranges')) {
-          const range = locate(bookId, u.searchParams.get('ranges'));
-          result = { sheets: [{ properties: { sheetId: range.sheet.id }, data: [{ rowData: Array.from({ length: range.rows }, (_, r) => ({ values: Array.from({ length: range.columns }, (_, c) => {
-            const formula = range.sheet.formulas.get(`${range.row + r},${range.column + c}`); return formula ? { userEnteredValue: { formulaValue: formula } } : {};
-          }) })) }] }] };
-        } else result = { spreadsheetId: bookId, sheets: books.get(bookId).map(s => ({ properties: { sheetId: s.id }, protectedRanges: s.protections })) };
+          const selected = new Map();
+          for (const a1 of u.searchParams.getAll('ranges')) {
+            const range = locate(bookId, a1); const s = range.sheet;
+            if (!selected.has(s.id)) selected.set(s.id, { properties: { sheetId: s.id }, data: [] });
+            const block = { startRow: range.row, startColumn: range.column, rowData: Array.from({ length: range.rows }, (_, r) => ({ values: Array.from({ length: range.columns }, (_, c) => {
+              const row = range.row + r; const column = range.column + c;
+              const formula = s.formulas.get(`${row},${column}`); const value = s.values[row]?.[column];
+              const entered = formula ? { formulaValue: formula } : value === undefined || value === '' ? undefined
+                : typeof value === 'number' ? { numberValue: value } : typeof value === 'boolean' ? { boolValue: value } : { stringValue: value };
+              return { ...structuredClone(s.cells.get(`${row},${column}`) ?? {}), ...(entered ? { userEnteredValue: entered } : {}) };
+            }) })), rowMetadata: Array.from({ length: range.rows }, (_, r) => s.rowMetadata[range.row + r] ?? {}),
+            columnMetadata: Array.from({ length: range.columns }, (_, c) => s.columnMetadata[range.column + c] ?? {}) };
+            selected.get(s.id).data.push(block);
+          }
+          result = { spreadsheetId: bookId, sheets: [...selected.values()] };
+        } else result = { spreadsheetId: bookId, sheets: books.get(bookId).map(s => ({ properties: s.properties, protectedRanges: s.protections,
+          tables: s.tables, filterViews: s.filterViews, conditionalFormats: s.conditionalFormats, developerMetadata: s.developerMetadata, merges: [] })) };
       }
       return { getResponseCode: () => 200, getContentText: () => JSON.stringify(result) };
     } },
   };
+  function applyFields(target, value, fields) {
+    for (const path of fields.split(',')) {
+      const keys = path.trim().split('.'); let to = target; let from = value;
+      for (const key of keys.slice(0, -1)) { to[key] ??= {}; to = to[key]; from = from?.[key]; }
+      const last = keys.at(-1); if (from?.[last] === undefined) delete to[last]; else to[last] = structuredClone(from[last]);
+    }
+  }
+  function applyPresentationRequest(bookId, request) {
+    const sheets = books.get(bookId); const find = id => { const s = sheets.find(s => s.id === id); assert.ok(s); return s; };
+    if (request.addTable) { const value = structuredClone(request.addTable.table); value.tableId ??= `google-generated-${value.range.sheetId}`; find(value.range.sheetId).tables.push(value); }
+    else if (request.createDeveloperMetadata) { const value = structuredClone(request.createDeveloperMetadata.developerMetadata); value.metadataId = 100 + value.location.sheetId; find(value.location.sheetId).developerMetadata.push(value); }
+    else if (request.updateTable) {
+      const { table, fields } = request.updateTable; const target = sheets.flatMap(s => s.tables).find(t => t.tableId === table.tableId); assert.ok(target); applyFields(target, table, fields);
+    } else if (request.updateSheetProperties) { const { properties, fields } = request.updateSheetProperties; applyFields(find(properties.sheetId).properties, properties, fields); }
+    else if (request.updateDimensionProperties) {
+      const { range, properties, fields } = request.updateDimensionProperties; const s = find(range.sheetId);
+      const dimensions = range.dimension === 'ROWS' ? s.rowMetadata : s.columnMetadata;
+      for (let i = range.startIndex ?? 0; i < range.endIndex; i++) { dimensions[i] ??= {}; applyFields(dimensions[i], properties, fields); }
+    } else if (request.repeatCell || request.setDataValidation) {
+      const { range } = request.repeatCell ?? request.setDataValidation; const s = find(range.sheetId);
+      for (let r = range.startRowIndex ?? 0; r < range.endRowIndex; r++) for (let c = range.startColumnIndex ?? 0; c < range.endColumnIndex; c++) {
+        const key = `${r},${c}`; const cell = s.cells.get(key) ?? {};
+        if (request.repeatCell) applyFields(cell, request.repeatCell.cell, request.repeatCell.fields);
+        else if (request.setDataValidation.rule) cell.dataValidation = structuredClone(request.setDataValidation.rule); else delete cell.dataValidation;
+        s.cells.set(key, cell);
+      }
+    } else if (request.addFilterView) { const view = structuredClone(request.addFilterView.filter); find(view.range.sheetId).filterViews.push(view); }
+    else if (request.updateFilterView) {
+      const { filter, fields } = request.updateFilterView; const target = sheets.flatMap(s => s.filterViews).find(v => v.filterViewId === filter.filterViewId); assert.ok(target); applyFields(target, filter, fields);
+    } else if (request.addConditionalFormatRule) { const { rule, index } = request.addConditionalFormatRule; find(rule.ranges[0].sheetId).conditionalFormats.splice(index, 0, structuredClone(rule)); }
+    else if (request.deleteConditionalFormatRule) { const { sheetId, index } = request.deleteConditionalFormatRule; find(sheetId).conditionalFormats.splice(index, 1); }
+    else if (request.updateCells) {
+      const { start, range, rows, fields } = request.updateCells; const s = find(start?.sheetId ?? range.sheetId); const firstRow = start?.rowIndex ?? range.startRowIndex ?? 0; const firstCol = start?.columnIndex ?? range.startColumnIndex ?? 0;
+      rows.forEach((row, r) => row.values.forEach((cell, c) => {
+        if (fields.includes('userEnteredValue')) { s.values[firstRow + r] ??= []; const value = cell.userEnteredValue ?? {}; s.values[firstRow + r][firstCol + c] = value.stringValue ?? value.numberValue ?? value.boolValue ?? ''; }
+        const key = `${firstRow + r},${firstCol + c}`; const target = s.cells.get(key) ?? {}; applyFields(target, cell, fields); s.cells.set(key, target);
+      }));
+    } else assert.fail(`Unimplemented presentation request ${Object.keys(request).join(',')}`);
+  }
   const runtime = createNativeStagingRuntime(services);
-  return { config, projection, properties, state, services, runtime, files, form, journal, decision, attendance, decisions, cursors, lock,
+  return { config, projection, properties, state, services, runtime, files, books, addSheet, form, journal, decision, attendance, decisions, cursors, lock,
     saveConfig() { properties.set(H.config, JSON.stringify(config)); }, saveProjection() { properties.set(N.projectionConfig, JSON.stringify(projection)); } };
 }
+
+function presentationFixture() {
+  const f = fixture();
+  f.books.get('review-book').splice(0, 1); f.books.get('output-book').push(f.decision);
+  f.config.decisionInput.spreadsheetId = 'output-book'; delete f.config.decisionInput.slots;
+  Object.assign(f.config.decisionInput, { mode: 'projection', maxSlots: 20 }); f.saveConfig();
+  f.decision.values = []; f.decision.protections[0].unprotectedRanges[0].endRowIndex = 22;
+  const legend = f.addSheet('output-book', 6, "Data Legend's Choices"); legend.properties.hidden = true;
+  const presentation = { version: 1, environment: 'staging', generation: 1, legend: { spreadsheetId: 'output-book', sheetId: 6 } };
+  f.properties.set(N.presentationConfig, JSON.stringify(presentation));
+  f.runtime.initializeProjections();
+  return { ...f, legend, presentation };
+}
+
+test('native presentation repair is optional and requires paused, private, protected and initialized bindings before writing', () => {
+  const absent = fixture(); assert.deepEqual(absent.runtime.repairPresentation(), { status: 'presentation-not-configured' });
+  assert.equal(absent.state.writes.length, 0); assert.equal(absent.state.presentationWrites.length, 0);
+  for (const [change, expected] of [
+    [f => f.properties.set(H.enabled, 'true'), 'pause_required'],
+    [f => f.properties.set(N.projectionClaim, JSON.stringify({ fingerprint: 'unreviewed', claim: {} })), 'claim_integrity'],
+    [f => f.properties.delete(N.projectionReceipt), 'projection_setup_required'],
+    [f => { f.legend.properties.hidden = false; }, 'presentation_legend'],
+    [f => { f.legend.protections[0].warningOnly = true; }, 'protection_unverified'],
+    [f => { f.attendance.values[0][0] = 'changed_header'; }, 'presentation_headers'],
+    [f => { f.files.get('private-journal').pages[0].permissions.push({ type: 'anyone', role: 'reader' }); }, 'private_resource_required'],
+  ]) {
+    const f = presentationFixture(); const before = structuredClone(f.decision.values); change(f);
+    assert.throws(() => f.runtime.repairPresentation(), code(expected)); assert.equal(f.state.presentationWrites.length, 0);
+    assert.deepEqual(f.decision.values, before); assert.equal(f.properties.has(N.presentationReceipt), false); assert.equal(f.lock.held, false);
+  }
+});
+
+test('native presentation repairs real tables with fresh format and validation read-back while preserving rows and unrelated views', () => {
+  const f = presentationFixture();
+  const foreignView = { filterViewId: 14, title: 'Operator saved view', range: { sheetId: 3, startRowIndex: 1, endRowIndex: 20, startColumnIndex: 0, endColumnIndex: 10 } };
+  f.attendance.filterViews.push(structuredClone(foreignView));
+  const before = [f.attendance, f.decisions, f.decision, f.journal, f.cursors].map(s => structuredClone(s.values));
+  const result = f.runtime.repairPresentation(); assert.equal(result.status, 'presentation-ready-paused'); assert.ok(result.requests > 0);
+  assert.equal(f.properties.get(H.enabled), 'false'); assert.ok(f.properties.get(N.presentationReceipt));
+  assert.deepEqual([f.attendance, f.decisions, f.decision, f.journal, f.cursors].map(s => s.values), before);
+  assert.equal(f.legend.values.length, 6); assert.equal(f.legend.values[2][0], 'Approved');
+  assert.equal(f.attendance.tables.length, 1); assert.equal(f.decisions.tables.length, 1); assert.equal(f.decision.tables.length, 1);
+  assert.deepEqual(f.attendance.filterViews.find(v => v.filterViewId === 14), foreignView);
+  const draftColumn = f.decision.values[0].indexOf('draft_decision');
+  assert.equal(f.decision.cells.get(`21,${draftColumn}`).dataValidation.strict, true);
+  assert.equal(f.decision.cells.get(`21,${draftColumn}`).dataValidation.condition.type, 'ONE_OF_RANGE');
+  const allBefore = structuredClone(f.decision.values); f.runtime.repairPresentation();
+  assert.deepEqual(f.decision.values, allBefore); assert.equal(f.decision.tables.length, 1); assert.equal(f.attendance.filterViews.length, 3);
+});
+
+test('an unconfirmed native presentation write cannot save its setup receipt and can be repaired again', () => {
+  const f = presentationFixture(); f.state.discardPresentation = true;
+  assert.throws(() => f.runtime.repairPresentation(), code('presentation_unverified'));
+  assert.equal(f.properties.has(N.presentationReceipt), false); assert.equal(f.lock.held, false);
+  f.state.discardPresentation = false; assert.equal(f.runtime.repairPresentation().status, 'presentation-ready-paused');
+  assert.equal(f.attendance.tables.length, 1); assert.ok(f.properties.get(N.presentationReceipt));
+  const fetch = f.services.UrlFetchApp.fetch;
+  f.services.UrlFetchApp.fetch = (url, options) => options.method === 'post' && url.endsWith(':batchUpdate')
+    ? { getResponseCode: () => 503, getContentText() { throw Error('Provider error body must not be read'); } } : fetch(url, options);
+  assert.throws(() => f.runtime.repairPresentation(), code('google_write_failed'));
+  assert.equal(f.properties.has(N.presentationReceipt), false, 'A previously valid receipt is removed before any repair write');
+  assert.equal(f.properties.get(H.enabled), 'false'); assert.equal(f.lock.held, false);
+});
+
+test('projection presentation grows before ACK, retains failed claims and never restyles every publication', () => {
+  const f = presentationFixture(); f.runtime.repairPresentation();
+  const signer = createGoogleSigner(f.services.Utilities, 'fictional-signing-material-never-deploy');
+  const claim = { jobId: 'job.presentation', claimToken: 'claim.presentation', leaseExpiresAt: new Date((1800000000 + 300) * 1000).toISOString(), eventId: 'event.one', unitId: 'unit.one', kind: 'attendance.projection' };
+  const snapshot = { revision: 7, event: { eventId: 'event.one', label: 'Synthetic event' }, unit: { unitId: 'unit.one', label: 'Unit' }, rows: [1, 2].map(n => ({ personId: `person.${n}`, displayName: `Synthetic cadet ${n}`, observedCode: 'P', requests: [{ requestId: `request.${n}`, status: 'Submitted', requestedOutcome: 'E', version: 1 }] })) };
+  const calls = []; const context = { config: { baseUrl: f.config.workerOrigin, keyId: f.config.keyId, environment: 'staging', generation: 1 }, signer, nowSeconds: () => 1800000000, transport: { send(request) {
+    const route = new URL(request.url).pathname; calls.push(route);
+    if (route.endsWith('/ack')) { assert.equal(f.attendance.tables[0].range.endRowIndex, 4); assert.equal(f.decision.tables[0].range.endRowIndex, 4); }
+    return { status: 200, body: JSON.stringify(route.endsWith('/claim') ? { job: claim } : route.endsWith('/project') ? snapshot : { acknowledged: true }) };
+  } } };
+  const start = f.state.presentationWrites.length; f.state.discardPresentation = true;
+  assert.throws(() => f.runtime.consumeProjection(context), code('presentation_unverified'));
+  assert.equal(calls.some(route => route.endsWith('/ack')), false); assert.ok(f.properties.get(N.projectionClaim));
+  const original = structuredClone(f.decision.values); f.state.discardPresentation = false;
+  assert.deepEqual(f.runtime.consumeProjection(context), { published: 1, idle: false });
+  assert.deepEqual(f.decision.values, original); assert.equal(calls.filter(route => route.endsWith('/claim')).length, 1);
+  assert.equal(f.properties.has(N.projectionClaim), false);
+  const changes = f.state.presentationWrites.slice(start).flatMap(batch => batch.requests);
+  assert.ok(changes.length > 0); assert.ok(changes.every(request => (request.updateTable ?? request.updateFilterView)?.fields === 'range'));
+  const end = f.state.presentationWrites.length; f.runtime.consumeProjection(context); assert.equal(f.state.presentationWrites.length, end);
+});
+
+test('native paused setup upgrades legacy 14-column slots without changing frozen drafts or existing target identities', () => {
+  const f = presentationFixture(); const headers = f.decision.values[0].slice(0, 14); const labels = f.decision.values[1].slice(0, 14);
+  const slotId = `slot.${createHash('sha256').update(JSON.stringify(['decision-slot-v1', 'staging', 1, f.config.decisionInput.resourceKey, 3, 'request.one', 2])).digest('hex')}`;
+  const row = [slotId, 'request.one', 2, 'Denied', 'draft.frozen', 'Committed: Denied', '{"frozen":"payload"}',
+    'event.one', 'unit.one', 'person.one', 'Synthetic event', 'Synthetic cadet', 'E', 'Submitted'];
+  f.decision.values = [headers, labels, structuredClone(row)]; const start = f.state.writes.length;
+  f.runtime.initializeProjections();
+  assert.deepEqual(f.decision.values[2].slice(0, 14), row); assert.equal(f.decision.values[2][14], 3); assert.match(f.decision.values[2][15], /^[a-f0-9]{64}$/);
+  const writes = f.state.writes.slice(start); assert.equal(writes.length, 1); assert.match(writes[0].data[0].range, /!O1:P3$/);
+  assert.equal(f.properties.get(H.enabled), 'false'); assert.equal(f.runtime.repairPresentation().status, 'presentation-ready-paused');
+});
+
+test('native paused setup appends event and unit labels to legacy recorded output without rewriting its original cells', () => {
+  const f = fixture(); f.runtime.initializeProjections();
+  const signer = createGoogleSigner(f.services.Utilities, 'fictional-signing-material-never-deploy');
+  const claim = { jobId: 'job.labels', claimToken: 'claim.labels', leaseExpiresAt: new Date((1800000000 + 300) * 1000).toISOString(), eventId: 'event.one', unitId: 'unit.one', kind: 'attendance.projection' };
+  const snapshot = { revision: 4, event: { eventId: 'event.one', label: 'Synthetic event' }, unit: { unitId: 'unit.one', label: 'Synthetic unit' }, rows: [{ personId: 'person.one', displayName: 'Synthetic cadet', observedCode: 'P', requests: [{ requestId: 'request.one', status: 'Submitted', requestedOutcome: 'E', version: 1 }] }] };
+  f.runtime.consumeProjection({ config: { baseUrl: f.config.workerOrigin, keyId: f.config.keyId, environment: 'staging', generation: 1 }, signer, nowSeconds: () => 1800000000, transport: { send(request) {
+    const route = new URL(request.url).pathname; return { status: 200, body: JSON.stringify(route.endsWith('/claim') ? { job: claim } : route.endsWith('/project') ? snapshot : { acknowledged: true }) };
+  } } });
+  f.decisions.values = f.decisions.values.map(row => row.slice(0, 11)); const original = structuredClone(f.decisions.values); const start = f.state.writes.length;
+  f.runtime.initializeProjections();
+  assert.deepEqual(f.decisions.values.map(row => row.slice(0, 11)), original); assert.deepEqual(f.decisions.values[2].slice(11), ['Synthetic event', 'Synthetic unit']);
+  assert.equal(f.state.writes.length - start, 1); assert.match(f.state.writes.at(-1).data[0].range, /!L1:M3$/);
+  assert.equal(f.properties.has(N.projectionClaim), false); assert.equal(f.properties.get(H.enabled), 'false');
+});
+
+test('schema contract and optional presentation configuration changes invalidate setup without replacing old claims', () => {
+  const f = presentationFixture(); const current = f.runtime.configurationFingerprint();
+  const oldFingerprint = createHash('sha256').update(`${f.properties.get(H.config)}\n${f.properties.get(N.projectionConfig)}`).digest('hex');
+  const oldClaim = JSON.stringify({ fingerprint: oldFingerprint, claim: { jobId: 'old-contract-claim' } });
+  f.properties.set(N.projectionClaim, oldClaim); const before = f.state.writes.length;
+  assert.throws(() => f.runtime.initializeProjections(), code('claim_integrity'));
+  assert.equal(f.properties.get(N.projectionClaim), oldClaim); assert.equal(f.state.writes.length, before);
+  f.presentation.legend.sheetId = 7; f.properties.set(N.presentationConfig, JSON.stringify(f.presentation));
+  assert.notEqual(f.runtime.configurationFingerprint(), current);
+  const expectedOldHost = createHash('sha256').update(f.properties.get(N.projectionConfig)).digest('hex');
+  f.properties.delete(N.presentationConfig); assert.notEqual(f.runtime.configurationFingerprint(), expectedOldHost);
+});
+
+test('setup rechecks pause after acquiring the shared lock before schema or value writes', () => {
+  const f = fixture(); const acquire = f.lock.tryLock.bind(f.lock);
+  f.lock.tryLock = () => { const locked = acquire(); f.properties.set(H.enabled, 'true'); return locked; };
+  assert.throws(() => f.runtime.initializeProjections(), code('pause_required'));
+  assert.equal(f.state.writes.length, 0); assert.equal(f.lock.held, false);
+});
+
+test('presentation repair and growth use bounded Google calls and metadata-only publication writes', t => {
+  const f = presentationFixture();
+  const counts = start => {
+    const calls = f.state.calls.slice(start).filter(call => call.url.startsWith('https://sheets.googleapis.com/'));
+    return { get: calls.filter(call => call.method === 'get').length, post: calls.filter(call => call.method === 'post').length };
+  };
+  let start = f.state.calls.length; f.runtime.repairPresentation(); const first = counts(start);
+  start = f.state.calls.length; f.runtime.repairPresentation(); const repeated = counts(start);
+  const signer = createGoogleSigner(f.services.Utilities, 'fictional-signing-material-never-deploy');
+  const claim = { jobId: 'job.bounded', claimToken: 'claim.bounded', leaseExpiresAt: new Date((1800000000 + 300) * 1000).toISOString(), eventId: 'event.one', unitId: 'unit.one', kind: 'attendance.projection' };
+  const snapshot = { revision: 1, event: { eventId: 'event.one', label: 'Synthetic event' }, unit: { unitId: 'unit.one', label: 'Unit' }, rows: [1, 2].map(n => ({ personId: `person.${n}`, displayName: `Synthetic cadet ${n}`, observedCode: 'P', requests: [{ requestId: `request.${n}`, status: 'Submitted', requestedOutcome: 'E', version: 1 }] })) };
+  start = f.state.calls.length;
+  f.runtime.consumeProjection({ config: { baseUrl: f.config.workerOrigin, keyId: f.config.keyId, environment: 'staging', generation: 1 }, signer, nowSeconds: () => 1800000000, transport: { send(request) {
+    const route = new URL(request.url).pathname; return { status: 200, body: JSON.stringify(route.endsWith('/claim') ? { job: claim } : route.endsWith('/project') ? snapshot : { acknowledged: true }) };
+  } } });
+  const growth = counts(start); t.diagnostic(`Fictional Sheets call counts: ${JSON.stringify({ first, repeated, growth })}`);
+  assert.ok(first.get <= 20 && first.post <= 4); assert.ok(repeated.get <= 15 && repeated.post <= 3); assert.ok(growth.get <= 32 && growth.post <= 7);
+});
+
+test('formatting read-back checks fresh literal headers despite cached operational value reads', () => {
+  const f = presentationFixture(); f.runtime.repairPresentation(); const fetch = f.services.UrlFetchApp.fetch;
+  f.services.UrlFetchApp.fetch = (url, options) => {
+    const response = fetch(url, options);
+    if (options.method === 'post' && url.endsWith(':batchUpdate')) f.attendance.values[0][0] = 'unexpected_header';
+    return response;
+  };
+  assert.throws(() => f.runtime.repairPresentation(), code('presentation_headers'));
+  assert.equal(f.properties.has(N.presentationReceipt), false); assert.equal(f.lock.held, false);
+});
 
 test('native construction performs no resource IO and rejects production or wrong executor before IO', () => {
   const f = fixture(); assert.equal(f.state.calls.length, 0);
@@ -238,7 +458,7 @@ test('native dynamic slots require the entire bounded input area and initialize 
   const f = fixture(); delete f.config.decisionInput.slots; Object.assign(f.config.decisionInput, { mode: 'projection', maxSlots: 4 }); f.saveConfig(); f.decision.values = [];
   assert.throws(() => f.runtime.initializeProjections(), code('protection_unverified'));
   f.decision.protections[0].unprotectedRanges[0].endRowIndex = 6;
-  f.runtime.initializeProjections(); assert.equal(f.decision.values.length, 2); assert.equal(f.decision.values[0].length, 14);
+  f.runtime.initializeProjections(); assert.equal(f.decision.values.length, 2); assert.equal(f.decision.values[0].length, 16);
   const protectedHeaders = f.decision.values[0].filter(h => h !== 'draft_decision');
   f.runtime.assertDecisionProtection(f.config.decisionInput, protectedHeaders);
   f.decision.protections[0].unprotectedRanges[0].endRowIndex = 5;

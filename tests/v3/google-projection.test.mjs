@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { createHash, createHmac } from 'node:crypto';
 import test from 'node:test';
 import { consumeProjectionJobs, initializeProjectionSheets, parseProjectionSnapshot,
-  PROJECTION_HEADERS, publishProjectionSnapshot } from '../../.build/v3/apps/google-adapter/src/projection.js';
+  PROJECTION_HEADERS, publishProjectionSnapshot, upgradeRecordedDecisionLabels } from '../../.build/v3/apps/google-adapter/src/projection.js';
 
 const sha256 = value => createHash('sha256').update(value).digest('hex');
 const secret = 'fictional-projection-test-secret-not-for-deployment';
@@ -107,6 +107,8 @@ test('signed claim/project/ack writes named columns and preserves filters and se
   assert.equal(r.sheets.attendance.row('person_id', 'person-b').observed_code, '');
   assert.equal(r.sheets.decisions.row('request_id', 'request-one').recorded_status, 'Submitted');
   assert.equal(r.sheets.decisions.row('request_id', 'request-one').approved_outcome, '');
+  assert.equal(r.sheets.decisions.row('request_id', 'request-one').event_label, 'Example event');
+  assert.equal(r.sheets.decisions.row('request_id', 'request-one').unit_label, 'Alpha');
   assert.deepEqual(input.values, beforeDraft);
   assert.equal(r.sheets.attendance.filterViews, filters);
   assert.equal(r.claimStore.load(), undefined);
@@ -137,6 +139,88 @@ test('RAW publication preserves potentially formula-like names without executing
   consumeProjectionJobs(r);
   assert.equal(r.sheets.attendance.row('person_id', 'person-a').display_name, r.state.snapshot.rows[0].displayName);
   assert.equal(r.sheets.attendance.row('person_id', 'person-a').event_label, "'Quoted example");
+  assert.equal(r.sheets.decisions.row('request_id', 'request-one').event_label, "'Quoted example");
+});
+
+function precedingOutput() {
+  const r = runtime(); publishProjectionSnapshot(r.state.snapshot, r);
+  r.sheets.decisions.values = r.sheets.decisions.values.map(row => row.slice(0, 11));
+  for (const sheet of Object.values(r.sheets)) sheet.writes = [];
+  return r;
+}
+test('paused recorded-output upgrade appends readable labels without rewriting old cells or cursors', () => {
+  const r = precedingOutput();
+  r.sheets.decisions.reorderHeaders(); r.sheets.attendance.reorderHeaders(); r.sheets.cursors.reorderHeaders();
+  const old = clone(r.sheets.decisions.values), attendance = clone(r.sheets.attendance.values), cursors = clone(r.sheets.cursors.values);
+  assert.deepEqual(upgradeRecordedDecisionLabels(r.sheets, { generation: 1 }), { upgraded: true, rows: 1 });
+  assert.deepEqual(r.sheets.decisions.values.map(row => row.slice(0, 11)), old);
+  assert.deepEqual(r.sheets.attendance.values, attendance); assert.deepEqual(r.sheets.cursors.values, cursors);
+  assert.equal(r.sheets.decisions.row('request_id', 'request-one').event_label, 'Example event');
+  assert.equal(r.sheets.decisions.row('request_id', 'request-one').unit_label, 'Alpha');
+  assert.deepEqual(r.sheets.decisions.writes.map(({ row, column, values }) => ({ row, column, width: values[0].length })), [{ row: 1, column: 12, width: 2 }]);
+  assert.equal(r.sheets.attendance.writes.length + r.sheets.cursors.writes.length, 0);
+  assert.deepEqual(upgradeRecordedDecisionLabels(r.sheets, { generation: 1 }), { upgraded: false, rows: 1 });
+  assert.equal(r.sheets.decisions.writes.length, 1);
+  initializeProjectionSheets(r.sheets);
+});
+
+test('label upgrade handles fresh and initialized empty output and preserves literal formula-like labels', () => {
+  const empty = { attendance: new Sheet(), decisions: new Sheet(), cursors: new Sheet() };
+  assert.deepEqual(upgradeRecordedDecisionLabels(empty, { generation: 1 }), { upgraded: false, rows: 0 });
+  initializeProjectionSheets(empty);
+  empty.decisions.values = empty.decisions.values.map(row => row.slice(0, 11));
+  assert.deepEqual(upgradeRecordedDecisionLabels(empty, { generation: 1 }), { upgraded: true, rows: 0 });
+  assert.deepEqual(empty.decisions.values[0].slice(11), ['event_label', 'unit_label']);
+  const r = precedingOutput();
+  for (let row = 3; row <= r.sheets.attendance.getLastRow(); row++) {
+    r.sheets.attendance.set(row, 'event_label', '=Literal event'); r.sheets.attendance.set(row, 'unit_label', "'Literal unit");
+  }
+  upgradeRecordedDecisionLabels(r.sheets, { generation: 1 });
+  assert.equal(r.sheets.decisions.row('request_id', 'request-one').event_label, '=Literal event');
+  assert.equal(r.sheets.decisions.row('request_id', 'request-one').unit_label, "'Literal unit");
+});
+
+test('label upgrade rejects missing/inconsistent/unpublished sources and every malformed target before writes', () => {
+  const mutations = [
+    r => { r.sheets.attendance.values = r.sheets.attendance.values.slice(0, 2); },
+    r => { r.sheets.attendance.set(4, 'event_label', 'Conflicting event'); },
+    r => { r.sheets.attendance.set(4, 'unit_label', 'Conflicting unit'); },
+    r => { r.sheets.cursors.values = r.sheets.cursors.values.slice(0, 2); },
+    r => { r.sheets.attendance.set(3, 'projection_revision', 3); },
+    r => { r.sheets.decisions.set(3, 'projection_revision', 3); },
+    r => { r.sheets.attendance.set(3, 'projection_revision', 1); },
+    r => { r.sheets.decisions.set(3, 'projection_revision', 1); },
+    r => { r.sheets.cursors.set(3, 'snapshot_hash', 'malformed watermark'); },
+    r => { r.sheets.attendance.set(3, 'generation', 2); },
+    r => { r.sheets.decisions.set(3, 'generation', 2); },
+    r => { r.sheets.decisions.values[0].push('event_label'); },
+    r => { r.sheets.decisions.values[0].push('event_label', 'unit_label'); r.sheets.decisions.values[1].push('Event', 'Unit'); },
+    r => { r.sheets.decisions.formula = true; },
+  ];
+  for (const mutate of mutations) {
+    const r = precedingOutput(); mutate(r); const before = clone(r.sheets.decisions.values);
+    assert.throws(() => upgradeRecordedDecisionLabels(r.sheets, { generation: 1 }));
+    assert.deepEqual(r.sheets.decisions.values, before);
+    assert.equal(r.sheets.decisions.writes.length, 0);
+  }
+});
+
+test('ambiguous label upgrade retries only complete read-back; old-cell damage and partial schemas fail closed', () => {
+  const r = precedingOutput(); const before = clone(r.sheets.decisions.values);
+  r.sheets.decisions.afterWrite = () => { throw new Error('ambiguous reply'); };
+  assert.throws(() => upgradeRecordedDecisionLabels(r.sheets, { generation: 1 }), /ambiguous reply/);
+  r.sheets.decisions.afterWrite = undefined;
+  assert.deepEqual(upgradeRecordedDecisionLabels(r.sheets, { generation: 1 }), { upgraded: false, rows: 1 });
+  assert.deepEqual(r.sheets.decisions.values.map(row => row.slice(0, 11)), before);
+  const damaged = precedingOutput();
+  damaged.sheets.decisions.afterWrite = () => damaged.sheets.decisions.set(3, 'display_name', 'Unexpected change');
+  assert.throws(() => upgradeRecordedDecisionLabels(damaged.sheets, { generation: 1 }), { code: 'projection_readback' });
+  const partial = precedingOutput();
+  partial.sheets.decisions.afterWrite = () => partial.sheets.decisions.set(3, 'event_label', '');
+  assert.throws(() => upgradeRecordedDecisionLabels(partial.sheets, { generation: 1 }));
+  partial.sheets.decisions.afterWrite = undefined;
+  assert.throws(() => upgradeRecordedDecisionLabels(partial.sheets, { generation: 1 }));
+  assert.equal(partial.sheets.decisions.writes.length, 1);
 });
 
 test('partial ambiguous write is never acknowledged; same durable claim repairs on retry', () => {

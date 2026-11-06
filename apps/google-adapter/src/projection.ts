@@ -25,14 +25,14 @@ export const PROJECTION_HEADERS = {
   attendance: ['event_id', 'unit_id', 'person_id', 'event_label', 'unit_label', 'display_name',
     'observed_code', 'in_current_scope', 'generation', 'projection_revision'],
   decisions: ['event_id', 'unit_id', 'person_id', 'request_id', 'display_name', 'recorded_status',
-    'requested_outcome', 'approved_outcome', 'recorded_version', 'generation', 'projection_revision'],
+    'requested_outcome', 'approved_outcome', 'recorded_version', 'generation', 'projection_revision', 'event_label', 'unit_label'],
   cursors: ['event_id', 'unit_id', 'generation', 'projection_revision', 'snapshot_hash'],
 } as const;
 const DISPLAY_HEADERS: Record<ProjectionSheetKind, readonly string[]> = {
   attendance: ['Event ID', 'Unit ID', 'Person ID', 'Event', 'Unit', 'Name', 'Observed attendance',
     'In current roster', 'Generation', 'Projection revision'],
   decisions: ['Event ID', 'Unit ID', 'Person ID', 'Request ID', 'Name', 'Recorded status',
-    'Requested outcome', 'Approved outcome', 'Recorded version', 'Generation', 'Projection revision'],
+    'Requested outcome', 'Approved outcome', 'Recorded version', 'Generation', 'Projection revision', 'Event', 'Unit'],
   cursors: ['Event ID', 'Unit ID', 'Generation', 'Projection revision', 'Snapshot hash'],
 };
 const KINDS: ProjectionSheetKind[] = ['attendance', 'decisions', 'cursors'];
@@ -149,11 +149,11 @@ function key(row: Row, kind: ProjectionSheetKind): string {
   return kind === 'decisions' ? id(row.request_id) : JSON.stringify(kind === 'attendance'
     ? [id(row.event_id), id(row.unit_id), id(row.person_id)] : [id(row.event_id), id(row.unit_id)]);
 }
-interface Table { headers: string[]; rows: Row[] }
-function readTable(sheet: ProjectionSheetPort, kind: ProjectionSheetKind, maxRows: number): Table {
+interface Table { headers: string[]; rows: Row[]; sourceValues: unknown[][] }
+function readTable(sheet: ProjectionSheetPort, kind: ProjectionSheetKind, maxRows: number,
+  expected: readonly string[] = PROJECTION_HEADERS[kind]): Table {
   const height = sheet.getLastRow();
   const width = sheet.getLastColumn();
-  const expected = PROJECTION_HEADERS[kind];
   if (!Number.isSafeInteger(height) || height < 2 || height > maxRows + 2 || width !== expected.length) {
     fail('projection_schema', 'The projection sheet schema or size needs review.');
   }
@@ -178,9 +178,54 @@ function readTable(sheet: ProjectionSheetPort, kind: ProjectionSheetKind, maxRow
     found.add(rowKey);
     positive(row.generation); positive(row.projection_revision);
     if (kind === 'decisions') { id(row.event_id); id(row.unit_id); id(row.person_id); positive(row.recorded_version); }
+    if (expected.includes('event_label')) { label(row.event_label); label(row.unit_label); }
     return row;
   });
-  return { headers: names, rows };
+  return { headers: names, rows, sourceValues: values };
+}
+
+/** Explicit paused maintenance only. The native host must hold the shared lock,
+ * check all three output protections/ownership, and refuse outstanding claims.
+ * Upgrades only the immediately preceding eleven-column recorded-output schema.
+ * Labels come from consistently published attendance scopes, never guessed IDs.
+ * One RAW write appends two columns; all original cells and cursors are preserved.
+ */
+export function upgradeRecordedDecisionLabels(sheets: ProjectionSheets, options: { generation: number }): { upgraded: boolean; rows: number } {
+  const generation = positive(options.generation), target = sheets.decisions;
+  if (target.getLastRow() === 0 && target.getLastColumn() === 0) return { upgraded: false, rows: 0 };
+  const width = target.getLastColumn();
+  if (width !== 11 && width !== PROJECTION_HEADERS.decisions.length) fail('projection_schema', 'The recorded-output upgrade requires the exact preceding or current schema.');
+  const decisions = readTable(target, 'decisions', 2000, width === 11 ? PROJECTION_HEADERS.decisions.slice(0, 11) : PROJECTION_HEADERS.decisions);
+  if (decisions.rows.some(row => row.generation !== generation)) fail('wrong_generation', 'Recorded outputs belong to another deployment generation.');
+  if (width === PROJECTION_HEADERS.decisions.length) return { upgraded: false, rows: decisions.rows.length };
+  const attendance = readTable(sheets.attendance, 'attendance', 2000), cursors = readTable(sheets.cursors, 'cursors', 2000);
+  if ([...attendance.rows, ...cursors.rows].some(row => row.generation !== generation)) fail('wrong_generation', 'Published label sources belong to another deployment generation.');
+  const scopeKey = (row: Row) => JSON.stringify([id(row.event_id), id(row.unit_id)]);
+  const published = new Map(cursors.rows.map(row => {
+    if (typeof row.snapshot_hash !== 'string') fail('projection_schema', 'The publication watermark hash is malformed.');
+    digest(row.snapshot_hash);
+    return [scopeKey(row), Number(row.projection_revision)] as const;
+  }));
+  const labels = new Map<string, [string, string]>();
+  for (const row of attendance.rows) {
+    const key = scopeKey(row), revision = published.get(key);
+    if (!revision || row.projection_revision !== revision) fail('projection_schema', 'Attendance labels do not match their publication watermark.');
+    const pair: [string, string] = [label(row.event_label), label(row.unit_label)];
+    if (labels.has(key) && !same(labels.get(key), pair)) fail('projection_conflict', 'Published attendance labels disagree for a recorded-output scope.');
+    labels.set(key, pair);
+  }
+  const additions: Cell[][] = [['event_label', 'unit_label'], ['Event', 'Unit'], ...decisions.rows.map(row => {
+    const key = scopeKey(row), pair = labels.get(key), revision = published.get(key);
+    if (!pair || !revision || row.projection_revision !== revision) fail('projection_schema', 'A recorded request lacks consistent published event and unit labels.');
+    return [...pair];
+  })];
+  const expected = decisions.sourceValues.map((row, index) => [...row, ...additions[index]]);
+  // All validation precedes the sole append. A provider ambiguity requires a fresh
+  // read: a complete upgrade is idempotent; partial schemas are never guessed.
+  target.writeRaw(1, 12, additions);
+  const actual = readTable(target, 'decisions', 2000);
+  if (!same(actual.sourceValues, expected)) fail('projection_readback', 'The recorded-output upgrade did not preserve and verify every original cell.');
+  return { upgraded: true, rows: decisions.rows.length };
 }
 
 /** Explicit setup only. Initializes EMPTY, already configured tabs; existing sheets
@@ -258,7 +303,7 @@ export function publishProjectionSnapshot(
       event_id: snapshot.event.eventId, unit_id: snapshot.unit.unitId, person_id: person.personId, request_id: request.requestId,
       display_name: person.displayName, recorded_status: request.status, requested_outcome: request.requestedOutcome,
       approved_outcome: request.status === 'Approved' ? request.requestedOutcome : '', recorded_version: request.version,
-      generation, projection_revision: snapshot.revision,
+      generation, projection_revision: snapshot.revision, event_label: snapshot.event.label, unit_label: snapshot.unit.label,
     });
   }
   upsert('cursors', { event_id: snapshot.event.eventId, unit_id: snapshot.unit.unitId, generation, projection_revision: snapshot.revision, snapshot_hash: hash });

@@ -17,10 +17,12 @@ function shamrockV3StagingSetup() {
   var host = shamrockV3StagingHost_();
   host.pause();
   host.initializeProjections();
+  host.repairPresentation();
   return host.setup();
 }
 
 function shamrockV3StagingPause() { return shamrockV3StagingHost_().pause(); }
+function shamrockV3StagingRepairPresentation() { return shamrockV3StagingHost_().repairPresentation(); }
 function shamrockV3StagingImportConfig() {
   return SHAMROCKV3.importStagingConfiguration({
     PropertiesService: PropertiesService,

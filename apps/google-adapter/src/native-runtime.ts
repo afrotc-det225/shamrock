@@ -1,14 +1,16 @@
 /** Native Google services for the explicitly configured staging host. No resources,
  * permissions or triggers are provisioned by this module. */
 import { AdapterError, type AdapterConfig, type Signer, type Transport } from './index.js';
-import { type SheetPort, type ScriptLockPort } from './apps-script.js';
-import { appendProjectionDecisionSlots, initializeDynamicDecisionSlots, DYNAMIC_DECISION_HEADERS } from './decision-slots.js';
+import { createGoogleSigner, type SheetPort, type ScriptLockPort } from './apps-script.js';
+import { appendProjectionDecisionSlots, initializeDynamicDecisionSlots, readDynamicDecisionSlots, DYNAMIC_DECISION_HEADERS } from './decision-slots.js';
+import { planPresentationRepair, planPresentationGrowth, verifyPresentation, chunkPresentationRequests,
+  type PresentationInput, type PresentationSurface, type SheetsMetadata } from './presentation.js';
 import {
   createStagingHost, HOST_PROPERTIES, parseStagingHostConfig,
-  type ExistingSheetReference, type StagingHostRuntime,
+  type ExistingSheetReference, type StagingHostConfig, type StagingHostRuntime,
 } from './staging-host.js';
 import {
-  consumeProjectionJobs, initializeProjectionSheets, PROJECTION_HEADERS,
+  consumeProjectionJobs, initializeProjectionSheets, upgradeRecordedDecisionLabels, PROJECTION_HEADERS,
   type ProjectionClaim, type ProjectionClaimStore, type ProjectionSheetKind,
   type ProjectionSheetPort, type ProjectionSheets,
 } from './projection.js';
@@ -17,6 +19,8 @@ export const NATIVE_PROPERTIES = {
   projectionConfig: 'SHAMROCK_V3_PROJECTION_CONFIG',
   projectionReceipt: 'SHAMROCK_V3_PROJECTION_SETUP',
   projectionClaim: 'SHAMROCK_V3_PROJECTION_CLAIM',
+  presentationConfig: 'SHAMROCK_V3_PRESENTATION_CONFIG',
+  presentationReceipt: 'SHAMROCK_V3_PRESENTATION_SETUP',
 } as const;
 
 interface NativeProperties {
@@ -53,10 +57,19 @@ export interface NativeProjectionConfig {
   decisions: ExistingSheetReference;
   cursors: ExistingSheetReference;
 }
+export interface NativePresentationConfig {
+  version: 1;
+  environment: 'staging';
+  generation: number;
+  legend: ExistingSheetReference;
+}
 type Json = Record<string, unknown>;
 type Cell = string | number | boolean;
 type BoundSheet = SheetPort & ProjectionSheetPort & { getSheetId(): number };
 const KINDS: ProjectionSheetKind[] = ['attendance', 'decisions', 'cursors'];
+// Invalidate setup evidence when the protected slot identity/schema contract changes,
+// even when the private resource IDs and staging generation remain the same.
+const NATIVE_CONTRACT = 'dynamic-decision-v2:presentation-v1';
 
 function fail(code: string, message: string): never { throw new AdapterError(code, message); }
 function object(value: unknown): Json {
@@ -85,7 +98,26 @@ function columnName(column: number): string {
   return result;
 }
 
-export function createNativeStagingRuntime(services: NativeStagingServices): StagingHostRuntime & { initializeProjections(): { status: string } } {
+/** Optional presentation binds only an existing, separate tab in the reviewed operator workbook. */
+export function parseNativePresentationConfig(value: unknown, host: StagingHostConfig, projection: NativeProjectionConfig): NativePresentationConfig {
+  const v = object(value);
+  if (Object.keys(v).sort().join(',') !== 'environment,generation,legend,version'
+    || v.version !== 1 || v.environment !== 'staging' || positive(v.generation) !== host.generation
+    || projection.environment !== 'staging' || projection.generation !== host.generation
+    || host.decisionInput?.mode !== 'projection') fail('native_configuration', 'Presentation requires reviewed staging projection and dynamic input bindings.');
+  const raw = object(v.legend);
+  if (Object.keys(raw).sort().join(',') !== 'sheetId,spreadsheetId') fail('native_configuration', 'The presentation legend binding contains unexpected fields.');
+  const legend = reference(raw);
+  if ([projection.attendance, projection.decisions, host.decisionInput].some(ref => ref.spreadsheetId !== legend.spreadsheetId || sameRef(ref, legend))
+    || legend.spreadsheetId === host.journal.spreadsheetId || sameRef(legend, projection.cursors)) {
+    fail('native_configuration', 'Presentation surfaces and a distinct legend must share the reviewed operator workbook.');
+  }
+  return { version: 1, environment: 'staging', generation: host.generation, legend };
+}
+
+export function createNativeStagingRuntime(services: NativeStagingServices): StagingHostRuntime & {
+  initializeProjections(): { status: string }; repairPresentation(): { status: string; requests?: number };
+} {
   const properties = services.PropertiesService.getScriptProperties();
   const nativeLock = services.LockService.getScriptLock();
   let lockHeld = false;
@@ -320,7 +352,7 @@ export function createNativeStagingRuntime(services: NativeStagingServices): Sta
         || (h.config.decisionInput && sameRef(config[kind], h.config.decisionInput))
         || KINDS.some(other => other !== kind && sameRef(config[kind], config[other]))) fail('native_configuration', 'Projection outputs must be distinct from each other, the private journal, and decision inputs.');
     }
-    const bytes = services.Utilities.computeDigest(services.Utilities.DigestAlgorithm.SHA_256, `${h.raw}\n${saved.raw}`, services.Utilities.Charset.UTF_8);
+    const bytes = services.Utilities.computeDigest(services.Utilities.DigestAlgorithm.SHA_256, `${NATIVE_CONTRACT}\n${h.raw}\n${saved.raw}`, services.Utilities.Charset.UTF_8);
     const fingerprint = bytes.map(byte => (byte & 255).toString(16).padStart(2, '0')).join('');
     if (!/^[a-f0-9]{64}$/.test(fingerprint)) fail('native_configuration', 'The projection binding digest is invalid.');
     const sheets: ProjectionSheets = { attendance: bindSheet(config.attendance), decisions: bindSheet(config.decisions), cursors: bindSheet(config.cursors) };
@@ -382,6 +414,136 @@ export function createNativeStagingRuntime(services: NativeStagingServices): Sta
       },
     };
   }
+  function dynamicContext(binding: NonNullable<StagingHostConfig['decisionInput']> & { mode: 'projection' }) {
+    const { config } = host();
+    return { binding, config: { baseUrl: config.workerOrigin, keyId: config.keyId, environment: 'staging' as const, generation: config.generation },
+      signer: createGoogleSigner(services.Utilities, properties.getProperty(HOST_PROPERTIES.secret) ?? '') };
+  }
+  function presentationBinding(bound: ReturnType<typeof projectionBinding>) {
+    if (!properties.getProperty(NATIVE_PROPERTIES.presentationConfig)) return undefined;
+    const saved = readJson(NATIVE_PROPERTIES.presentationConfig);
+    const config = parseNativePresentationConfig(saved.value, bound.host, bound.config);
+    const fingerprint = services.Utilities.computeDigest(services.Utilities.DigestAlgorithm.SHA_256,
+      `presentation-v1\n${bound.fingerprint}\n${saved.raw}`, services.Utilities.Charset.UTF_8)
+      .map(byte => (byte & 255).toString(16).padStart(2, '0')).join('');
+    return { config, fingerprint };
+  }
+  function presentationInput(bound: ReturnType<typeof projectionBinding>, binding: NonNullable<ReturnType<typeof presentationBinding>>, checkSlots: boolean): PresentationInput {
+    const inputBinding = bound.host.decisionInput;
+    if (inputBinding?.mode !== 'projection') fail('native_configuration', 'Presentation requires dynamic decision inputs.');
+    for (const kind of ['attendance', 'decisions'] as const) bound.assertProtected(kind, PROJECTION_HEADERS[kind]);
+    assertDecisionProtection(inputBinding, DYNAMIC_DECISION_HEADERS.filter(header => header !== 'draft_decision'));
+    const legendProtection = protection(binding.config.legend);
+    if (Array.isArray(legendProtection.unprotectedRanges) && legendProtection.unprotectedRanges.length) fail('protection_unverified', 'The presentation legend must be fully protected.');
+    if (checkSlots) readDynamicDecisionSlots(bindSheet(inputBinding), dynamicContext(inputBinding));
+    const spreadsheetId = binding.config.legend.spreadsheetId;
+    const metadataFields = 'spreadsheetId,sheets(properties,tables,filterViews,conditionalFormats,merges,protectedRanges,developerMetadata)';
+    const metadata = api(`${sheetsUrl(spreadsheetId)}?fields=${encodeURIComponent(metadataFields)}`);
+    if (metadata.spreadsheetId !== spreadsheetId || !Array.isArray(metadata.sheets)) fail('presentation_metadata', 'Presentation workbook metadata could not be verified.');
+    const sheetMetadata = (ref: ExistingSheetReference) => {
+      const matches = (metadata.sheets as unknown[]).map(object).filter(sheet => object(sheet.properties).sheetId === ref.sheetId);
+      if (matches.length !== 1) fail('presentation_metadata', 'A presentation tab is missing or ambiguous.');
+      return matches[0];
+    };
+    const legendMetadata = sheetMetadata(binding.config.legend);
+    const legendProperties = object(legendMetadata.properties);
+    if (legendProperties.hidden !== true) fail('presentation_legend', 'The explicitly bound legend must already be hidden.');
+    const legend = bindSheet(binding.config.legend);
+    if (legend.getLastColumn() > 2 || legend.getLastRow() > 6) fail('presentation_legend', 'The legend tab contains unrelated data.');
+    const refs = [bound.config.attendance, bound.config.decisions, inputBinding];
+    const roles: PresentationSurface['role'][] = ['attendance', 'decisions', 'decision-input'];
+    const surfaces: PresentationSurface[] = refs.map((ref, index) => {
+      const meta = sheetMetadata(ref); const p = object(meta.properties); const grid = object(p.gridProperties);
+      const sheet = bindSheet(ref); const columns = sheet.getLastColumn(); const rows = sheet.getLastRow();
+      const expected = index === 2 ? DYNAMIC_DECISION_HEADERS : PROJECTION_HEADERS[index === 0 ? 'attendance' : 'decisions'];
+      if (columns !== expected.length || rows < 2) fail('presentation_headers', 'Initialize the reviewed presentation schemas before styling.');
+      const gridRowCount = positive(grid.rowCount); const gridColumnCount = positive(grid.columnCount);
+      if (gridRowCount > 2002 || gridColumnCount > 100 || gridRowCount < Math.max(3, rows) || gridColumnCount < columns) fail('presentation_bounds', 'The presentation grid exceeds its reviewed bounds.');
+      const capacityRows = index === 2 ? inputBinding.maxSlots + 2 : gridRowCount;
+      if (capacityRows > gridRowCount) fail('presentation_bounds', 'The decision input grid is smaller than its configured capacity.');
+      // Resolve actual header order from the single fresh bounded GridData read
+      // below, rather than separate values/formula requests for each surface.
+      return { role: roles[index], sheetId: ref.sheetId, title: openNative(ref).getName(), headers: [...expected], displayHeaders: [],
+        dataEndRow: Math.max(3, rows), gridRowCount, gridColumnCount, capacityRows };
+    });
+    const quotedRange = (title: string, endColumn: number, startRow: number, endRow: number) => `'${title.replace(/'/g, "''")}'!A${startRow}:${columnName(endColumn)}${endRow}`;
+    const ranges = surfaces.flatMap(surface => [quotedRange(surface.title, surface.headers.length, 1, 3),
+      quotedRange(surface.title, surface.headers.length, surface.capacityRows!, surface.capacityRows!)]);
+    ranges.push(quotedRange(openNative(binding.config.legend).getName(), 2, 1, 6));
+    const gridFields = 'spreadsheetId,sheets(properties(sheetId),data(startRow,startColumn,rowData(values(userEnteredValue,userEnteredFormat,dataValidation,note)),rowMetadata,columnMetadata))';
+    const cells = api(`${sheetsUrl(spreadsheetId)}?${ranges.map(range => `ranges=${encodeURIComponent(range)}`).join('&')}&includeGridData=true&fields=${encodeURIComponent(gridFields)}`);
+    if (cells.spreadsheetId !== spreadsheetId || !Array.isArray(cells.sheets)) fail('presentation_metadata', 'Presentation cell read-back is unavailable.');
+    for (const raw of cells.sheets) {
+      const cellSheet = object(raw); const id = object(cellSheet.properties).sheetId;
+      const target = (metadata.sheets as unknown[]).map(object).find(sheet => object(sheet.properties).sheetId === id);
+      if (!target) fail('presentation_metadata', 'Presentation cell metadata references an unexpected tab.');
+      target.data = cellSheet.data;
+    }
+    // The bounded GridData read supplies fresh literal schema/display headers,
+    // arbitrary column order and formula rejection in the same request as styles.
+    for (const surface of surfaces) {
+      const meta = sheetMetadata({ spreadsheetId, sheetId: surface.sheetId });
+      if (!Array.isArray(meta.data)) fail('presentation_headers', 'Presentation header read-back is unavailable.');
+      const blocks = meta.data.map(object);
+      const headers: string[][] = [[], []];
+      for (let row = 0; row < 2; row++) for (let column = 0; column < surface.headers.length; column++) {
+        const block = blocks.find(block => (Number(block.startRow) || 0) <= row && (Number(block.startColumn) || 0) <= column
+          && Array.isArray(block.rowData) && block.rowData.length > row - (Number(block.startRow) || 0));
+        const rowData = block && object((block.rowData as unknown[])[row - (Number(block.startRow) || 0)]);
+        const values = rowData?.values;
+        const cell = Array.isArray(values) ? values[column - (Number(block!.startColumn) || 0)] : undefined;
+        const entered = cell && object(cell).userEnteredValue;
+        const value = entered && object(entered).stringValue;
+        if (typeof value !== 'string' || !value.trim() || Object.keys(object(entered)).some(key => key !== 'stringValue')) fail('presentation_headers', 'Presentation headers must be nonempty literal strings.');
+        headers[row].push(value);
+      }
+      if (new Set(headers[0]).size !== surface.headers.length || surface.headers.some(header => !headers[0].includes(header))) fail('presentation_headers', 'Presentation machine headers are missing or ambiguous.');
+      surface.headers = headers[0]; surface.displayHeaders = headers[1];
+    }
+    return { surfaces, legend: { sheetId: binding.config.legend.sheetId, title: openNative(binding.config.legend).getName(),
+      values: legend.getLastRow() ? legend.getRange(1, 1, legend.getLastRow(), 2).getValues() : [] }, metadata: metadata as unknown as SheetsMetadata, requireCellReadback: true };
+  }
+  function applyPresentation(bound: ReturnType<typeof projectionBinding>, mode: 'repair' | 'growth'): number {
+    const binding = presentationBinding(bound);
+    if (!binding) return 0;
+    if (mode === 'growth' && properties.getProperty(NATIVE_PROPERTIES.presentationReceipt) !== binding.fingerprint) fail('presentation_setup_required', 'Repair the configured presentation while staging is paused before publication.');
+    let input = presentationInput(bound, binding, mode === 'repair');
+    let requestCount = 0;
+    for (let phase = 0; phase < (mode === 'repair' ? 2 : 1); phase++) {
+      const plan = mode === 'repair' ? planPresentationRepair(input) : planPresentationGrowth(input);
+      if (mode === 'repair' && phase === 0) {
+        properties.deleteProperty(NATIVE_PROPERTIES.presentationReceipt);
+        if (properties.getProperty(NATIVE_PROPERTIES.presentationReceipt) !== null) fail('presentation_unverified', 'The previous presentation receipt could not be invalidated.');
+      }
+      for (const requests of chunkPresentationRequests(plan.requests)) {
+        api(`${sheetsUrl(binding.config.legend.spreadsheetId)}:batchUpdate`, { requests });
+        // These plans only mutate metadata and the explicit legend. Keep verified
+        // operational value/extents and Drive ACL reads within this same lock;
+        // obtain fresh formats, tables, protection and headers via bounded GridData.
+        const prefix = sheetsUrl(binding.config.legend.spreadsheetId);
+        const formulaMask = encodeURIComponent('sheets(properties(sheetId),data(rowData(values(userEnteredValue(formulaValue)))))');
+        const legendChanged = requests.some(request => request.updateCells);
+        const legendValuesPrefix = `${prefix}/values/${encodeURIComponent(`'${input.legend.title.replace(/'/g, "''")}'`)}`;
+        for (const url of reads.keys()) {
+          if ((url.startsWith(`${prefix}?`) && !url.includes(formulaMask))
+            || (legendChanged && url.startsWith(legendValuesPrefix))) reads.delete(url);
+        }
+        if (legendChanged) extents.delete(JSON.stringify([binding.config.legend.spreadsheetId, binding.config.legend.sheetId]));
+      }
+      requestCount += plan.requests.length;
+      // Google assigns native Table identities. A minimal create is followed by a
+      // fresh metadata read and a separate configuration phase, never guessed IDs.
+      if (mode !== 'repair' || !plan.requests.some(request => request.addTable)) break;
+      input = presentationInput(bound, binding, false);
+    }
+    const verified = verifyPresentation(presentationInput(bound, binding, false));
+    if (!verified.ready) fail('presentation_unverified', `Presentation read-back did not confirm managed tables, formats or validation (${verified.issues.slice(0, 3).join(', ')}). Repair remains incomplete.`);
+    if (mode === 'repair') {
+      properties.setProperty(NATIVE_PROPERTIES.presentationReceipt, binding.fingerprint);
+      if (properties.getProperty(NATIVE_PROPERTIES.presentationReceipt) !== binding.fingerprint) fail('presentation_unverified', 'The presentation setup receipt was not persisted.');
+    }
+    return requestCount;
+  }
   return {
     properties, utilities: services.Utilities, urlFetch: services.UrlFetchApp, scriptApp: services.ScriptApp,
     session: services.Session, formApp: { openById(id) {
@@ -405,8 +567,9 @@ export function createNativeStagingRuntime(services: NativeStagingServices): Sta
     nowSeconds: services.nowSeconds ?? (() => Math.floor(Date.now() / 1000)),
     configurationFingerprint() {
       const raw = properties.getProperty(NATIVE_PROPERTIES.projectionConfig) ?? '';
-      if (raw.length > 8000) fail('native_configuration', 'The projection configuration exceeds its bound.');
-      return services.Utilities.computeDigest(services.Utilities.DigestAlgorithm.SHA_256, raw, services.Utilities.Charset.UTF_8)
+      const presentation = properties.getProperty(NATIVE_PROPERTIES.presentationConfig) ?? '';
+      if (raw.length > 8000 || presentation.length > 8000) fail('native_configuration', 'The projection or presentation configuration exceeds its bound.');
+      return services.Utilities.computeDigest(services.Utilities.DigestAlgorithm.SHA_256, `${NATIVE_CONTRACT}\n${raw}\n${presentation}`, services.Utilities.Charset.UTF_8)
         .map(byte => (byte & 255).toString(16).padStart(2, '0')).join('');
     },
     assertJournalPrivate(ref) {
@@ -424,11 +587,16 @@ export function createNativeStagingRuntime(services: NativeStagingServices): Sta
         || context.config.baseUrl !== bound.host.workerOrigin || context.config.keyId !== bound.host.keyId) fail('native_configuration', 'Projection delivery differs from the verified host binding.');
       if (properties.getProperty(NATIVE_PROPERTIES.projectionReceipt) !== bound.fingerprint) fail('projection_setup_required', 'Initialize reviewed projection bindings while staging is paused.');
       const binding = bound.host.decisionInput;
+      const presentation = presentationBinding(bound);
+      if (presentation && properties.getProperty(NATIVE_PROPERTIES.presentationReceipt) !== presentation.fingerprint) fail('presentation_setup_required', 'Repair the configured presentation while staging is paused before publication.');
       return consumeProjectionJobs({ ...context, workerId: bound.config.workerId, lock: sharedLock, sheets: bound.sheets,
         assertProtected: bound.assertProtected, flush: () => services.SpreadsheetApp.flush(), claimStore: claimStore(bound.fingerprint),
-        ...(binding?.mode === 'projection' ? { publishDecisionSlots(snapshot) {
-          assertDecisionProtection(binding, DYNAMIC_DECISION_HEADERS.filter(header => header !== 'draft_decision'));
-          appendProjectionDecisionSlots(snapshot, bindSheet(binding), { binding, config: context.config, signer: context.signer });
+        ...(binding?.mode === 'projection' || presentation ? { publishDecisionSlots(snapshot) {
+          if (binding?.mode === 'projection') {
+            assertDecisionProtection(binding, DYNAMIC_DECISION_HEADERS.filter(header => header !== 'draft_decision'));
+            appendProjectionDecisionSlots(snapshot, bindSheet(binding), { binding, config: context.config, signer: context.signer });
+          }
+          if (presentation) applyPresentation(bound, 'growth');
         } } : {}),
       });
     },
@@ -437,12 +605,18 @@ export function createNativeStagingRuntime(services: NativeStagingServices): Sta
       const bound = projectionBinding();
       if (!sharedLock.tryLock(100)) fail('projection_busy', 'Another staging operation is in progress.');
       try {
+        if (properties.getProperty(HOST_PROPERTIES.enabled) === 'true') fail('pause_required', 'Pause staging before initializing projection outputs.');
         if (claimStore(bound.fingerprint).load()) fail('claim_integrity', 'Reconcile the outstanding claim before initializing output bindings.');
         for (const kind of KINDS) bound.assertProtected(kind, PROJECTION_HEADERS[kind]);
+        upgradeRecordedDecisionLabels(bound.sheets, { generation: bound.host.generation });
         const binding = bound.host.decisionInput;
         if (binding?.mode === 'projection') {
-          assertDecisionProtection(binding, DYNAMIC_DECISION_HEADERS.filter(header => header !== 'draft_decision'), true);
-          initializeDynamicDecisionSlots(bindSheet(binding));
+          // The protected origin column is an additive upgrade; validate all existing
+          // columns before the migration and require the complete schema afterward.
+          assertDecisionProtection(binding, DYNAMIC_DECISION_HEADERS.filter(header => header !== 'draft_decision' && header !== 'slot_origin_row' && header !== 'slot_context_hash'), true);
+          const sheet = bindSheet(binding);
+          initializeDynamicDecisionSlots(sheet, sheet.getLastRow() ? dynamicContext(binding) : undefined);
+          assertDecisionProtection(binding, DYNAMIC_DECISION_HEADERS.filter(header => header !== 'draft_decision'));
         }
         initializeProjectionSheets(bound.sheets);
         services.SpreadsheetApp.flush();
@@ -452,10 +626,24 @@ export function createNativeStagingRuntime(services: NativeStagingServices): Sta
         return { status: 'projection-ready-paused' };
       } finally { sharedLock.releaseLock(); }
     },
+    repairPresentation() {
+      if (properties.getProperty(HOST_PROPERTIES.enabled) === 'true') fail('pause_required', 'Pause staging before repairing spreadsheet presentation.');
+      const bound = projectionBinding();
+      if (!presentationBinding(bound)) return { status: 'presentation-not-configured' };
+      if (!sharedLock.tryLock(100)) fail('projection_busy', 'Another staging operation is in progress.');
+      try {
+        if (properties.getProperty(HOST_PROPERTIES.enabled) === 'true') fail('pause_required', 'Pause staging before repairing spreadsheet presentation.');
+        if (claimStore(bound.fingerprint).load()) fail('claim_integrity', 'Reconcile the outstanding projection claim before presentation repair.');
+        assertTrustedFile(bound.host.journal.spreadsheetId, 'application/vnd.google-apps.spreadsheet', false);
+        if (properties.getProperty(NATIVE_PROPERTIES.projectionReceipt) !== bound.fingerprint) fail('projection_setup_required', 'Initialize the reviewed projection schemas before presentation repair.');
+        const requests = applyPresentation(bound, 'repair');
+        return { status: 'presentation-ready-paused', requests };
+      } finally { sharedLock.releaseLock(); }
+    },
   };
 }
 
 export function createNativeStagingHost(services: NativeStagingServices) {
   const runtime = createNativeStagingRuntime(services);
-  return { ...createStagingHost(runtime), initializeProjections: () => runtime.initializeProjections() };
+  return { ...createStagingHost(runtime), initializeProjections: () => runtime.initializeProjections(), repairPresentation: () => runtime.repairPresentation() };
 }

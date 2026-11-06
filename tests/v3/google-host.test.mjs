@@ -374,8 +374,43 @@ test('a newly submitted request gets a usable dynamic row and later versions can
   const target = f.decisions.rows[2][1]; f.host.onDecisionEdit(f.editEvent());
   assert.equal(f.state.commands[1].payload.requestId, target); assert.equal(f.decisions.rows[2][5], 'Committed: Approved');
   assert.equal(f.decisions.rows[2][2], 1); assert.equal(f.decisions.rows[3][2], 2); assert.equal(f.decisions.rows[3][6], '');
+  const saved = f.decisions.rows[2][6];
   f.decisions.rows[3][3] = 'Approved'; [f.decisions.rows[2], f.decisions.rows[3]] = [f.decisions.rows[3], f.decisions.rows[2]];
-  assert.throws(() => f.host.onDecisionEdit(f.editEvent()), code('draft_target_changed')); assert.equal(f.state.commands.length, 2);
+  assert.deepEqual(f.host.onDecisionEdit(f.editEvent({ row: 4, value: 'Denied' })), { status: 'saved-draft-retained' });
+  assert.equal(f.decisions.rows[3][6], saved); assert.equal(f.state.commands.length, 2);
+  f.host.onDecisionEdit(f.editEvent());
+  assert.equal(f.state.commands.length, 3); assert.equal(f.state.commands[2].payload.expectedVersion, 2);
+  assert.equal(f.decisions.rows[3][6], saved);
+});
+
+function twoDynamicRows() {
+  const f = fixture(); delete f.config.decisionInput.slots; Object.assign(f.config.decisionInput, { mode: 'projection', maxSlots: 5 }); f.saveConfig();
+  f.decisions.rows = []; initializeDynamicDecisionSlots(f.decisions);
+  f.runtime.assertDecisionProtection = (_, headers) => assert.deepEqual(headers, DYNAMIC_DECISION_HEADERS.filter(h => h !== 'draft_decision'));
+  appendProjectionDecisionSlots({ revision: 1, event: { eventId: 'event.one', label: 'Event' }, unit: { unitId: 'unit.one', label: 'Unit' }, rows: [{ personId: 'person.one', displayName: 'Synthetic cadet', observedCode: 'P', requests: ['request.one', 'request.two'].map(requestId => ({ requestId, status: 'Submitted', requestedOutcome: 'E', version: 1 })) }] }, f.decisions, {
+    binding: f.config.decisionInput, config: { environment: 'staging', generation: 1 }, signer: { sha256: value => createHash('sha256').update(value).digest('hex') },
+  });
+  f.activate(); f.decisions.rows[3][3] = 'Approved'; return f;
+}
+test('a complete-row sort during lock waiting cannot retarget a same-value edit', () => {
+  const f = twoDynamicRows(); const event = f.editEvent(); const acquire = f.lock.tryLock.bind(f.lock); f.lock.held = true;
+  f.lock.tryLock = milliseconds => {
+    assert.equal(milliseconds, 25000); [f.decisions.rows[2], f.decisions.rows[3]] = [f.decisions.rows[3], f.decisions.rows[2]];
+    f.lock.held = false; return acquire(milliseconds);
+  };
+  assert.throws(() => f.host.onDecisionEdit(event), code('draft_target_changed'));
+  assert.equal(f.state.commands.length, 0); assert.ok(f.decisions.rows.slice(2).every(row => row[6] === '' && row[3] === 'Approved'));
+  f.lock.tryLock = acquire;
+  f.host.onDecisionEdit(f.editEvent({ row: 4 }));
+  assert.equal(f.state.commands[0].payload.requestId, 'request.one');
+  assert.equal(f.state.commands[0].actor.principalId, 'principal.cadet');
+});
+test('a timeout after sorting never annotates a different same-value request', () => {
+  const f = twoDynamicRows(); const event = f.editEvent(); f.lock.held = true;
+  f.lock.tryLock = () => { [f.decisions.rows[2], f.decisions.rows[3]] = [f.decisions.rows[3], f.decisions.rows[2]]; return false; };
+  assert.equal(f.host.onDecisionEdit(event).notice, 'input-changed');
+  assert.equal(f.decisions.notes.size, 0); assert.equal(f.state.commands.length, 0);
+  assert.ok(f.decisions.rows.slice(2).every(row => row[6] === ''));
 });
 
 test('500 protected dynamic slots use bounded bulk reads and one state-only reconciliation write', () => {
