@@ -9,7 +9,7 @@ export interface AttendanceLayoutInput {
 type Request = Record<string, unknown>;
 const WIDTHS: Record<string, number> = {
   last_name: 110, first_name: 100, as_year: 60, flight: 75, squadron: 60,
-  overall_attendance_pct: 68, llab_attendance_pct: 68,
+  overall_attendance_pct: 75, llab_attendance_pct: 75,
 };
 function validate(input: AttendanceLayoutInput): void {
   if (!Number.isSafeInteger(input.sheetId) || input.sheetId < 0 || !Number.isSafeInteger(input.dataEndRow)
@@ -30,7 +30,10 @@ function columns(input: AttendanceLayoutInput, headers: readonly string[]): Requ
   const requests: Request[] = [];
   for (const header of headers) {
     const index = input.headers.indexOf(header), event = input.eventHeaders.includes(header);
-    const width = event ? 70 : WIDTHS[header];
+    // Native Table headers reserve room for their menu. Fit whole short words
+    // such as Mando and Secondary without returning to oversized 130px cells.
+    const longestWord = Math.max(0, ...input.labels[index].split(/\s+/).map(word => word.length));
+    const width = event ? Math.max(75, Math.min(95, Math.ceil((34 + longestWord * 6) / 5) * 5)) : WIDTHS[header];
     if (width === undefined) continue;
     requests.push(dimension(input.sheetId, 'COLUMNS', index, index + 1, width));
     requests.push(format(input, 1, 2, index, index + 1, {
@@ -45,10 +48,23 @@ function columns(input: AttendanceLayoutInput, headers: readonly string[]): Requ
 }
 function rows(input: AttendanceLayoutInput, startRow: number): Request[] {
   if (startRow >= input.dataEndRow) return [];
-  return [dimension(input.sheetId, 'ROWS', startRow, input.dataEndRow, 23),
+  const requests = [dimension(input.sheetId, 'ROWS', startRow, input.dataEndRow, 23),
     format(input, startRow, input.dataEndRow, 0, input.headers.length, {
       textFormat: { fontFamily: 'Roboto', fontSize: 9 }, verticalAlignment: 'MIDDLE', wrapStrategy: 'CLIP',
     }, 'userEnteredFormat.textFormat.fontFamily,userEnteredFormat.textFormat.fontSize,userEnteredFormat.verticalAlignment,userEnteredFormat.wrapStrategy')];
+  for (const header of input.eventHeaders) {
+    const column = input.headers.indexOf(header);
+    requests.push(format(input, startRow, input.dataEndRow, column, column + 1, {
+      numberFormat: { type: 'TEXT' }, horizontalAlignment: 'CENTER', textFormat: { bold: true },
+    }, 'userEnteredFormat.numberFormat,userEnteredFormat.horizontalAlignment,userEnteredFormat.textFormat.bold'));
+  }
+  for (const header of ['overall_attendance_pct', 'llab_attendance_pct']) {
+    const column = input.headers.indexOf(header); if (column < 0) continue;
+    requests.push(format(input, startRow, input.dataEndRow, column, column + 1, {
+      numberFormat: { type: 'PERCENT', pattern: '0.0%' }, horizontalAlignment: 'CENTER',
+    }, 'userEnteredFormat.numberFormat,userEnteredFormat.horizontalAlignment'));
+  }
+  return requests;
 }
 function headerHeight(input: AttendanceLayoutInput): number {
   const longest = Math.max(0, ...input.eventHeaders.map(h => input.labels[input.headers.indexOf(h)].length));
