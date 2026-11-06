@@ -1,3 +1,4 @@
+import { recoverAdminEffect } from './effect-recovery.js';
 import { transitionCommand, transitionStatus, transitionArchive } from './transitions.js';
 import { planNotifications, notificationStatus, processNotificationTask, notificationDelivery } from './notifications.js';
 import { acceptAttendanceCorrection } from './corrections.js';
@@ -437,6 +438,7 @@ export default {
         return json(await acceptAdminCommand(env, input));
       }
       if (url.pathname === '/v1/admin/snapshot' && !url.search) return json(await frontendSnapshot(env, input));
+      if (url.pathname === '/v1/admin/effects/recover' && !url.search) return json(await recoverAdminEffect(env, input));
       for (const action of ['claim', 'project', 'ack'] as const) {
         if (url.pathname === `/v1/admin/effects/${action}` && !url.search) return json(await adminEffect(env, action, input));
       }

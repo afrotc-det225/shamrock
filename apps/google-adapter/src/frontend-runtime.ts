@@ -16,7 +16,31 @@ import { buildExcusalPublicationTables, planExcusalPublication, planDashboardPub
 import type { DashboardAction } from './frontend-dashboard.js';
 import type { SnapshotRevision } from '../../../packages/domain/src/admin.js';
 
-export const FRONTEND_PROPERTIES = { config: 'SHAMROCK_V3_FRONTEND_CONFIG', claim: 'SHAMROCK_V3_FRONTEND_CLAIM', pause: 'SHAMROCK_V3_FRONTEND_PAUSED' } as const;
+export const FRONTEND_PROPERTIES = { config: 'SHAMROCK_V3_FRONTEND_CONFIG', claim: 'SHAMROCK_V3_FRONTEND_CLAIM', pause: 'SHAMROCK_V3_FRONTEND_PAUSED', resumeReceipt: 'SHAMROCK_V3_FRONTEND_RESUME_RECEIPT' } as const;
+
+/** An explicit owner-private operator request, consumed once before clearing a pause.
+ * It cannot repeatedly override a later automatic/manual pause on timer invocations. */
+export function consumeFrontendResume(input: {
+  request: { requestId: string; sequence: number; stateSha256: string }; readStateSha256(): string;
+  properties: { getProperty(key: string): string | null; setProperty(key: string, value: string): unknown; deleteProperty(key: string): unknown };
+  lock: ScriptLockPort;
+}): 'already-consumed' | 'resumed' {
+  const { request, properties, lock } = input;
+  if (!id(request?.requestId) || !natural(request?.sequence) || request.sequence < 1 || !/^[a-f0-9]{64}$/.test(request?.stateSha256 ?? '')
+    || Object.keys(request).sort().join(',') !== 'requestId,sequence,stateSha256') fail('frontend_control', 'An exact reviewed resume request is required.');
+  if (!lock.tryLock(10000)) fail('frontend_busy', 'Another adapter operation is active.');
+  try {
+    const prior = properties.getProperty(FRONTEND_PROPERTIES.resumeReceipt);
+    if (prior === canonical(request)) return 'already-consumed';
+    if (prior && (record(JSON.parse(prior)).sequence >= request.sequence || record(JSON.parse(prior)).requestId === request.requestId)) fail('frontend_control', 'A consumed resume request cannot change its checkpoint.');
+    if (request.stateSha256 !== input.readStateSha256()) fail('frontend_control', 'The private checkpoint changed after operator review.');
+    properties.setProperty(FRONTEND_PROPERTIES.resumeReceipt, canonical(request));
+    if (properties.getProperty(FRONTEND_PROPERTIES.resumeReceipt) !== canonical(request)) fail('frontend_control', 'Resume consumption did not persist.');
+    properties.deleteProperty(FRONTEND_PROPERTIES.pause);
+    if (properties.getProperty(FRONTEND_PROPERTIES.pause) !== null) fail('frontend_control', 'The pause override did not clear. Submit a new reviewed resume request.');
+    return 'resumed';
+  } finally { lock.releaseLock(); }
+}
 type Kind = 'directory' | 'leadership' | 'attendance';
 const KINDS: Kind[] = ['directory', 'leadership', 'attendance'];
 type SquadronQueue = 'blue' | 'gold';
@@ -48,6 +72,7 @@ export interface FrontendRefreshPorts {
   config: AdapterConfig;
   workerId: string; principalId: string;
   signer: Signer; transport: Transport; lock: ScriptLockPort;
+  recovery?: { recoveryId: string; checkpointSha256: string; previousExpiry: string };
   enabled(): boolean;
   nowSeconds(): number;
   /** Verify owner, workbook isolation and private state storage before even claiming. */
@@ -318,6 +343,52 @@ export function consumeFrontendRefresh(runtime: FrontendRefreshPorts): { status:
       claim = parseClaim(response.effect); runtime.claimStore.save(claim);
       if (!equal(runtime.claimStore.load(), claim)) fail('frontend_claim', 'The frontend lease did not persist.');
     } else claim = parseClaim(claim);
+    if (Date.parse(claim.leaseExpiresAt) <= (runtime.nowSeconds() + LEASE_RESERVE_SECONDS) * 1000
+      || state.pending && !equal(state.pending.claim, claim)) {
+      const recovery = runtime.recovery;
+      if (!recovery || !id(recovery.recoveryId) || recovery.previousExpiry !== (state.pending?.claim.leaseExpiresAt ?? claim.leaseExpiresAt)
+        || runtime.signer.sha256(canonical(state)) !== recovery.checkpointSha256) fail('frontend_lease_expired', 'Review the retained checkpoint and submit an explicit lease recovery request.');
+      if (state.pending && (state.pending.claim.effectId !== claim.effectId || state.pending.claim.claimToken !== claim.claimToken)) fail('frontend_claim', 'Recovery cannot replace another publication claim.');
+      fenced = true; runtime.fenceEdits(); runtime.assertFenced(); runtime.refreshReads?.();
+      let providerState: 'before' | 'after' | 'partial' | 'completed' = state.completedClaim ? 'completed' : 'before';
+      if (state.completedClaim && (state.completedClaim.effectId !== claim.effectId || state.completedClaim.claimToken !== claim.claimToken)) fail('frontend_claim', 'Completed publication belongs to another claim.');
+      if (state.pending) {
+        const { plans, supplemental } = state.pending;
+        const reads = Object.fromEntries(KINDS.map(kind => [kind, runtime.readTable(kind)])) as Record<Kind, FrontendTableRead>;
+        const dashboard = supplemental ? runtime.supplemental!.readDashboard() : undefined;
+        const mainAfter = KINDS.every(k => verifyFrontendPublicationReadback(plans[k], reads[k]))
+          && (!supplemental || verifyDashboardPublicationReadback(supplemental.dashboard, dashboard!));
+        if (!mainAfter) {
+          KINDS.forEach(k => assertFrontendPublicationPreconditions(plans[k], reads[k]));
+          if (supplemental && dashboardReadFingerprint(dashboard!) !== supplemental.dashboard.expectedRead) fail('frontend_readback', 'Recovery found mixed Main state.');
+        } else if (KINDS.some(k => !runtime.verifyValidation(plans[k]))) fail('frontend_validation', 'Recovery must verify copied Main controls.');
+        let queuesAfter = mainAfter;
+        if (supplemental) {
+          const reads = Object.fromEntries(QUEUES.map(q => [q, runtime.supplemental!.readExcusal(q)])) as Record<SquadronQueue, FrontendTableRead>;
+          queuesAfter = QUEUES.every(q => verifyFrontendPublicationReadback(supplemental.excusals[q], reads[q]));
+          if (!queuesAfter) QUEUES.forEach(q => assertFrontendPublicationPreconditions(supplemental.excusals[q], reads[q]));
+          else if (QUEUES.some(q => !runtime.supplemental!.verifyValidation(supplemental.excusals[q]))) fail('frontend_validation', 'Recovery must verify copied decision controls.');
+        }
+        providerState = mainAfter && queuesAfter ? 'after' : mainAfter || queuesAfter ? 'partial' : 'before';
+      }
+      // Reuse the validated identity/config/clock, but sign the exact recovery path/body.
+      const signed = buildSignedFrontendRequest('project', { workerId: runtime.workerId, principalId: runtime.principalId, claim }, runtime.config, runtime.signer, runtime.nowSeconds());
+      const body = JSON.stringify({ environment: runtime.config.environment, generation: runtime.config.generation, principalId: runtime.principalId,
+        workerId: runtime.workerId, recoveryId: recovery.recoveryId, effectId: claim.effectId, claimToken: claim.claimToken,
+        previousExpiry: recovery.previousExpiry, checkpointSha256: recovery.checkpointSha256, providerState, producerFenced: true, exclusiveWriter: true });
+      const path = '/v1/admin/effects/recover';
+      signed.url = runtime.config.baseUrl + path; signed.body = body;
+      signed.headers['x-shamrock-signature'] = runtime.signer.hmacSha256(`POST\n${path}\n${signed.headers['x-shamrock-timestamp']}\n${runtime.signer.sha256(body)}`);
+      const response = runtime.transport.send(signed);
+      if (response.status !== 200 || typeof response.body !== 'string' || bytes(response.body) > 8192) fail('frontend_recovery', 'Lease recovery did not return a verified receipt.');
+      const receipt = record(JSON.parse(response.body));
+      if (receipt.status !== 'renewed' || receipt.recoveryId !== recovery.recoveryId || receipt.effectId !== claim.effectId || receipt.workerId !== runtime.workerId
+        || receipt.claimToken !== claim.claimToken || receipt.checkpointSha256 !== recovery.checkpointSha256 || receipt.providerState !== providerState) fail('frontend_recovery', 'Recovery receipt does not match the frozen request.');
+      claim = parseClaim({ ...claim, leaseExpiresAt: receipt.leaseExpiresAt });
+      runtime.claimStore.save(claim);
+      if (!equal(runtime.claimStore.load(), claim)) fail('frontend_recovery', 'Renewed claim did not persist.');
+      if (state.pending) { state.pending.claim = clone(claim); runtime.state.save(state); if (!equal(runtime.state.load(), state)) fail('frontend_recovery', 'Renewed private checkpoint did not persist.'); }
+    }
     const lease = claim;
     const checkLease = () => { if (Date.parse(lease.leaseExpiresAt) <= (runtime.nowSeconds() + LEASE_RESERVE_SECONDS) * 1000) fail('frontend_lease_expired', 'The frontend lease needs reconciliation before further writes.'); };
     checkLease();
@@ -424,6 +495,8 @@ export interface NativeFrontendConfig {
   version: 1; environment: 'staging'; generation: number; enabled: boolean;
   resourceReview: 'EXISTING_FICTIONAL_FRONTEND_REVIEWED_FOR_STAGING';
   workerId: string; principalId: string; stateFileId: string;
+  resumeRequest?: { requestId: string; sequence: number; stateSha256: string };
+  leaseRecovery?: { recoveryId: string; checkpointSha256: string; previousExpiry: string };
   main: { spreadsheetId: string; expectedTitle: string; sheets: Record<Kind, { sheetId: number; tableId: string }> };
   allowedFileEditors: string[];
   access: FrontendProtectionAccess;
@@ -534,11 +607,20 @@ export function createNativeFrontendRuntime(services: NativeFrontendServices,
     return { frontend: clone(f), host };
   }
   function refresh() {
-    if (properties.getProperty(FRONTEND_PROPERTIES.pause) === 'true') return { status: 'disabled' as const };
     const loaded = configuration(); if (!loaded || !loaded.frontend.enabled) return { status: 'disabled' as const };
     const { frontend: config, host } = loaded;
     const supplemental = config.supplemental?.enabled ? config.supplemental : undefined;
     const signer = createGoogleSigner(services.Utilities, properties.getProperty(HOST_PROPERTIES.secret) ?? '');
+    if (config.resumeRequest) {
+      consumeFrontendResume({ request: config.resumeRequest, properties, lock: services.LockService.getScriptLock(), readStateSha256() {
+        const info = inspectFile(config.stateFileId, host.expectedAutomationEmail);
+        if (info.mimeType !== 'application/json' || Number(info.size) > MAX_STATE_BYTES) fail('frontend_state', 'A private bounded checkpoint is required for resume.');
+        const state = api(`${driveUrl(config.stateFileId)}?alt=media`);
+        validState(state as FrontendPublicationState, config.generation);
+        return signer.sha256(canonical(state));
+      } });
+    }
+    if (properties.getProperty(FRONTEND_PROPERTIES.pause) === 'true') return { status: 'disabled' as const };
     let stateVersion: string | undefined;
     let publishedBaselines: FrontendPublicationState['baselines'] | undefined;
     let publishedSupplemental: FrontendSupplementalState | undefined;
@@ -755,6 +837,7 @@ export function createNativeFrontendRuntime(services: NativeFrontendServices,
     };
     const runtime: FrontendRefreshPorts = {
       config: { baseUrl: host.workerOrigin, keyId: host.keyId, environment: 'staging', generation: host.generation }, workerId: config.workerId, principalId: config.principalId,
+      recovery: config.leaseRecovery,
       signer, transport: createGoogleTransport(services.UrlFetchApp), lock: services.LockService.getScriptLock(), nowSeconds: now,
       enabled: () => config.enabled && properties.getProperty(FRONTEND_PROPERTIES.pause) !== 'true',
       assertIsolation() {

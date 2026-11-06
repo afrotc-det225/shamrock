@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash, createHmac } from 'node:crypto';
-import { consumeFrontendRefresh, buildSignedFrontendRequest, createNativeFrontendRuntime, buildCoherentFrontendModel, frontendRowLocks, readFrontendValidationRanges, readFrontendDashboardValues, assertNativeAttendanceLayoutRequest } from '../../.build/v3/apps/google-adapter/src/frontend-runtime.js';
+import { consumeFrontendRefresh, consumeFrontendResume, buildSignedFrontendRequest, createNativeFrontendRuntime, buildCoherentFrontendModel, frontendRowLocks, readFrontendValidationRanges, readFrontendDashboardValues, assertNativeAttendanceLayoutRequest } from '../../.build/v3/apps/google-adapter/src/frontend-runtime.js';
 import { frontendLiteralCell, planFrontendPublication } from '../../.build/v3/apps/google-adapter/src/frontend-publication.js';
 import { dashboardReadFingerprint } from '../../.build/v3/apps/google-adapter/src/frontend-supplemental.js';
 import { buildAttendanceGrowthLayout } from '../../.build/v3/apps/google-adapter/src/frontend-layout.js';
@@ -394,4 +394,65 @@ test('native Dashboard reads a narrow physical data grid before padding planned 
   assert.deepEqual(result.data[19], Array.from({ length: 16 }, () => ({})));
   assert.throws(() => readFrontendDashboardValues({ ...input, data: { ...input.data, columnCount: 17 } }, read), e => e.code === 'frontend_dashboard');
   assert.equal(calls, 1);
+});
+
+test('private operator resume is checkpoint-bound, monotonic and consumed before clearing a pause', () => {
+  const props = { SHAMROCK_V3_FRONTEND_PAUSED: 'true' }, calls = [];
+  const request = { requestId: 'resume-1', sequence: 1, stateSha256: 'a'.repeat(64) };
+  const properties = { getProperty: key => props[key] ?? null, setProperty(key, value) { calls.push('persist'); props[key] = value; }, deleteProperty(key) { calls.push('clear'); delete props[key]; } };
+  const input = { request, properties, readStateSha256() { calls.push('read'); return request.stateSha256; }, lock: { tryLock() { calls.push('lock'); return true; }, releaseLock() { calls.push('unlock'); } } };
+  assert.equal(consumeFrontendResume(input), 'resumed');
+  assert.deepEqual(calls, ['lock', 'read', 'persist', 'clear', 'unlock']);
+  props.SHAMROCK_V3_FRONTEND_PAUSED = 'true'; calls.length = 0;
+  assert.equal(consumeFrontendResume(input), 'already-consumed');
+  assert.equal(props.SHAMROCK_V3_FRONTEND_PAUSED, 'true');
+  assert.deepEqual(calls, ['lock', 'unlock']);
+  assert.throws(() => consumeFrontendResume({ ...input, request: { ...request, requestId: 'another', sequence: 1 } }));
+  const second = { ...request, requestId: 'resume-2', sequence: 2 };
+  assert.throws(() => consumeFrontendResume({ ...input, request: second, readStateSha256: () => 'b'.repeat(64) }), /checkpoint changed/);
+  assert.equal(props.SHAMROCK_V3_FRONTEND_PAUSED, 'true');
+  assert.equal(consumeFrontendResume({ ...input, request: second }), 'resumed');
+  assert.throws(() => consumeFrontendResume(input)); // old request cannot override a later pause
+});
+
+test('failed resume receipt persistence never clears a pause', () => {
+  let cleared = false;
+  assert.throws(() => consumeFrontendResume({ request: { requestId: 'resume', sequence: 1, stateSha256: 'a'.repeat(64) }, readStateSha256: () => 'a'.repeat(64),
+    properties: { getProperty: () => null, setProperty() {}, deleteProperty() { cleared = true; } }, lock: { tryLock: () => true, releaseLock() {} } }), /did not persist/);
+  assert.equal(cleared, false);
+});
+
+const canonicalRecovery = value => JSON.stringify(value, (_k,v) => v && typeof v === 'object' && !Array.isArray(v) ? Object.fromEntries(Object.keys(v).sort().map(k=>[k,v[k]])) : v);
+function reviewedRecovery(runtime, fx, claim) {
+  fx.claim = { ...claim, leaseExpiresAt: new Date(990000).toISOString() };
+  if (fx.state.pending) fx.state.pending.claim = copy(fx.claim);
+  runtime.recovery = { recoveryId: 'operator-recovery', previousExpiry: fx.claim.leaseExpiresAt, checkpointSha256: signer.sha256(canonicalRecovery(fx.state)) };
+  const original = runtime.transport.send.bind(runtime.transport);
+  runtime.transport.send = request => {
+    if (!request.url.endsWith('/recover')) return original(request);
+    const body=JSON.parse(request.body);fx.calls.push('recover');
+    assert.equal(fx.fenced,true);assert.equal(body.producerFenced,true);assert.equal(body.exclusiveWriter,true);
+    assert.equal(request.headers['x-shamrock-signature'],signer.hmacSha256(`POST\n/v1/admin/effects/recover\n1000\n${signer.sha256(request.body)}`));
+    assert.equal(body.checkpointSha256,runtime.recovery.checkpointSha256);
+    return {status:200,body:JSON.stringify({status:'renewed',recoveryId:body.recoveryId,effectId:body.effectId,workerId:body.workerId,claimToken:body.claimToken,leaseExpiresAt:claim.leaseExpiresAt,checkpointSha256:body.checkpointSha256,providerState:body.providerState})};
+  };
+}
+test('explicit lease reconciliation recovers a failed pre-write checkpoint and uses the same retained claim',()=>{
+  const {fx,runtime,claim}=fixture(); reviewedRecovery(runtime,fx,claim);
+  assert.equal(consumeFrontendRefresh(runtime).status,'published');
+  assert.equal(fx.calls.filter(x=>x==='recover').length,1);assert.equal(fx.calls.includes('claim'),false);assert.equal(fx.writes,1);
+});
+test('explicit recovery verifies a partial two-workbook publication and never replays its completed Main batch',()=>{
+  const {fx,runtime,claim}=fullFixture();fx.mode='excusal-before';
+  assert.throws(()=>consumeFrontendRefresh(runtime));assert.equal(fx.writes,1);assert.ok(fx.state.pending);
+  fx.enabled=true;fx.mode='normal';reviewedRecovery(runtime,fx,claim);
+  assert.equal(consumeFrontendRefresh(runtime).status,'published');assert.equal(fx.writes,1);assert.equal(fx.excusalWrites,2);
+});
+test('lease recovery refuses an unreviewed checkpoint or mixed provider contents before contacting renewal',()=>{
+  for(const broken of ['checkpoint','mixed']){
+    const {fx,runtime,claim}=fixture();fx.mode='write-after';assert.throws(()=>consumeFrontendRefresh(runtime));
+    fx.enabled=true;fx.mode='normal';reviewedRecovery(runtime,fx,claim);
+    if(broken==='checkpoint')runtime.recovery.checkpointSha256='b'.repeat(64);else fx.current.directory.rows[0][1]=frontendLiteralCell('unexpected');
+    assert.throws(()=>consumeFrontendRefresh(runtime));assert.equal(fx.calls.includes('recover'),false);assert.equal(fx.fenced,true);
+  }
 });
