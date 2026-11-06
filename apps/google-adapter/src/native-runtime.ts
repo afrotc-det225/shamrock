@@ -500,6 +500,23 @@ export function createNativeStagingRuntime(services: NativeStagingServices): Sta
       if (new Set(headers[0]).size !== surface.headers.length || surface.headers.some(header => !headers[0].includes(header))) fail('presentation_headers', 'Presentation machine headers are missing or ambiguous.');
       surface.headers = headers[0]; surface.displayHeaders = headers[1];
     }
+    // Resolve the actual protected header first: the input columns can be
+    // reordered. Read the entire bounded decision column so matching rules can
+    // retain Google's unexposed chip styling without missing interior drift.
+    const decisions = surfaces.find(surface => surface.role === 'decision-input')!;
+    const decisionColumn = columnName(decisions.headers.indexOf('draft_decision') + 1);
+    const decisionRange = `'${decisions.title.replace(/'/g, "''")}'!${decisionColumn}3:${decisionColumn}${decisions.capacityRows!}`;
+    const validationFields = 'spreadsheetId,sheets(properties(sheetId),data(startRow,startColumn,rowData(values(dataValidation))))';
+    const validations = api(`${sheetsUrl(spreadsheetId)}?ranges=${encodeURIComponent(decisionRange)}&includeGridData=true&fields=${encodeURIComponent(validationFields)}`);
+    const validationSheets = Array.isArray(validations.sheets) ? validations.sheets.map(object) : [];
+    if (validations.spreadsheetId !== spreadsheetId || validationSheets.length !== 1
+      || object(validationSheets[0].properties).sheetId !== decisions.sheetId || !Array.isArray(validationSheets[0].data)) {
+      fail('presentation_metadata', 'Decision validation read-back is unavailable.');
+    }
+    // Endpoint style samples remain first; interior validation blocks supplement
+    // them without replacing formatting samples needed by the verifier.
+    const decisionMetadata = sheetMetadata({ spreadsheetId, sheetId: decisions.sheetId });
+    (decisionMetadata.data as unknown[]).push(...validationSheets[0].data);
     return { surfaces, legend: { sheetId: binding.config.legend.sheetId, title: openNative(binding.config.legend).getName(),
       values: legend.getLastRow() ? legend.getRange(1, 1, legend.getLastRow(), 2).getValues() : [] }, metadata: metadata as unknown as SheetsMetadata, requireCellReadback: true };
   }

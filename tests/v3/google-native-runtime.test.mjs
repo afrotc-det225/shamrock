@@ -211,8 +211,31 @@ test('native presentation repairs real tables with fresh format and validation r
   const draftColumn = f.decision.values[0].indexOf('draft_decision');
   assert.equal(f.decision.cells.get(`21,${draftColumn}`).dataValidation.strict, true);
   assert.equal(f.decision.cells.get(`21,${draftColumn}`).dataValidation.condition.type, 'ONE_OF_RANGE');
-  const allBefore = structuredClone(f.decision.values); f.runtime.repairPresentation();
+  const allBefore = structuredClone(f.decision.values), start = f.state.presentationWrites.length;
+  f.runtime.repairPresentation();
   assert.deepEqual(f.decision.values, allBefore); assert.equal(f.decision.tables.length, 1); assert.equal(f.attendance.filterViews.length, 3);
+  assert.ok(f.state.presentationWrites.slice(start).flatMap(batch => batch.requests).every(request => !request.setDataValidation),
+    'unchanged native rules must retain chip appearance rather than be recreated');
+  f.decision.cells.get(`10,${draftColumn}`).dataValidation.strict = false;
+  const damaged = f.state.presentationWrites.length; f.runtime.repairPresentation();
+  const validationWrites = f.state.presentationWrites.slice(damaged).flatMap(batch => batch.requests).filter(request => request.setDataValidation);
+  assert.equal(validationWrites.length, 1);
+  assert.equal(validationWrites[0].setDataValidation.range.startRowIndex, 10);
+  assert.equal(validationWrites[0].setDataValidation.range.endRowIndex, 11);
+  assert.equal(f.decision.cells.get(`10,${draftColumn}`).dataValidation.strict, true);
+});
+
+test('full decision-validation read-back follows reordered machine headers', () => {
+  const f = presentationFixture();
+  f.decision.values = f.decision.values.map(row => [...row].reverse());
+  const column = f.decision.values[0].indexOf('draft_decision');
+  Object.assign(f.decision.protections[0].unprotectedRanges[0], { startColumnIndex: column, endColumnIndex: column + 1 });
+  f.runtime.repairPresentation();
+  // URL encoding deliberately hides the field-mask punctuation in stored calls.
+  const validationReads = f.state.calls.map(call => new URL(call.url)).filter(url => url.searchParams.get('fields')?.includes('rowData(values(dataValidation))'));
+  assert.ok(validationReads.length > 0);
+  assert.ok(validationReads.every(url => url.searchParams.get('ranges') === "'Decision Input'!M3:M22"));
+  assert.equal(f.decision.cells.get(`10,${column}`).dataValidation.strict, true);
 });
 
 test('an unconfirmed native presentation write cannot save its setup receipt and can be repaired again', () => {

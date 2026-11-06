@@ -142,6 +142,35 @@ test('arbitrary header order keeps validation on decision cells and every machin
   assert.equal(verifyPresentation(input).ready, true);
 });
 
+test('matching decision validation is retained and only damaged interior rules are repaired', () => {
+  const input = fixture(); repair(input);
+  const surface = input.surfaces[2], metadata = getSheet(input, surface.sheetId), column = surface.headers.indexOf('draft_decision');
+  assert.ok(planPresentationRepair(input).requests.every(request => !request.setDataValidation),
+    'an intact rule must not be recreated: Google retains chip styling outside its public validation DTO');
+  metadata.data[0].rowData[10].values[column].dataValidation.strict = false;
+  delete metadata.data[0].rowData[11].values[column].dataValidation;
+  metadata.data[0].rowData[20].values[column].dataValidation.condition.values[0].userEnteredValue = "='Wrong source'!A1:A4";
+  assert.ok(verifyPresentation(input).issues.includes('decision-input:decision-validation'), 'interior drift must not escape endpoint sampling');
+  const before = copy(operationalValues(input));
+  const repairs = planPresentationRepair(input).requests.filter(request => request.setDataValidation);
+  assert.deepEqual(repairs.map(request => request.setDataValidation.range), [
+    { sheetId: surface.sheetId, startRowIndex: 10, endRowIndex: 12, startColumnIndex: column, endColumnIndex: column + 1 },
+    { sheetId: surface.sheetId, startRowIndex: 20, endRowIndex: 21, startColumnIndex: column, endColumnIndex: column + 1 },
+  ]);
+  apply(input, repairs);
+  assert.deepEqual(operationalValues(input), before);
+  assert.equal(verifyPresentation(input).ready, true);
+  assert.ok(planPresentationRepair(input).requests.every(request => !request.setDataValidation));
+});
+
+test('missing decision-column read-back never proves intact validation or silently skips repair', () => {
+  const input = fixture(); repair(input);
+  const metadata = input.metadata.sheets[2];
+  metadata.data[0].rowData[10].values[input.surfaces[2].headers.indexOf('draft_decision')] = {};
+  assert.ok(verifyPresentation(input).issues.includes('decision-input:decision-validation'));
+  assert.equal(planPresentationRepair(input).requests.filter(request => request.setDataValidation).length, 1);
+});
+
 test('missing native structures, drifted colors, weakened validation and incomplete read-back never report ready', () => {
   const base = fixture(); repair(base);
   let input = copy(base); input.metadata.sheets[0].tables = [];
@@ -165,6 +194,12 @@ test('bounded GridData samples and provider-default enum/boolean/color normaliza
     const block = sheet.data[0];
     sheet.data = [{ ...block, rowData: block.rowData.slice(0, 3), rowMetadata: block.rowMetadata.slice(0, 3) },
       { startRow: 39, startColumn: 0, rowData: block.rowData.slice(39), rowMetadata: block.rowMetadata.slice(39) }];
+    const surface = input.surfaces.find(surface => surface.sheetId === sheet.properties.sheetId);
+    if (surface.role === 'decision-input') {
+      const column = surface.headers.indexOf('draft_decision');
+      sheet.data.push({ startRow: 2, startColumn: column,
+        rowData: block.rowData.slice(2).map(row => ({ values: [copy(row.values[column])] })) });
+    }
     delete sheet.properties.gridProperties.frozenColumnCount;
     for (const column of sheet.data[0].columnMetadata) if (column.hiddenByUser === false) delete column.hiddenByUser;
   }

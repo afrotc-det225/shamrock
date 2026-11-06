@@ -247,6 +247,23 @@ function validationRule(input: PresentationInput): Record<string, any> {
   return { condition: { type: 'ONE_OF_RANGE', values: [{ userEnteredValue: `='${input.legend.title.replace(/'/g, "''")}'!$A$3:$A$6` }] },
     inputMessage: 'Select Approved, Denied, Withdrawn, or Superseded. Delivery status shows the saved result.', strict: true, showCustomUi: true };
 }
+function decisionValidationRepairs(input: PresentationInput, surface: PresentationSurface): PresentationRequest[] {
+  const column = surface.headers.indexOf('draft_decision'), metadata = sheet(input, surface.sheetId), rule = validationRule(input);
+  const requests: PresentationRequest[] = [];
+  let start: number | undefined;
+  for (let row = 2; row <= capacity(surface); row++) {
+    // Dropdown chip colors/display style are not exposed by DataValidationRule.
+    // Preserve an existing matching rule instead of recreating its private UI
+    // metadata. Missing read-back is not evidence of an intact validation rule.
+    const mismatch = row < capacity(surface) && !same(rule, cellAt(metadata, row, column)?.dataValidation);
+    if (mismatch && start === undefined) start = row;
+    if (!mismatch && start !== undefined) {
+      requests.push({ setDataValidation: { range: range(surface, start, row, column, column + 1), rule, filteredRowsIncluded: true } });
+      start = undefined;
+    }
+  }
+  return requests;
+}
 function formatRequests(input: PresentationInput, surface: PresentationSurface): PresentationRequest[] {
   const requests: PresentationRequest[] = [{ updateSheetProperties: { properties: { sheetId: surface.sheetId,
     gridProperties: { frozenRowCount: 2, frozenColumnCount: 0, hideGridlines: true }, tabColorStyle: color(COLORS.green) },
@@ -261,10 +278,7 @@ function formatRequests(input: PresentationInput, surface: PresentationSurface):
     const format = bodyFormat(header);
     requests.push({ repeatCell: { range: range(surface, 2, capacity(surface), column, column + 1), cell: { userEnteredFormat: format }, fields: formatFields(format) } });
   });
-  if (surface.role === 'decision-input') {
-    const column = surface.headers.indexOf('draft_decision');
-    requests.push({ setDataValidation: { range: range(surface, 2, capacity(surface), column, column + 1), rule: validationRule(input), filteredRowsIncluded: true } });
-  }
+  if (surface.role === 'decision-input') requests.push(...decisionValidationRepairs(input, surface));
   return requests;
 }
 /** Full repair may repeat formatting requests; its resulting state is idempotent.
@@ -387,6 +401,14 @@ export function verifyPresentation(input: PresentationInput): PresentationVerifi
     if (!same({ frozenRowCount: 2, frozenColumnCount: 0, hideGridlines: true }, metadata.properties.gridProperties)) issues.push(`${surface.role}:frozen-headers`);
     if (!same(color(COLORS.green), metadata.properties.tabColorStyle)) issues.push(`${surface.role}:tab-color`);
     if (!input.requireCellReadback) continue;
+    if (surface.role === 'decision-input') {
+      const column = surface.headers.indexOf('draft_decision');
+      for (let row = 2; row < capacity(surface); row++) {
+        if (!same(validationRule(input), cellAt(metadata, row, column)?.dataValidation)) {
+          issues.push(`${surface.role}:decision-validation`); break;
+        }
+      }
+    }
     if (!same({ hiddenByUser: true }, dimensionAt(metadata, 'row', 0)) || !same({ hiddenByUser: false, pixelSize: 42 }, dimensionAt(metadata, 'row', 1))) issues.push(`${surface.role}:header-dimensions`);
     surface.headers.forEach((header, column) => {
       if (!same({ hiddenByUser: HIDDEN.has(header), pixelSize: width(header) }, dimensionAt(metadata, 'column', column))) issues.push(`${surface.role}:column-dimensions:${header}`);
@@ -397,7 +419,6 @@ export function verifyPresentation(input: PresentationInput): PresentationVerifi
       for (const row of new Set([2, capacity(surface) - 1])) {
         const cell = cellAt(metadata, row, column);
         if (!bodyFormatMatches(header, cell)) issues.push(`${surface.role}:body-format:${header}`);
-        if (header === 'draft_decision' && !same(validationRule(input), cell?.dataValidation)) issues.push(`${surface.role}:decision-validation`);
       }
     });
   }
