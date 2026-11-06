@@ -57,7 +57,9 @@ export function buildFrontendDashboard(input: DashboardInput): Request[] {
     range: { sheetId: d, dimension: 'ROWS', startIndex, endIndex }, properties: { pixelSize }, fields: 'pixelSize' } });
   format(r(d, 0, 70, 0, 12), { backgroundColor: rgb(C.canvas), verticalAlignment: 'MIDDLE',
     textFormat: { fontSize: 10, foregroundColor: rgb(C.text) } });
-  [115, 115, 90, 190, 70, 18, 95, 95, 95, 120, 95, 95].forEach((pixelSize, startIndex) => requests.push({ updateDimensionProperties: {
+  // 740px canvas: the two chart columns and all six cards fit an ordinary
+  // laptop/browser pane at 100% zoom without horizontal scrolling.
+  [90, 90, 50, 90, 60, 10, 70, 46, 47, 47, 70, 70].forEach((pixelSize, startIndex) => requests.push({ updateDimensionProperties: {
     range: { sheetId: d, dimension: 'COLUMNS', startIndex, endIndex: startIndex + 1 }, properties: { pixelSize }, fields: 'pixelSize' } }));
   height(0, 1, 40); height(1, 2, 28); height(2, 8, 29); height(9, 48, 22);
   merge(0, 1, 0, 12); write(0, 0, 'SHAMROCK Dashboard');
@@ -87,7 +89,7 @@ export function buildFrontendDashboard(input: DashboardInput): Request[] {
         axis: [{ position: 'BOTTOM_AXIS', title: chart.axis }, { position: 'LEFT_AXIS', title: 'Count', viewWindowOptions: { viewWindowMin: 0 } }],
         domains: [{ domain: { sourceRange: { sources: [r(source, 0, chart.sourceEndRow, chart.sourceColumn, chart.sourceColumn + 1)] } } }],
         series: [{ series: { sourceRange: { sources: [r(source, 0, chart.sourceEndRow, chart.sourceColumn + 1, chart.sourceColumn + 2)] } }, targetAxis: 'LEFT_AXIS', colorStyle: { rgbColor: rgb(C.green) } }] } },
-    position: { overlayPosition: { anchorCell: { sheetId: d, rowIndex: i < 2 ? 9 : 22, columnIndex: i % 2 ? 6 : 0 }, widthPixels: 550, heightPixels: 245 } },
+    position: { overlayPosition: { anchorCell: { sheetId: d, rowIndex: i < 2 ? 9 : 22, columnIndex: i % 2 ? 6 : 0 }, widthPixels: 350, heightPixels: 245 } },
   } } }));
   section(36, 0, 5, 'Using SHAMROCK'); section(36, 6, 12, 'Attendance codes');
   merge(37, 42, 0, 5);
