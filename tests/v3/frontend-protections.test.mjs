@@ -31,7 +31,9 @@ function apply(input, requests) {
   for (const request of requests) {
     if (request.addProtectedRange) {
       const p = copy(request.addProtectedRange.protectedRange); p.protectedRangeId = nextId++;
-      input.metadata.sheets.find(s => s.properties.sheetId === p.range.sheetId).protectedRanges.push(p);
+      const existing = input.metadata.sheets.find(s => s.properties.sheetId === p.range.sheetId).protectedRanges;
+      if (Object.keys(p.range).length === 1) assert.equal(existing.some(e => Object.keys(e.range).length === 1), false, 'Google permits only one whole-sheet protection');
+      existing.push(p);
     } else if (request.updateProtectedRange) {
       const { protectedRange: p, fields } = request.updateProtectedRange;
       const current = input.metadata.sheets.flatMap(s => s.protectedRanges).find(value => value.protectedRangeId === p.protectedRangeId);
@@ -158,12 +160,15 @@ test('protected ranges must cover holes: deleting one input restriction is detec
 
 test('exact adoption replaces reviewed preview protections; unrelated rules are never silently removed', () => {
   const input = fixture(); input.metadata.sheets[0].protectedRanges.push({ protectedRangeId: 77, description: 'old preview', range: { sheetId: 101 } });
+  input.metadata.sheets[0].protectedRanges.push({ protectedRangeId: 78, description: 'old extra field', range: { sheetId: 101, startRowIndex: 0, endRowIndex: 2 } });
   assert.throws(() => planFrontendProtections(input), invalid);
-  input.adoptProtectionIds = [77]; const plan = planFrontendProtections(input);
+  input.adoptProtectionIds = [77, 78]; const plan = planFrontendProtections(input);
   assert.ok(plan.requests.at(-1).deleteProtectedRange);
-  assert.ok(plan.requests[0].addProtectedRange);
+  assert.equal(plan.requests.at(-1).deleteProtectedRange.protectedRangeId, 78);
+  assert.equal(plan.requests[0].updateProtectedRange.protectedRange.protectedRangeId, 77);
   apply(input, plan.requests); delete input.adoptProtectionIds;
   assert.equal(verifyFrontendProtections(input).ready, true);
+  assert.equal(input.metadata.sheets[0].protectedRanges[0].protectedRangeId, 77);
 });
 
 test('empty surfaces and removing all role grants close inputs; growth opens only newly occupied rows', () => {

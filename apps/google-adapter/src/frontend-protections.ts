@@ -219,8 +219,17 @@ export function planFrontendProtections(input: FrontendProtectionInput): Fronten
   if (actual.some(p => !managed.includes(p) && !adopted.has(p.protectedRangeId))) fail('Unmanaged protections require explicit review before frontend adoption.');
   if (new Set(managed.map(p => p.description)).size !== managed.length) fail('Managed protection descriptions are duplicated.');
   const requests: Record<string, any>[] = [];
+  const retained = new Set<number>();
   for (const requirement of requirements) {
-    const existing = managed.find(p => p.description === requirement.description);
+    let existing = managed.find(p => p.description === requirement.description);
+    // Google permits only one whole-sheet protection. Adopt the reviewed guard
+    // in place instead of adding a second guard before deleting the old one.
+    if (!existing && requirement.description.endsWith(':sheet')) {
+      const candidates = actual.filter(p => adopted.has(p.protectedRangeId) && rangeKey(p.range) === rangeKey(requirement.range));
+      if (candidates.length > 1) fail('Whole-sheet protection adoption is ambiguous.');
+      existing = candidates[0];
+    }
+    if (existing) retained.add(existing.protectedRangeId);
     if (!existing) requests.push({ addProtectedRange: { protectedRange: requirement } });
     else if (!matches(existing, requirement, access.ownerEmail)) {
       // Explicit editor mask is essential: changing warningOnly alone can grant every workbook editor.
@@ -228,8 +237,7 @@ export function planFrontendProtections(input: FrontendProtectionInput): Fronten
         fields: 'description,range,warningOnly,editors,unprotectedRanges,namedRangeId,tableId' } });
     }
   }
-  const names = new Set(requirements.map(r => r.description));
-  for (const protection of actual) if (!names.has(protection.description) || !managed.includes(protection)) {
+  for (const protection of actual) if (!retained.has(protection.protectedRangeId)) {
     requests.push({ deleteProtectedRange: { protectedRangeId: protection.protectedRangeId } });
   }
   if (requests.length > MAX_REQUESTS) fail('Protection repair exceeds one bounded atomic batch; retain the closed workbook and review its scope.');
