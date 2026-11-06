@@ -1,3 +1,5 @@
+import { acceptAdminCommand, adminEffect, frontendSnapshot, getAdminReceipt } from './admin.js';
+import { HttpError } from './http-error.js';
 import {
   buildAttendanceReport, createExcusalRequest, createExcusalRequests, decideExcusalRequest,
   DomainError, parseCommand,
@@ -12,9 +14,6 @@ export interface Env {
   BRIDGE_SECRET: string;
 }
 
-class HttpError extends Error {
-  constructor(readonly status: number, readonly code: string, message: string) { super(message); }
-}
 const MAX_BODY_BYTES = 65_536;
 const LEASE_MS = 10 * 60 * 1000;
 const json = (value: unknown, status = 200) => new Response(JSON.stringify(value), {
@@ -196,8 +195,8 @@ async function acceptCommand(env: Env, command: Command): Promise<Receipt> {
   const now = new Date().toISOString();
   const guard = guardParts(env, command, ctx);
   // Recheck membership inside the same atomic batch as the accepted mutation.
-  guard.sql += ` AND ${membership.sql}`;
-  guard.values.push(...membership.values);
+  guard.sql += ` AND ${membership.sql} AND NOT EXISTS (SELECT 1 FROM admin_commands WHERE command_id=?)`;
+  guard.values.push(...membership.values, command.commandId);
   const writes: D1PreparedStatement[] = [];
   let result: unknown;
   let targetId: string;
@@ -396,11 +395,17 @@ export default {
       }
       const body = await boundedBody(request);
       await authenticate(request, env, body);
+      if (request.method === 'GET' && url.pathname.startsWith('/v1/admin/commands/')) return json(await getAdminReceipt(env, url));
       if (request.method === 'GET' && url.pathname.startsWith('/v1/commands/')) return json(await getReceipt(env, url));
       if (request.method !== 'POST' || !request.headers.get('content-type')?.startsWith('application/json')) {
         throw new HttpError(400, 'INVALID_REQUEST', 'Use an authenticated JSON operation.');
       }
       const input = parseJson(body);
+      if (url.pathname === '/v1/admin/commands' && !url.search) return json(await acceptAdminCommand(env, input));
+      if (url.pathname === '/v1/admin/snapshot' && !url.search) return json(await frontendSnapshot(env, input));
+      for (const action of ['claim', 'project', 'ack'] as const) {
+        if (url.pathname === `/v1/admin/effects/${action}` && !url.search) return json(await adminEffect(env, action, input));
+      }
       if (url.pathname === '/v1/commands' && !url.search) return json(await acceptCommand(env, parseCommand(input)));
       if (url.pathname === '/v1/jobs/claim' && !url.search) return json(await claimJob(env, jobInput(input, env, true)));
       if (url.pathname === '/v1/jobs/project' && !url.search) return json(await projectJob(env, jobInput(input, env)));

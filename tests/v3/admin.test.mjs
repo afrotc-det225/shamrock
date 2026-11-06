@@ -1,0 +1,170 @@
+import assert from 'node:assert/strict';
+import {createHash,createHmac} from 'node:crypto';
+import {readFile,readdir} from 'node:fs/promises';
+import {resolve} from 'node:path';
+import test from 'node:test';
+import {Miniflare,Log,LogLevel} from 'miniflare';
+import worker from '../../.build/v3/apps/worker/src/index.js';
+import {parseAdminCommand,operationallyActive} from '../../.build/v3/packages/domain/src/admin.js';
+const secret='fictional-admin-test-secret-never-for-deployment';
+const keyId='admin-fixture';
+const directory=new URL('../../database/migrations/',import.meta.url);
+const migration=(await Promise.all((await readdir(directory)).filter(n=>/^\d{4}_.*\.sql$/.test(n)).sort().map(n=>readFile(new URL(n,directory),'utf8')))).join('\n');
+function nativeRequest(input,path='/v1/admin/commands',method='POST') {
+  const body=method==='GET'?'':JSON.stringify(input);const timestamp=String(Math.floor(Date.now()/1000));
+  const signature=createHmac('sha256',secret).update(`${method}\n${path}\n${timestamp}\n${createHash('sha256').update(body).digest('hex')}`).digest('hex');
+  return new Request(`https://fixture.invalid${path}`,{method,...(method==='GET'?{}:{body}),headers:{'content-type':'application/json','x-shamrock-key-id':keyId,'x-shamrock-timestamp':timestamp,'x-shamrock-signature':signature}});
+}
+async function fixture(t) {
+  const mf=new Miniflare({modules:true,scriptPath:resolve('.build/v3-artifacts/worker.mjs'),compatibilityDate:'2026-07-01',d1Databases:{DB:'admin-fixture-db'},bindings:{ENVIRONMENT:'local',GENERATION:'1',BRIDGE_KEY_ID:keyId,BRIDGE_SECRET:secret},log:new Log(LogLevel.NONE)});
+  t.after(()=>mf.dispose());const db=await mf.getD1Database('DB');
+  await db.batch(migration.replace(/^\s*--.*$/gm,'').split(';').map(s=>s.trim()).filter(Boolean).map(sql=>db.prepare(sql)));
+  await db.batch([
+    db.prepare("INSERT INTO system_control VALUES(1,'local',1,1)"),
+    db.prepare("INSERT INTO principals VALUES('admin',NULL,1),('flight-admin',NULL,1),('outsider',NULL,1)"),
+    db.prepare("INSERT INTO organizational_units VALUES('alpha','Alpha',1),('bravo','Bravo',1)"),
+    db.prepare("INSERT INTO squadrons VALUES('blue','Blue'),('gold','Gold')"),
+    db.prepare("INSERT INTO flight_hierarchy VALUES('alpha','blue'),('bravo','gold')"),
+    db.prepare("INSERT INTO terms VALUES('term-current','Fictional Current',2,1),('term-prior','Fictional Prior',1,0)"),
+    db.prepare("INSERT INTO admin_grants SELECT 'admin',value,'wing','*' FROM json_each('[\"directory.manage\",\"leadership.manage\",\"events.manage\",\"frontend.read\"]')"),
+    db.prepare("INSERT INTO admin_grants VALUES('flight-admin','directory.manage','flight','alpha')"),
+    db.prepare("INSERT INTO adapter_sources VALUES('test','admin-console',1),('sheet','directory-sheet',1)"),
+  ]);
+  const env={DB:db,ENVIRONMENT:'local',GENERATION:'1',BRIDGE_KEY_ID:keyId,BRIDGE_SECRET:secret};
+  const send=async(input,path='/v1/admin/commands',method='POST')=>{const request=nativeRequest(input,path,method);const res=await mf.dispatchFetch(request.url,{method,headers:Object.fromEntries(request.headers),...(method==='GET'?{}:{body:await request.text()})});return {status:res.status,body:await res.json()};};
+  const count=async(table)=>(await db.prepare(`SELECT COUNT(*) AS count FROM ${table}`).first()).count;
+  return {db,env,send,count};
+}
+const profile=()=>({lastName:'Example',firstName:'Cadet',asYear:'AS200',rank:'C/SSgt',role:'Flight Commander',university:'Notre Dame',email:'cadet@example.invalid',phone:'',dorm:'',cipBroadArea:'14 - Engineering',cipCode:'14.0901',afsc:'',homeTown:'',homeState:'',classYear:'2030',dateOfBirth:'2000-01-02',flightPathStatus:'Active 3/4',photoLink:''});
+function command(operation='directory.upsert',changes={}) {
+  const defaults={
+    'directory.upsert':{personId:'person-a',expectedVersion:0,flightId:'alpha',profile:profile()},
+    'leadership.upsert':{contactId:'manual-cadre',expectedVersion:0,personId:null,profile:{lastName:'Example',firstName:'Cadre',rank:'Capt',role:'Cadre',email:'cadre@example.invalid',cellPhone:''},reportsTo:'',officePhone:'',officeLocation:'',active:true},
+    'event.upsert':{eventId:'event-one',expectedVersion:0,termId:'term-current',eventType:'llab',trainingWeek:1,displayOrder:1,label:'TW-1 LLAB',columnLabel:'LLAB TW-1',expectedGroup:'All Cadets',flightIds:['alpha','bravo'],status:'active',startAt:'2026-01-01T12:00:00.000Z',endAt:'2026-01-01T13:00:00.000Z',location:'Fictional field',notes:''},
+  };
+  return {commandId:operation,contractVersion:1,environment:'local',generation:1,actor:{principalId:'admin',evidence:'authenticated-confirmation'},source:{kind:'test',resourceKey:'admin-console',submissionId:operation,revision:1},operation,payload:defaults[operation],...changes};
+}
+function revised(c,revision=2) {const copy=structuredClone(c);copy.commandId+=`-${revision}`;copy.source.revision=revision;copy.payload.expectedVersion=revision-1;return copy;}
+const read=extra=>({environment:'local',generation:1,principalId:'admin',...extra});
+const effect=extra=>read({workerId:'adapter-one',...extra});
+
+// Contract tests cover unsafe or unsupported identity changes before any SQL runs.
+test('admin contract rejects unsupported fields, invalid dates, forms, retired events and contradictory profile state',()=>{
+  const valid=command();assert.deepEqual(parseAdminCommand(valid),valid);assert.equal(operationallyActive(profile()),true);
+  const cases=[c=>{c.payload.profile.asYear='Unknown';},c=>{c.payload.profile.dateOfBirth='2001-02-29';},c=>{c.payload.profile.photoLink='javascript:alert(1)';},c=>{c.source.kind='form';},c=>{c.payload.flightId=null;},c=>{c.payload.untrusted=true;}];
+  for(const change of cases){const bad=command();change(bad);assert.throws(()=>parseAdminCommand(bad),{code:'INVALID_COMMAND'});}
+  const retired=command('event.upsert');retired.payload.eventType='third-hour';assert.throws(()=>parseAdminCommand(retired),{code:'INVALID_COMMAND'});
+  const linked=command('leadership.upsert');linked.payload.personId='person-a';assert.throws(()=>parseAdminCommand(linked),{code:'INVALID_COMMAND'});
+});
+
+test('Directory creates one stable profile, membership history, audit, receipt and two bounded refresh intents',async t=>{
+  const f=await fixture(t);const c=command();const first=await f.send(c);assert.equal(first.status,200,JSON.stringify(first.body));
+  assert.deepEqual(first.body.result,{targetId:'person-a',version:1});
+  for(const table of ['people','directory_profiles','memberships','directory_membership_history','admin_commands','admin_audit_events'])assert.equal(await f.count(table),1,table);
+  assert.equal(await f.count('admin_effects'),2);assert.equal(await f.count('command_assertions'),0);
+  assert.equal((await f.db.prepare("SELECT roster_version FROM organizational_units WHERE unit_id='alpha'").first()).roster_version,2);
+  assert.deepEqual(await f.send(c),first);assert.equal(await f.count('admin_effects'),2);
+  const conflict=structuredClone(c);conflict.payload.profile.firstName='Changed';assert.equal((await f.send(conflict)).status,409);
+  const sourceReuse=structuredClone(c);sourceReuse.commandId='new-id';assert.equal((await f.send(sourceReuse)).status,409);
+});
+
+test('transfers require both Flight scopes and bump both roster versions; inactive cadets retain prior data',async t=>{
+  const f=await fixture(t);const c=command();c.actor.principalId='flight-admin';assert.equal((await f.send(c)).status,200);
+  const move=revised(c);move.payload.flightId='bravo';assert.equal((await f.send(move)).status,403);
+  await f.db.prepare("INSERT INTO admin_grants VALUES('flight-admin','directory.manage','flight','bravo')").run();
+  assert.equal((await f.send(move)).status,200);
+  assert.deepEqual((await f.db.prepare('SELECT unit_id,active FROM memberships ORDER BY unit_id').all()).results,[{unit_id:'alpha',active:0},{unit_id:'bravo',active:1}]);
+  const stale=revised(c,3);stale.payload.expectedVersion=1;assert.equal((await f.send(stale)).status,409);
+  const inactive=revised(move,3);inactive.payload.profile.flightPathStatus='Commissioned';assert.equal((await f.send(inactive)).status,200);
+  assert.equal(await f.count('people'),1);assert.equal((await f.db.prepare('SELECT SUM(active) AS active FROM memberships').first()).active,0);
+  assert.equal(await f.count('directory_membership_history'),3);
+});
+
+test('replay and receipt retrieval honor grant, principal and source revocation',async t=>{
+  const f=await fixture(t);const c=command();assert.equal((await f.send(c)).status,200);
+  assert.equal((await f.send(null,'/v1/admin/commands/directory.upsert?principalId=admin','GET')).status,200);
+  await f.db.prepare("DELETE FROM admin_grants WHERE capability='directory.manage'").run();
+  assert.equal((await f.send(c)).status,403);assert.equal((await f.send(null,'/v1/admin/commands/directory.upsert?principalId=admin','GET')).status,404);
+  await f.db.prepare("INSERT INTO admin_grants VALUES('admin','directory.manage','wing','*')").run();
+  await f.db.prepare("UPDATE adapter_sources SET active=0").run();assert.equal((await f.send(c)).status,403);
+  await f.db.prepare("UPDATE adapter_sources SET active=1").run();await f.db.prepare("UPDATE principals SET active=0 WHERE principal_id='admin'").run();assert.equal((await f.send(c)).status,403);
+});
+
+test('manual Leadership is preserved while Directory-linked contact identity and role follow the current profile',async t=>{
+  const f=await fixture(t);const c=command();assert.equal((await f.send(c)).status,200);
+  assert.equal((await f.send(command('leadership.upsert'))).status,200);
+  const linked=command('leadership.upsert',{commandId:'link-contact',source:{kind:'test',resourceKey:'admin-console',submissionId:'link-contact',revision:1},payload:{contactId:'cadet-contact',expectedVersion:0,personId:'person-a',profile:null,reportsTo:'Blue Squadron Commander',officePhone:'',officeLocation:'',active:true}});
+  assert.equal((await f.send(linked)).status,200);
+  let view=(await f.send(read(),'/v1/admin/snapshot')).body;
+  assert.equal(view.leadership.length,2);assert.equal(view.leadership.find(r=>r.personId==='person-a').role,'Alpha Flight Commander');
+  const rename=revised(c);rename.payload.profile.firstName='New Name';assert.equal((await f.send(rename)).status,200);
+  view=(await f.send(read(),'/v1/admin/snapshot')).body;assert.equal(view.leadership.find(r=>r.personId==='person-a').firstName,'New Name');
+  assert.equal(view.leadership.find(r=>r.personId==='person-a').reportsTo,'Blue Squadron Commander');
+  const remove=revised(c,3);remove.payload.profile.role='';assert.equal((await f.send(remove)).status,200);
+  view=(await f.send(read(),'/v1/admin/snapshot')).body;assert.equal(view.leadership.length,1);assert.equal(view.leadership[0].contactId,'manual-cadre');
+});
+
+test('events preserve ID and term, update explicit Flight scope, cancel without deleting evidence, and reject stale edits',async t=>{
+  const f=await fixture(t);const c=command('event.upsert');assert.equal((await f.send(c)).status,200);
+  const edit=revised(c);edit.payload.flightIds=['bravo'];edit.payload.status='cancelled';assert.equal((await f.send(edit)).status,200);
+  assert.equal(await f.count('events'),1);assert.equal((await f.db.prepare('SELECT active FROM events').first()).active,0);
+  assert.equal(await f.count('event_units'),1);assert.equal(await f.count('admin_effects'),4);
+  const moveTerm=revised(c,3);moveTerm.payload.termId='term-prior';assert.equal((await f.send(moveTerm)).status,409);
+  const stale=revised(c,4);stale.payload.expectedVersion=1;assert.equal((await f.send(stale)).status,409);
+  const wingOnly=revised(c,5);wingOnly.actor.principalId='flight-admin';assert.equal((await f.send(wingOnly)).status,403);
+});
+
+test('late grant revocation and audit write failure roll back the entire administrative batch',async t=>{
+  const f=await fixture(t);let batches=0;
+  const DB={prepare:sql=>f.db.prepare(sql),batch:async statements=>{
+    batches++;if(batches===3)await f.db.prepare("DELETE FROM admin_grants WHERE capability='directory.manage'").run();
+    return f.db.batch(statements);
+  }};
+  const raced=await worker.fetch(nativeRequest(command()),{...f.env,DB});assert.equal(raced.status,409);
+  for(const table of ['people','directory_profiles','admin_commands','admin_audit_events','admin_effects'])assert.equal(await f.count(table),0,table);
+  await f.db.prepare("INSERT INTO admin_grants VALUES('admin','directory.manage','wing','*')").run();
+  await f.db.prepare("CREATE TRIGGER reject_audit BEFORE INSERT ON admin_audit_events BEGIN SELECT RAISE(ABORT,'fixture-audit-failure'); END").run();
+  const failed=await f.send(command());assert.equal(failed.status,409);
+  for(const table of ['people','directory_profiles','admin_commands','admin_audit_events','admin_effects'])assert.equal(await f.count(table),0,table);
+});
+
+test('snapshot is one coherent bounded read with causal fact order and remains readable while mutations are paused',async t=>{
+  const f=await fixture(t);assert.equal((await f.send(command())).status,200);assert.equal((await f.send(command('event.upsert'))).status,200);
+  await f.db.batch([f.db.prepare("INSERT INTO access_grants VALUES('admin','attendance.report','alpha','unit')"),f.db.prepare("INSERT INTO adapter_sources VALUES('test','attendance-console',1)")]);
+  const attendance={commandId:'attendance-one',contractVersion:1,environment:'local',generation:1,actor:{principalId:'admin',evidence:'authenticated-confirmation'},source:{kind:'test',resourceKey:'attendance-console',submissionId:'attendance-one',revision:1},operation:'attendance.report',payload:{reportId:'report-one',eventId:'event-one',unitId:'alpha',rosterVersion:2,coveredPersonIds:['person-a'],presentPersonIds:['person-a'],completeness:'complete'}};
+  assert.equal((await f.send(attendance,'/v1/commands')).status,200);
+  await f.db.prepare('UPDATE system_control SET accepting_commands=0').run();
+  const result=await f.send(read(),'/v1/admin/snapshot');assert.equal(result.status,200);assert.deepEqual(result.body.revision,{operations:1,administration:2});
+  assert.equal(result.body.observations[0].order,1);assert.deepEqual(result.body.diagnostics,[]);
+  assert.equal((await f.send(revised(command()))).status,403);
+  assert.equal((await f.send(read({principalId:'outsider'}),'/v1/admin/snapshot')).status,403);
+});
+
+test('effects project fresh snapshots, serialize each kind, reject stolen or expired claims and remain pending until acknowledgement',async t=>{
+  const f=await fixture(t);const c=command();c.commandId='x'.repeat(128);assert.equal((await f.send(c)).status,200);
+  const claim=await f.send(effect({kind:'frontend.refresh'}),'/v1/admin/effects/claim');assert.equal(claim.status,200);assert.ok(claim.body.effect.effectId.length<=128);
+  const key={effectId:claim.body.effect.effectId,claimToken:claim.body.effect.claimToken};
+  const projected=await f.send(effect(key),'/v1/admin/effects/project');assert.equal(projected.status,200);assert.equal(projected.body.snapshot.people.length,1);
+  assert.equal((await f.send(effect({...key,claimToken:'wrong'}),'/v1/admin/effects/ack')).status,409);
+  assert.equal((await f.send(effect(key),'/v1/admin/effects/ack')).status,200);
+  const second=(await f.send(effect({kind:'forms.refresh'}),'/v1/admin/effects/claim')).body.effect;
+  await f.db.prepare("UPDATE admin_effects SET lease_expires_at='2000-01-01T00:00:00.000Z' WHERE state='leased'").run();
+  assert.equal((await f.send(effect({effectId:second.effectId,claimToken:second.claimToken}),'/v1/admin/effects/ack')).status,409);
+  assert.equal((await f.send(effect({kind:'frontend.refresh'}),'/v1/admin/effects/claim')).body.effect,null);
+});
+
+test('concurrent identical administrative deliveries commit once and return the same receipt',async t=>{
+  const f=await fixture(t);const result=await Promise.all([f.send(command()),f.send(command())]);
+  assert.deepEqual(result.map(r=>r.status),[200,200]);assert.deepEqual(result[0],result[1]);assert.equal(await f.count('admin_audit_events'),1);
+});
+
+test('command IDs cannot collide across the operational and administrative ledgers',async t=>{
+  const f=await fixture(t);assert.equal((await f.send(command())).status,200);assert.equal((await f.send(command('event.upsert'))).status,200);
+  await f.db.prepare("INSERT INTO access_grants VALUES('admin','attendance.report','alpha','unit')").run();
+  const operational={commandId:'shared-id',contractVersion:1,environment:'local',generation:1,actor:{principalId:'admin',evidence:'authenticated-confirmation'},source:{kind:'test',resourceKey:'admin-console',submissionId:'presence-source',revision:1},operation:'attendance.report',payload:{reportId:'presence-report',eventId:'event-one',unitId:'alpha',rosterVersion:2,coveredPersonIds:['person-a'],presentPersonIds:['person-a'],completeness:'complete'}};
+  assert.equal((await f.send(operational,'/v1/commands')).status,200);
+  const admin=revised(command());admin.commandId='shared-id';assert.equal((await f.send(admin)).status,409);
+  admin.commandId='administrative-id';assert.equal((await f.send(admin)).status,200);
+  operational.commandId='administrative-id';operational.source.submissionId='another-presence-source';operational.payload.reportId='another-report';operational.payload.rosterVersion=3;
+  assert.equal((await f.send(operational,'/v1/commands')).status,409);assert.equal(await f.count('attendance_reports'),1);
+});

@@ -16,7 +16,7 @@ const commit = 'a'.repeat(40);
 const plan = createMigrationPlan(sql, commit, 1);
 const sources = await readMigrationSources(new URL('../../database/migrations', import.meta.url));
 const upgradeCommit = 'b'.repeat(40);
-const upgradePlan = createMigrationPlan(sources, upgradeCommit, 1);
+const upgradePlan = createMigrationPlan(sources.slice(0, 2), upgradeCommit, 1);
 const sha256 = value => createHash('sha256').update(value).digest('hex');
 
 async function database(t) {
@@ -227,7 +227,7 @@ test('ordered migration history rejects gaps, future versions and modified earli
 });
 
 test('third version upgrades append history without repeating the legacy-ledger conversion', async t => {
-  const future = createMigrationPlan([...sources, { name: '0003_fixture.sql', sql:
+  const future = createMigrationPlan([...sources.slice(0, 2), { name: '0003_fixture.sql', sql:
     "ALTER TABLE people ADD COLUMN fixture_tag TEXT NOT NULL DEFAULT 'fixture';\nCREATE TABLE fixture_upgrade (key TEXT PRIMARY KEY, note TEXT DEFAULT 'two  spaces; it''s safe');\nINSERT INTO fixture_upgrade(key) SELECT person_id FROM people;" }], 'f'.repeat(40), 1);
   const db = await database(t);
   await apply(db);
@@ -277,7 +277,7 @@ test('release artifacts bind the entire ordered migration source and regenerated
   t.after(() => rm(directory, { recursive: true, force: true }));
   await mkdir(join(directory, 'migrations'));
   const artifacts = { 'worker.mjs': '// fictional build\n', 'GoogleAdapter.js': '// fictional build\n', 'appsscript.json': '{}\n',
-    'upload-metadata.template.json': '{}\n', 'migration-plan.json': JSON.stringify(upgradePlan, null, 2) + '\n' };
+    'upload-metadata.template.json': '{}\n', 'migration-plan.json': JSON.stringify(createMigrationPlan(sources, upgradeCommit, 1), null, 2) + '\n' };
   for (const source of sources) artifacts[`migrations/${source.name}`] = source.sql;
   const files = {};
   for (const [name, content] of Object.entries(artifacts)) {
@@ -290,7 +290,7 @@ test('release artifacts bind the entire ordered migration source and regenerated
   const saveManifest = () => writeFile(join(directory, 'manifest.json'), JSON.stringify(manifest));
   await saveManifest();
   assert.equal((await verifyRelease(directory, upgradeCommit, 1)).verified, true);
-  const tampered = JSON.stringify({ ...upgradePlan, generation: 2 });
+  const tampered = JSON.stringify({ ...createMigrationPlan(sources, upgradeCommit, 1), generation: 2 });
   await writeFile(join(directory, 'migration-plan.json'), tampered);
   files['migration-plan.json'] = { bytes: Buffer.byteLength(tampered), sha256: sha256(tampered) };
   await saveManifest();
@@ -314,4 +314,26 @@ test('artifact paths and migration sources reject symlink escapes', async t => {
   await assert.rejects(resolveBuildPath(outside), /ignored/);
   await symlink(new URL('../../database/migrations/0001_prototype.sql', import.meta.url), join(outside, '0001_prototype.sql'));
   await assert.rejects(readMigrationSources(outside), /regular/);
+});
+
+
+test('all checked-in additive upgrades preserve existing receipts and leave staging fenced', async t => {
+  const all = createMigrationPlan(sources, upgradeCommit, 1);
+  const db = await database(t);
+  await apply(db);
+  await seedCommand(db);
+  const accepted = (await db.prepare('SELECT * FROM operation_commands').all()).results;
+  for (let version = 2; version <= sources.length; version++) {
+    const before = await evidence(db);
+    const operation = createUpgradeBatch(all, ...before, recovery(before));
+    assert.equal(operation.toVersion, version);
+    if (version > 2) assert.equal(operation.batch.some(({ sql }) => /RENAME TO shamrock_migrations_v1/.test(sql)), false);
+    await apply(db, operation.batch);
+    const after = await evidence(db);
+    assert.deepEqual(after[1].slice(0, version - 1), before[1]);
+    assert.deepEqual((await db.prepare('SELECT * FROM operation_commands').all()).results, accepted);
+    assert.equal(after[2][0].accepting_commands, 0);
+    assert.deepEqual((await db.prepare('PRAGMA foreign_key_check').all()).results, []);
+  }
+  assert.deepEqual(classifyMigrationState(all, ...await evidence(db)), { action: 'noop' });
 });
