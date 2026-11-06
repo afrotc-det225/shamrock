@@ -2,7 +2,7 @@ import { recoverAdminEffect } from './effect-recovery.js';
 import { transitionCommand, transitionStatus, transitionArchive } from './transitions.js';
 import { planNotifications, notificationStatus, processNotificationTask, notificationDelivery } from './notifications.js';
 import { acceptAttendanceCorrection } from './corrections.js';
-import { acceptAdminCommand, adminEffect, frontendSnapshot, getAdminReceipt } from './admin.js';
+import { acceptAdminCommand, adminEffect, authorizeDirectoryReview, frontendSnapshot, getAdminReceipt } from './admin.js';
 import { HttpError } from './http-error.js';
 import {
   buildAttendanceReport, createExcusalRequest, createExcusalRequests, decideExcusalRequest,
@@ -201,6 +201,16 @@ async function acceptCommand(env: Env, command: Command): Promise<Receipt> {
   // Recheck membership inside the same atomic batch as the accepted mutation.
   guard.sql += ` AND ${membership.sql}`;
   guard.values.push(...membership.values);
+  // New Form catalogs freeze event versions. Check them only on first acceptance;
+  // replaying an already committed response must still return its original receipt.
+  const eventVersions = command.operation === 'excusal.submitMany' ? command.payload.events
+    : command.operation === 'excusal.decide' ? [] : [command.payload];
+  const expectedEvents = eventVersions.filter(e => e.expectedEventVersion !== undefined).map(e => ({ eventId: e.eventId, version: e.expectedEventVersion }));
+  if (expectedEvents.length) {
+    guard.sql += ` AND NOT EXISTS(SELECT 1 FROM json_each(?) selected WHERE NOT EXISTS(
+      SELECT 1 FROM event_details e WHERE e.event_id=json_extract(selected.value,'$.eventId') AND e.version=json_extract(selected.value,'$.version')))`;
+    guard.values.push(JSON.stringify(expectedEvents));
+  }
   const writes: D1PreparedStatement[] = [];
   let result: unknown;
   let targetId: string;
@@ -437,6 +447,7 @@ export default {
         }
         return json(await acceptAdminCommand(env, input));
       }
+      if (url.pathname === '/v1/admin/directory/review-authorize' && !url.search) return json(await authorizeDirectoryReview(env, input));
       if (url.pathname === '/v1/admin/snapshot' && !url.search) return json(await frontendSnapshot(env, input));
       if (url.pathname === '/v1/admin/effects/recover' && !url.search) return json(await recoverAdminEffect(env, input));
       for (const action of ['claim', 'project', 'ack'] as const) {

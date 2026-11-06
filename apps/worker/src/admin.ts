@@ -21,8 +21,11 @@ function permission(principal: string, capability: string, scopes: string[]): {
    SELECT 1 FROM admin_grants WHERE principal_id=? AND capability=? AND scope_kind='flight' AND scope_key=s.value))))`,
     values: [principal, principal, capability, JSON.stringify(scopes), JSON.stringify(scopes), principal, capability] };
 }
-function commandAuth(env: AdminEnv, c: AdminCommand, capability: string, scopes: string[]) {
-  const p = permission(c.actor.principalId, capability, scopes);
+function commandAuth(env: AdminEnv, c: AdminCommand, capability: string, scopes: string[], targetId: string) {
+  const p = c.operation === 'directory.selfUpdate'
+    ? { sql: 'EXISTS(SELECT 1 FROM principals WHERE principal_id=? AND person_id=? AND active=1)', values: [c.actor.principalId, c.payload.personId] }
+    : c.operation === 'directory.enroll' ? { sql: '(NOT EXISTS(SELECT 1 FROM principals WHERE principal_id=?) OR EXISTS(SELECT 1 FROM principals WHERE principal_id=? AND person_id=? AND active=1))', values: [c.actor.principalId, c.actor.principalId, targetId] }
+    : permission(c.actor.principalId, capability, scopes);
   return { sql: `${control()} AND ${p.sql} AND EXISTS(SELECT 1 FROM adapter_sources WHERE source_kind=? AND resource_key=? AND active=1)`, values: [env.ENVIRONMENT, Number(env.GENERATION), ...p.values, c.source.kind, c.source.resourceKey] };
 }
 interface Receipt {
@@ -43,14 +46,16 @@ interface StoredReceipt {
   scopes: string;
   sourceKind: string;
   sourceResource: string;
+  targetId: string;
+  operation: string;
 }
 async function priorReceipt(env: AdminEnv, c: AdminCommand, hash: string): Promise<Receipt | null> {
   // All authorization facts and the receipt are read in one transaction, even on replay.
   const rows = await env.DB.batch<Record<string, unknown>>([
     stmt(env.DB, `SELECT payload_hash AS hash,receipt_json AS receipt,actor_id AS actorId,capability,scopes_json AS scopes,
-   source_kind AS sourceKind,source_resource AS sourceResource FROM admin_commands WHERE command_id=?`, c.commandId),
+   source_kind AS sourceKind,source_resource AS sourceResource,target_id AS targetId,operation FROM admin_commands WHERE command_id=?`, c.commandId),
     stmt(env.DB, `SELECT (${control()}) AS allowed`, env.ENVIRONMENT, Number(env.GENERATION)),
-    stmt(env.DB, `SELECT active FROM principals WHERE principal_id=?`, c.actor.principalId),
+    stmt(env.DB, `SELECT active,person_id AS personId FROM principals WHERE principal_id=?`, c.actor.principalId),
     stmt(env.DB, `SELECT capability,scope_kind AS kind,scope_key AS scope FROM admin_grants WHERE principal_id=?`, c.actor.principalId),
     stmt(env.DB, `SELECT active FROM adapter_sources WHERE source_kind=? AND resource_key=?`, c.source.kind, c.source.resourceKey),
   ]);
@@ -65,7 +70,7 @@ async function priorReceipt(env: AdminEnv, c: AdminCommand, hash: string): Promi
   }[];
   const relevant = grants.filter(g => g.capability === row.capability);
   if (row.actorId !== c.actor.principalId || rows[1].results[0]?.allowed !== 1 || rows[2].results[0]?.active !== 1 || rows[4].results[0]?.active !== 1 ||
-    !(relevant.some(g => g.kind === 'wing' && g.scope === '*') || (scopes.length > 0 && scopes.every(s => relevant.some(g => g.kind === 'flight' && g.scope === s))))) {
+    !(['directory.selfUpdate','directory.enroll'].includes(row.operation) ? rows[2].results[0]?.personId === row.targetId : relevant.some(g => g.kind === 'wing' && g.scope === '*') || (scopes.length > 0 && scopes.every(s => relevant.some(g => g.kind === 'flight' && g.scope === s))))) {
     throw new HttpError(403, 'NOT_AUTHORIZED', 'The actor, source or operation is not currently authorized.');
   }
   if (row.hash !== hash)
@@ -84,22 +89,58 @@ export async function acceptAdminCommand(env: AdminEnv, input: unknown): Promise
   if (previous)
     return previous;
   const now = new Date().toISOString();
-  const writes: D1PreparedStatement[] = [];
+  const writes: D1PreparedStatement[] = [], identityWrites: D1PreparedStatement[] = [];
+  let resultVersion = c.operation === 'directory.enroll' ? 1 : c.payload.expectedVersion + 1;
   let before: unknown = null;
   let scopes: string[] = [];
   let targetId: string;
   let capability: string;
   let condition: string;
   let conditionValues: Value[];
-  if (c.operation === 'directory.upsert') {
-    const p = c.payload;
-    targetId = p.personId;
-    capability = 'directory.manage';
+  if (c.operation === 'directory.enroll') {
+    const p = c.payload, emailHash = await digest(p.verifiedEmail);
+    if (c.actor.principalId !== `google.${emailHash}`) throw new HttpError(400, 'INVALID_IDENTITY', 'Enrollment must bind the attested verified account.');
+    const facts = await env.DB.batch<Record<string,unknown>>([
+      stmt(env.DB, 'SELECT person_id AS personId,active FROM principals WHERE principal_id=?', c.actor.principalId),
+      stmt(env.DB, `${profileProjection} WHERE lower(d.email)=? ORDER BY d.person_id LIMIT 2`, p.verifiedEmail),
+    ]);
+    const principal = facts[0].results[0] as {personId:string|null;active:number}|undefined;
+    const matches = facts[1].results as unknown as DirectoryRecord[];
+    if (matches.length > 1 || (principal && (!principal.active || !principal.personId))) throw new HttpError(409, 'ENROLLMENT_REVIEW_REQUIRED', 'Resolve duplicate or revoked enrollment identity before activation.');
+    targetId = principal?.personId ?? matches[0]?.personId ?? `person.${emailHash}`;
+    const existing = await stmt(env.DB, `${profileProjection} WHERE d.person_id=?`, targetId).first<DirectoryRecord>();
+    if (matches[0] && matches[0].personId !== targetId) throw new HttpError(409, 'ENROLLMENT_REVIEW_REQUIRED', 'Verified account identity conflicts with an existing profile.');
+    if (existing && !operationallyActive(existing)) throw new HttpError(409, 'ENROLLMENT_REVIEW_REQUIRED', 'A Directory manager must review a previously inactive enrollment.');
+    before = { principal: principal ?? null, profile: existing };
+    capability = 'directory.enroll'; scopes = [existing?.flightId ?? p.flightId].filter((v):v is string=>!!v); resultVersion = existing?.version ?? 1;
+    condition = `COALESCE((SELECT version FROM directory_profiles WHERE person_id=?),0)=?
+      AND (SELECT COUNT(*) FROM directory_profiles WHERE lower(email)=?)=?
+      AND EXISTS(SELECT 1 FROM flight_hierarchy WHERE unit_id=?)
+      AND (SELECT COUNT(*) FROM principals WHERE principal_id=?)=?`;
+    conditionValues = [targetId, existing?.version ?? 0, p.verifiedEmail, matches.length, scopes[0], c.actor.principalId, principal ? 1 : 0];
+    if (!existing) {
+      identityWrites.push(stmt(env.DB, 'INSERT INTO people(person_id,display_name) VALUES(?,?) ON CONFLICT(person_id) DO UPDATE SET display_name=excluded.display_name', targetId, `${p.profile.lastName}, ${p.profile.firstName}`));
+      const columns = ['person_id','version','flight_id',...profileColumns,'updated_at'];
+      writes.push(stmt(env.DB, `INSERT INTO directory_profiles(${columns.join(',')}) VALUES(${columns.map(()=>'?').join(',')})`, targetId,1,p.flightId,...DIRECTORY_FIELDS.map(k=>p.profile[k]),now));
+      writes.push(stmt(env.DB, 'INSERT INTO memberships(person_id,unit_id,active) VALUES(?,?,1)', targetId,p.flightId));
+      writes.push(stmt(env.DB, 'UPDATE organizational_units SET roster_version=roster_version+1 WHERE unit_id=?',p.flightId));
+      writes.push(stmt(env.DB, 'INSERT INTO directory_membership_history(command_id,person_id,previous_flight_id,flight_id,active,accepted_at) VALUES(?,?,NULL,?,1,?)',c.commandId,targetId,p.flightId,now));
+      writes.push(stmt(env.DB, `INSERT INTO term_roster_snapshots SELECT term_id,?,?,?,?,?,?,?,? FROM terms WHERE is_current=1`,targetId,p.profile.lastName,p.profile.firstName,p.profile.asYear,p.flightId,p.profile.flightPathStatus,p.profile.dateOfBirth,c.commandId));
+    }
+    if (!principal) identityWrites.push(stmt(env.DB, 'INSERT INTO principals(principal_id,person_id,active) VALUES(?,?,1)',c.actor.principalId,targetId));
+    // A fixed self-only cadet capability, never derived from the claimed rank or role.
+    if (!principal) writes.push(stmt(env.DB, `INSERT INTO access_grants(principal_id,capability,unit_id,subject_scope) VALUES(?,'excusal.submit',?,'self') ON CONFLICT DO NOTHING`,c.actor.principalId,scopes[0]));
+  } else if (c.operation === 'directory.upsert' || c.operation === 'directory.selfUpdate') {
+    const target = c.payload;
+    targetId = target.personId;
+    capability = c.operation === 'directory.selfUpdate' ? 'directory.selfUpdate' : 'directory.manage';
     const rows = await env.DB.batch<Record<string, unknown>>([
-      stmt(env.DB, `${profileProjection} WHERE d.person_id=?`, p.personId),
-      stmt(env.DB, 'SELECT unit_id AS flightId,active FROM memberships WHERE person_id=? ORDER BY unit_id', p.personId),
+      stmt(env.DB, `${profileProjection} WHERE d.person_id=?`, target.personId),
+      stmt(env.DB, 'SELECT unit_id AS flightId,active FROM memberships WHERE person_id=? ORDER BY unit_id', target.personId),
     ]);
     const existing = rows[0].results[0] as unknown as DirectoryRecord | undefined;
+    if (c.operation === 'directory.selfUpdate' && !existing) throw new HttpError(409, 'ENROLLMENT_REQUIRED', 'A Directory manager must review this enrollment first.');
+    const p = c.operation === 'directory.upsert' ? c.payload : { personId: target.personId, expectedVersion: target.expectedVersion, flightId: existing!.flightId, profile: { ...existing!, ...c.payload.changes } };
     const memberships = rows[1].results as {
       flightId: string;
       active: number;
@@ -182,18 +223,19 @@ export async function acceptAdminCommand(env: AdminEnv, input: unknown): Promise
     writes.push(stmt(env.DB, 'DELETE FROM event_units WHERE event_id=?', p.eventId));
     writes.push(stmt(env.DB, 'INSERT INTO event_units(event_id,unit_id) SELECT ?,value FROM json_each(?)', p.eventId, JSON.stringify(p.flightIds)));
   }
-  const auth = commandAuth(env, c, capability, scopes);
+  const auth = commandAuth(env, c, capability, scopes, targetId);
   const allowed = await stmt(env.DB, `SELECT (${auth.sql}) AS allowed`, ...auth.values).first<{
     allowed: number;
   }>();
   if (allowed?.allowed !== 1)
     throw new HttpError(403, 'NOT_AUTHORIZED', 'The actor, source or operation is not currently authorized.');
-  const receipt: Receipt = { commandId: c.commandId, status: 'committed', operation: c.operation, result: { targetId, version: c.payload.expectedVersion + 1 }, pendingEffects: true };
+  const receipt: Receipt = { commandId: c.commandId, status: 'committed', operation: c.operation, result: { targetId, version: resultVersion }, pendingEffects: true };
   const effects = (c.operation === 'leadership.upsert' ? ['frontend.refresh'] : ['frontend.refresh', 'forms.refresh']).map(kind => ({ effectId: crypto.randomUUID(), kind }));
   try {
     await env.DB.batch<Record<string, unknown>>([
       stmt(env.DB, `INSERT INTO command_assertions(command_id,ok) VALUES(?,(${auth.sql}) AND (${condition}))`, c.commandId, ...auth.values, ...conditionValues),
       stmt(env.DB, `INSERT INTO command_registry VALUES(?,'admin')`, c.commandId),
+      ...identityWrites,
       stmt(env.DB, `INSERT INTO admin_commands VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`, c.commandId, hash, c.actor.principalId, c.operation, targetId, capability, JSON.stringify(scopes), c.source.kind, c.source.resourceKey, c.source.submissionId, c.source.revision, now, JSON.stringify(receipt)),
       ...writes,
       stmt(env.DB, `INSERT INTO admin_audit_events(command_id,actor_id,actor_evidence,operation,target_id,accepted_at,before_json,after_json) VALUES(?,?,?,?,?,?,?,?)`, c.commandId, c.actor.principalId, c.actor.evidence, c.operation, targetId, now, JSON.stringify(before), JSON.stringify(c.payload)),
@@ -229,6 +271,13 @@ const readerGuard = (env: AdminEnv, principalId: string, write = false) => {
   const p = permission(principalId, 'frontend.read', []);
   return { sql: `${control(write)} AND ${p.sql}`, values: [env.ENVIRONMENT, Number(env.GENERATION), ...p.values] };
 };
+/** Private pending Directory submissions are visible only to a current Wing Directory manager. */
+export async function authorizeDirectoryReview(env: AdminEnv, input: unknown): Promise<{ authorized: true }> {
+  const req = readInput(input, env), grant = permission(req.principalId, 'directory.manage', []);
+  const row = await stmt(env.DB, `SELECT (${control(false)} AND ${grant.sql}) AS allowed`, env.ENVIRONMENT, Number(env.GENERATION), ...grant.values).first<{ allowed: number }>();
+  if (row?.allowed !== 1) throw new HttpError(403, 'NOT_AUTHORIZED', 'Directory review requires current Wing Directory authority.');
+  return { authorized: true };
+}
 export async function frontendSnapshot(env: AdminEnv, input: unknown): Promise<FrontendSnapshot> {
   const req = readInput(input, env);
   const guard = readerGuard(env, req.principalId);
@@ -315,6 +364,7 @@ export async function getAdminReceipt(env: AdminEnv, url: URL): Promise<unknown>
   const row = await stmt(env.DB, `SELECT c.receipt_json AS receipt FROM admin_commands c JOIN principals p ON p.principal_id=c.actor_id
   WHERE c.command_id=? AND c.actor_id=? AND p.active=1 AND ${control()} AND
   EXISTS(SELECT 1 FROM adapter_sources s WHERE s.source_kind=c.source_kind AND s.resource_key=c.source_resource AND s.active=1) AND (
+   (c.operation IN ('directory.selfUpdate','directory.enroll') AND p.person_id=c.target_id) OR
    EXISTS(SELECT 1 FROM admin_grants g WHERE g.principal_id=c.actor_id AND g.capability=c.capability AND g.scope_kind='wing' AND g.scope_key='*') OR
    (json_array_length(c.scopes_json)>0 AND NOT EXISTS(SELECT 1 FROM json_each(c.scopes_json) s WHERE NOT EXISTS(
     SELECT 1 FROM admin_grants g WHERE g.principal_id=c.actor_id AND g.capability=c.capability AND g.scope_kind='flight' AND g.scope_key=s.value))))`, id, principal, env.ENVIRONMENT, Number(env.GENERATION)).first<{

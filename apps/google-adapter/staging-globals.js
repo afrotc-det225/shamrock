@@ -35,6 +35,10 @@ function shamrockV3StagingMaintenanceResume() { return shamrockV3StagingMaintena
 function shamrockV3StagingNotificationsPlan() { return shamrockV3StagingMaintenance_().planNotifications(); }
 function shamrockV3StagingTransitionArchive(transitionId) { return shamrockV3StagingMaintenance_().archive(transitionId); }
 function shamrockV3StagingTransitionCommand(input) { return shamrockV3StagingMaintenance_().command(input); }
+function shamrockV3StagingForms_() {
+  return SHAMROCKV3.createNativeFormsRuntime({ PropertiesService: PropertiesService, Utilities: Utilities,
+    UrlFetchApp: UrlFetchApp, ScriptApp: ScriptApp, Session: Session, FormApp: FormApp, LockService: LockService });
+}
 
 function shamrockV3StagingSetup() {
   var host = shamrockV3StagingHost_();
@@ -50,6 +54,7 @@ function shamrockV3StagingPauseBoth_(host) {
   try { result = host.pause(); } catch (error) { failure = error; }
   try { shamrockV3StagingFrontend_().pause(); } catch (error) { if (!failure) failure = error; }
   try { shamrockV3StagingMaintenance_().pause(); } catch (error) { if (!failure) failure = error; }
+  try { if (typeof SHAMROCKV3 !== 'undefined' && SHAMROCKV3.createNativeFormsRuntime) shamrockV3StagingForms_().pause(); } catch (error) { if (!failure) failure = error; }
   if (failure) throw failure;
   return result;
 }
@@ -72,7 +77,12 @@ function shamrockV3StagingFlush() {
   // Frontend maintenance has a separate explicit gate; Forms may remain paused.
   var frontend = shamrockV3StagingFrontend_().refresh();
   var maintenance = shamrockV3StagingMaintenance_().planNotifications();
-  return Object.assign({}, intake, { frontend: frontend, maintenance: maintenance });
+  var result = Object.assign({}, intake, { frontend: frontend, maintenance: maintenance });
+  if (typeof SHAMROCKV3 !== 'undefined' && SHAMROCKV3.createNativeFormsRuntime) {
+    var forms = shamrockV3StagingForms_();
+    result.formIntake = forms.flush(); result.forms = forms.refresh();
+  }
+  return result;
 }
 function shamrockV3StagingFrontendRefresh() { return shamrockV3StagingFrontend_().refresh(); }
 function shamrockV3StagingFrontendPause() { return shamrockV3StagingFrontend_().pause(); }
@@ -80,3 +90,17 @@ function shamrockV3StagingFrontendResume() { return shamrockV3StagingFrontend_()
 function shamrockV3StagingAttendanceSubmit(e) { return shamrockV3StagingHost_().onAttendanceSubmit(e); }
 function shamrockV3StagingExcusalSubmit(e) { return shamrockV3StagingHost_().onExcusalSubmit(e); }
 function shamrockV3StagingDecisionEdit(e) { return shamrockV3StagingHost_().onDecisionEdit(e); }
+
+function shamrockV3ManagedFormsSetup() { return shamrockV3StagingForms_().setup(); }
+function shamrockV3ManagedFormsRefresh() { return shamrockV3StagingForms_().refresh(); }
+function shamrockV3ManagedFormsPause() { return shamrockV3StagingForms_().pause(); }
+function shamrockV3ManagedFormsResume() { return shamrockV3StagingForms_().resumePublication(); }
+function shamrockV3ManagedIntakeResume() { return shamrockV3StagingForms_().resumeIntake(); }
+function shamrockV3ManagedFormsStatus() { return shamrockV3StagingForms_().status(); }
+function shamrockV3ManagedDirectoryReviewQueue() { return shamrockV3StagingForms_().directoryReviewQueue(); }
+function shamrockV3ManagedDirectoryReview(input) { return shamrockV3StagingForms_().reviewDirectory(input); }
+function shamrockV3ManagedAttendanceSubmit(e) { return shamrockV3StagingForms_().submit('attendance', e); }
+function shamrockV3ManagedExcusalSubmit(e) { return shamrockV3StagingForms_().submit('excusals', e); }
+function shamrockV3ManagedDirectorySubmit(e) { return shamrockV3StagingForms_().submit('directory', e); }
+
+function shamrockV3ManagedFormReplay(key, responseId) { return shamrockV3StagingForms_().replay(key, responseId); }

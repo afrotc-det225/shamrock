@@ -37,6 +37,13 @@ export interface DirectoryUpsert {
   flightId: string | null;
   profile: DirectoryProfile;
 }
+export const DIRECTORY_SELF_FIELDS = ['lastName', 'firstName', 'university', 'phone', 'dorm', 'cipBroadArea', 'cipCode', 'afsc', 'homeTown', 'homeState', 'classYear', 'dateOfBirth', 'photoLink'] as const;
+export interface DirectoryEnrollment { verifiedEmail: string; flightId: string; profile: DirectoryProfile }
+export interface DirectorySelfUpdate {
+  personId: string;
+  expectedVersion: number;
+  changes: Partial<Pick<DirectoryProfile, typeof DIRECTORY_SELF_FIELDS[number]>>;
+}
 export interface LeadershipUpsert {
   contactId: string;
   expectedVersion: number;
@@ -76,6 +83,12 @@ interface Envelope {
 export type AdminCommand = Envelope & ({
   operation: 'directory.upsert';
   payload: DirectoryUpsert;
+} | {
+  operation: 'directory.selfUpdate';
+  payload: DirectorySelfUpdate;
+} | {
+  operation: 'directory.enroll';
+  payload: DirectoryEnrollment;
 } | {
   operation: 'leadership.upsert';
   payload: LeadershipUpsert;
@@ -230,17 +243,9 @@ function profile(value: unknown): DirectoryProfile {
     else
       result[key] = text(p[key], `payload.profile.${key}`, key === 'photoLink' ? 2048 : 240, ['firstName', 'lastName'].includes(key));
   }
-  if (result.photoLink) {
-    let url: URL;
-    try {
-      url = new URL(result.photoLink);
-    }
-    catch {
-      return invalid('payload.profile.photoLink', 'Expected an HTTPS photo link or blank.');
-    }
-    if (url.protocol !== 'https:' || url.username || url.password)
-      return invalid('payload.profile.photoLink', 'Expected an HTTPS photo link or blank.');
-  }
+  // Apps Script V8 does not require the browser URL constructor. Bound a credential-free HTTPS URI.
+  if (result.photoLink && !/^https:\/\/(?:\[[A-Fa-f0-9:]+\]|[A-Za-z0-9.-]+)(?::[0-9]{1,5})?(?:[/?#][^\s]*)?$/.test(result.photoLink))
+    return invalid('payload.profile.photoLink', 'Expected an HTTPS photo link or blank.');
   if (result.classYear && !/^\d{4}$/.test(result.classYear))
     return invalid('payload.profile.classYear', 'Expected a four-digit class year or blank.');
   return result;
@@ -265,11 +270,27 @@ export function parseAdminCommand(value: unknown): AdminCommand {
   const s = object(c.source, 'source', ['kind', 'resourceKey', 'submissionId', 'revision']);
   if (c.contractVersion !== 1)
     return invalid('contractVersion', 'Unsupported contract version.');
-  const sourceKind = choice(s.kind, ['sheet', 'test'] as const, 'source.kind');
-  const evidence = choice(a.evidence, ['google-edit', 'authenticated-confirmation'] as const, 'actor.evidence');
+  const self = c.operation === 'directory.selfUpdate' || c.operation === 'directory.enroll';
+  const sourceKind = choice(s.kind, self ? ['form'] as const : ['sheet', 'test'] as const, 'source.kind');
+  const evidence = choice(a.evidence, self ? ['google-form'] as const : ['google-edit', 'authenticated-confirmation'] as const, 'actor.evidence');
   if (evidence === 'google-edit' && sourceKind !== 'sheet')
     return invalid('actor.evidence', 'Actor evidence does not match the source.');
   const envelope: Envelope = { commandId: adminIdentifier(c.commandId, 'commandId'), contractVersion: 1, environment: choice(c.environment, ['local', 'staging'] as const, 'environment'), generation: integer(c.generation, 'generation', 1), actor: { principalId: adminIdentifier(a.principalId, 'actor.principalId'), evidence }, source: { kind: sourceKind, resourceKey: adminIdentifier(s.resourceKey, 'source.resourceKey'), submissionId: adminIdentifier(s.submissionId, 'source.submissionId'), revision: integer(s.revision, 'source.revision', 1) } };
+  if (c.operation === 'directory.enroll') {
+    const p = object(c.payload, 'payload', ['verifiedEmail', 'flightId', 'profile']);
+    const verifiedEmail = email(p.verifiedEmail, 'payload.verifiedEmail'), record = profile(p.profile);
+    if (!verifiedEmail || record.email !== verifiedEmail || record.rank !== 'C/AB' || record.role !== '' || record.flightPathStatus !== 'Active 3/4')
+      return invalid('payload.profile', 'Automatic enrollment uses verified email and the fixed initial cadet policy.');
+    return { ...envelope, operation: 'directory.enroll', payload: { verifiedEmail, flightId: adminIdentifier(p.flightId, 'payload.flightId'), profile: record } };
+  }
+  if (c.operation === 'directory.selfUpdate') {
+    const p = object(c.payload, 'payload', ['personId', 'expectedVersion', 'changes']);
+    if (!p.changes || typeof p.changes !== 'object' || Array.isArray(p.changes)) return invalid('payload.changes', 'Expected profile changes.');
+    const changes = p.changes as Record<string, unknown>, keys = Object.keys(changes);
+    if (!keys.length || keys.some(k => !(DIRECTORY_SELF_FIELDS as readonly string[]).includes(k))) return invalid('payload.changes', 'Only self-service profile fields may be changed.');
+    const validated = profile({ lastName: 'Unchanged', firstName: 'Unchanged', asYear: 'AS100', rank: '', role: '', university: '', email: '', phone: '', dorm: '', cipBroadArea: '', cipCode: '', afsc: '', homeTown: '', homeState: '', classYear: '', dateOfBirth: null, flightPathStatus: 'Active 3/4', photoLink: '', ...changes });
+    return { ...envelope, operation: 'directory.selfUpdate', payload: { personId: adminIdentifier(p.personId, 'payload.personId'), expectedVersion: integer(p.expectedVersion, 'payload.expectedVersion', 1), changes: Object.fromEntries(keys.map(k => [k, validated[k as keyof DirectoryProfile]])) } };
+  }
   if (c.operation === 'directory.upsert') {
     const p = object(c.payload, 'payload', ['personId', 'expectedVersion', 'flightId', 'profile']);
     const payload = { personId: adminIdentifier(p.personId, 'payload.personId'), expectedVersion: integer(p.expectedVersion, 'payload.expectedVersion'), flightId: p.flightId === null ? null : adminIdentifier(p.flightId, 'payload.flightId'), profile: profile(p.profile) };

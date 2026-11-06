@@ -67,8 +67,8 @@ function fixture() {
 function assertOnlyPaused(f, expected) {
   const before = new Map(f.properties);
   assert.throws(() => f.run(), expected);
-  before.set(H.enabled, 'false'); before.set(F.paused, 'true'); before.set(M.paused, 'true'); assert.deepEqual(f.properties, before);
-  assert.deepEqual(f.state.mutations, [['set', H.enabled], ['set', F.paused], ['set', M.paused]]);
+  before.set(H.enabled, 'false'); before.set(F.paused, 'true'); before.set(M.paused, 'true'); before.set('SHAMROCK_V3_FORMS_PAUSED','true'); before.set('SHAMROCK_V3_FORM_INTAKE_PAUSED','true'); assert.deepEqual(f.properties, before);
+  assert.deepEqual(f.state.mutations, [['set', H.enabled], ['set', F.paused], ['set', M.paused], ['set','SHAMROCK_V3_FORMS_PAUSED'], ['set','SHAMROCK_V3_FORM_INTAKE_PAUSED']]);
   assert.equal(f.state.secretReads, 0);
 }
 
@@ -210,7 +210,7 @@ test('a property provider failure is never reported as an atomic successful impo
 test('an unconfirmed pause stops before downloading or replacing any configuration', () => {
   const f = fixture(); const before = new Map(f.properties); f.state.discardPause = true;
   assert.throws(() => f.run(), code('configuration_write_failed'));
-  assert.deepEqual(f.properties, before); assert.equal(f.state.calls.length, 0); assert.equal(f.state.mutations.length, 3);
+  assert.deepEqual(f.properties, before); assert.equal(f.state.calls.length, 0); assert.equal(f.state.mutations.length, 5);
 });
 
 

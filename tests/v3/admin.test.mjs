@@ -521,3 +521,69 @@ test('concurrent notification results return one durable receipt and completion 
  const results=await Promise.all([f.send(input,path+'complete'),f.send(input,path+'complete')]);assert.equal(results[0].status,200,JSON.stringify(results));assert.deepEqual(results[0],results[1]);
  assert.equal((await f.db.prepare("SELECT COUNT(*) AS n FROM notification_delivery_events WHERE action='confirmed'").first()).n,1);
 });
+
+test('verified Directory self-service changes only the linked cadet profile and rechecks revocation',async t=>{
+  const f=await fixture(t);assert.equal((await f.send(command())).status,200);
+  await f.db.batch([f.db.prepare("INSERT INTO principals VALUES('cadet','person-a',1),('other-cadet',NULL,1)"),f.db.prepare("INSERT INTO adapter_sources VALUES('form','directory-form',1)")]);
+  const c={commandId:'self-profile',contractVersion:1,environment:'local',generation:1,actor:{principalId:'cadet',evidence:'google-form'},source:{kind:'form',resourceKey:'directory-form',submissionId:'native-response',revision:1},operation:'directory.selfUpdate',payload:{personId:'person-a',expectedVersion:1,changes:{phone:'555-555-0100',photoLink:'https://drive.google.com/file/d/fictional-photo/view'}}};
+  const accepted=await f.send(c);assert.equal(accepted.status,200,JSON.stringify(accepted.body));assert.equal(accepted.body.result.version,2);
+  const p=await f.db.prepare("SELECT version,rank,role,flight_id,email,phone FROM directory_profiles WHERE person_id='person-a'").first();
+  assert.deepEqual(p,{version:2,rank:'C/SSgt',role:'Flight Commander',flight_id:'alpha',email:'cadet@example.invalid',phone:'555-555-0100'});
+  assert.deepEqual(await f.send(c),accepted);
+  assert.equal((await f.send(null,'/v1/admin/commands/self-profile?principalId=cadet','GET')).status,200);
+  const other=structuredClone(c);other.commandId='other-profile';other.actor.principalId='other-cadet';other.source.submissionId='other-response';other.payload.expectedVersion=2;assert.equal((await f.send(other)).status,403);
+  for(const changes of [{rank:'C/Col'},{role:'Wing Commander'},{asYear:'AS400'},{flightId:'bravo'},{flightPathStatus:'Active 3/4'},{email:'other@example.invalid'}]){
+    const bad=structuredClone(c);bad.payload.changes=changes;assert.throws(()=>parseAdminCommand(bad),{code:'INVALID_COMMAND'});
+  }
+  await f.db.prepare("UPDATE principals SET person_id=NULL WHERE principal_id='cadet'").run();assert.equal((await f.send(c)).status,403);
+  assert.equal((await f.send(null,'/v1/admin/commands/self-profile?principalId=cadet','GET')).status,404);
+});
+
+test('Directory self-service freezes the submitted base version and rejects stale or typed identity evidence',async t=>{
+  const f=await fixture(t);assert.equal((await f.send(command())).status,200);
+  await f.db.batch([f.db.prepare("INSERT INTO principals VALUES('cadet','person-a',1)"),f.db.prepare("INSERT INTO adapter_sources VALUES('form','directory-form',1)")]);
+  const base={commandId:'self-1',contractVersion:1,environment:'local',generation:1,actor:{principalId:'cadet',evidence:'google-form'},source:{kind:'form',resourceKey:'directory-form',submissionId:'native-1',revision:1},operation:'directory.selfUpdate',payload:{personId:'person-a',expectedVersion:1,changes:{dorm:'Reviewed Dorm'}}};
+  assert.equal((await f.send(base)).status,200);
+  const stale=structuredClone(base);stale.commandId='self-2';stale.source.submissionId='native-2';assert.equal((await f.send(stale)).status,409);
+  const bad=structuredClone(base);bad.actor.evidence='google-edit';assert.throws(()=>parseAdminCommand(bad),{code:'INVALID_COMMAND'});
+  await f.db.prepare("UPDATE adapter_sources SET active=0 WHERE resource_key='directory-form'").run();assert.equal((await f.send(base)).status,403);
+});
+
+test('managed Form event versions reject stale first acceptance while committed responses keep their receipt',async t=>{
+ const f=await fixture(t);assert.equal((await f.send(command())).status,200);assert.equal((await f.send(command('event.upsert'))).status,200);
+ await f.db.batch([f.db.prepare("INSERT INTO access_grants VALUES('admin','attendance.report','alpha','unit')"),f.db.prepare("INSERT INTO adapter_sources VALUES('form','managed-attendance',1)")]);
+ const c={commandId:'bound-event',contractVersion:1,environment:'local',generation:1,actor:{principalId:'admin',evidence:'google-form'},source:{kind:'form',resourceKey:'managed-attendance',submissionId:'native-event',revision:1},operation:'attendance.report',payload:{reportId:'bound-report',eventId:'event-one',expectedEventVersion:2,unitId:'alpha',rosterVersion:2,coveredPersonIds:['person-a'],presentPersonIds:['person-a'],completeness:'complete'}};
+ assert.equal((await f.send(c,'/v1/commands')).status,409);assert.equal(await f.count('attendance_reports'),0);
+ c.payload.expectedEventVersion=1;const accepted=await f.send(c,'/v1/commands');assert.equal(accepted.status,200);
+ const changed=revised(command('event.upsert'));changed.payload.label='Updated event';assert.equal((await f.send(changed)).status,200);
+ assert.deepEqual(await f.send(c,'/v1/commands'),accepted);
+ const newer=structuredClone(c);newer.commandId='new-native';newer.source.submissionId='new-native';newer.payload.reportId='new-report';assert.equal((await f.send(newer,'/v1/commands')).status,409);assert.equal(await f.count('attendance_reports'),1);
+});
+
+test('pending Directory review requires current Wing authority even when the private adapter knows the cadet',async t=>{
+ const f=await fixture(t),path='/v1/admin/directory/review-authorize';
+ assert.deepEqual(await f.send(read(),path),{status:200,body:{authorized:true}});
+ assert.equal((await f.send(read({principalId:'flight-admin'}),path)).status,403);
+ assert.equal((await f.send(read({principalId:'outsider'}),path)).status,403);
+ await f.db.prepare("DELETE FROM admin_grants WHERE principal_id='admin' AND capability='directory.manage'").run();assert.equal((await f.send(read(),path)).status,403);
+});
+
+const enrollment=(email='new@example.invalid',revision=1)=>({commandId:`enroll-${revision}`,contractVersion:1,environment:'local',generation:1,actor:{principalId:`google.${createHash('sha256').update(email).digest('hex')}`,evidence:'google-form'},source:{kind:'form',resourceKey:'directory-form',submissionId:'native-new',revision},operation:'directory.enroll',payload:{verifiedEmail:email,flightId:'alpha',profile:{...profile(),email,rank:'C/AB',role:'',flightPathStatus:'Active 3/4'}}});
+test('verified Directory enrollment activates once with only self excusal authority and immutable replay',async t=>{
+ const f=await fixture(t);await f.db.prepare("INSERT INTO adapter_sources VALUES('form','directory-form',1)").run();const c=enrollment(),first=await f.send(c);assert.equal(first.status,200,JSON.stringify(first.body));const personId=first.body.result.targetId;
+ assert.equal(await f.count('people'),1);assert.equal(await f.count('principals'),4);assert.equal(await f.count('directory_profiles'),1);assert.equal((await f.db.prepare('SELECT active FROM memberships WHERE person_id=?').bind(personId).first()).active,1);
+ assert.deepEqual((await f.db.prepare('SELECT capability,unit_id,subject_scope FROM access_grants WHERE principal_id=?').bind(c.actor.principalId).all()).results,[{capability:'excusal.submit',unit_id:'alpha',subject_scope:'self'}]);assert.equal((await f.db.prepare('SELECT COUNT(*) AS n FROM admin_grants WHERE principal_id=?').bind(c.actor.principalId).first()).n,0);
+ assert.deepEqual(await f.send(c),first);assert.equal((await f.send(enrollment('new@example.invalid',2))).status,200);assert.equal(await f.count('people'),1);assert.equal(await f.count('directory_profiles'),1);
+ await f.db.prepare('DELETE FROM access_grants WHERE principal_id=?').bind(c.actor.principalId).run();assert.equal((await f.send(enrollment('new@example.invalid',3))).status,200);assert.equal(await f.count('access_grants'),0,'repeat enrollment does not restore a revoked capability');
+ await f.db.prepare('UPDATE principals SET active=0 WHERE principal_id=?').bind(c.actor.principalId).run();assert.equal((await f.send(c)).status,403);assert.equal((await f.send(enrollment('new@example.invalid',4))).status,409);
+});
+test('Directory enrollment links one existing verified email without overwriting its operational profile',async t=>{
+ const f=await fixture(t);await f.db.prepare("INSERT INTO adapter_sources VALUES('form','directory-form',1)").run();assert.equal((await f.send(command())).status,200);const c=enrollment('cadet@example.invalid'),r=await f.send(c);assert.equal(r.status,200,JSON.stringify(r.body));assert.equal(r.body.result.targetId,'person-a');assert.equal(await f.count('people'),1);assert.equal((await f.db.prepare("SELECT rank FROM directory_profiles WHERE person_id='person-a'").first()).rank,'C/SSgt');
+ const forged=enrollment('other@example.invalid',2);forged.actor.principalId=c.actor.principalId;assert.equal((await f.send(forged)).status,400);
+ const leader=enrollment('leader@example.invalid',3);leader.payload.profile.role='Wing Commander';assert.equal((await f.send(leader)).status,400);
+ const unregistered=enrollment('unregistered@example.invalid',4);unregistered.source.resourceKey='other-form';assert.equal((await f.send(unregistered)).status,403);
+});
+test('enrollment is atomic under duplicate delivery and honors the mutation fence',async t=>{
+ const f=await fixture(t);await f.db.prepare("INSERT INTO adapter_sources VALUES('form','directory-form',1)").run();const c=enrollment();const results=await Promise.all([f.send(c),f.send(c)]);assert(results.every(r=>r.status===200),JSON.stringify(results));assert.equal(await f.count('people'),1);assert.equal(await f.count('admin_commands'),1);
+ await f.db.prepare('UPDATE system_control SET accepting_commands=0').run();assert.equal((await f.send(enrollment('second@example.invalid',2))).status,403);assert.equal(await f.count('people'),1);
+});

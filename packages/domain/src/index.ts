@@ -41,6 +41,7 @@ interface CommandEnvelope {
 export interface AttendanceReportPayload {
   reportId: string;
   eventId: string;
+  expectedEventVersion?: number;
   unitId: string;
   rosterVersion: number;
   coveredPersonIds: string[];
@@ -51,6 +52,7 @@ export interface AttendanceReportPayload {
 export interface ExcusalSubmitPayload {
   requestId: string;
   eventId: string;
+  expectedEventVersion?: number;
   personId: string;
   requestedOutcome: RequestedOutcome;
   reason: string;
@@ -62,7 +64,7 @@ export interface ExcusalSubmitManyPayload {
   requestedOutcome: RequestedOutcome;
   reason: string;
   /** Child identities are stable per native response and event, never selection order. */
-  events: { eventId: string; requestId: string }[];
+  events: { eventId: string; requestId: string; expectedEventVersion?: number }[];
 }
 
 export interface ExcusalDecidePayload {
@@ -149,7 +151,7 @@ function invalid(path: string, message: string): never {
   throw new DomainError('INVALID_COMMAND', message, path);
 }
 
-function object(value: unknown, path: string, keys: readonly string[]): Record<string, unknown> {
+function object(value: unknown, path: string, keys: readonly string[], optional: readonly string[] = []): Record<string, unknown> {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) {
     invalid(path, 'Expected an object.');
   }
@@ -158,7 +160,7 @@ function object(value: unknown, path: string, keys: readonly string[]): Record<s
   const record = value as Record<string, unknown>;
   if (Object.keys(record).some(key => !keys.includes(key))) invalid(path, 'Unsupported field.');
   for (const key of keys) {
-    if (!Object.prototype.hasOwnProperty.call(record, key)) invalid(`${path}.${key}`, 'Required field is missing.');
+    if (!optional.includes(key) && !Object.prototype.hasOwnProperty.call(record, key)) invalid(`${path}.${key}`, 'Required field is missing.');
   }
   return record;
 }
@@ -246,8 +248,8 @@ export function parseCommand(input: unknown): Command {
 
   if (raw.operation === 'attendance.report') {
     const p = object(raw.payload, 'command.payload', [
-      'reportId', 'eventId', 'unitId', 'rosterVersion', 'coveredPersonIds', 'presentPersonIds', 'completeness',
-    ]);
+      'reportId', 'eventId', 'unitId', 'rosterVersion', 'coveredPersonIds', 'presentPersonIds', 'completeness', 'expectedEventVersion',
+    ], ['expectedEventVersion']);
     const coveredPersonIds = identifiers(p.coveredPersonIds, 'command.payload.coveredPersonIds', 1);
     const presentPersonIds = identifiers(p.presentPersonIds, 'command.payload.presentPersonIds', 0);
     const covered = new Set(coveredPersonIds);
@@ -260,6 +262,7 @@ export function parseCommand(input: unknown): Command {
       payload: {
         reportId: id(p.reportId, 'command.payload.reportId'),
         eventId: id(p.eventId, 'command.payload.eventId'),
+        ...(p.expectedEventVersion === undefined ? {} : { expectedEventVersion: positiveInteger(p.expectedEventVersion, 'command.payload.expectedEventVersion') }),
         unitId: id(p.unitId, 'command.payload.unitId'),
         rosterVersion: positiveInteger(p.rosterVersion, 'command.payload.rosterVersion'),
         coveredPersonIds,
@@ -270,13 +273,14 @@ export function parseCommand(input: unknown): Command {
   }
 
   if (raw.operation === 'excusal.submit') {
-    const p = object(raw.payload, 'command.payload', ['requestId', 'eventId', 'personId', 'requestedOutcome', 'reason']);
+    const p = object(raw.payload, 'command.payload', ['requestId', 'eventId', 'personId', 'requestedOutcome', 'reason', 'expectedEventVersion'], ['expectedEventVersion']);
     return {
       ...envelope,
       operation: 'excusal.submit',
       payload: {
         requestId: id(p.requestId, 'command.payload.requestId'),
         eventId: id(p.eventId, 'command.payload.eventId'),
+        ...(p.expectedEventVersion === undefined ? {} : { expectedEventVersion: positiveInteger(p.expectedEventVersion, 'command.payload.expectedEventVersion') }),
         personId: id(p.personId, 'command.payload.personId'),
         requestedOutcome: choice(p.requestedOutcome, 'command.payload.requestedOutcome', REQUESTED_OUTCOMES),
         reason: reason(p.reason, 'command.payload.reason'),
@@ -291,8 +295,8 @@ export function parseCommand(input: unknown): Command {
     }
     const events = p.events.map((entry, index) => {
       const path = `command.payload.events[${index}]`;
-      const event = object(entry, path, ['eventId', 'requestId']);
-      return { eventId: id(event.eventId, `${path}.eventId`), requestId: id(event.requestId, `${path}.requestId`) };
+      const event = object(entry, path, ['eventId', 'requestId', 'expectedEventVersion'], ['expectedEventVersion']);
+      return { eventId: id(event.eventId, `${path}.eventId`), requestId: id(event.requestId, `${path}.requestId`), ...(event.expectedEventVersion === undefined ? {} : { expectedEventVersion: positiveInteger(event.expectedEventVersion, `${path}.expectedEventVersion`) }) };
     });
     if (new Set(events.map(event => event.eventId)).size !== events.length
       || new Set(events.map(event => event.requestId)).size !== events.length) {
