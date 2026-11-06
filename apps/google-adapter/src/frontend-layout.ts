@@ -37,7 +37,7 @@ function columns(input: AttendanceLayoutInput, headers: readonly string[]): Requ
     if (width === undefined) continue;
     requests.push(dimension(input.sheetId, 'COLUMNS', index, index + 1, width));
     requests.push(format(input, 1, 2, index, index + 1, {
-      textFormat: { fontFamily: 'Roboto', fontSize: event || header.endsWith('_pct') ? 8 : 9, bold: true },
+      textFormat: { fontFamily: 'Roboto', fontSize: event || header.endsWith('_pct') ? 7 : 9, bold: true },
       wrapStrategy: 'WRAP', verticalAlignment: 'MIDDLE',
     }, 'userEnteredFormat.textFormat.fontFamily,userEnteredFormat.textFormat.fontSize,userEnteredFormat.textFormat.bold,userEnteredFormat.wrapStrategy,userEnteredFormat.verticalAlignment'));
     if (event) requests.push(format(input, 2, input.dataEndRow, index, index + 1, {
