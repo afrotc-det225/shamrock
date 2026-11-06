@@ -1,3 +1,4 @@
+import { prepareTransitionPermissions, permissionManagerSql } from './permissions.js';
 import { noticeLocalClock } from '../../../packages/domain/src/notifications.js';
 /** Isolated, explicitly reviewed term transitions. No Google or mail IO in the Worker. */
 import { adminIdentifier, type FrontendSnapshot } from '../../../packages/domain/src/admin.js';
@@ -81,6 +82,8 @@ export async function transitionCommand(env: Env, input: unknown): Promise<unkno
     const auth = authority(env, c.actor.principalId);
     auth.sql += ' AND EXISTS(SELECT 1 FROM adapter_sources WHERE source_kind=? AND resource_key=? AND active=1)';
     auth.values.push(c.source.kind, c.source.resourceKey);
+    auth.sql+=` AND (NOT EXISTS(SELECT 1 FROM permission_command_requirements WHERE command_id=?) OR ${permissionManagerSql})`;
+    auth.values.push(c.commandId,c.actor.principalId);
     const check = await stmt(env.DB, `SELECT (${auth.sql}) AS allowed`, ...auth.values).first<{
         allowed: number;
     }>();
@@ -154,6 +157,8 @@ export async function transitionCommand(env: Env, input: unknown): Promise<unkno
       AND NOT EXISTS(SELECT 1 FROM attendance_closeouts WHERE state IN ('processing','notifying'))`;
             values.push(c.transitionId, row.base_operations_revision, row.base_administration_revision, plan.sourceTermId, plan.targetTerm.termId, plan.targetTerm.sortOrder);
             const changed = prepared.people.filter(p => plan.people.some(change => change.personId === p.personId));
+            const permissionChange = await prepareTransitionPermissions(env, {commandId:c.commandId,principalId:c.actor.principalId,people:changed,now,payloadHash:digest});
+            if(permissionChange) { condition+=` AND (${permissionChange.assertion.sql})`;values.push(...permissionChange.assertion.values); }
             const changesJson = JSON.stringify(changed), oldJson = JSON.stringify(snapshot.people);
             const eventRows = await Promise.all(prepared.events.map(async (event) => ({ ...event, commandId: 'transition-event-' + await hash(JSON.stringify([c.commandId, event.eventId])) })));
             const eventsJson = JSON.stringify(eventRows);
@@ -191,6 +196,7 @@ export async function transitionCommand(env: Env, input: unknown): Promise<unkno
         SELECT json_extract(value,'$.commandId'),?,?,'transition.event',json_extract(value,'$.eventId'),?,'{}',value FROM json_each(?)`, c.actor.principalId, c.actor.evidence, now, eventsJson));
             for (const kind of ['forms.refresh', 'frontend.refresh'])
                 writes.push(stmt(env.DB, "INSERT INTO admin_effects(effect_id,command_id,kind,state,created_at) VALUES(?,?,?,'pending',?)", 'transition-' + await hash(JSON.stringify([c.commandId, kind])), c.commandId, kind, now));
+            writes.push(...(permissionChange?.writes??[]));
             state = 'publishing';
         }
         writes.push(stmt(env.DB, `UPDATE term_transitions SET state=?,version=?,updated_at=?,accepted_command_id=CASE WHEN ?='publishing' THEN ? ELSE accepted_command_id END WHERE transition_id=?`, state, version, now, state, c.commandId, c.transitionId));

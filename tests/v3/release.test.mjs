@@ -341,7 +341,7 @@ test('all checked-in additive upgrades preserve existing receipts and leave stag
 
 test('fresh current-schema bootstrap is atomic, paused, and refuses every existing database',async t=>{
  const latest=createMigrationPlan(sources,commit,1),fresh=createFreshDatabaseBatch(latest),db=await database(t);
- assert(fresh.batch.length<=128);await apply(db,fresh.batch);
+ assert(fresh.batch.length<=160);await apply(db,fresh.batch);
  assert.deepEqual(classifyMigrationState(latest,...await evidence(db)),{action:'noop'});
  assert.equal((await db.prepare('SELECT accepting_commands FROM system_control').first()).accepting_commands,0);
  assert.equal((await db.prepare('PRAGMA foreign_key_check').all()).results.length,0);

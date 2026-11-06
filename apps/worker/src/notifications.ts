@@ -1,3 +1,4 @@
+import { effectiveAdminGrants } from './permission-grants.js';
 /** Suppressed planning/status API and local-only transport rehearsal. No mail provider binding. */
 import { adminIdentifier, type FrontendSnapshot } from '../../../packages/domain/src/admin.js';
 import { buildFrontendReporting, REPORTING_POLICY_VERSION } from '../../../packages/domain/src/frontend-reporting.js';
@@ -76,7 +77,7 @@ function authority(env: NotificationEnv, principalId: string, write = true) {
   return {
     sql: `EXISTS(SELECT 1 FROM system_control WHERE singleton=1 AND environment=? AND generation=?${write ? ' AND accepting_commands=1' : ''})
    AND EXISTS(SELECT 1 FROM principals WHERE principal_id=? AND active=1)
-   AND EXISTS(SELECT 1 FROM admin_grants WHERE principal_id=? AND capability='notifications.manage' AND scope_kind='wing' AND scope_key='*')`,
+   AND EXISTS(SELECT 1 FROM ${effectiveAdminGrants} WHERE principal_id=? AND capability='notifications.manage' AND scope_kind='wing' AND scope_key='*')`,
     values: [env.ENVIRONMENT, Number(env.GENERATION), principalId, principalId],
   };
 }

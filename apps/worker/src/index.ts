@@ -1,4 +1,6 @@
 import { adminEffectAvailability } from './effect-availability.js';
+import { permissionCommand, permissionRefresh, attestPermissionFence, recoverPermissionRefresh } from './permissions.js';
+import { effectiveAccessGrants } from './permission-grants.js';
 import { prepareCloseout, advanceCloseout, closeoutStatus } from './closeout.js';
 import { listLegacyHistory, readLegacyHistory, listLegacyRequestHistory } from './legacy-history.js';
 import { recoverAdminEffect } from './effect-recovery.js';
@@ -123,7 +125,7 @@ async function context(db: D1Database, command: Command): Promise<Context> {
 }
 
 const controlSql = `EXISTS (SELECT 1 FROM system_control WHERE singleton=1 AND environment=? AND generation=? AND accepting_commands=1)`;
-const permissionSql = `EXISTS (SELECT 1 FROM principals p JOIN access_grants g ON g.principal_id=p.principal_id
+const permissionSql = `EXISTS (SELECT 1 FROM principals p JOIN ${effectiveAccessGrants} g ON g.principal_id=p.principal_id
   WHERE p.principal_id=? AND p.active=1 AND g.capability=? AND g.unit_id=?
   AND (g.subject_scope='unit' OR (g.subject_scope='self' AND p.person_id=?)))`;
 const sourceSql = `EXISTS (SELECT 1 FROM adapter_sources WHERE source_kind=? AND resource_key=? AND active=1)`;
@@ -406,7 +408,7 @@ async function getReceipt(env: Env, url: URL): Promise<unknown> {
     JOIN principals p ON p.principal_id=c.actor_id WHERE c.command_id=? AND c.actor_id=? AND p.active=1
     AND EXISTS (SELECT 1 FROM command_event_scopes s WHERE s.command_id=c.command_id)
     AND NOT EXISTS (SELECT 1 FROM command_event_scopes s WHERE s.command_id=c.command_id AND NOT EXISTS
-      (SELECT 1 FROM access_grants g JOIN event_units eu ON eu.unit_id=g.unit_id
+      (SELECT 1 FROM ${effectiveAccessGrants} g JOIN event_units eu ON eu.unit_id=g.unit_id
        JOIN events e ON e.event_id=eu.event_id WHERE g.principal_id=p.principal_id
        AND g.capability=CASE WHEN c.operation='excusal.submitMany' THEN 'excusal.submit' ELSE c.operation END
        AND g.unit_id=s.unit_id AND e.event_id=s.event_id AND e.active=1
@@ -433,6 +435,12 @@ export default {
         throw new HttpError(400, 'INVALID_REQUEST', 'Use an authenticated JSON operation.');
       }
       const input = parseJson(body);
+      if (url.pathname === '/v1/admin/permissions/recover' && !url.search) return json(await recoverPermissionRefresh(env, input));
+      if (url.pathname === '/v1/admin/permissions/fence' && !url.search) return json(await attestPermissionFence(env, input));
+      if (url.pathname === '/v1/admin/permissions/commands' && !url.search) return json(await permissionCommand(env, input));
+      for (const action of ['claim','project','ack','status'] as const) {
+        if (url.pathname === `/v1/admin/permissions/${action}` && !url.search) return json(await permissionRefresh(env, action, input));
+      }
       if (url.pathname === '/v1/admin/closeout/prepare' && !url.search) return json(await prepareCloseout(env, input));
       if (url.pathname === '/v1/admin/closeout/advance' && !url.search) return json(await advanceCloseout(env, input));
       if (url.pathname === '/v1/admin/closeout/status' && !url.search) return json(await closeoutStatus(env, input));

@@ -1,3 +1,4 @@
+import { effectiveAdminGrants } from './permission-grants.js';
 /** Bounded automatic Sunday finalization. All writes are append-only, audited and staging mail is suppressed. */
 import { adminIdentifier, type FrontendSnapshot } from '../../../packages/domain/src/admin.js';
 import { buildFrontendReporting, REPORTING_POLICY_VERSION, type FrontendReportingInput } from '../../../packages/domain/src/frontend-reporting.js';
@@ -53,8 +54,8 @@ function parse(input: unknown, env: Env, extra: string[] = []): Identity & Recor
 function authority(env: Env, r: Identity, write = true) {
     return { sql: `EXISTS(SELECT 1 FROM system_control WHERE singleton=1 AND environment=? AND generation=? ${write ? 'AND accepting_commands=1' : ''})
  AND EXISTS(SELECT 1 FROM principals p JOIN closeout_authorities a ON a.principal_id=p.principal_id WHERE p.principal_id=? AND p.active=1 AND a.active=1)
- AND EXISTS(SELECT 1 FROM admin_grants WHERE principal_id=? AND capability='frontend.read' AND scope_kind='wing' AND scope_key='*')
- AND EXISTS(SELECT 1 FROM admin_grants WHERE principal_id=? AND capability='notifications.manage' AND scope_kind='wing' AND scope_key='*')
+ AND EXISTS(SELECT 1 FROM ${effectiveAdminGrants} WHERE principal_id=? AND capability='frontend.read' AND scope_kind='wing' AND scope_key='*')
+ AND EXISTS(SELECT 1 FROM ${effectiveAdminGrants} WHERE principal_id=? AND capability='notifications.manage' AND scope_kind='wing' AND scope_key='*')
  AND EXISTS(SELECT 1 FROM adapter_sources WHERE source_kind=? AND resource_key=? AND active=1)`, values: [env.ENVIRONMENT, Number(env.GENERATION), r.principalId, r.principalId, r.principalId, r.sourceKind, r.sourceResource] };
 }
 async function authorized(env: Env, r: Identity, write = true) {

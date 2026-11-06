@@ -1,3 +1,4 @@
+import { effectiveAdminGrants } from './permission-grants.js';
 import { parseAttendanceCorrection, type AttendanceCorrectionCommand } from '../../../packages/domain/src/corrections.js';
 import { HttpError } from './http-error.js';
 
@@ -27,7 +28,7 @@ function authorization(env: CorrectionEnv, command: AttendanceCorrectionCommand,
   return {
     sql: `EXISTS(SELECT 1 FROM system_control WHERE singleton=1 AND environment=? AND generation=? AND accepting_commands=1)
       AND EXISTS(SELECT 1 FROM principals WHERE principal_id=? AND active=1)
-      AND EXISTS(SELECT 1 FROM admin_grants WHERE principal_id=? AND capability='attendance.correct'
+      AND EXISTS(SELECT 1 FROM ${effectiveAdminGrants} WHERE principal_id=? AND capability='attendance.correct'
         AND ((scope_kind='wing' AND scope_key='*') OR (scope_kind='flight' AND scope_key=?)))
       AND EXISTS(SELECT 1 FROM adapter_sources WHERE source_kind=? AND resource_key=? AND active=1)`,
     values: [env.ENVIRONMENT, Number(env.GENERATION), command.actor.principalId, command.actor.principalId,
@@ -46,7 +47,7 @@ async function previousReceipt(env: CorrectionEnv, command: AttendanceCorrection
   const row = await statement(env.DB, `SELECT c.payload_hash AS hash,c.receipt_json AS receipt,c.operation,c.actor_id AS actorId,
     (EXISTS(SELECT 1 FROM system_control WHERE singleton=1 AND environment=? AND generation=? AND accepting_commands=1)
     AND EXISTS(SELECT 1 FROM principals p WHERE p.principal_id=c.actor_id AND p.active=1)
-    AND EXISTS(SELECT 1 FROM admin_grants g WHERE g.principal_id=c.actor_id AND g.capability='attendance.correct'
+    AND EXISTS(SELECT 1 FROM ${effectiveAdminGrants} g WHERE g.principal_id=c.actor_id AND g.capability='attendance.correct'
       AND ((g.scope_kind='wing' AND g.scope_key='*') OR (g.scope_kind='flight' AND g.scope_key=c.unit_id)))
     AND EXISTS(SELECT 1 FROM adapter_sources s WHERE s.source_kind=c.source_kind AND s.resource_key=c.source_resource AND s.active=1)) AS allowed
     FROM operation_commands c WHERE c.command_id=?`, env.ENVIRONMENT, Number(env.GENERATION), command.commandId)
@@ -118,7 +119,7 @@ export async function correctionReceipt(env: CorrectionEnv, commandId: string, p
     JOIN principals p ON p.principal_id=c.actor_id
     WHERE c.command_id=? AND c.operation='attendance.correct' AND c.actor_id=? AND p.active=1
     AND EXISTS(SELECT 1 FROM system_control WHERE singleton=1 AND environment=? AND generation=? AND accepting_commands=1)
-    AND EXISTS(SELECT 1 FROM admin_grants g WHERE g.principal_id=c.actor_id AND g.capability='attendance.correct'
+    AND EXISTS(SELECT 1 FROM ${effectiveAdminGrants} g WHERE g.principal_id=c.actor_id AND g.capability='attendance.correct'
       AND ((g.scope_kind='wing' AND g.scope_key='*') OR (g.scope_kind='flight' AND g.scope_key=c.unit_id)))
     AND EXISTS(SELECT 1 FROM adapter_sources s WHERE s.source_kind=c.source_kind AND s.resource_key=c.source_resource AND s.active=1)`,
     commandId, principalId, env.ENVIRONMENT, Number(env.GENERATION)).first<{ receipt: string }>();

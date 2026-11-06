@@ -1,3 +1,5 @@
+import { preparePermissionMutation, permissionManagerSql } from './permissions.js';
+import { effectiveAdminGrants } from './permission-grants.js';
 import { attendanceVersionsSql, correctionReceipt } from './corrections.js';
 import { adminIdentifier, DIRECTORY_FIELDS, directoryLeadershipRole, operationallyActive, parseAdminCommand, type AdminCommand, type DirectoryRecord, type FrontendSnapshot, type LeadershipRecord, } from '../../../packages/domain/src/admin.js';
 import { HttpError } from './http-error.js';
@@ -16,9 +18,9 @@ function permission(principal: string, capability: string, scopes: string[]): {
   values: Value[];
 } {
   return { sql: `EXISTS(SELECT 1 FROM principals WHERE principal_id=? AND active=1) AND (
-  EXISTS(SELECT 1 FROM admin_grants WHERE principal_id=? AND capability=? AND scope_kind='wing' AND scope_key='*') OR
+  EXISTS(SELECT 1 FROM ${effectiveAdminGrants} WHERE principal_id=? AND capability=? AND scope_kind='wing' AND scope_key='*') OR
   (json_array_length(?)>0 AND NOT EXISTS(SELECT 1 FROM json_each(?) s WHERE NOT EXISTS(
-   SELECT 1 FROM admin_grants WHERE principal_id=? AND capability=? AND scope_kind='flight' AND scope_key=s.value))))`,
+   SELECT 1 FROM ${effectiveAdminGrants} WHERE principal_id=? AND capability=? AND scope_kind='flight' AND scope_key=s.value))))`,
     values: [principal, principal, capability, JSON.stringify(scopes), JSON.stringify(scopes), principal, capability] };
 }
 function commandAuth(env: AdminEnv, c: AdminCommand, capability: string, scopes: string[], targetId: string) {
@@ -48,20 +50,22 @@ interface StoredReceipt {
   sourceResource: string;
   targetId: string;
   operation: string;
+  managerRequired: number;
 }
 async function priorReceipt(env: AdminEnv, c: AdminCommand, hash: string): Promise<Receipt | null> {
   // All authorization facts and the receipt are read in one transaction, even on replay.
   const rows = await env.DB.batch<Record<string, unknown>>([
     stmt(env.DB, `SELECT payload_hash AS hash,receipt_json AS receipt,actor_id AS actorId,capability,scopes_json AS scopes,
-   source_kind AS sourceKind,source_resource AS sourceResource,target_id AS targetId,operation FROM admin_commands WHERE command_id=?`, c.commandId),
+   source_kind AS sourceKind,source_resource AS sourceResource,target_id AS targetId,operation,EXISTS(SELECT 1 FROM permission_command_requirements pr WHERE pr.command_id=admin_commands.command_id) AS managerRequired FROM admin_commands WHERE command_id=?`, c.commandId),
     stmt(env.DB, `SELECT (${control()}) AS allowed`, env.ENVIRONMENT, Number(env.GENERATION)),
     stmt(env.DB, `SELECT active,person_id AS personId FROM principals WHERE principal_id=?`, c.actor.principalId),
-    stmt(env.DB, `SELECT capability,scope_kind AS kind,scope_key AS scope FROM admin_grants WHERE principal_id=?`, c.actor.principalId),
+    stmt(env.DB, `SELECT capability,scope_kind AS kind,scope_key AS scope FROM ${effectiveAdminGrants} WHERE principal_id=?`, c.actor.principalId),
     stmt(env.DB, `SELECT active FROM adapter_sources WHERE source_kind=? AND resource_key=?`, c.source.kind, c.source.resourceKey),
   ]);
   const row = rows[0].results[0] as unknown as StoredReceipt | undefined;
   if (!row)
     return null;
+  if (row.managerRequired && !(await stmt(env.DB, `SELECT (${permissionManagerSql}) AS allowed`, c.actor.principalId).first<{allowed:number}>())?.allowed) throw new HttpError(403, 'NOT_AUTHORIZED', 'Current permission-manager authority is required.');
   const scopes = JSON.parse(row.scopes) as string[];
   const grants = rows[3].results as {
     capability: string;
@@ -223,7 +227,11 @@ export async function acceptAdminCommand(env: AdminEnv, input: unknown): Promise
     writes.push(stmt(env.DB, 'DELETE FROM event_units WHERE event_id=?', p.eventId));
     writes.push(stmt(env.DB, 'INSERT INTO event_units(event_id,unit_id) SELECT ?,value FROM json_each(?)', p.eventId, JSON.stringify(p.flightIds)));
   }
+  const permissionChange = await preparePermissionMutation(env, c, now, targetId, hash);
   const auth = commandAuth(env, c, capability, scopes, targetId);
+  if (permissionChange?.managerRequired) { auth.sql += ` AND ${permissionManagerSql}`; auth.values.push(c.actor.principalId); }
+  if (permissionChange) { condition += ` AND (${permissionChange.assertion.sql})`; conditionValues.push(...permissionChange.assertion.values); }
+
   const allowed = await stmt(env.DB, `SELECT (${auth.sql}) AS allowed`, ...auth.values).first<{
     allowed: number;
   }>();
@@ -238,6 +246,7 @@ export async function acceptAdminCommand(env: AdminEnv, input: unknown): Promise
       ...identityWrites,
       stmt(env.DB, `INSERT INTO admin_commands VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`, c.commandId, hash, c.actor.principalId, c.operation, targetId, capability, JSON.stringify(scopes), c.source.kind, c.source.resourceKey, c.source.submissionId, c.source.revision, now, JSON.stringify(receipt)),
       ...writes,
+      ...(permissionChange?.writes ?? []),
       stmt(env.DB, `INSERT INTO admin_audit_events(command_id,actor_id,actor_evidence,operation,target_id,accepted_at,before_json,after_json) VALUES(?,?,?,?,?,?,?,?)`, c.commandId, c.actor.principalId, c.actor.evidence, c.operation, targetId, now, JSON.stringify(before), JSON.stringify(c.payload)),
       stmt(env.DB, `INSERT INTO admin_effects(effect_id,command_id,kind,state,created_at) SELECT json_extract(value,'$.effectId'),?,json_extract(value,'$.kind'),'pending',? FROM json_each(?)`, c.commandId, now, JSON.stringify(effects)),
       stmt(env.DB, 'DELETE FROM command_assertions WHERE command_id=?', c.commandId),
@@ -365,12 +374,13 @@ export async function getAdminReceipt(env: AdminEnv, url: URL): Promise<unknown>
     throw new HttpError(400, 'INVALID_RECEIPT_QUERY', 'Specify a command and principal.');
   // Authorize in SQL against the stored command scopes and current grants, not a cached role.
   const row = await stmt(env.DB, `SELECT c.receipt_json AS receipt FROM admin_commands c JOIN principals p ON p.principal_id=c.actor_id
-  WHERE c.command_id=? AND c.actor_id=? AND p.active=1 AND ${control()} AND
+  WHERE c.command_id=? AND c.actor_id=? AND p.active=1 AND ${control()}
+  AND (NOT EXISTS(SELECT 1 FROM permission_command_requirements pr WHERE pr.command_id=c.command_id) OR EXISTS(SELECT 1 FROM permission_managers pm WHERE pm.principal_id=c.actor_id AND pm.active=1)) AND
   EXISTS(SELECT 1 FROM adapter_sources s WHERE s.source_kind=c.source_kind AND s.resource_key=c.source_resource AND s.active=1) AND (
    (c.operation IN ('directory.selfUpdate','directory.enroll') AND p.person_id=c.target_id) OR
-   EXISTS(SELECT 1 FROM admin_grants g WHERE g.principal_id=c.actor_id AND g.capability=c.capability AND g.scope_kind='wing' AND g.scope_key='*') OR
+   EXISTS(SELECT 1 FROM ${effectiveAdminGrants} g WHERE g.principal_id=c.actor_id AND g.capability=c.capability AND g.scope_kind='wing' AND g.scope_key='*') OR
    (json_array_length(c.scopes_json)>0 AND NOT EXISTS(SELECT 1 FROM json_each(c.scopes_json) s WHERE NOT EXISTS(
-    SELECT 1 FROM admin_grants g WHERE g.principal_id=c.actor_id AND g.capability=c.capability AND g.scope_kind='flight' AND g.scope_key=s.value))))`, id, principal, env.ENVIRONMENT, Number(env.GENERATION)).first<{
+    SELECT 1 FROM ${effectiveAdminGrants} g WHERE g.principal_id=c.actor_id AND g.capability=c.capability AND g.scope_kind='flight' AND g.scope_key=s.value))))`, id, principal, env.ENVIRONMENT, Number(env.GENERATION)).first<{
     receipt: string;
   }>();
   if (!row) {

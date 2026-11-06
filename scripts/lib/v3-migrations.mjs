@@ -186,7 +186,7 @@ export function createFreshDatabaseBatch(plan) {
     { sql: "INSERT INTO system_control(singleton,environment,generation,accepting_commands) VALUES(1,'staging',?,0)", params: [plan.generation] },
     { sql: `DROP TABLE ${bootstrapGuard}` },
   ];
-  if (batch.length > 128 || Buffer.byteLength(JSON.stringify(batch)) > 512 * 1024) throw new Error('Fresh schema exceeds its reviewed atomic bootstrap bound.');
+  if (batch.length > 160 || Buffer.byteLength(JSON.stringify(batch)) > 512 * 1024) throw new Error('Fresh schema exceeds its reviewed atomic bootstrap bound.');
   return { environment: 'staging', generation: plan.generation, version: plan.version, sourceCommit: plan.sourceCommit, batch };
 }
 

@@ -171,6 +171,6 @@ Do not migrate production automation as part of this rehearsal. Use the [account
 For a newly created, empty isolated database, `createFreshDatabaseBatch(plan)` in
 `scripts/lib/v3-migrations.mjs` installs the exact current schema and ordered ledger
 in one guarded transaction, leaving commands paused. Its explicit review bound is
-128 statements / 512 KiB. The transaction refuses any existing application object,
+160 statements / 512 KiB. The transaction refuses any existing application object,
 including an older SHAMROCK database. It is only initial provisioning; existing
 staging databases still require the versioned backup/restore upgrade procedure.

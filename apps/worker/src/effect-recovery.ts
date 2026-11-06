@@ -1,3 +1,4 @@
+import { effectiveAdminGrants } from './permission-grants.js';
 /** Deliberate recovery by the same adapter, after exclusive provider reconciliation.
  * A recovery renews a retained lease. It never steals/requeues/acknowledges work. */
 import { HttpError } from './http-error.js';
@@ -29,7 +30,7 @@ export async function recoverAdminEffect(env: Env, input: unknown): Promise<unkn
   // Recovery is permitted while the command gate is paused, but never across
   // generations or a revoked principal/grant. The same grant already owns effects.
   const guard = `EXISTS(SELECT 1 FROM system_control WHERE singleton=1 AND environment=? AND generation=?)
-    AND EXISTS(SELECT 1 FROM principals p JOIN admin_grants g ON g.principal_id=p.principal_id
+    AND EXISTS(SELECT 1 FROM principals p JOIN ${effectiveAdminGrants} g ON g.principal_id=p.principal_id
       WHERE p.principal_id=? AND p.active=1 AND g.capability='frontend.read' AND g.scope_kind='wing' AND g.scope_key='*')`;
   const authority = [r.environment,r.generation,r.principalId];
   const prior = await env.DB.batch<Record<string, unknown>>([

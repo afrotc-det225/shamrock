@@ -1,3 +1,4 @@
+import { effectiveAdminGrants } from './permission-grants.js';
 import { buildLegacyHistoryReport, LegacyHistoryError, type LegacyHistoryInput, type LegacyHistoryReport } from '../../../packages/domain/src/legacy-history.js';
 import { HttpError } from './http-error.js';
 interface Env { DB:D1Database;ENVIRONMENT:string;GENERATION:string }
@@ -13,7 +14,7 @@ function request(env:Env,input:unknown,read:boolean){
   return {principalId:r.principalId as string,snapshotId:r.snapshotId as string};
 }
 function guard(env:Env,principalId:string){return {sql:`EXISTS(SELECT 1 FROM system_control WHERE singleton=1 AND environment=? AND generation=?)
-  AND EXISTS(SELECT 1 FROM principals p JOIN admin_grants g ON g.principal_id=p.principal_id
+  AND EXISTS(SELECT 1 FROM principals p JOIN ${effectiveAdminGrants} g ON g.principal_id=p.principal_id
   WHERE p.principal_id=? AND p.active=1 AND g.capability='frontend.read' AND g.scope_kind='wing' AND g.scope_key='*')`,params:[env.ENVIRONMENT,Number(env.GENERATION),principalId] as Value[]};}
 /** Lists source copies separately; a reused term label cannot merge different archived formulas. */
 export async function listLegacyHistory(env:Env,input:unknown):Promise<unknown>{
