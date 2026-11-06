@@ -1,3 +1,4 @@
+import { prepareCloseout, advanceCloseout, closeoutStatus } from './closeout.js';
 import { recoverAdminEffect } from './effect-recovery.js';
 import { transitionCommand, transitionStatus, transitionArchive } from './transitions.js';
 import { planNotifications, notificationStatus, processNotificationTask, notificationDelivery } from './notifications.js';
@@ -430,6 +431,9 @@ export default {
         throw new HttpError(400, 'INVALID_REQUEST', 'Use an authenticated JSON operation.');
       }
       const input = parseJson(body);
+      if (url.pathname === '/v1/admin/closeout/prepare' && !url.search) return json(await prepareCloseout(env, input));
+      if (url.pathname === '/v1/admin/closeout/advance' && !url.search) return json(await advanceCloseout(env, input));
+      if (url.pathname === '/v1/admin/closeout/status' && !url.search) return json(await closeoutStatus(env, input));
       if (url.pathname === '/v1/admin/transitions/commands' && !url.search) return json(await transitionCommand(env, input));
       if (url.pathname === '/v1/admin/transitions/status' && !url.search) return json(await transitionStatus(env, input));
       for (const action of ['claim', 'ack'] as const) {

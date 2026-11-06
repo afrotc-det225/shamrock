@@ -1,4 +1,5 @@
 /** Explicit provider ports; no globals, installed triggers, credentials or mail calls on load. */
+import { CLOSEOUT_POLICY } from '../../../packages/domain/src/closeout.js';
 import { AdapterError, type AdapterConfig, type Signer, type Transport } from './index.js';
 import type { ScriptLockPort } from './apps-script.js';
 import { NOTICE_POLICY, noticeLocalClock } from '../../../packages/domain/src/notifications.js';
@@ -12,7 +13,7 @@ export interface MaintenanceApi {
     nowSeconds(): number;
 }
 export function callMaintenance(api: MaintenanceApi, path: string, input: unknown): Record<string, unknown> {
-    if (!/^\/v1\/admin\/(notifications|transitions)\/[a-z/]+$/.test(path))
+    if (!/^\/v1\/admin\/(notifications|transitions|closeout)\/[a-z/]+$/.test(path))
         throw new AdapterError('maintenance_path', 'Unsupported maintenance operation.');
     if (!/^https:\/\//.test(api.config.baseUrl) || /[?#]/.test(api.config.baseUrl))
         throw new AdapterError('maintenance_origin', 'Use the configured HTTPS Worker origin.');
@@ -176,7 +177,7 @@ function scheduledTime(now: string): string | null {
 export function planNotificationWork(api: MaintenanceApi, source: {
     kind: 'sheet' | 'test';
     resourceKey: string;
-}, enabled: boolean): {
+}, enabled: boolean, weeklyCloseoutHandled = false): {
     planned: boolean;
     processed: number;
 } {
@@ -184,7 +185,7 @@ export function planNotificationWork(api: MaintenanceApi, source: {
         return { planned: false, processed: 0 };
     const asOf = scheduledTime(new Date(api.nowSeconds() * 1000).toISOString());
     let planned = false;
-    if (asOf) {
+    if (asOf && !(weeklyCloseoutHandled && noticeLocalClock(asOf).weekday === 0 && noticeLocalClock(asOf).hour === 17)) {
         const commandId = 'notice-schedule-' + api.signer.sha256(JSON.stringify([NOTICE_POLICY.version, asOf]));
         callMaintenance(api, '/v1/admin/notifications/plan', { commandId, contractVersion: 1, environment: api.config.environment, generation: api.config.generation,
             actor: { principalId: api.principalId, evidence: 'registered-automation' }, source: { ...source, submissionId: commandId, revision: 1 }, operation: 'notifications.plan', payload: { kind: 'scheduled', asOf, requestId: null } });
@@ -201,4 +202,34 @@ export function planNotificationWork(api: MaintenanceApi, source: {
         processed++;
     }
     return { planned, processed };
+}
+/** Continue the oldest retained window on any day; start only at the established Sunday deadline. */
+export function advanceSundayCloseout(api: MaintenanceApi, source: {
+    kind: 'sheet' | 'test';
+    resourceKey: string;
+}): {
+    state: string;
+} {
+    const base = { ...identity(api), sourceKind: source.kind, sourceResource: source.resourceKey, policyVersion: CLOSEOUT_POLICY.version };
+    const status = callMaintenance(api, '/v1/admin/closeout/status', base);
+    if (!Array.isArray(status.runs))
+        throw new AdapterError('closeout_status', 'Closeout status is invalid.');
+    let run = status.runs.find((r: any) => r && ['processing', 'notifying'].includes(r.state));
+    if (!run) {
+        const now = new Date(api.nowSeconds() * 1000).toISOString(), clock = noticeLocalClock(now);
+        if (clock.weekday !== 0 || clock.hour < 17)
+            return { state: 'idle' };
+        const asOf = scheduledTime(now);
+        if (!asOf)
+            throw new AdapterError('closeout_schedule', 'The Sunday window could not be resolved.');
+        run = callMaintenance(api, '/v1/admin/closeout/prepare', { ...base, asOf });
+    }
+    if (['complete', 'needs-review'].includes(run.state))
+        return { state: run.state };
+    if (typeof run.closeoutId !== 'string' || !Number.isSafeInteger(run.version) || run.version < 1)
+        throw new AdapterError('closeout_status', 'Closeout progress is invalid.');
+    const result = callMaintenance(api, '/v1/admin/closeout/advance', { ...base, closeoutId: run.closeoutId, expectedVersion: run.version });
+    if (!['processing', 'notifying', 'complete', 'needs-review'].includes(String(result.state)))
+        throw new AdapterError('closeout_receipt', 'Closeout progress was not confirmed.');
+    return { state: String(result.state) };
 }

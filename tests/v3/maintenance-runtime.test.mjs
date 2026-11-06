@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import {createHash,createHmac} from 'node:crypto';
 import test from 'node:test';
-import {flushNotificationDelivery,createMailAppProvider,planNotificationWork} from '../../.build/v3/apps/google-adapter/src/notification-runtime.js';
+import {flushNotificationDelivery,createMailAppProvider,planNotificationWork,advanceSundayCloseout} from '../../.build/v3/apps/google-adapter/src/notification-runtime.js';
 import {continueTransitionArchive} from '../../.build/v3/apps/google-adapter/src/transition-runtime.js';
 const hash=v=>createHash('sha256').update(v).digest('hex');
 const signer={sha256:hash,hmacSha256:v=>createHmac('sha256','fictional-maintenance-signing-secret').update(v).digest('hex')};
@@ -68,4 +68,21 @@ test('archive continuation is retained and cannot satisfy completion before veri
 test('archive lost ACK reconciles verified completed snapshot after lease expiry without recreating it',()=>{
  const f=archiveFixture();continueTransitionArchive(f.ports,'transition');f.serverDone();f.expire();let writes=0;f.ports.archive.write=()=>{writes++;throw Error('must not rewrite');};
  assert.deepEqual(continueTransitionArchive(f.ports,'transition'),{state:'ready-for-reviewed-acceptance'});assert.equal(writes,0);assert.equal(f.ack,0);
+});
+
+test('Sunday scheduler prepares one bounded step, resumes on Monday and excludes premature weekly-review plans',()=>{
+ let paths=[];const f=base((path,input)=>{paths.push(path);
+  if(path.endsWith('/closeout/status'))return {status:200,body:JSON.stringify({runs:[]})};
+  if(path.endsWith('/prepare'))return {status:200,body:JSON.stringify({closeoutId:'closeout',version:1,state:'processing'})};
+  if(path.endsWith('/advance'))return {status:200,body:JSON.stringify({state:'notifying'})};
+  if(path.endsWith('/notifications/status'))return {status:200,body:JSON.stringify({pendingTasks:[]})};
+  throw Error('Unexpected notification planning before closeout');
+ },'staging');
+ f.api.nowSeconds=()=>Date.parse('2026-11-01T23:00:00Z')/1000;
+ assert.deepEqual(advanceSundayCloseout(f.api,{kind:'sheet',resourceKey:'maintenance'}),{state:'notifying'});
+ assert.deepEqual(planNotificationWork(f.api,{kind:'sheet',resourceKey:'maintenance'},true,true),{planned:false,processed:0});
+ assert.equal(paths.filter(p=>p.endsWith('/advance')).length,1);
+ f.api.nowSeconds=()=>Date.parse('2026-11-02T23:00:00Z')/1000;paths=[];
+ f.api.transport.send=req=>{const path=new URL(req.url).pathname;paths.push(path);return {status:200,body:JSON.stringify(path.endsWith('/status')?{runs:[{closeoutId:'closeout',version:2,state:'notifying'}]}:{state:'complete'})};};
+ assert.deepEqual(advanceSundayCloseout(f.api,{kind:'sheet',resourceKey:'maintenance'}),{state:'complete'});assert.ok(!paths.some(p=>p.endsWith('/prepare')));
 });

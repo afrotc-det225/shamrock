@@ -4,7 +4,7 @@ import { createGoogleSigner, createGoogleTransport, type ScriptLockPort, type Ut
 import { HOST_PROPERTIES, parseStagingHostConfig } from './staging-host.js';
 import { CONFIG_FILE_ID_PROPERTY } from './staging-config.js';
 import { MAINTENANCE_PROPERTIES, parseNativeMaintenanceConfig } from './maintenance-config.js';
-import { callMaintenance, planNotificationWork, type MaintenanceApi } from './notification-runtime.js';
+import { callMaintenance, planNotificationWork, advanceSundayCloseout, type MaintenanceApi } from './notification-runtime.js';
 import { continueTransitionArchive, type TransitionArchiveClaim, type TransitionArchivePorts } from './transition-runtime.js';
 import { buildCoherentFrontendModel } from './frontend-runtime.js';
 import { REPORTING_POLICY_VERSION } from '../../../packages/domain/src/frontend-reporting.js';
@@ -200,7 +200,9 @@ export function createNativeMaintenanceRuntime(services: NativeMaintenanceServic
         if (!lock.tryLock(1000))
             return { status: 'busy' };
         try {
-            return { status: 'suppressed', ...planNotificationWork(c.api, { kind: 'sheet', resourceKey: c.config.sourceResource }, true) };
+            const source = {kind: 'sheet' as const, resourceKey: c.config.sourceResource};
+            const closeout = c.config.closeoutEnabled ? advanceSundayCloseout(c.api, source) : {state:'disabled'};
+            return { status: 'suppressed', closeout, ...planNotificationWork(c.api, source, true, c.config.closeoutEnabled) };
         }
         finally {
             lock.releaseLock();

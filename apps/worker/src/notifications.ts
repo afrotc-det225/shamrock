@@ -89,6 +89,11 @@ function recipient(snapshot: FrontendSnapshot, roles: string[]): NoticeRecipient
     return undefined;
   return { email: matches[0].email, displayName: `${matches[0].lastName}, ${matches[0].firstName}` };
 }
+export function flightNoticeContacts(snapshot: FrontendSnapshot): FlightNoticeContact[] {
+  return snapshot.flights.map(f => ({ flightId: f.flightId, label: f.label, operational: roleKey(f.label) !== 'abroad',
+    commander: recipient(snapshot, [`${f.label} Flight Commander`, `Cadet ${f.label} Flight Commander`]),
+    deputy: recipient(snapshot, [`${f.label} Deputy Flight Commander`, `Deputy ${f.label} Flight Commander`, `Cadet ${f.label} Deputy Flight Commander`]) }));
+}
 function planFromSnapshot(snapshot: FrontendSnapshot, recipe: PlanCommand['payload']): NotificationIntent[] {
   if (snapshot.diagnostics.length)
     throw new HttpError(409, 'NOTIFICATION_SNAPSHOT_INCOMPLETE', 'Resolve the roster/catalog diagnostics before planning notices.');
@@ -120,11 +125,9 @@ function planFromSnapshot(snapshot: FrontendSnapshot, recipe: PlanCommand['paylo
   const report = buildFrontendReporting({ policyVersion: REPORTING_POLICY_VERSION, asOfDate: clock.date, currentTermId: current[0].termId,
     people: snapshot.people, flights: snapshot.flights.map(f => ({ ...f, squadronId: f.squadronId! })), squadrons: snapshot.squadrons,
     terms: snapshot.terms.map(term => ({ ...term, roster: term.isCurrent ? undefined : term.roster })),
-    events: snapshot.events.map(event => ({ ...event, type: event.eventType })), observations: snapshot.observations, corrections: snapshot.corrections,
+    events: snapshot.events.map(event => ({ ...event, type: event.eventType })), observations: snapshot.observations, corrections: snapshot.corrections, legacyBaselines: snapshot.legacyBaselines ?? [],
     requests: snapshot.requests as Parameters<typeof buildFrontendReporting>[0]['requests'] });
-  const flights: FlightNoticeContact[] = snapshot.flights.map(f => ({ flightId: f.flightId, label: f.label, operational: roleKey(f.label) !== 'abroad',
-    commander: recipient(snapshot, [`${f.label} Flight Commander`, `Cadet ${f.label} Flight Commander`]),
-    deputy: recipient(snapshot, [`${f.label} Deputy Flight Commander`, `Deputy ${f.label} Flight Commander`, `Cadet ${f.label} Deputy Flight Commander`]) }));
+  const flights = flightNoticeContacts(snapshot);
   const events = snapshot.events.filter(event => event.startAt !== null).map(event => ({ eventId: event.eventId, termId: event.termId, label: event.label,
     type: ({ 'mando': 'Mando PT', 'secondary': 'Secondary PT', 'llab': 'LLAB', 'other': 'Other' } as const)[event.eventType], startsAt: event.startAt!, status: event.status,
     flightIds: snapshot.eventFlights.filter(scope => scope.eventId === event.eventId).map(scope => scope.flightId) }));

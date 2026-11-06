@@ -23,7 +23,9 @@ signing as a human commander.
 
 Messages distinguish approved excusals, pending requests, recorded A/U and
 attendance not yet established. A denial or a missing request never establishes
-an absence. A weekly review does not silently assign U or describe an incomplete
+an absence. The [explicit Sunday closeout policy](D1_SUNDAY_CLOSEOUT.md) separately
+records automatic A/U finalization before its final summary. A preliminary weekly
+review does not assign U or describe an incomplete
 record as perfect attendance. Final absence adjudication is a separate authorized
 operation with its own evidence and audit history.
 
@@ -142,3 +144,16 @@ Live Google installation, real provider delivery, account quotas and operational
 notification parity remain separate live acceptance checks. See the
 [MailApp API contract](https://developers.google.com/apps-script/reference/mail/mail-app)
 and [D1 transactional batch contract](https://developers.cloudflare.com/d1/worker-api/d1-database/).
+
+
+## Confirmed automatic Sunday closeout (migration 0009)
+
+The user confirmed retention of automatic Sunday 17:00 closeout, including when
+Flight reports are missing. The [closeout workflow](D1_SUNDAY_CLOSEOUT.md) now
+appends policy-versioned A/U corrections in bounded atomic steps, preserving P/T,
+pending R and existing approved outcomes. Its final weekly summary is based on
+fresh facts after all steps, with the established Flight Commander/deputy routing.
+Staging summaries remain terminal suppressed and no actual messages are sent.
+Set the private maintenance `closeoutEnabled` flag only for a reviewed rehearsal;
+when enabled it replaces the preliminary Sunday review with the closeout's final
+summary. It does not change ordinary event-day or excusal task processing.

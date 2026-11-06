@@ -109,7 +109,8 @@ export async function transitionCommand(env: Env, input: unknown): Promise<unkno
       AND NOT EXISTS(SELECT 1 FROM term_transitions WHERE state NOT IN ('complete','cancelled'))
       AND NOT EXISTS(SELECT 1 FROM terms WHERE term_id=? OR sort_order=?)
       AND NOT EXISTS(SELECT 1 FROM admin_effects WHERE state='leased')
-      AND NOT EXISTS(SELECT 1 FROM outbox_jobs WHERE state='leased')`;
+      AND NOT EXISTS(SELECT 1 FROM outbox_jobs WHERE state='leased')
+      AND NOT EXISTS(SELECT 1 FROM attendance_closeouts WHERE state IN ('processing','notifying'))`;
         values = [snapshot.revision.operations, snapshot.revision.administration, c.plan.targetTerm.termId, c.plan.targetTerm.sortOrder];
         writes.push(stmt(env.DB, `INSERT INTO term_transitions VALUES(?,?,?, ?,1,'proposed',?,?,?,?,?,?,?,NULL,?,?)`, c.transitionId, c.plan.sourceTermId, c.plan.targetTerm.termId, c.plan.kind, planJson, planHash, snapshotJson, snapshotHash, snapshot.revision.operations, snapshot.revision.administration, c.commandId, now, now));
         writes.push(stmt(env.DB, "INSERT INTO transition_archive_jobs(transition_id,state,snapshot_hash) VALUES(?,'pending',?)", c.transitionId, snapshotHash));
@@ -149,7 +150,8 @@ export async function transitionCommand(env: Env, input: unknown): Promise<unkno
         AND EXISTS(SELECT 1 FROM terms WHERE term_id=? AND is_current=1)
         AND NOT EXISTS(SELECT 1 FROM terms WHERE term_id=? OR sort_order=?)
         AND NOT EXISTS(SELECT 1 FROM admin_effects WHERE state='leased')
-        AND NOT EXISTS(SELECT 1 FROM outbox_jobs WHERE state='leased')`;
+        AND NOT EXISTS(SELECT 1 FROM outbox_jobs WHERE state='leased')
+      AND NOT EXISTS(SELECT 1 FROM attendance_closeouts WHERE state IN ('processing','notifying'))`;
             values.push(c.transitionId, row.base_operations_revision, row.base_administration_revision, plan.sourceTermId, plan.targetTerm.termId, plan.targetTerm.sortOrder);
             const changed = prepared.people.filter(p => plan.people.some(change => change.personId === p.personId));
             const changesJson = JSON.stringify(changed), oldJson = JSON.stringify(snapshot.people);

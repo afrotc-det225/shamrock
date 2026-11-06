@@ -119,9 +119,11 @@ publication fails, and resume the same normal consumers. Reverting code alone
 does not restore a prior term. A reviewed data restore requires a verified backup
 and proof that accepted writes are not discarded.
 
-Weekly blank→absence or denied→unexcused finalization, its deadline and its
-responsible reviewer remain operational policy questions. Neither transitions
-nor notification planning invent those attendance facts.
+The confirmed Sunday policy automatically finalizes blanks as A and unresolved
+denials as U at 17:00 Indianapolis, including missing Flight reports. The
+[separate closeout workflow](D1_SUNDAY_CLOSEOUT.md) preserves presence and pending
+requests, records causal corrections and must finish before term preparation or
+acceptance. Transition commands themselves do not manufacture attendance facts.
 
 ## Native staging maintenance host
 
@@ -133,7 +135,7 @@ flush invokes suppressed notification planning only when maintenance is enabled.
 No additional trigger, Google file, MailApp binding or mail OAuth scope is created.
 
 The strict binding contains `version: 1`, `environment: 'staging'`, the current
-`generation`, `enabled`, the exact review marker
+`generation`, `enabled`, optional `closeoutEnabled` (default false), the exact review marker
 `EXISTING_PRIVATE_MAINTENANCE_REVIEWED_FOR_STAGING`, `principalId`, `workerId`,
 `sourceResource`, `stateFileId`, `archiveSpreadsheetId` and `archiveExpectedTitle`.
 The resources must already exist, be separate from current frontends and transport
