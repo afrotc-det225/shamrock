@@ -409,3 +409,79 @@ test('expired local attempts stay uncertain even if a late result claims success
   assert.equal(quota.reason,'quota-exhausted');assert.equal(calls,0);assert.equal(await g.count('notification_attempts'),0);
   assert.equal((await g.db.prepare("SELECT state FROM notification_intents WHERE mode='local-test'").first()).state,'blocked');
 });
+
+test('frontend ACK coalesces both audit streams only through its immutable claim-time watermarks',async t=>{
+  const f=await correctionFixture(t);
+  assert.equal((await f.send(f.attendance,'/v1/commands')).status,200);
+  const claim=(await f.send(effect({kind:'frontend.refresh'}),'/v1/admin/effects/claim')).body.effect;
+  assert.deepEqual(Object.keys(claim).sort(),['claimToken','effectId','kind','leaseExpiresAt']);
+  const identity=effect({effectId:claim.effectId,claimToken:claim.claimToken});
+  const floor=await f.db.prepare('SELECT claim_operations_revision AS operations,claim_administration_revision AS administration FROM admin_effects WHERE effect_id=?').bind(claim.effectId).first();
+  assert.deepEqual(floor,{operations:1,administration:2});
+  // This is the exact snapshot a publisher could already have cached before later commands arrive.
+  const earlier=await f.send(identity,'/v1/admin/effects/project');assert.equal(earlier.status,200);assert.deepEqual(earlier.body.snapshot.revision,floor);
+  const later=command('directory.upsert',{commandId:'later-directory',source:{kind:'test',resourceKey:'admin-console',submissionId:'later-directory',revision:1}});
+  later.payload.personId='person-b';later.payload.profile.email='second@example.invalid';assert.equal((await f.send(later)).status,200);
+  f.correction.payload.expectedBaseVersion=1;assert.equal((await f.send(f.correction)).status,200);
+  // Reprojection can be newer without advancing the persisted floor used for ACK.
+  const newer=await f.send(identity,'/v1/admin/effects/project');assert.deepEqual(newer.body.snapshot.revision,{operations:2,administration:3});
+  assert.deepEqual(await f.db.prepare('SELECT claim_operations_revision AS operations,claim_administration_revision AS administration FROM admin_effects WHERE effect_id=?').bind(claim.effectId).first(),floor);
+  assert.equal((await f.send(identity,'/v1/admin/effects/ack')).status,200);
+  const front=(await f.db.prepare("SELECT command_id,state,completed_by_effect_id FROM admin_effects WHERE kind='frontend.refresh' ORDER BY command_id").all()).results;
+  for(const row of front) {
+    const isLater=['later-directory','correction-one'].includes(row.command_id);
+    assert.equal(row.state,isLater?'pending':'done',row.command_id);
+    assert.equal(row.completed_by_effect_id,isLater?null:claim.effectId,row.command_id);
+  }
+  assert.equal((await f.db.prepare("SELECT COUNT(*) AS count FROM admin_effects WHERE kind='forms.refresh' AND state='pending'").first()).count,3);
+  // Successful ACK is still not blindly replayable; ambiguous-result recovery semantics are unchanged.
+  assert.equal((await f.send(identity,'/v1/admin/effects/ack')).status,409);
+  assert.equal((await f.db.prepare("SELECT COUNT(*) AS count FROM admin_effects WHERE kind='frontend.refresh' AND state='pending'").first()).count,2);
+  const next=(await f.send(effect({kind:'frontend.refresh'}),'/v1/admin/effects/claim')).body.effect;
+  const nextIdentity=effect({effectId:next.effectId,claimToken:next.claimToken});
+  assert.equal((await f.send(nextIdentity,'/v1/admin/effects/project')).status,200);
+  assert.equal((await f.send(nextIdentity,'/v1/admin/effects/ack')).status,200);
+  assert.equal((await f.db.prepare("SELECT COUNT(*) AS count FROM admin_effects WHERE kind='frontend.refresh' AND state='pending'").first()).count,0);
+});
+
+test('Forms ACK never coalesces another effect; wrong or fenced frontend claims cannot complete pending work',async t=>{
+  const f=await correctionFixture(t);
+  const form=(await f.send(effect({kind:'forms.refresh'}),'/v1/admin/effects/claim')).body.effect;
+  const floor=await f.db.prepare('SELECT claim_operations_revision,claim_administration_revision FROM admin_effects WHERE effect_id=?').bind(form.effectId).first();
+  assert.deepEqual(floor,{claim_operations_revision:null,claim_administration_revision:null});
+  assert.equal((await f.send(effect({effectId:form.effectId,claimToken:form.claimToken}),'/v1/admin/effects/ack')).status,200);
+  assert.equal((await f.db.prepare("SELECT COUNT(*) AS count FROM admin_effects WHERE kind='forms.refresh' AND state='pending'").first()).count,1);
+  const front=(await f.send(effect({kind:'frontend.refresh'}),'/v1/admin/effects/claim')).body.effect;
+  assert.equal((await f.send(effect({effectId:front.effectId,claimToken:'wrong-token'}),'/v1/admin/effects/ack')).status,409);
+  await f.db.prepare('UPDATE system_control SET accepting_commands=0').run();
+  assert.equal((await f.send(effect({effectId:front.effectId,claimToken:front.claimToken}),'/v1/admin/effects/ack')).status,409);
+  assert.equal((await f.db.prepare("SELECT COUNT(*) AS count FROM admin_effects WHERE kind='frontend.refresh' AND state='done'").first()).count,0);
+  assert.equal(await f.count('command_assertions'),0);
+});
+
+test('a snapshot behind the immutable claim watermark fails closed without completing effects',async t=>{
+  const f=await correctionFixture(t);
+  assert.equal((await f.send(f.attendance,'/v1/commands')).status,200);
+  const claim=(await f.send(effect({kind:'frontend.refresh'}),'/v1/admin/effects/claim')).body.effect;
+  const DB={prepare:sql=>f.db.prepare(sql),batch:async statements=>{
+    const result=await f.db.batch(statements);
+    // Simulate a replica/read regression at the snapshot boundary, not a normal D1 outcome.
+    result[1].results[0].operations=0;
+    return result;
+  }};
+  const input=effect({effectId:claim.effectId,claimToken:claim.claimToken});
+  const response=await worker.fetch(nativeRequest(input,'/v1/admin/effects/project'),{...f.env,DB});
+  assert.equal(response.status,409);assert.equal((await response.json()).error.code,'SNAPSHOT_BEHIND_CLAIM');
+  assert.equal((await f.db.prepare("SELECT COUNT(*) AS count FROM admin_effects WHERE state='done'").first()).count,0);
+});
+
+test('coalesced completion rolls back if the claimed effect cannot be completed',async t=>{
+  const f=await correctionFixture(t);
+  const claim=(await f.send(effect({kind:'frontend.refresh'}),'/v1/admin/effects/claim')).body.effect;
+  // Fail the final leased-row update after pending rows would have been coalesced.
+  await f.db.prepare("CREATE TRIGGER reject_final_effect BEFORE UPDATE ON admin_effects WHEN OLD.state='leased' AND NEW.state='done' BEGIN SELECT RAISE(ABORT,'fictional-ack-failure'); END").run();
+  assert.equal((await f.send(effect({effectId:claim.effectId,claimToken:claim.claimToken}),'/v1/admin/effects/ack')).status,409);
+  assert.equal((await f.db.prepare("SELECT COUNT(*) AS count FROM admin_effects WHERE state='done'").first()).count,0);
+  assert.equal((await f.db.prepare("SELECT COUNT(*) AS count FROM admin_effects WHERE state='leased'").first()).count,1);
+  assert.equal(await f.count('command_assertions'),0);
+});

@@ -334,7 +334,9 @@ export async function adminEffect(env: AdminEnv, action: 'claim' | 'project' | '
   if (action === 'claim') {
     if (!['frontend.refresh', 'forms.refresh'].includes(String(req.kind)))
       throw new HttpError(400, 'INVALID_ADMIN_REQUEST', 'Unsupported refresh effect kind.');
-    const effect = await stmt(env.DB, `UPDATE admin_effects SET state='leased',worker_id=?,claim_token=?,lease_expires_at=?
+    const effect = await stmt(env.DB, `UPDATE admin_effects SET state='leased',worker_id=?,claim_token=?,lease_expires_at=?,
+      claim_operations_revision=CASE WHEN kind='frontend.refresh' THEN (SELECT COALESCE(MAX(audit_id),0) FROM audit_events) ELSE NULL END,
+      claim_administration_revision=CASE WHEN kind='frontend.refresh' THEN (SELECT COALESCE(MAX(audit_id),0) FROM admin_audit_events) ELSE NULL END
    WHERE effect_id=(SELECT j.effect_id FROM admin_effects j WHERE j.state='pending' AND j.kind=? AND ${guard.sql}
     AND NOT EXISTS(SELECT 1 FROM admin_effects l WHERE l.kind=j.kind AND l.state='leased') ORDER BY j.created_at,j.effect_id LIMIT 1)
    RETURNING effect_id AS effectId,kind,claim_token AS claimToken,lease_expires_at AS leaseExpiresAt`, req.workerId, crypto.randomUUID(), new Date(Date.now() + 600000).toISOString(), req.kind, ...guard.values).first();
@@ -343,15 +345,42 @@ export async function adminEffect(env: AdminEnv, action: 'claim' | 'project' | '
   const lease = `effect_id=? AND worker_id=? AND claim_token=? AND state='leased' AND lease_expires_at>? AND ${guard.sql}`;
   const values = [req.effectId, req.workerId, req.claimToken, now, ...guard.values];
   if (action === 'ack') {
-    const result = await stmt(env.DB, `UPDATE admin_effects SET state='done',completed_at=? WHERE ${lease} RETURNING effect_id`, now, ...values).first();
-    if (!result)
+    const assertionId = crypto.randomUUID();
+    try {
+      await env.DB.batch([
+        stmt(env.DB, `INSERT INTO command_assertions VALUES(?,EXISTS(SELECT 1 FROM admin_effects WHERE ${lease}
+          AND (kind<>'frontend.refresh' OR (claim_operations_revision IS NOT NULL AND claim_administration_revision IS NOT NULL))))`,
+          assertionId, ...values),
+        // Only the immutable claim-time floor is covered. A cached publication may
+        // predate a later project read, so never replace this with the current MAX.
+        stmt(env.DB, `UPDATE admin_effects AS pending SET state='done',completed_at=?,completed_by_effect_id=?
+          WHERE pending.state='pending' AND pending.kind='frontend.refresh' AND EXISTS(
+            SELECT 1 FROM admin_effects claimed WHERE ${lease} AND claimed.kind='frontend.refresh' AND (
+              EXISTS(SELECT 1 FROM command_registry r JOIN audit_events a ON a.command_id=r.command_id
+                WHERE r.command_id=pending.command_id AND r.ledger='operation' AND a.audit_id<=claimed.claim_operations_revision)
+              OR EXISTS(SELECT 1 FROM command_registry r JOIN admin_audit_events a ON a.command_id=r.command_id
+                WHERE r.command_id=pending.command_id AND r.ledger='admin' AND a.audit_id<=claimed.claim_administration_revision)))`,
+          now, req.effectId, ...values),
+        stmt(env.DB, `UPDATE admin_effects SET state='done',completed_at=?,completed_by_effect_id=? WHERE ${lease}`, now, req.effectId, ...values),
+        stmt(env.DB, 'DELETE FROM command_assertions WHERE command_id=?', assertionId),
+      ]);
+    } catch {
       throw new HttpError(409, 'LEASE_CONFLICT', 'The effect lease is no longer current.');
+    }
     return { acknowledged: true };
   }
-  const effect = await stmt(env.DB, `SELECT effect_id AS effectId,kind FROM admin_effects WHERE ${lease}`, ...values).first();
-  if (!effect)
+  const leased = await stmt(env.DB, `SELECT effect_id AS effectId,kind,claim_operations_revision AS operationsFloor,
+    claim_administration_revision AS administrationFloor FROM admin_effects WHERE ${lease}`, ...values)
+    .first<{effectId:string;kind:string;operationsFloor:number|null;administrationFloor:number|null}>();
+  if (!leased)
     throw new HttpError(409, 'LEASE_CONFLICT', 'The effect lease is no longer current.');
   const snapshot = await frontendSnapshot(env, { environment: req.environment, generation: req.generation, principalId: req.principalId });
+  if (leased.kind === 'frontend.refresh' && (leased.operationsFloor === null || leased.administrationFloor === null
+    || snapshot.revision.operations < leased.operationsFloor || snapshot.revision.administration < leased.administrationFloor)) {
+    throw new HttpError(409, 'SNAPSHOT_BEHIND_CLAIM', 'The frontend snapshot does not yet cover its claimed refreshes.');
+  }
+  // The API shape stays stable; watermarks are server-owned, never caller inputs.
+  const effect = {effectId:leased.effectId,kind:leased.kind};
   // A pause/revocation or lease expiry during the snapshot must not authorize publication.
   if (!await stmt(env.DB, `SELECT effect_id FROM admin_effects WHERE ${lease}`, req.effectId, req.workerId, req.claimToken, new Date().toISOString(), ...guard.values).first())
     throw new HttpError(409, 'LEASE_CONFLICT', 'The effect lease is no longer current.');

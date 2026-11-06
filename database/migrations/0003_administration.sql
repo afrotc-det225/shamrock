@@ -68,7 +68,12 @@ CREATE TABLE directory_membership_history (
 CREATE TABLE admin_effects (
   effect_id TEXT PRIMARY KEY, command_id TEXT NOT NULL REFERENCES command_registry(command_id),
   kind TEXT NOT NULL CHECK (kind IN ('frontend.refresh','forms.refresh')), state TEXT NOT NULL CHECK (state IN ('pending','leased','done')),
-  created_at TEXT NOT NULL, worker_id TEXT, claim_token TEXT, lease_expires_at TEXT, completed_at TEXT
+  created_at TEXT NOT NULL, worker_id TEXT, claim_token TEXT, lease_expires_at TEXT, completed_at TEXT,
+  claim_operations_revision INTEGER CHECK(claim_operations_revision>=0),
+  claim_administration_revision INTEGER CHECK(claim_administration_revision>=0),
+  completed_by_effect_id TEXT REFERENCES admin_effects(effect_id),
+  CHECK((claim_operations_revision IS NULL AND claim_administration_revision IS NULL)
+    OR (claim_operations_revision IS NOT NULL AND claim_administration_revision IS NOT NULL))
 );
 CREATE INDEX admin_effects_pending ON admin_effects(state,created_at,effect_id);
 CREATE INDEX admin_effects_kind_lease ON admin_effects(kind,state);
