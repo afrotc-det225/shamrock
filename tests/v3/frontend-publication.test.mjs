@@ -237,6 +237,11 @@ test('domain snapshot mapping keeps explicit unknown eligibility and requires re
     events: [{ eventId: 'event-a', termId: 'term-current', label: 'LLAB', columnLabel: 'LLAB', eventType: 'llab', trainingWeek: 1, displayOrder: 0, version: 3 }],
     eventFlights: [], observations: [], corrections: [], attendanceVersions: [], requests: [], diagnostics: [] };
   const normalized = snapshotToFrontendReportingInput(snapshot, '2027-01-12'); assert.equal(normalized.events[0].eligiblePersonIds, null);
+  snapshot.legacyBaselines = [{baselineId:'import-cell-a',personId:p.personId,eventId:'event-a',code:'D'}];
+  const imported = snapshotToFrontendReportingInput(snapshot, '2027-01-12');
+  assert.deepEqual(imported.legacyBaselines, snapshot.legacyBaselines);
+  assert.notEqual(imported.legacyBaselines, snapshot.legacyBaselines);
+
   const result = buildFrontendReporting(normalized), args = { snapshot, reporting: { revision: snapshot.revision, result }, attendanceVersions: [{ personId: p.personId, eventId: 'event-a', version: 0 }] };
   const model = buildFrontendPublicationModel(args), [directory, leadership, attendance] = model.tables;
   assert.deepEqual(model.tables.map(t => t.keyHeader), ['person_id', 'contact_id', 'person_id']);

@@ -539,6 +539,7 @@ export function snapshotToFrontendReportingInput(snapshot: FrontendSnapshot, asO
     events: snapshot.events.map(e => ({ eventId: e.eventId, termId: e.termId, label: e.columnLabel || e.label, type: e.eventType, trainingWeek: e.trainingWeek, displayOrder: e.displayOrder,
       eligiblePersonIds: clone((e as typeof e & { eligiblePersonIds?: string[] | null }).eligiblePersonIds ?? null) })),
     observations: clone(snapshot.observations), corrections: clone(snapshot.corrections),
+    legacyBaselines: clone(snapshot.legacyBaselines ?? []),
     requests: snapshot.requests.map(r => ({ requestId: r.requestId, personId: r.personId, eventId: r.eventId, order: r.order, status: r.status as ExcusalStatus, requestedOutcome: r.requestedOutcome as RequestedOutcome })),
   };
 }
