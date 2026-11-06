@@ -7,6 +7,14 @@ const CODE_COLORS = {
   E: ['#D9EAD3', '#274E13'], ES: ['#D9EAD3', '#274E13'], MED: ['#CFE2F3', '#073763'], 'N/A': ['#E7E6E6', '#595959'],
 };
 const DECISION_COLORS = { Approved: ['#D9EAD3', '#274E13'], Denied: ['#F4CCCC', '#990000'], Withdrawn: ['#FFF2CC', '#7F6000'], Superseded: ['#D9D2E9', '#674EA7'] };
+// Native dropdown-chip backgrounds are a separate UI palette from cell fill/font pairs above.
+// Keep these explicit for native-editor finishing; Sheets validation JSON does not carry them.
+const CHIP = { green: '#d4edbc', blue: '#bfe1f6', yellow: '#ffe5a0', purple: '#e6cff2', orange: '#ffc8aa', red: '#ffcfc9', gray: '#e6e6e6' };
+const ATTENDANCE_CHIP_COLORS = { P: CHIP.green, E: CHIP.green, ES: CHIP.green, T: CHIP.yellow, A: CHIP.red, U: CHIP.red, R: CHIP.blue, MED: CHIP.blue, D: CHIP.purple, 'N/A': CHIP.gray };
+const YEAR_CHIP_COLORS = { AS100: CHIP.green, AS200: CHIP.blue, AS300: CHIP.yellow, AS400: CHIP.purple };
+const FLIGHT_CHIP_COLORS = { Alpha: CHIP.orange, Bravo: CHIP.yellow, Charlie: CHIP.blue, Delta: CHIP.purple };
+const SQUADRON_CHIP_COLORS = { Blue: CHIP.blue, Gold: CHIP.yellow };
+const DECISION_CHIP_COLORS = { Approved: CHIP.green, Denied: CHIP.red, Withdrawn: CHIP.yellow, Superseded: CHIP.purple };
 const CODES = Object.keys(CODE_COLORS);
 const DECISIONS = Object.keys(DECISION_COLORS);
 const FLIGHTS = ['Alpha', 'Bravo', 'Charlie', 'Delta'];
@@ -83,7 +91,9 @@ function chart(sheetId, dataId, title, type, startRow, endRow, startColumn, endC
 
 /** Pure, deterministic native-Sheets descriptors. Apply only to explicitly provisioned preview files.
  * Native table creation is intentionally a separate phase: create minimally, read assigned IDs,
- * then apply the returned columnProperties/rowsProperties. No Apps Script or D1 is attached.
+ * then apply the returned columnProperties/rowsProperties, followed by postTableRequests.
+ * Google can clear cell validation while configuring native Table columns, so legend-backed
+ * rules must be applied last. No Apps Script or D1 is attached.
  */
 export function buildFrontendPreview() {
   const main = { title: 'SHAMROCK — Fictional production preview', sheets: [], requests: [], tables: [], dropdownSeeds: [] };
@@ -104,14 +114,20 @@ export function buildFrontendPreview() {
     ['Leader 03', 'Example', 'C/Lt Col', 'Gold Squadron Commander', 'Wing Commander', '', '', '', ''],
     ...FLIGHTS.map((f, i) => [`Leader ${String(i + 4).padStart(2, '0')}`, 'Example', 'C/Capt', `${f} Flight Commander`, `${i < 2 ? 'Blue' : 'Gold'} Squadron Commander`, '', '', '', '']),
   ], [115, 115, 95, 235, 235, 190, 125, 125, 150]);
-  table(main, ids.directory, 'Directory', DIRECTORY, cadets.map((c, i) => [c.last, c.first, c.year, c.flight, c.squadron, c.rank, i % 4 === 3 ? 'Flight Commander' : 'Cadet', 'Notre Dame', '', '', 'Off-Campus', 'Engineering', '', '', '', '', 2030 - i % 4, '', 'Active 3/4', '']), [115, 115, 100, 85, 85, 95, 160, 110, 190, 125, 150, 155, 75, 190, 130, 110, 75, 100, 125, 100]);
-  table(main, ids.attendance, 'Attendance', ATTENDANCE, cadets.map((c, i) => [c.last, c.first, c.year, c.flight, c.squadron, '', '', ...marks[i]]), [115, 115, 100, 85, 85, 75, 75, 85, 85, 85, 85, 85, 85]);
+  table(main, ids.directory, 'Directory', DIRECTORY, cadets.map((c, i) => [c.last, c.first, c.year, c.flight, c.squadron, c.rank, i % 4 === 3 ? 'Flight Commander' : 'Cadet', 'Notre Dame', '', '', 'Off-Campus', 'Engineering', '', '', '', '', 2030 - i % 4, '', 'Active 3/4', '']), [115, 115, 100, 120, 85, 95, 160, 110, 190, 125, 150, 155, 75, 190, 130, 110, 75, 100, 125, 100]);
+  table(main, ids.attendance, 'Attendance', ATTENDANCE, cadets.map((c, i) => [c.last, c.first, c.year, c.flight, c.squadron, '', '', ...marks[i]]), [115, 115, 100, 85, 85, 95, 95, 130, 130, 130, 130, 130, 130]);
+  main.requests.push(height(ids.attendance, 1, 2, 56));
   main.requests.push({ repeatCell: { range: range(ids.attendance, 2, 18, 5, 7), cell: { note: 'Presentation preview only. Percentages are intentionally blank until the approved attendance-credit policy is implemented and tested.' }, fields: 'note' } });
   main.requests.push(format(range(ids.attendance, 2, 32, 2, 13), { horizontalAlignment: 'CENTER' }), format(range(ids.attendance, 2, 32, 5, 7), { numberFormat: { type: 'PERCENT', pattern: '0.0%' } }));
   legend(main, ids.legend, 'Data Legend', [{ key: 'as_year_options', label: 'AS Year', values: YEARS }, { key: 'flight_options', label: 'Flight', values: FLIGHTS }, { key: 'squadron_options', label: 'Squadron', values: ['Blue', 'Gold'] }, { key: 'attendance_code_options', label: 'Attendance Codes', values: CODES, colors: CODE_COLORS }]);
   for (const [column, source] of [[2, "='Data Legend'!$A$3:$A$6"], [3, "='Data Legend'!$B$3:$B$6"], [4, "='Data Legend'!$C$3:$C$4"]]) main.requests.push(validation(range(ids.directory, 2, 32, column, column + 1), source));
   main.requests.push(validation(range(ids.attendance, 2, 32, 7, 13), "='Data Legend'!$D$3:$D$12"), ...coloredRules(ids.attendance, 2, 32, 7, 13, CODE_COLORS));
-  main.dropdownSeeds.push({ sheetId: ids.attendance, a1: 'H3:M32', legendSheetId: ids.legend, sourceA1: 'D3:D12', values: CODES, colors: CODE_COLORS }, { sheetId: ids.directory, a1: 'C3:C32', legendSheetId: ids.legend, sourceA1: 'A3:A6', values: YEARS }, { sheetId: ids.directory, a1: 'D3:D32', legendSheetId: ids.legend, sourceA1: 'B3:B6', values: FLIGHTS }, { sheetId: ids.directory, a1: 'E3:E32', legendSheetId: ids.legend, sourceA1: 'C3:C4', values: ['Blue', 'Gold'] });
+  main.dropdownSeeds.push(
+    { sheetId: ids.attendance, a1: 'H3:M32', legendSheetId: ids.legend, sourceA1: 'D3:D12', values: CODES, colors: CODE_COLORS, nativeChipColors: ATTENDANCE_CHIP_COLORS },
+    { sheetId: ids.directory, a1: 'C3:C32', legendSheetId: ids.legend, sourceA1: 'A3:A6', values: YEARS, nativeChipColors: YEAR_CHIP_COLORS },
+    { sheetId: ids.directory, a1: 'D3:D32', legendSheetId: ids.legend, sourceA1: 'B3:B6', values: FLIGHTS, nativeChipColors: FLIGHT_CHIP_COLORS },
+    { sheetId: ids.directory, a1: 'E3:E32', legendSheetId: ids.legend, sourceA1: 'C3:C4', values: ['Blue', 'Gold'], nativeChipColors: SQUADRON_CHIP_COLORS },
+  );
   for (const [i, f] of FLIGHTS.entries()) main.requests.push({ addFilterView: { filter: { title: `${f} Flight`, range: range(ids.attendance, 1, 18, 0, 13), criteria: { 3: { hiddenValues: FLIGHTS.filter(x => x !== f) } } } } });
   sheet(main, ids.chartData, 'Dashboard Data', 8, 20, true);
   const presentByFlight = FLIGHTS.map((f, index) => [f, marks.slice(index * 4, index * 4 + 4).flat().filter(x => x === 'P').length]);
@@ -148,8 +164,12 @@ export function buildFrontendPreview() {
     table(excusals, id, squadron, EXCUSALS, data, [135, 135, 160, 265, 80, 180, 115, 115, 85, 150]);
     excusals.requests.push({ updateDimensionProperties: { range: { sheetId: id, dimension: 'COLUMNS', startIndex: 9, endIndex: 10 }, properties: { hiddenByUser: true }, fields: 'hiddenByUser' } }, format(range(id, 2, 32, 0, 1), { numberFormat: { type: 'DATE_TIME', pattern: 'm/d/yy h:mm' } }), format(range(id, 2, 32, 3, 4), { wrapStrategy: 'WRAP' }), validation(range(id, 2, 32, 1, 2), "='_Excusals Data Legend'!$A$3:$A$6"), ...coloredRules(id, 2, 32, 1, 2, DECISION_COLORS));
     excusals.requests.push({ addFilterView: { filter: { title: 'Awaiting decision', range: range(id, 1, 6, 0, 10), criteria: { 1: { hiddenValues: DECISIONS } } } } });
-    excusals.dropdownSeeds.push({ sheetId: id, a1: 'B3:B32', legendSheetId: ids.excusalLegend, sourceA1: 'A3:A6', values: DECISIONS, colors: DECISION_COLORS });
+    excusals.dropdownSeeds.push({ sheetId: id, a1: 'B3:B32', legendSheetId: ids.excusalLegend, sourceA1: 'A3:A6', values: DECISIONS, colors: DECISION_COLORS, nativeChipColors: DECISION_CHIP_COLORS });
   }
   excusals.sheets.sort((a, b) => a.sheetId - b.sheetId);
+  for (const book of [main, excusals]) {
+    book.postTableRequests = book.requests.filter(request => request.setDataValidation);
+    book.requests = book.requests.filter(request => !request.setDataValidation);
+  }
   return { main, excusals };
 }
