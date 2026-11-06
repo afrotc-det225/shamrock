@@ -56,6 +56,16 @@ test('one-time physical slot binding requires a fence and exact native values, a
  assert.throws(()=>bindImmutableInputSlots({baseline:f.baseline,current:f.current,keyHeader:'person_id',editFenceVerified:false}));f.current.rows[0][1]=scalar('P');assert.throws(()=>bindImmutableInputSlots({baseline:f.baseline,current:f.current,keyHeader:'person_id',editFenceVerified:true}));
 });
 
+test('native empty cells match published empty strings without changing baselines or hiding nonblank edits',()=>{
+ for(const kind of ['directory','leadership']){
+  const f=profileFixture(kind),header=f.current.headers[1];f.baseline.rows[0].values[header]='';f.current.rows[0][1]={};delete f.event.value;delete f.event.oldValue;
+  const original=copy(f.baseline),bound=bindImmutableInputSlots({baseline:f.baseline,current:f.current,keyHeader:f.current.headers[2],editFenceVerified:true});
+  assert.deepEqual(f.baseline,original);assert.equal(bound.rows[0].values[header],'');assert.equal(capture(f).status,'noop');
+  f.current.rows[0][1]=scalar('new');f.event.value='new';assert.equal(capture(f).status,'ready');
+  f.current.rows[0][1]=scalar(' ');f.event.value=' ';assert.throws(()=>bindImmutableInputSlots({baseline:f.baseline,current:f.current,keyHeader:f.current.headers[2],editFenceVerified:true}));
+ }
+});
+
 test('Blue and Gold decisions bind request/version and cannot clear a committed status implicitly',()=>{
  const f=fixture();f.binding.surface='blue';f.binding.resourceKey='blue-decisions';f.current.headers=['last_name','decision','request_id'];f.current.labels=['Last Name','Decision','Request'];f.baseline.slots={headers:f.current.headers,keys:['request-one']};f.baseline.rows=[{key:'request-one',values:{last_name:'Example',decision:null,request_id:'request-one'},versions:{decision:2},commandBindings:{decision:{operation:'excusal.decide',entityId:'request-one',field:'decision',expectedVersion:2}}}];f.current.rows=[[scalar('Example'),scalar('Denied'),scalar('request-one')]];f.event.value='Denied';const e=capture(f),c=commands(e)[0];assert.equal(c.operation,'excusal.decide');assert.equal(c.payload.requestId,'request-one');assert.equal(c.payload.expectedVersion,2);
  f.baseline.rows[0].values.decision='Denied';f.current.rows[0][1]={};delete f.event.value;f.event.oldValue='Denied';assert.throws(()=>capture(f));

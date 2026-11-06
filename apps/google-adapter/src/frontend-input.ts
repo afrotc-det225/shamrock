@@ -39,7 +39,10 @@ export function nativeInputValue(cell:NativeCellData|undefined):FrontendValue{
   fail('input_value','Unsupported native cell value.');
 }
 const scalar=(v:FrontendValue):string=>v===null?'':typeof v==='object'?v.fileUri:String(v);
-const eventScalar=(v:FrontendValue):string|undefined=>v===null?undefined:typeof v==='object'?undefined:String(v);
+// Google omits empty native cells even when the published source was an empty
+// string. Keep the baseline intact, but compare its visible blank consistently.
+const nativeComparable=(v:FrontendValue):FrontendValue=>v===''?null:v;
+const eventScalar=(v:FrontendValue):string|undefined=>v===null||v===''?undefined:typeof v==='object'?undefined:String(v);
 function isoDate(v:FrontendValue):string|null{
   if(v===null)return null;
   if(typeof v==='number'&&Number.isInteger(v)){const date=new Date(Date.UTC(1899,11,30)+v*86400000);return date.toISOString().slice(0,10);}
@@ -104,7 +107,7 @@ export function captureFrontendEdit(input:{event:NativeEditEvidence;binding:Inpu
   for(let r=e.row-3;r<e.row-3+e.rows;r++)for(let c=e.column-1;c<e.column-1+e.columns;c++){
     const key=baseline.slots!.keys[r],header=current.headers[c],row=baseline.rows.find(x=>x.key===key),value=nativeInputValue(current.rows[r][c]);
     if(!row||row.retired)fail('input_slots','This physical row is not an active published identity.');
-    const before=row.values[header]??null;
+    const before=nativeComparable(row.values[header]??null);
     if(equal(before,value))continue;
     if(row.readonlyHeaders?.includes(header)||!row.commandBindings?.[header]||!natural(row.versions[header]))fail('input_readonly','A protected identity or derived field was changed.');
     const binding=row.commandBindings[header];
@@ -168,7 +171,7 @@ export function bindImmutableInputSlots(input:{baseline:FrontendPublicationBasel
   for(let i=0;i<keys.length;i++){
     if(keys[i]===null){if(current.rows[i].some(cell=>nativeInputValue(cell)!==null))fail('input_slots','A populated native row has no protected identity.');continue;}
     const key=keys[i] as string,rows=baseline.rows.filter(row=>row.key===key);if(rows.length!==1)fail('input_slots','The native row has no exact published baseline.');found.add(key);
-    for(let c=0;c<current.headers.length;c++)if(!equal(nativeInputValue(current.rows[i][c]),rows[0].values[current.headers[c]]??null))fail('input_slots','Resolve unsent native values before establishing immutable slots.');
+    for(let c=0;c<current.headers.length;c++)if(!equal(nativeInputValue(current.rows[i][c]),nativeComparable(rows[0].values[current.headers[c]]??null)))fail('input_slots','Resolve unsent native values before establishing immutable slots.');
   }
   if(baseline.rows.some(row=>!found.has(row.key)))fail('input_slots','A published identity is missing from the native Table.');
   const slots={headers:[...current.headers],keys:keys as (string|null)[]};if(baseline.slots&&!equal(baseline.slots,slots))fail('input_slots','Existing immutable physical bindings cannot be reassigned.');
