@@ -149,6 +149,26 @@ and `foreign_key_check` returned no violations. The source database was unchange
 This demonstrates hosted restoration of the fictional checkpoint, not recovery
 after an unknown production write or successor access to recovery material.
 
+The detached restore then passed guarded upgrades through schema version 5.
+The source staging database subsequently passed the same upgrades with fresh
+export/restore evidence at each step. Every original business/control record
+and original migration entry was preserved; the shared registry contains the
+12 original commands. Both databases remain paused at generation 1, with
+integrity checks passing and notifications suppressed with a zero-recipient
+budget. Migrations 1–5 have now been applied and must not be edited.
+
+The staging Worker from `cd7ffad` and Google adapter from `34a157c` were uploaded
+and read back exactly. The native publisher remains disabled: initializing its
+private baselines and completing signed live publication are still pending.
+Local checks passed 370 tests, including 31 current-system regressions and 339
+prototype tests. No new Main or Blue/Gold edit-command capture is claimed.
+
+Attendance now uses compact 23-pixel body rows, 9-point body text, 7-point event
+and summary headers, and label-sized 75–95-pixel event columns. API comparisons
+and native rendering verified the existing sample cells, colors, validations,
+Table, four filter views and cell protections remained intact. This sizing is
+also applied to new Attendance rows and event columns by the publisher.
+
 New source modules cover [administrative commands and corrections](D1_ADMIN_COMMANDS.md),
 [attendance and birthday reporting](D1_REPORTING_RULES.md),
 [notification planning](D1_NOTIFICATIONS.md),
