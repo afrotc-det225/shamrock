@@ -6,6 +6,8 @@ The organization's private [SHAMROCK operations repository](https://github.com/a
 
 Read the [redesign plan](../plans/D1_REDESIGN_AND_MIGRATION.md), [current-system audit](../plans/D1_CURRENT_SYSTEM_AUDIT.md) and [feature-parity matrix](../plans/D1_FEATURE_PARITY_MATRIX.md) for the full migration scope. The matrix describes proposed acceptance evidence; it is not a list of implemented tests.
 
+**Presentation is unfinished.** The staging projection tabs are transport fixtures, not the final frontend. The replacement Main and decision sheets must match or exceed current SHAMROCK quality, including native Sheets API Tables, styling/colors, useful filter views, dropdowns, photos/charts and protections. The [presentation release gate](../plans/D1_REDESIGN_AND_MIGRATION.md#presentation-quality-is-a-release-gate) requires visual and interaction comparison before cutover; successful D1 receipts do not satisfy it. Current physical-row restrictions are prototype limitations to resolve, not a reason to remove ordinary table/sorting workflows.
+
 ## Verified live staging boundary
 
 **Historical milestone 1, source `5e1057f4a13c45960e70844724aa5261e49f422e`:** the operator linked the staging script to its standard Google Cloud project and completed Import and Setup. Real attendance and excusal Form submissions committed through the Google journal into D1 and published back to protected Sheets. A complete two-person attendance report recorded only the selected member as `P`; the other observed code stayed blank. Redelivery of the identical saved native-response payload returned the original receipt without another command. The new excusal request remained `Submitted/E` at version `1`, preserving the existing `P` observation.

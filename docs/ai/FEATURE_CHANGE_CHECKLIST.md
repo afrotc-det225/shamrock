@@ -88,3 +88,5 @@ Every feature doc must include:
 - At least one failure/edge-case validation.
 - A live-progress validation for every new or materially changed operator menu workflow.
 - A post-deploy verification step (menus load, triggers present, forms functioning).
+
+For D1 spreadsheet replacements, also apply the [presentation release gate](../plans/D1_REDESIGN_AND_MIGRATION.md#presentation-quality-is-a-release-gate): compare with the current SHAMROCK quality baseline, verify actual native Table/chart metadata, exercise filters/sorting/dropdowns as intended users, and check styling, validation, protections and pending drafts after repeated refresh/repair and a term transition. Plain data projections or visually banded ranges are not completed frontend parity. Include presentation API work in free-tier quota measurements.

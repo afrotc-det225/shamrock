@@ -85,7 +85,7 @@ The code meanings/credit, participation/eligibility, finalization deadlines, dec
 | EXC-16 | Publish failure after decision | Decision receipt persists; publication retries without repeating mutation or enqueueing another message. |
 | EXC-17 | Leadership/access turnover | Old decision authority revoked; new approver constrained to authorized scope; independent admin/read permissions verified. |
 | EXC-18 | Configured workbook inaccessible | Fail visibly without creating an empty replacement or changing production binding. |
-| EXC-19 | Decision spreadsheet usability | Readable request/outcome/reason, usable filters and dropdown drafts, protected recorded state, clear save status; exact colors/columns need not match. |
+| EXC-19 | Decision spreadsheet usability | Native Sheets tables with presentation quality at least equal to current management sheets: readable request/outcome/reason, coherent decision colors, useful filters, strict dropdown drafts, protected recorded state and clear save status. Layout changes must preserve or improve the workflow. |
 | EXC-20 | Multiple requests for one person/event | Every legacy request survives; new amendments/case conflicts are explicit; withdrawal cannot erase another valid request or observation. |
 | EXC-21 | Concurrent submit and decision | Commands serialize with defined case versions; derived outcome is deterministic and repeatable under policy. |
 
@@ -116,17 +116,19 @@ The code meanings/credit, participation/eligibility, finalization deadlines, dec
 
 ## Spreadsheet interaction
 
+All cases below are subject to the [same-or-better presentation release gate](D1_REDESIGN_AND_MIGRATION.md#presentation-quality-is-a-release-gate). Plain staging projections do not meet this gate. Require production-baseline comparison, sanitized staging visual evidence, API metadata/protection read-back and real operator interaction checks before cutover.
+
 | ID | Scenario | Required evidence / outcome |
 |---|---|---|
-| UI-01 | Routine access | Useful Directory/Leadership/Attendance/Dashboard and links remain accessible without AI; existing URLs retained where practical. |
+| UI-01 | Routine access | Directory/Leadership/Attendance/Dashboard and decision sheets remain accessible without AI, with styling, navigation and usability at least equal to current SHAMROCK; existing URLs retained where practical. |
 | UI-02 | Alpha this week | Filter view answers the question using approved roster/events/marks; repeat after new event, roster change, publish and term transition. |
 | UI-03 | Live metadata migration | Inventory saved views, sorts, tables, named ranges and customizations; preserve useful views or explicitly migrate field mappings without silent loss. |
 | UI-04 | Sort/filter then edit | Supported sorting keeps identity aligned; partial-range identity mismatch blocks mutation and preserves input for review. |
-| UI-05 | Directory readability | All required information legible with correct phone/CIP/DOB meaning and useful ordering; layout can improve. |
-| UI-06 | Tables and repeat repair | Chosen native table/filter experience works; two repairs do not duplicate resources or destroy user views; no obsolete API workaround requirement. |
+| UI-05 | Directory readability | All required information legible with correct phone/CIP/DOB meaning, photo chips, useful ordering and consistent headers/banding/widths/freezes; compare populated and long-value fixtures with the current quality baseline. |
+| UI-06 | Tables and repeat repair | Real Sheets API Table objects exist on primary tabular/decision surfaces, with verified metadata and working native controls. Full-table sorts/filter views preserve identity. Two repairs and row/event growth preserve table IDs where possible, user views, styles, validation and protections; a colored range/basic filter is not completion. |
 | UI-07 | Validation | Approved options accepted and invalid values rejected; options have one authority; validation styling is usable, not frozen to archived templates. |
 | UI-08 | Photos | Rich-text/formula/Drive-chip migration preserves actual URI; refresh never substitutes visible filename. |
-| UI-09 | Attendance presentation | Codes distinguish pending/recorded/no-data; numeric percentages filter/chart correctly; clear remains intentional; design can change colors/widths. |
+| UI-09 | Attendance presentation | At least current matrix quality: meaningful code/summary colors, readable wrapped event headers, aligned marks and percentage formats, useful frozen identity columns and flight/week views. Pending/recorded/no-data remain distinct; numeric percentages filter/chart correctly; clear remains intentional. Check after refresh, new events, roster growth and term transition. |
 | UI-10 | Real operator identities | Reader, self-profile user, representative, approver, admin and removed role tested; unknown original editor is never invented as a named actor. |
 | UI-11 | Protection failures | Required identity/output/draft restrictions verified after rendering and simulated API failure; partial access repair reported. |
 | UI-12 | Pending/rejected save | Timeout retains draft and command ID; retry applies once; rejection/conflict explains resolution without erasing user input. |

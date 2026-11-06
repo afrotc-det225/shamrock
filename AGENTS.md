@@ -62,6 +62,7 @@ The authorized redesign has a separate local/staging prototype in `packages/doma
 - Tests and demo require no provider credentials or real records. They do not establish live Google behavior, production capacity or complete feature parity.
 - Do not use `npm run push` to deploy the prototype. It still targets the current Apps Script project.
 - Read `docs/runbooks/D1_STAGING_RUNBOOK.md` before release preparation or isolated Cloudflare work. Staging uses fictional data and is paused between rehearsals; a successful API smoke test does not establish live Google integration or production readiness.
+- Frontend spreadsheet quality must match or exceed the existing SHAMROCK sheets, including native Sheets API tables, styling/colors, validation, filter views, charts and protections. Plain prototype output is not the final UI. Apply the presentation release gate in section 6 of `docs/plans/D1_REDESIGN_AND_MIGRATION.md` before claiming spreadsheet parity.
 
 ## Build And Deploy Commands
 
