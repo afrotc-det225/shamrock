@@ -2,6 +2,7 @@
  * permissions or triggers are provisioned by this module. */
 import { AdapterError, type AdapterConfig, type Signer, type Transport } from './index.js';
 import { type SheetPort, type ScriptLockPort } from './apps-script.js';
+import { appendProjectionDecisionSlots, initializeDynamicDecisionSlots, DYNAMIC_DECISION_HEADERS } from './decision-slots.js';
 import {
   createStagingHost, HOST_PROPERTIES, parseStagingHostConfig,
   type ExistingSheetReference, type StagingHostRuntime,
@@ -317,6 +318,31 @@ export function createNativeStagingRuntime(services: NativeStagingServices): Sta
     }
     return { host: h.config, config, fingerprint, sheets, assertProtected };
   }
+  function assertDecisionProtection(ref: ExistingSheetReference, protectedHeaders: readonly string[], allowEmpty = false) {
+    const { config } = host(); const binding = config.decisionInput;
+    if (!binding || !sameRef(ref, binding)) fail('protection_unverified', 'Decision inputs differ from the configured binding.');
+    const sheet = bindSheet(ref); const width = sheet.getLastColumn();
+    const headers = allowEmpty && width === 0 && sheet.getLastRow() === 0 && binding.mode === 'projection'
+      ? [...DYNAMIC_DECISION_HEADERS] : sheet.getRange(1, 1, 1, width).getValues()[0];
+    if (new Set(headers).size !== headers.length || protectedHeaders.some(header => !headers.includes(header)) || !headers.includes('draft_decision')) fail('protection_unverified', 'Decision columns are missing or ambiguous.');
+    const editableColumn = headers.indexOf('draft_decision');
+    const p = protection(ref); const covered = new Set<number>();
+    for (const value of (p.unprotectedRanges ?? []) as unknown[]) {
+      const hole = object(value);
+      if (hole.sheetId !== ref.sheetId || hole.startColumnIndex !== editableColumn || hole.endColumnIndex !== editableColumn + 1
+        || typeof hole.startRowIndex !== 'number' || !Number.isSafeInteger(hole.startRowIndex) || hole.startRowIndex < 2
+        || (hole.endRowIndex !== undefined && (typeof hole.endRowIndex !== 'number' || !Number.isSafeInteger(hole.endRowIndex) || hole.endRowIndex <= hole.startRowIndex))) {
+        fail('protection_unverified', 'Only decision-input cells below both header rows may be editable.');
+      }
+      if (binding.mode === 'projection') {
+        if (typeof hole.endRowIndex !== 'number' || hole.endRowIndex > binding.maxSlots + 2) fail('protection_unverified', 'Dynamic input exceptions must end at the reviewed slot capacity.');
+        for (let row = hole.startRowIndex; row < hole.endRowIndex; row++) covered.add(row);
+      }
+    }
+    if (binding.mode === 'projection' && Array.from({ length: binding.maxSlots }, (_, index) => index + 2).some(row => !covered.has(row))) {
+      fail('protection_unverified', 'Every reviewed dynamic slot must have its decision cell editable; metadata stays protected.');
+    }
+  }
   function claimStore(fingerprint: string): ProjectionClaimStore {
     function load(): ProjectionClaim | undefined {
       const raw = properties.getProperty(NATIVE_PROPERTIES.projectionClaim);
@@ -374,20 +400,7 @@ export function createNativeStagingRuntime(services: NativeStagingServices): Sta
       assertTrustedFile(ref.spreadsheetId, 'application/vnd.google-apps.spreadsheet', false);
     },
     assertDecisionProtection(ref, protectedHeaders) {
-      const { config } = host();
-      if (!config.decisionInput || !sameRef(ref, config.decisionInput)) fail('protection_unverified', 'Decision inputs differ from the configured binding.');
-      const sheet = bindSheet(ref); const width = sheet.getLastColumn();
-      const headers = sheet.getRange(1, 1, 1, width).getValues()[0];
-      if (new Set(headers).size !== headers.length || protectedHeaders.some(header => !headers.includes(header)) || !headers.includes('draft_decision')) fail('protection_unverified', 'Decision columns are missing or ambiguous.');
-      const editableColumn = headers.indexOf('draft_decision');
-      const p = protection(ref);
-      for (const value of (p.unprotectedRanges ?? []) as unknown[]) {
-        const hole = object(value);
-        if (hole.sheetId !== ref.sheetId || hole.startColumnIndex !== editableColumn || hole.endColumnIndex !== editableColumn + 1
-          || typeof hole.startRowIndex !== 'number' || !Number.isSafeInteger(hole.startRowIndex) || hole.startRowIndex < 2) {
-          fail('protection_unverified', 'Only decision-input cells below both header rows may be editable.');
-        }
-      }
+      assertDecisionProtection(ref, protectedHeaders);
     },
     consumeProjection(context: { config: AdapterConfig; signer: Signer; transport: Transport; nowSeconds: () => number }) {
       if (!properties.getProperty(NATIVE_PROPERTIES.projectionConfig)) return { status: 'not-configured' };
@@ -395,8 +408,14 @@ export function createNativeStagingRuntime(services: NativeStagingServices): Sta
       if (context.config.environment !== 'staging' || context.config.generation !== bound.config.generation
         || context.config.baseUrl !== bound.host.workerOrigin || context.config.keyId !== bound.host.keyId) fail('native_configuration', 'Projection delivery differs from the verified host binding.');
       if (properties.getProperty(NATIVE_PROPERTIES.projectionReceipt) !== bound.fingerprint) fail('projection_setup_required', 'Initialize reviewed projection bindings while staging is paused.');
+      const binding = bound.host.decisionInput;
       return consumeProjectionJobs({ ...context, workerId: bound.config.workerId, lock: sharedLock, sheets: bound.sheets,
-        assertProtected: bound.assertProtected, flush: () => services.SpreadsheetApp.flush(), claimStore: claimStore(bound.fingerprint) });
+        assertProtected: bound.assertProtected, flush: () => services.SpreadsheetApp.flush(), claimStore: claimStore(bound.fingerprint),
+        ...(binding?.mode === 'projection' ? { publishDecisionSlots(snapshot) {
+          assertDecisionProtection(binding, DYNAMIC_DECISION_HEADERS.filter(header => header !== 'draft_decision'));
+          appendProjectionDecisionSlots(snapshot, bindSheet(binding), { binding, config: context.config, signer: context.signer });
+        } } : {}),
+      });
     },
     initializeProjections() {
       if (properties.getProperty(HOST_PROPERTIES.enabled) === 'true') fail('pause_required', 'Pause staging before initializing projection outputs.');
@@ -405,6 +424,11 @@ export function createNativeStagingRuntime(services: NativeStagingServices): Sta
       try {
         if (claimStore(bound.fingerprint).load()) fail('claim_integrity', 'Reconcile the outstanding claim before initializing output bindings.');
         for (const kind of KINDS) bound.assertProtected(kind, PROJECTION_HEADERS[kind]);
+        const binding = bound.host.decisionInput;
+        if (binding?.mode === 'projection') {
+          assertDecisionProtection(binding, DYNAMIC_DECISION_HEADERS.filter(header => header !== 'draft_decision'), true);
+          initializeDynamicDecisionSlots(bindSheet(binding));
+        }
         initializeProjectionSheets(bound.sheets);
         services.SpreadsheetApp.flush();
         // A second pass validates the initialized headers through REST read-back.

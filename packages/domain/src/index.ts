@@ -56,6 +56,15 @@ export interface ExcusalSubmitPayload {
   reason: string;
 }
 
+export const MAX_EXCUSAL_EVENTS = 25;
+export interface ExcusalSubmitManyPayload {
+  personId: string;
+  requestedOutcome: RequestedOutcome;
+  reason: string;
+  /** Child identities are stable per native response and event, never selection order. */
+  events: { eventId: string; requestId: string }[];
+}
+
 export interface ExcusalDecidePayload {
   requestId: string;
   expectedVersion: number;
@@ -78,7 +87,12 @@ export interface ExcusalDecideCommand extends CommandEnvelope {
   payload: ExcusalDecidePayload;
 }
 
-export type Command = AttendanceReportCommand | ExcusalSubmitCommand | ExcusalDecideCommand;
+export interface ExcusalSubmitManyCommand extends CommandEnvelope {
+  operation: 'excusal.submitMany';
+  payload: ExcusalSubmitManyPayload;
+}
+
+export type Command = AttendanceReportCommand | ExcusalSubmitCommand | ExcusalSubmitManyCommand | ExcusalDecideCommand;
 
 export interface AttendanceObservation {
   personId: string;
@@ -270,6 +284,31 @@ export function parseCommand(input: unknown): Command {
     };
   }
 
+  if (raw.operation === 'excusal.submitMany') {
+    const p = object(raw.payload, 'command.payload', ['personId', 'requestedOutcome', 'reason', 'events']);
+    if (!Array.isArray(p.events) || p.events.length < 1 || p.events.length > MAX_EXCUSAL_EVENTS) {
+      invalid('command.payload.events', 'Expected between 1 and 25 event requests.');
+    }
+    const events = p.events.map((entry, index) => {
+      const path = `command.payload.events[${index}]`;
+      const event = object(entry, path, ['eventId', 'requestId']);
+      return { eventId: id(event.eventId, `${path}.eventId`), requestId: id(event.requestId, `${path}.requestId`) };
+    });
+    if (new Set(events.map(event => event.eventId)).size !== events.length
+      || new Set(events.map(event => event.requestId)).size !== events.length) {
+      invalid('command.payload.events', 'Event and child request identifiers must each be unique.');
+    }
+    // Code-point ordering is independent of host locale. Selection order is not identity.
+    events.sort((a, b) => a.eventId < b.eventId ? -1 : a.eventId > b.eventId ? 1 : 0);
+    return {
+      ...envelope, operation: 'excusal.submitMany', payload: {
+        personId: id(p.personId, 'command.payload.personId'),
+        requestedOutcome: choice(p.requestedOutcome, 'command.payload.requestedOutcome', REQUESTED_OUTCOMES),
+        reason: reason(p.reason, 'command.payload.reason'), events,
+      },
+    };
+  }
+
   if (raw.operation === 'excusal.decide') {
     const p = object(raw.payload, 'command.payload', ['requestId', 'expectedVersion', 'decision', 'reason']);
     return {
@@ -321,6 +360,16 @@ export function createExcusalRequest(command: ExcusalSubmitCommand, acceptedAt: 
     commandId: parsed.commandId,
     lastCommandId: parsed.commandId,
   };
+}
+
+/** Pure expansion only: persistence must commit the parent and every child together. */
+export function createExcusalRequests(command: ExcusalSubmitManyCommand, acceptedAt: string): ExcusalRequest[] {
+  const parsed = parseCommand(command);
+  if (parsed.operation !== 'excusal.submitMany') invalid('command.operation', 'Expected a multi-event excusal submission.');
+  const { events, ...common } = parsed.payload;
+  return events.map(event => createExcusalRequest({
+    ...parsed, operation: 'excusal.submit', payload: { ...common, ...event },
+  }, acceptedAt));
 }
 
 export function decideExcusalRequest(

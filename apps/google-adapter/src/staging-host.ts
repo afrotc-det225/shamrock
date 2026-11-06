@@ -3,8 +3,10 @@ import { parseCommand } from '../../../packages/domain/src/index.js';
 import {
   AdapterError, attendanceCommandFromForm, captureDecisionDraft, decisionCommandFromDraft,
   enqueueCommand, type AdapterConfig, type ChoiceReference, type DecisionDraft, type FormCatalog,
-  type Signer, type Transport,
+  type Signer, type Transport, type Journal,
 } from './index.js';
+import { DECISION_HEADERS, DYNAMIC_DECISION_HEADERS, decisionColumns, readDynamicDecisionSlots,
+  type DynamicSlotBinding, type LocatedDecisionSlot } from './decision-slots.js';
 import {
   createGoogleSigner, createGoogleTransport, flushGoogleCommands, googleEditActorEmail,
   snapshotGoogleForm, withJournalLock,
@@ -34,11 +36,12 @@ interface AttendanceBinding extends FormBinding {
   itemRoles: { event: string; scope: string; present: string[]; completeness: string };
 }
 interface ExcusalBinding extends FormBinding { itemRoles: { event: string; outcome: string; reason: string } }
-interface DecisionInputBinding extends ExistingSheetReference {
+type DecisionInputBinding = ExistingSheetReference & (DynamicSlotBinding | {
   resourceKey: string;
+  mode?: 'fixed';
   /** Frozen target mapping. No code infers identity from an edited/sorted display row. */
   slots: { row: number; slotId: string; requestId: string; baseVersion: number }[];
-}
+});
 export interface StagingHostConfig {
   version: 1;
   environment: 'staging';
@@ -175,13 +178,22 @@ export function parseStagingHostConfig(value: unknown): StagingHostConfig {
   }
   if (v.decisionInput !== undefined) {
     const input = record(v.decisionInput);
-    if (!Array.isArray(input.slots) || input.slots.length === 0 || input.slots.length > 25) fail('invalid_host_config', 'Configure a bounded set of fixed decision slots.');
-    const slots = input.slots.map(raw => {
+    if (input.mode === 'projection') {
+      const maxSlots = integer(input.maxSlots);
+      if (maxSlots > 500 || input.slots !== undefined) fail('invalid_host_config', 'Projection decision slots need a bound of 1–500 and cannot also use fixed bindings.');
+      result.decisionInput = { ...sheetReference(input), resourceKey: id(input.resourceKey), mode: 'projection', maxSlots };
+    } else {
+      if (input.mode !== undefined && input.mode !== 'fixed') fail('invalid_host_config', 'The decision slot mode is invalid.');
+      if (!Array.isArray(input.slots) || input.slots.length === 0 || input.slots.length > 25) fail('invalid_host_config', 'Configure a bounded set of fixed decision slots.');
+      const slots = input.slots.map(raw => {
       const slot = record(raw);
-      return { row: integer(slot.row, 3), slotId: id(slot.slotId), requestId: id(slot.requestId), baseVersion: integer(slot.baseVersion) };
-    });
-    if (new Set(slots.map(s => s.row)).size !== slots.length || new Set(slots.map(s => s.slotId)).size !== slots.length) fail('invalid_host_config', 'Decision slot identities and rows must be unique.');
-    result.decisionInput = { ...sheetReference(input), resourceKey: id(input.resourceKey), slots };
+      const row = integer(slot.row, 3);
+      if (row > 2002) fail('invalid_host_config', 'A fixed slot exceeds the bounded input table.');
+      return { row, slotId: id(slot.slotId), requestId: id(slot.requestId), baseVersion: integer(slot.baseVersion) };
+      });
+      if (new Set(slots.map(s => s.row)).size !== slots.length || new Set(slots.map(s => s.slotId)).size !== slots.length) fail('invalid_host_config', 'Decision slot identities and rows must be unique.');
+      result.decisionInput = { ...sheetReference(input), resourceKey: id(input.resourceKey), ...(input.mode === 'fixed' ? { mode: 'fixed' as const } : {}), slots };
+    }
     if (result.decisionInput.spreadsheetId === result.journal.spreadsheetId) fail('invalid_host_config', 'The private journal must not share the decision-input workbook.');
   }
   return result;
@@ -261,18 +273,15 @@ export function createStagingHost(runtime: StagingHostRuntime) {
     }
     return form;
   }
-  const decisionHeaders = ['slot_id', 'request_id', 'base_version', 'draft_decision', 'draft_id', 'draft_state', 'draft_json'];
-  function openDecisionInput(reference: ExistingSheetReference): HostSheet {
-    runtime.assertDecisionProtection(reference, decisionHeaders.filter(header => header !== 'draft_decision'));
+  function openDecisionInput(reference: DecisionInputBinding): HostSheet {
+    const headers = reference.mode === 'projection' ? DYNAMIC_DECISION_HEADERS : DECISION_HEADERS;
+    runtime.assertDecisionProtection(reference, headers.filter(header => header !== 'draft_decision'));
     return openSheet(reference);
   }
-  function decisionColumns(sheet: HostSheet): Record<string, number> {
-    if (sheet.getLastRow() < 2 || sheet.getLastColumn() < decisionHeaders.length) fail('decision_schema_required', 'Prepare the configured decision-input tab before setup.');
-    const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
-    if (new Set(headers).size !== headers.length || decisionHeaders.some(h => !headers.includes(h))) fail('decision_schema_required', 'Decision input headers are missing or ambiguous.');
-    return Object.fromEntries(decisionHeaders.map(h => [h, headers.indexOf(h) + 1]));
+  function slotsFor(ctx: Context, sheet: HostSheet, binding: DecisionInputBinding): LocatedDecisionSlot[] {
+    return binding.mode === 'projection' ? readDynamicDecisionSlots(sheet, { binding, config: ctx.adapter, signer: ctx.signer }).slots : binding.slots;
   }
-  function checkSlot(sheet: HostSheet, columns: Record<string, number>, slot: DecisionInputBinding['slots'][number]) {
+  function checkSlot(sheet: HostSheet, columns: Record<string, number>, slot: LocatedDecisionSlot) {
     const read = (header: string) => sheet.getRange(slot.row, columns[header], 1, 1).getValues()[0][0];
     if (read('slot_id') !== slot.slotId || read('request_id') !== slot.requestId || read('base_version') !== slot.baseVersion) {
       fail('draft_target_changed', 'A fixed decision slot differs from its reviewed target; input was retained.');
@@ -286,8 +295,16 @@ export function createStagingHost(runtime: StagingHostRuntime) {
     verifiedForm(ctx.config.attendance);
     if (ctx.config.excusal) verifiedForm(ctx.config.excusal);
     if (ctx.config.decisionInput) {
-      const sheet = openDecisionInput(ctx.config.decisionInput); const cols = decisionColumns(sheet);
-      for (const slot of ctx.config.decisionInput.slots) checkSlot(sheet, cols, slot);
+      const binding = ctx.config.decisionInput; const sheet = openDecisionInput(binding);
+      const cols = decisionColumns(sheet, binding.mode === 'projection');
+      if (binding.mode === 'projection') readDynamicDecisionSlots(sheet, { binding, config: ctx.adapter, signer: ctx.signer });
+      else {
+        const rows = sheet.getRange(3, 1, Math.max(...binding.slots.map(slot => slot.row)) - 2, sheet.getLastColumn()).getValues();
+        for (const slot of binding.slots) {
+          const values = rows[slot.row - 3];
+          if (values[cols.slot_id - 1] !== slot.slotId || values[cols.request_id - 1] !== slot.requestId || values[cols.base_version - 1] !== slot.baseVersion) fail('draft_target_changed', 'A fixed decision slot differs from its reviewed target.');
+        }
+      }
     }
   }
   function specs(ctx: Context) {
@@ -322,8 +339,72 @@ export function createStagingHost(runtime: StagingHostRuntime) {
   function resolver(ctx: Context) {
     return { resolveVerifiedEmail: (address: string) => ctx.principals.find(p => p.email === address)?.principalId };
   }
+  function savedDraft(read: (header: string) => unknown, slot: LocatedDecisionSlot, binding: DecisionInputBinding): DecisionDraft | undefined {
+    const raw = read('draft_json');
+    if (raw === '' && read('draft_id') === '') return undefined;
+    let draft: DecisionDraft;
+    try { draft = JSON.parse(String(raw)) as DecisionDraft; } catch { return fail('draft_capture_failed', 'The saved draft is incomplete; retain it for review.'); }
+    if (!draft || draft.slotId !== slot.slotId || draft.requestId !== slot.requestId || draft.baseVersion !== slot.baseVersion
+      || draft.resourceKey !== binding.resourceKey || draft.draftId !== read('draft_id')
+      || !['ready', 'confirmation-required'].includes(draft.status)) fail('draft_target_changed', 'The saved draft does not match its immutable row.');
+    captureDecisionDraft({ slot, draftId: draft.draftId, resourceKey: draft.resourceKey, decision: draft.decision, reason: draft.reason, editedCellCount: 1 }, { resolveVerifiedEmail: () => undefined });
+    if (draft.status === 'confirmation-required' && draft.actor) fail('draft_target_changed', 'An unconfirmed draft cannot assert an actor.');
+    return draft;
+  }
+  function reconcileDecisionStates(ctx: Context, journal: Journal) {
+    const binding = ctx.config.decisionInput;
+    if (!binding) return { reconciled: 0 };
+    const sheet = openDecisionInput(binding); const cols = decisionColumns(sheet, binding.mode === 'projection');
+    const slots = slotsFor(ctx, sheet, binding);
+    const count = Math.max(0, ...slots.map(slot => slot.row - 2));
+    const values = count ? sheet.getRange(3, 1, count, sheet.getLastColumn()).getValues() : [];
+    const drafts = slots.map(slot => {
+      const read = (header: string) => values[slot.row - 3][cols[header] - 1];
+      if (read('slot_id') !== slot.slotId || read('request_id') !== slot.requestId || read('base_version') !== slot.baseVersion) fail('draft_target_changed', 'A decision row moved after capture.');
+      return { slot, read };
+    })
+      .map(value => ({ ...value, draft: savedDraft(value.read, value.slot, binding) }));
+    const entries = new Map(journal.find(drafts.filter(row => row.draft?.status === 'ready').map(row => `draft.${row.draft!.draftId}`)).map(entry => [entry.commandId, entry]));
+    let reconciled = 0;
+    const states = values.map(row => [row[cols.draft_state - 1]]);
+    for (const { slot, read, draft } of drafts) {
+      if (!draft) continue;
+      let state = `Confirmation required: ${draft.decision}`;
+      if (draft.status === 'ready') {
+        const command = decisionCommandFromDraft(draft, ctx.adapter); const body = JSON.stringify(command);
+        const entry = entries.get(command.commandId);
+        if (entry && (entry.body !== body || entry.bodyHash !== ctx.signer.sha256(body))) fail('journal_integrity', 'The saved outcome belongs to a different decision payload.');
+        const label = !entry ? 'Not queued; retry the saved decision' : ({
+          pending: entry.attempts ? 'Retry pending' : 'Queued', committed: 'Committed', conflict: 'Conflict; review recorded version',
+          rejected: 'Failed; review rejected request', 'needs-attention': 'Needs attention; delivery unresolved',
+        } as const)[entry.status];
+        state = `${label}: ${draft.decision}`;
+      }
+      if (read('draft_decision') !== draft.decision) state = `Input changed; saved ${state}`;
+      if (read('draft_state') !== state) {
+        states[slot.row - 3] = [state];
+        reconciled++;
+      }
+    }
+    if (reconciled) {
+      // One bounded status-column write, never per-row Google round trips or a
+      // rectangular write across editable input / immutable target columns.
+      sheet.getRange(3, cols.draft_state, count, 1).setValues(states);
+      const after = sheet.getRange(3, 1, count, sheet.getLastColumn()).getValues();
+      for (const { slot, read } of drafts) {
+        const current = after[slot.row - 3];
+        for (const key of ['slot_id', 'request_id', 'base_version', 'draft_id', 'draft_json', 'draft_decision']) {
+          if (current[cols[key] - 1] !== read(key)) fail('draft_capture_failed', 'A decision row changed while reconciling its outcome; retain it for review.');
+        }
+        if (current[cols.draft_state - 1] !== states[slot.row - 3][0]) fail('draft_capture_failed', 'The delivery status did not read back; retain the saved journal outcome.');
+      }
+    }
+    return { reconciled };
+  }
   function flushWith(ctx: Context) {
-    const commands = flushGoogleCommands(openJournal(ctx), runtime.lockService.getScriptLock(), runtime.urlFetch, ctx.adapter, ctx.signer, runtime.nowSeconds());
+    let commands;
+    try { commands = flushGoogleCommands(openJournal(ctx), runtime.lockService.getScriptLock(), runtime.urlFetch, ctx.adapter, ctx.signer, runtime.nowSeconds()); }
+    finally { withJournalLock(openJournal(ctx), runtime.lockService.getScriptLock(), journal => reconcileDecisionStates(ctx, journal)); }
     const projection = runtime.consumeProjection?.({ config: ctx.adapter, signer: ctx.signer, transport: createGoogleTransport(runtime.urlFetch), nowSeconds: runtime.nowSeconds });
     return { status: 'processed', commands, projection: projection === undefined ? 'not-configured' : projection };
   }
@@ -352,15 +433,27 @@ export function createStagingHost(runtime: StagingHostRuntime) {
     const principal = ctx.principals.find(p => p.email === snapshot.responderEmail.trim().toLowerCase());
     if (!principal?.personId) fail('confirmation_required', 'The verified responder needs an enrolled cadet identity.');
     const answer = (item: string) => { const value = snapshot.answers[item]; if (typeof value !== 'string') fail('invalid_form_answer', 'A required scalar excusal answer is missing.'); return value; };
-    const token = /\[sr:([A-Za-z0-9_.:-]{1,96})\]$/.exec(answer(binding.itemRoles.event))?.[1];
-    const event = token ? ctx.excusalReferences[token] : undefined;
-    if (!event || event.kind !== 'event') fail('unknown_choice', 'The excusal event needs a reviewed choice mapping.');
+    const selection = snapshot.answers[binding.itemRoles.event];
+    const selected = typeof selection === 'string' ? [selection] : selection;
+    if (!Array.isArray(selected) || selected.length < 1 || selected.length > 25) fail('invalid_form_answer', 'Select between one and 25 reviewed excusal events.');
+    const events = selected.map(choice => {
+      const token = /\[sr:([A-Za-z0-9_.:-]{1,96})\]$/.exec(choice)?.[1];
+      const event = token ? ctx.excusalReferences[token] : undefined;
+      if (!event || event.kind !== 'event') fail('unknown_choice', 'An excusal event needs a reviewed choice mapping.');
+      return event.eventId;
+    });
+    if (new Set(events).size !== events.length) fail('invalid_form_answer', 'A native excusal submission cannot repeat an event.');
     const identity = ctx.signer.sha256(`${binding.resourceKey}\n${snapshot.responseId}\n1`);
+    const shared = { personId: principal.personId, requestedOutcome: answer(binding.itemRoles.outcome), reason: answer(binding.itemRoles.reason) };
     const command = parseCommand({
       commandId: `form.${identity}`, contractVersion: 1, environment: 'staging', generation: ctx.config.generation,
       actor: { principalId: principal.principalId, evidence: 'google-form' },
       source: { kind: 'form', resourceKey: binding.resourceKey, submissionId: snapshot.responseId, revision: 1 },
-      operation: 'excusal.submit', payload: { requestId: `request.${identity}`, eventId: event.eventId, personId: principal.personId, requestedOutcome: answer(binding.itemRoles.outcome), reason: answer(binding.itemRoles.reason) },
+      ...(typeof selection === 'string'
+        ? { operation: 'excusal.submit', payload: { ...shared, requestId: `request.${identity}`, eventId: events[0] } }
+        : { operation: 'excusal.submitMany', payload: { ...shared, events: events.map(eventId => ({ eventId,
+          requestId: `request.${ctx.signer.sha256(`${binding.resourceKey}\n${snapshot.responseId}\n1\n${eventId}`)}`,
+        })) } }),
     });
     withJournalLock(openJournal(ctx), runtime.lockService.getScriptLock(), j => enqueueCommand(command, j, ctx.signer));
     return flushWith(ctx);
@@ -427,30 +520,36 @@ export function createStagingHost(runtime: StagingHostRuntime) {
       const binding = ctx.config.decisionInput;
       if (!binding || event.source.getId() !== binding.spreadsheetId) fail('wrong_source', 'This is not the configured decision workbook.');
       if (event.range.getSheet().getSheetId() !== binding.sheetId) return { status: 'ignored' };
-      const sheet = openDecisionInput(binding); const cols = decisionColumns(sheet);
+      const sheet = openDecisionInput(binding); const cols = decisionColumns(sheet, binding.mode === 'projection');
       if (event.range.getColumn() > cols.draft_decision || event.range.getColumn() + event.range.getNumColumns() <= cols.draft_decision) return { status: 'ignored' };
       if (event.range.getNumRows() !== 1 || event.range.getNumColumns() !== 1) fail('bulk_review_required', 'Keep the pasted input and review it as a frozen bulk draft.');
-      const slot = binding.slots.find(s => s.row === event.range.getRow());
-      if (!slot) fail('unknown_draft_slot', 'This row has no reviewed immutable request binding.');
       const result = withJournalLock(openJournal(ctx), runtime.lockService.getScriptLock(), journal => {
-        const read = checkSlot(sheet, cols, slot);
+        const currentCols = decisionColumns(sheet, binding.mode === 'projection');
+        if (currentCols.draft_decision !== event.range.getColumn()) fail('draft_target_changed', 'The decision columns moved after this edit.');
+        const slot = slotsFor(ctx, sheet, binding).find(s => s.row === event.range.getRow());
+        if (!slot) fail('unknown_draft_slot', 'This row has no reviewed immutable request binding.');
+        const read = checkSlot(sheet, currentCols, slot);
         if (read('draft_decision') !== event.value) fail('draft_input_changed', 'This delayed edit no longer matches the current input; no command was sent.');
+        const prior = savedDraft(read, slot, binding);
+        if (prior) {
+          // A captured slot is never rebound, even if its outcome is terminal. A later
+          // recorded version gets a fresh row; edits here retain the original payload.
+          if (prior.decision !== event.value || prior.status !== 'ready') {
+            reconcileDecisionStates(ctx, journal);
+            return { status: prior.status === 'ready' ? 'saved-draft-retained' : 'confirmation-required' };
+          }
+          enqueueCommand(decisionCommandFromDraft(prior, ctx.adapter), journal, ctx.signer);
+          return { status: 'queued' };
+        }
         const candidate = captureDecisionDraft({ slot, draftId: runtime.utilities.getUuid(), resourceKey: binding.resourceKey,
           decision: event.value ?? '', reason: 'Decision selected in the staging spreadsheet.', editedCellCount: 1,
           eventUserEmail: googleEditActorEmail(event),
         }, resolver(ctx));
-        let draft = candidate;
-        // Redelivery with the same frozen target/actor/value reuses the saved command identity.
-        try {
-          const prior = JSON.parse(String(read('draft_json') || '')) as DecisionDraft;
-          if (prior.slotId === candidate.slotId && prior.requestId === candidate.requestId && prior.baseVersion === candidate.baseVersion
-            && prior.decision === candidate.decision && prior.reason === candidate.reason && prior.resourceKey === candidate.resourceKey
-            && JSON.stringify(prior.actor) === JSON.stringify(candidate.actor) && prior.status === candidate.status) draft = { ...candidate, draftId: id(prior.draftId) };
-        } catch { /* An older/unavailable capture is not identity evidence. Preserve the new explicit event. */ }
+        const draft = candidate;
         const body = JSON.stringify(draft);
-        sheet.getRange(slot.row, cols.draft_id, 1, 1).setValues([[draft.draftId]]);
-        sheet.getRange(slot.row, cols.draft_json, 1, 1).setValues([[body]]);
-        sheet.getRange(slot.row, cols.draft_state, 1, 1).setValues([[draft.status === 'ready' ? `Queued: ${draft.decision}` : `Confirmation required: ${draft.decision}`]]);
+        sheet.getRange(slot.row, currentCols.draft_id, 1, 1).setValues([[draft.draftId]]);
+        sheet.getRange(slot.row, currentCols.draft_json, 1, 1).setValues([[body]]);
+        sheet.getRange(slot.row, currentCols.draft_state, 1, 1).setValues([[draft.status === 'ready' ? `Not queued; retry the saved decision: ${draft.decision}` : `Confirmation required: ${draft.decision}`]]);
         if (read('draft_id') !== draft.draftId || read('draft_json') !== body) fail('draft_capture_failed', 'The draft could not be verified; no command was sent.');
         if (draft.status !== 'ready') return { status: 'confirmation-required' };
         enqueueCommand(decisionCommandFromDraft(draft, ctx.adapter), journal, ctx.signer);

@@ -73,6 +73,9 @@ export interface ProjectionRuntime {
   assertProtected(kind: ProjectionSheetKind, headers: readonly string[]): void;
   /** Apply pending SpreadsheetApp operations before read-back. */
   flush(): void;
+  /** Optional protected input-slot allocation under this same lock, after recorded
+   * output read-back and before ACK. Failure retains the durable claim. */
+  publishDecisionSlots?(snapshot: ProjectionSnapshot): void;
 }
 
 function fail(code: string, message: string): never { throw new AdapterError(code, message); }
@@ -316,6 +319,8 @@ export function consumeProjectionJobs(runtime: ProjectionRuntime, options: { lim
       const snapshot = parseProjectionSnapshot(send('/v1/jobs/project', claim));
       if (snapshot.event.eventId !== claim.eventId || snapshot.unit.unitId !== claim.unitId) fail('projection_scope', 'The snapshot does not match its leased resource.');
       publishProjectionSnapshot(snapshot, runtime, { maxRows: options.maxRows, beforeWrite: checkLease });
+      checkLease();
+      runtime.publishDecisionSlots?.(snapshot);
       checkLease();
       const ack = object(send('/v1/jobs/ack', claim), ['acknowledged'], 'invalid_ack');
       if (ack.acknowledged !== true) fail('invalid_ack', 'Publication acknowledgement is ambiguous.');

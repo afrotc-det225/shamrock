@@ -1,5 +1,5 @@
 import {
-  buildAttendanceReport, createExcusalRequest, decideExcusalRequest,
+  buildAttendanceReport, createExcusalRequest, createExcusalRequests, decideExcusalRequest,
   DomainError, parseCommand,
   type Command, type ExcusalRequest,
 } from '../../../packages/domain/src/index.js';
@@ -81,6 +81,10 @@ function parseJson(body: string): unknown {
 }
 
 interface Context { eventId: string; unitId: string; personId: string | null; current?: ExcusalRequest }
+const submission = (command: Command) => command.operation === 'excusal.submit' || command.operation === 'excusal.submitMany';
+const capability = (command: Command) => command.operation === 'excusal.submitMany' ? 'excusal.submit' : command.operation;
+const eventIds = (command: Command, ctx: Context) => command.operation === 'excusal.submitMany'
+  ? command.payload.events.map(event => event.eventId) : [ctx.eventId];
 
 async function requestRecord(db: D1Database, requestId: string): Promise<(ExcusalRequest & { unitId: string }) | null> {
   const row = await statement(db, `SELECT request_id AS requestId, event_id AS eventId, person_id AS personId,
@@ -108,7 +112,8 @@ async function context(db: D1Database, command: Command): Promise<Context> {
     WHERE person_id=? AND active=1 LIMIT 2`, command.payload.personId)
     .all<{ unitId: string }>();
   if (units.results.length !== 1) throw new HttpError(409, 'AMBIGUOUS_SCOPE', 'Resolve the event membership before submitting.');
-  return { eventId: command.payload.eventId, unitId: units.results[0].unitId, personId: command.payload.personId };
+  return { eventId: command.operation === 'excusal.submitMany' ? command.payload.events[0].eventId : command.payload.eventId,
+    unitId: units.results[0].unitId, personId: command.payload.personId };
 }
 
 const controlSql = `EXISTS (SELECT 1 FROM system_control WHERE singleton=1 AND environment=? AND generation=? AND accepting_commands=1)`;
@@ -135,11 +140,12 @@ function membershipGuard(ctx: Context): { sql: string; values: (string | number 
 function guardParts(env: Env, command: Command, ctx: Context): { sql: string; values: (string | number | null)[] } {
   return {
     sql: `${controlSql} AND ${permissionSql} AND ${sourceSql}
-      AND EXISTS (SELECT 1 FROM events e JOIN event_units eu ON eu.event_id=e.event_id
-        WHERE e.event_id=? AND e.active=1 AND eu.unit_id=?)`,
-    values: [env.ENVIRONMENT, Number(env.GENERATION), command.actor.principalId, command.operation,
-      ctx.unitId, command.operation === 'excusal.submit' ? ctx.personId : null,
-      command.source.kind, command.source.resourceKey, ctx.eventId, ctx.unitId],
+      AND NOT EXISTS (SELECT 1 FROM json_each(?) selected WHERE NOT EXISTS
+        (SELECT 1 FROM events e JOIN event_units eu ON eu.event_id=e.event_id
+         WHERE e.event_id=selected.value AND e.active=1 AND eu.unit_id=?))`,
+    values: [env.ENVIRONMENT, Number(env.GENERATION), command.actor.principalId, capability(command),
+      ctx.unitId, submission(command) ? ctx.personId : null,
+      command.source.kind, command.source.resourceKey, JSON.stringify(eventIds(command, ctx)), ctx.unitId],
   };
 }
 
@@ -163,10 +169,17 @@ interface Receipt {
   result: unknown;
   pendingEffects: true;
 }
-async function priorReceipt(db: D1Database, commandId: string, hash: string): Promise<Receipt | null> {
-  const prior = await statement(db, 'SELECT payload_hash AS hash, receipt_json AS receipt FROM operation_commands WHERE command_id=?', commandId)
-    .first<{ hash: string; receipt: string }>();
+async function priorReceipt(env: Env, command: Command, ctx: Context, hash: string): Promise<Receipt | null> {
+  const guard = guardParts(env, command, ctx);
+  const membership = membershipGuard(ctx);
+  // Permission and receipt are read in one snapshot, including retries that race
+  // with grant revocation after the preliminary validation above. Submission
+  // retries cannot inherit a different unit's grants after a membership move.
+  const prior = await statement(env.DB, `SELECT payload_hash AS hash,receipt_json AS receipt,
+    (${guard.sql} AND ${membership.sql} AND unit_id=?) AS allowed FROM operation_commands WHERE command_id=?`,
+    ...guard.values, ...membership.values, ctx.unitId, command.commandId).first<{ hash: string; receipt: string; allowed: number }>();
   if (!prior) return null;
+  if (prior.allowed !== 1) throw new HttpError(403, 'NOT_AUTHORIZED', 'The actor, source or operation is not currently authorized.');
   if (prior.hash !== hash) throw new HttpError(409, 'COMMAND_ID_CONFLICT', 'This command ID was already used for different input.');
   return JSON.parse(prior.receipt);
 }
@@ -178,7 +191,7 @@ async function acceptCommand(env: Env, command: Command): Promise<Receipt> {
   const scope = await statement(env.DB, `SELECT (${membership.sql}) AS supported`, ...membership.values).first<{ supported: number }>();
   if (scope?.supported !== 1) throw new HttpError(409, 'AMBIGUOUS_SCOPE', 'This prototype requires one active unit per person in the command scope.');
   const hash = await digest(JSON.stringify(command)); // parseCommand emits deterministic property order.
-  const prior = await priorReceipt(env.DB, command.commandId, hash);
+  const prior = await priorReceipt(env, command, ctx, hash);
   if (prior) return prior;
   const now = new Date().toISOString();
   const guard = guardParts(env, command, ctx);
@@ -202,7 +215,7 @@ async function acceptCommand(env: Env, command: Command): Promise<Receipt> {
       report.reportId, report.eventId, report.unitId, report.rosterVersion, report.completeness,
       report.submittedAt, report.submittedBy, command.commandId));
     writes.push(statement(env.DB, `INSERT INTO attendance_report_members (report_id,person_id,present)
-      SELECT ?,c.value,EXISTS(SELECT 1 FROM json_each(?) p WHERE p.value=c.value) FROM json_each(?) c`,
+      SELECT ?,c.value,c.value IN (SELECT value FROM json_each(?)) FROM json_each(?) c`,
       report.reportId, JSON.stringify(report.presentPersonIds), JSON.stringify(report.coveredPersonIds)));
     writes.push(statement(env.DB, `INSERT INTO attendance_observations (report_id,event_id,person_id,code,accepted_at)
       SELECT ?,?,value,'P',? FROM json_each(?)`, report.reportId, report.eventId, now, JSON.stringify(report.presentPersonIds)));
@@ -210,18 +223,19 @@ async function acceptCommand(env: Env, command: Command): Promise<Receipt> {
       SELECT ?,value,'P',1,? FROM json_each(?) WHERE true
       ON CONFLICT(event_id,person_id) DO UPDATE SET observed_code='P',version=attendance_current.version+1,updated_at=excluded.updated_at`,
       report.eventId, now, JSON.stringify(report.presentPersonIds)));
-  } else if (command.operation === 'excusal.submit') {
-    const request = createExcusalRequest(command, now);
-    result = request; targetId = request.requestId;
-    guard.sql += ' AND EXISTS (SELECT 1 FROM memberships WHERE unit_id=? AND person_id=? AND active=1)';
-    guard.values.push(ctx.unitId, request.personId);
+  } else if (command.operation === 'excusal.submit' || command.operation === 'excusal.submitMany') {
+    const requests = command.operation === 'excusal.submit' ? [createExcusalRequest(command, now)] : createExcusalRequests(command, now);
+    result = command.operation === 'excusal.submit' ? requests[0] : { requests };
+    targetId = command.operation === 'excusal.submit' ? requests[0].requestId : command.commandId;
+    // One SQL input set keeps the batch bounded even at the maximum event count.
     writes.push(statement(env.DB, `INSERT INTO excusal_requests
       (request_id,event_id,person_id,unit_id,requested_outcome,reason,status,decision,version,
        submitted_at,submitted_by,updated_at,decided_at,decided_by,decision_reason,source_json,command_id,last_command_id)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-      request.requestId, request.eventId, request.personId, ctx.unitId, request.requestedOutcome, request.reason,
-      request.status, request.decision, request.version, request.submittedAt, request.submittedBy, request.updatedAt,
-      request.decidedAt, request.decidedBy, request.decisionReason, JSON.stringify(request.source), request.commandId, request.lastCommandId));
+      SELECT json_extract(value,'$.requestId'),json_extract(value,'$.eventId'),?, ?, ?, ?,'Submitted',NULL,1,
+        ?,?,?,NULL,NULL,NULL,?,?,? FROM json_each(?)`,
+      command.payload.personId, ctx.unitId, command.payload.requestedOutcome, command.payload.reason,
+      now, command.actor.principalId, now, JSON.stringify(command.source), command.commandId, command.commandId,
+      JSON.stringify(requests.map(request => ({ requestId: request.requestId, eventId: request.eventId })))));
   } else {
     const request = decideExcusalRequest(ctx.current!, command, now);
     result = request; targetId = request.requestId;
@@ -236,23 +250,30 @@ async function acceptCommand(env: Env, command: Command): Promise<Receipt> {
   }
 
   const receipt: Receipt = { commandId: command.commandId, status: 'committed', operation: command.operation, result, pendingEffects: true };
+  const scopes = await Promise.all(eventIds(command, ctx).map(async eventId => ({
+    eventId, jobId: `projection:${await digest(JSON.stringify([command.commandId, eventId]))}`,
+  })));
   const batch = [
     statement(env.DB, `INSERT INTO command_assertions(command_id,ok) SELECT ?,CASE WHEN ${guard.sql} THEN 1 ELSE 0 END`, command.commandId, ...guard.values),
     statement(env.DB, `INSERT INTO operation_commands VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
       command.commandId, hash, command.actor.principalId, command.operation, ctx.unitId, ctx.eventId, ctx.personId,
       command.source.kind, command.source.resourceKey, command.source.submissionId, command.source.revision, now, JSON.stringify(receipt)),
+    statement(env.DB, `INSERT INTO command_event_scopes(command_id,event_id,unit_id)
+      SELECT ?,value,? FROM json_each(?)`, command.commandId, ctx.unitId, JSON.stringify(eventIds(command, ctx))),
     ...writes,
     statement(env.DB, `INSERT INTO audit_events(command_id,actor_id,actor_evidence,operation,target_id,accepted_at,metadata_json)
       VALUES (?,?,?,?,?,?,?)`, command.commandId, command.actor.principalId, command.actor.evidence,
-      command.operation, targetId, now, JSON.stringify({ source: command.source, environment: command.environment, generation: command.generation })),
-    statement(env.DB, `INSERT INTO outbox_jobs(job_id,command_id,kind,event_id,unit_id,created_at) VALUES (?,?,'attendance.projection',?,?,?)`,
-      `projection:${await digest(command.commandId)}`, command.commandId, ctx.eventId, ctx.unitId, now),
+      command.operation, targetId, now, JSON.stringify({ source: command.source, environment: command.environment, generation: command.generation,
+        ...(command.operation === 'excusal.submitMany' ? { requests: command.payload.events } : {}) })),
+    statement(env.DB, `INSERT INTO outbox_jobs(job_id,command_id,kind,event_id,unit_id,created_at)
+      SELECT json_extract(value,'$.jobId'),?,'attendance.projection',json_extract(value,'$.eventId'),?,? FROM json_each(?)`,
+      command.commandId, ctx.unitId, now, JSON.stringify(scopes)),
     statement(env.DB, 'DELETE FROM command_assertions WHERE command_id=?', command.commandId),
   ];
   try { await env.DB.batch(batch); }
   catch (error) {
     // Another identical request may have committed while our batch was waiting.
-    const committed = await priorReceipt(env.DB, command.commandId, hash);
+    const committed = await priorReceipt(env, command, ctx, hash);
     if (committed) return committed;
     const message = String(error);
     if (/constraint|command_preconditions/i.test(message)) {
@@ -311,7 +332,7 @@ async function projectJob(env: Env, input: Record<string, string | number>): Pro
     // All current prototype mutations append an audit record atomically. Future
     // roster/event/name mutations must also advance this scope's revision.
     statement(env.DB, `SELECT COALESCE(MAX(a.audit_id),0) AS revision FROM audit_events a
-      JOIN operation_commands c ON c.command_id=a.command_id WHERE c.event_id=? AND c.unit_id=?`, job.eventId, job.unitId),
+      JOIN command_event_scopes s ON s.command_id=a.command_id WHERE s.event_id=? AND s.unit_id=?`, job.eventId, job.unitId),
     statement(env.DB, `SELECT (${singleUnitScopeSql}) AS supported`, job.unitId),
   ]);
   if ((membership.results[0] as { supported: number }).supported !== 1) {
@@ -351,9 +372,15 @@ async function getReceipt(env: Env, url: URL): Promise<unknown> {
     throw new HttpError(400, 'INVALID_RECEIPT_QUERY', 'Specify a command and principal.');
   }
   const row = await statement(env.DB, `SELECT c.receipt_json AS receipt FROM operation_commands c
-    JOIN principals p ON p.principal_id=c.actor_id JOIN access_grants g ON g.principal_id=p.principal_id
-    AND g.capability=c.operation AND g.unit_id=c.unit_id WHERE c.command_id=? AND c.actor_id=? AND p.active=1
-    AND (g.subject_scope='unit' OR (c.operation='excusal.submit' AND p.person_id=c.target_person_id)) AND ${controlSql}`,
+    JOIN principals p ON p.principal_id=c.actor_id WHERE c.command_id=? AND c.actor_id=? AND p.active=1
+    AND EXISTS (SELECT 1 FROM command_event_scopes s WHERE s.command_id=c.command_id)
+    AND NOT EXISTS (SELECT 1 FROM command_event_scopes s WHERE s.command_id=c.command_id AND NOT EXISTS
+      (SELECT 1 FROM access_grants g JOIN event_units eu ON eu.unit_id=g.unit_id
+       JOIN events e ON e.event_id=eu.event_id WHERE g.principal_id=p.principal_id
+       AND g.capability=CASE WHEN c.operation='excusal.submitMany' THEN 'excusal.submit' ELSE c.operation END
+       AND g.unit_id=s.unit_id AND e.event_id=s.event_id AND e.active=1
+       AND (g.subject_scope='unit' OR (c.operation IN ('excusal.submit','excusal.submitMany') AND p.person_id=c.target_person_id))))
+    AND ${controlSql}`,
     id, actor, env.ENVIRONMENT, Number(env.GENERATION)).first<{ receipt: string }>();
   if (!row) throw new HttpError(404, 'NOT_FOUND', 'The requested receipt is unavailable.');
   return JSON.parse(row.receipt);

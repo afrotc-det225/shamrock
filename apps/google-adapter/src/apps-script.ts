@@ -123,6 +123,11 @@ function sheetJournal(sheet: SheetPort, limits: JournalLimits): Journal {
     due(nowSeconds, limit) {
       return read().map(row => row.entry).filter(entry => entry.status === 'pending' && entry.nextAttemptAt <= nowSeconds).slice(0, limit);
     },
+    find(commandIds) {
+      if (commandIds.length > 1000) journalError('The journal lookup exceeds its configured bound.');
+      const wanted = new Set(commandIds);
+      return read().map(row => row.entry).filter(entry => wanted.has(entry.commandId));
+    },
     update(entry, expected) {
       const found = read().find(row => row.entry.commandId === entry.commandId);
       if (!found || found.entry.status !== expected.status || found.entry.attempts !== expected.attempts

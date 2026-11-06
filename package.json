@@ -15,7 +15,8 @@
     "build:v3": "node scripts/build-v3.mjs",
     "test:v3": "npm run build:v3 && node --test tests/v3/*.test.mjs",
     "check": "npm run build && npm test && npm run test:v3",
-    "demo:v3": "npm run build:v3 && node scripts/demo-v3.mjs"
+    "demo:v3": "npm run build:v3 && node scripts/demo-v3.mjs",
+    "capacity:v3": "npm run build:v3 && node scripts/check-v3-capacity.mjs"
   },
   "repository": {
     "type": "git",

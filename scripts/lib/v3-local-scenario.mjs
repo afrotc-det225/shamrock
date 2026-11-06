@@ -1,5 +1,4 @@
 import { createHash, createHmac, randomBytes } from 'node:crypto';
-import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { Miniflare, Log, LogLevel } from 'miniflare';
 import {
@@ -7,6 +6,7 @@ import {
   captureDecisionDraft, decisionCommandFromDraft, publishRecordedDecision,
 } from '../../.build/v3/apps/google-adapter/src/index.js';
 import { createGoogleSigner } from '../../.build/v3/apps/google-adapter/src/apps-script.js';
+import { initializeLocalDatabase } from './v3-local-database.mjs';
 
 // Entirely fictional. No provider credentials, Google resources, or retained database.
 export async function runLocalScenario() {
@@ -27,11 +27,7 @@ export async function runLocalScenario() {
   });
   try {
     const db = await mf.getD1Database('DB');
-    const migration = await readFile(new URL('../../database/migrations/0001_prototype.sql', import.meta.url), 'utf8');
-    // This first migration contains no triggers/semicolon-containing literals.
-    // A deployment migration runner must track versions and handle general SQL.
-    const statements = migration.replace(/^\s*--.*$/gm, '').split(';').map(sql => sql.trim()).filter(Boolean);
-    await db.batch(statements.map(sql => db.prepare(sql)));
+    await initializeLocalDatabase(db);
     await db.batch([
       db.prepare("INSERT INTO system_control VALUES(1,'local',1,1)"),
       db.prepare("INSERT INTO people VALUES('person-a','Example A'),('person-b','Example B')"),

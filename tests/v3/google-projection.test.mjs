@@ -288,3 +288,15 @@ test('canonical snapshot order gives identical hashes without mutating caller da
   assert.deepEqual(input, before);
   assert.deepEqual(parsed, fixtureSnapshot());
 });
+
+test('dynamic input publication runs inside the claim lock after recorded verification and blocks ACK on failure', () => {
+  const r = runtime(); let fail = true; let calls = 0;
+  r.publishDecisionSlots = snapshot => {
+    calls++; assert.equal(r.isLocked(), true); assert.equal(r.sheets.cursors.row('event_id', 'event-one').projection_revision, snapshot.revision);
+    if (fail) throw Error('Synthetic slot capacity failure');
+  };
+  assert.throws(() => consumeProjectionJobs(r), /Synthetic slot capacity failure/);
+  assert.equal(r.state.ackCount, 0); assert.ok(r.claimStore.load()); assert.equal(r.isLocked(), false);
+  fail = false; consumeProjectionJobs(r);
+  assert.equal(calls, 2); assert.equal(r.state.claimCount, 1); assert.equal(r.state.ackCount, 1); assert.equal(r.claimStore.load(), undefined);
+});

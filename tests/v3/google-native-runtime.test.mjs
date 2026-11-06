@@ -233,3 +233,36 @@ test('native publication retains ambiguous ACK claims durably and recovers witho
   assert.notEqual(resumed.configurationFingerprint(), before);
   assert.throws(() => resumed.consumeProjection(context), code('projection_setup_required'));
 });
+
+test('native dynamic slots require the entire bounded input area and initialize only a reviewed empty tab', () => {
+  const f = fixture(); delete f.config.decisionInput.slots; Object.assign(f.config.decisionInput, { mode: 'projection', maxSlots: 4 }); f.saveConfig(); f.decision.values = [];
+  assert.throws(() => f.runtime.initializeProjections(), code('protection_unverified'));
+  f.decision.protections[0].unprotectedRanges[0].endRowIndex = 6;
+  f.runtime.initializeProjections(); assert.equal(f.decision.values.length, 2); assert.equal(f.decision.values[0].length, 14);
+  const protectedHeaders = f.decision.values[0].filter(h => h !== 'draft_decision');
+  f.runtime.assertDecisionProtection(f.config.decisionInput, protectedHeaders);
+  f.decision.protections[0].unprotectedRanges[0].endRowIndex = 5;
+  assert.throws(() => f.runtime.assertDecisionProtection(f.config.decisionInput, protectedHeaders), code('protection_unverified'));
+  f.decision.protections[0].unprotectedRanges[0].endRowIndex = 7;
+  assert.throws(() => f.runtime.assertDecisionProtection(f.config.decisionInput, protectedHeaders), code('protection_unverified'));
+});
+
+test('native projection creates immutable dynamic slots before ACK and appends later versions without draft writes', () => {
+  const f = fixture(); delete f.config.decisionInput.slots; Object.assign(f.config.decisionInput, { mode: 'projection', maxSlots: 4 }); f.saveConfig(); f.decision.values = [];
+  f.decision.protections[0].unprotectedRanges[0].endRowIndex = 6; f.runtime.initializeProjections();
+  const signer = createGoogleSigner(f.services.Utilities, 'fictional-signing-material-never-deploy');
+  const claim = { jobId: 'job.one', claimToken: 'claim.one', leaseExpiresAt: new Date((1800000000 + 300) * 1000).toISOString(), eventId: 'event.one', unitId: 'unit.one', kind: 'attendance.projection' };
+  const snapshot = { revision: 7, event: { eventId: 'event.one', label: '=literal event' }, unit: { unitId: 'unit.one', label: 'Unit' }, rows: [{ personId: 'person.one', displayName: '=literal name', observedCode: 'P', requests: [{ requestId: 'request.one', status: 'Submitted', requestedOutcome: 'E', version: 1 }] }] };
+  const context = { config: { baseUrl: f.config.workerOrigin, keyId: f.config.keyId, environment: 'staging', generation: 1 }, signer, nowSeconds: () => 1800000000, transport: { send(request) {
+    assert.equal(f.lock.held, true); const route = new URL(request.url).pathname;
+    if (route.endsWith('/ack')) { assert.equal(f.decision.values.at(-1)[2], snapshot.rows[0].requests[0].version); assert.equal(f.decision.values.at(-1)[11], '=literal name'); }
+    return { status: 200, body: JSON.stringify(route.endsWith('/claim') ? { job: claim } : route.endsWith('/project') ? snapshot : { acknowledged: true }) };
+  } } };
+  const start = f.state.writes.length; f.runtime.consumeProjection(context); assert.equal(f.decision.values.length, 3);
+  const inputWrites = f.state.writes.slice(start).filter(write => write.data[0].range.includes('Decision Input'));
+  assert.equal(inputWrites.length, 2); assert.ok(inputWrites.every(write => !write.data[0].range.includes('!D')));
+  f.decision.values[2][3] = 'Denied'; f.decision.values[2][4] = 'draft.saved'; f.decision.values[2][6] = 'saved frozen payload';
+  const original = structuredClone(f.decision.values[2]); snapshot.revision++; snapshot.rows[0].requests[0].version = 2; snapshot.rows[0].requests[0].status = 'Approved'; claim.jobId = 'job.two';
+  f.runtime.consumeProjection(context); assert.equal(f.decision.values.length, 4); assert.deepEqual(f.decision.values[2], original); assert.equal(f.decision.values[3][2], 2);
+  assert.equal(f.properties.has(N.projectionClaim), false);
+});

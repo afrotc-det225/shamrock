@@ -31,7 +31,7 @@ node scripts/prepare-v3-release.mjs --environment staging --generation 1
 node scripts/prepare-v3-release.mjs --environment staging --generation 1 --verify
 ```
 
-The helper rebuilds the Worker and Google adapter from that commit and writes ignored `.build/v3-release/` artifacts. The manifest records the source commit, checksums, migration version, environment, generation and runtime compatibility date. The metadata template contains placeholders; it never contains a real database ID or signing secret. `--verify` checks the prepared files without rebuilding or deploying them. To verify an older release, use its recorded source checkout; verification intentionally rejects a different current commit. Local emulator tests and the cloud runtime may have different compatibility dates; real staging validation is required.
+The helper rebuilds the Worker and Google adapter from that commit and writes ignored `.build/v3-release/` artifacts. Format 2 includes each ordered SQL source under `migrations/`; previously recorded format-1 releases remain historical rollback artifacts, not current upgrade plans. The manifest records the source commit, checksums, migration version, environment, generation and runtime compatibility date. The metadata template contains placeholders; it never contains a real database ID or signing secret. `--verify` checks the prepared files without rebuilding or deploying them. To verify an older release, use its recorded source checkout; verification intentionally rejects a different current commit. Local emulator tests and the cloud runtime may have different compatibility dates; real staging validation is required.
 
 Deployment is through the connected Cloudflare API in this phase. No paid subscription, custom domain, extra storage service or GitHub deployment feature is needed for this procedure. API resource creation does not itself verify an account's billing subscriptions. If the OAuth connection lacks billing access, report that limit instead of claiming the account's plan was verified.
 
@@ -46,9 +46,32 @@ The plugin can create resources and upload the already built module using the Cl
 
 ## Apply the initial migration safely
 
-`migration-plan.json` contains API-ready preflight queries, the bootstrap batch and expected schema signatures. Read the schema first; read the ledger/control only if their tables exist. The helper classifies a truly empty database as ready to bootstrap, a complete matching migration as a no-op, and any partial/unknown schema or hash mismatch as requiring review.
+`migration-plan.json` contains API-ready preflight queries, the bootstrap batch and expected schema signatures. Read the schema first; read the ledger/control only if their tables exist. The helper classifies a truly empty database as ready to bootstrap, a complete matching migration as a no-op, an exact older schema as an upgrade candidate, and any partial/unknown schema or hash mismatch as requiring review.
 
 Apply the complete `bootstrap.batch` in a single D1 REST query request. The first assertion rejects an unexpected schema inside that transaction. The batch creates the application schema, a migration ledger and `system_control` with `accepting_commands=0`. Inspect every result, then verify the ledger hash, complete schema, staging generation, `PRAGMA quick_check` and `PRAGMA foreign_key_check`. Do not mask an incomplete migration with `CREATE TABLE IF NOT EXISTS` or manually mark a failed migration complete.
+
+For a new database, bootstrap creates version 1. Apply any remaining versions using the same upgrade procedure below; do not deploy a Worker requiring version 2 against version 1.
+
+## Upgrade a paused staging database
+
+1. Pause Google intake, journal dispatch and publication; close the staging Forms and verify D1 `accepting_commands=0` for the intended generation. Capture the currently deployed Worker/Google source and configuration for recovery. Never use production bindings.
+2. Export the existing fictional staging database into restricted ignored storage and record its SHA-256. Restore it into an isolated database and verify schema, migration history, counts, `quick_check`, foreign keys and paused control. Record exactly which restore environment was tested. A file's existence is not restore evidence.
+3. Save fresh preflight arrays under exactly `inventory`, `ledger` and `controls`. The queries are in the release plan. Use `migrationEvidenceHash` from `scripts/lib/v3-migrations.mjs` to bind the recovery record to this preflight. Recovery fields are `environment`, `generation`, `fromVersion`, `evidenceSha256`, `backupSha256`, `rollbackSourceCommit`, `reviewed: true`, `restoreVerified: true`, and `adaptersPaused: true`. These attestations require actual evidence; the helper does not verify backup contents or pause Google for you.
+4. Prepare the next version's reviewed API batch without applying it:
+
+```sh
+node scripts/prepare-v3-migration.mjs --environment staging --generation 1 \
+  --evidence .build/staging-preflight.json --recovery .build/staging-recovery.json \
+  --out .build/staging-upgrade.json
+```
+
+5. Check the selected account/database, manifest and every statement. Submit the emitted `batch` as **one transactional D1 API request**. Do not split it into separate calls. Exact schema/ledger/control assertions run inside that transaction before additive DDL/backfill; a mismatch or failed write rolls the batch back. The helper supports bounded additive migrations and backfills only into newly created tables, not arbitrary repairs.
+6. Re-read schema, ledger and paused control; inspect every API result and both integrity checks. After an ambiguous response, classify fresh state before retrying. Repeat for another version only with new preflight/recovery evidence. Matching latest state is a no-op.
+7. Upload compatible committed Worker/Google artifacts while still paused, then run a bounded fictional rehearsal. Never infer data rollback from reverting application code. Prefer a reviewed forward fix; restore only while fenced and with no accepted writes omitted, then revalidate schema, generation and code compatibility.
+
+**Version 2 compatibility:** the older Worker does not populate the new command/event scope table. Do not reopen processing after a code-only rollback to that Worker against version 2. Keep processing fenced until a compatible forward fix, or a reviewed restoration of both the pre-upgrade schema/data and matching code with no accepted writes omitted.
+
+The offline helper refuses unknown schema, historical hash changes, missing recovery evidence, active command processing, a different generation and production environments. It never contacts a provider, enables commands or performs an automatic restore.
 
 Upload the manifest's `worker.mjs` as an ES module with these runtime bindings:
 

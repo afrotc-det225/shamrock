@@ -5,12 +5,45 @@ import {
   parseCommand,
   buildAttendanceReport,
   createExcusalRequest,
+  createExcusalRequests,
   decideExcusalRequest,
   deriveAttendanceView,
 } from '../../.build/v3/packages/domain/src/index.js';
 
 const SUBMITTED = '2026-11-05T12:00:00.000Z';
 const DECIDED = '2026-11-05T13:00:00.000Z';
+
+function requests(events = [{ eventId: 'event-b', requestId: 'request-b' }, { eventId: 'event-a', requestId: 'request-a' }]) {
+  return envelope('excusal.submitMany', { personId: 'person-fixture-1', requestedOutcome: 'ES', reason: 'Fictional shared conflict.', events });
+}
+
+test('multi-event excusal expansion preserves child identity and canonicalizes event order', () => {
+  const input = requests();
+  const parsed = parseCommand(input);
+  const reordered = structuredClone(input); reordered.payload.events.reverse();
+  assert.deepEqual(parseCommand(reordered), parsed);
+  const records = createExcusalRequests(input, SUBMITTED);
+  assert.deepEqual(records.map(r => [r.eventId, r.requestId, r.status, r.version]), [
+    ['event-a', 'request-a', 'Submitted', 1], ['event-b', 'request-b', 'Submitted', 1],
+  ]);
+  assert.ok(records.every(r => r.commandId === input.commandId && r.requestedOutcome === 'ES' && r.submittedAt === SUBMITTED));
+  input.payload.events[0].requestId = 'changed'; input.source.submissionId = 'changed';
+  assert.equal(records[1].requestId, 'request-b');
+  assert.notEqual(records[1].source.submissionId, 'changed');
+  records[0].source.submissionId = 'changed-child';
+  assert.notEqual(records[1].source.submissionId, 'changed-child');
+});
+
+test('multi-event excusals reject ambiguous children and enforce an explicit 25-event bound', () => {
+  for (const events of [[], [{ eventId: 'same', requestId: 'one' }, { eventId: 'same', requestId: 'two' }],
+    [{ eventId: 'one', requestId: 'same' }, { eventId: 'two', requestId: 'same' }],
+    [{ eventId: 'one', requestId: 'one', arbitrary: true }],
+    Array.from({ length: 26 }, (_, i) => ({ eventId: `event-${i}`, requestId: `request-${i}` }))]) {
+    rejectsInvalid(requests(events));
+  }
+  assert.equal(createExcusalRequests(requests(Array.from({ length: 25 }, (_, i) => ({ eventId: `event-${i}`, requestId: `request-${i}` }))), SUBMITTED).length, 25);
+  const invalid = requests(); invalid.payload.requestedOutcome = 'unknown'; rejectsInvalid(invalid);
+});
 
 function envelope(operation, payload, overrides = {}) {
   return {

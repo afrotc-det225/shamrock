@@ -2,6 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash, createHmac } from 'node:crypto';
 import { createStagingHost, HOST_PROPERTIES as P, STAGING_HANDLERS as H, parseStagingHostConfig } from '../../.build/v3/apps/google-adapter/src/staging-host.js';
+import { initializeDynamicDecisionSlots, appendProjectionDecisionSlots, DYNAMIC_DECISION_HEADERS } from '../../.build/v3/apps/google-adapter/src/decision-slots.js';
+import { captureDecisionDraft, decisionCommandFromDraft } from '../../.build/v3/apps/google-adapter/src/index.js';
 
 const signingMaterial = 'fictional-staging-material-never-deploy-this';
 const automationEmail = 'automation@example.invalid';
@@ -291,4 +293,107 @@ test('pausing stops new intake and preserves pending original body through HTTP 
   assert.equal(f.state.getRequests.length, requests); assert.equal(f.journal.rows.length, 2);
   f.state.now += 1000; f.state.commandStatus = 200; f.host.resume(); f.host.flush();
   assert.equal(f.state.commands.length, 2); assert.equal(JSON.stringify(f.state.commands[1]), original);
+});
+
+test('decision states reconcile committed, conflict, rejected, authorization and retry outcomes', () => {
+  for (const [status, expected] of [[200, 'Committed: Approved'], [409, 'Conflict; review recorded version: Approved'], [422, 'Failed; review rejected request: Approved'], [403, 'Needs attention; delivery unresolved: Approved'], [503, 'Retry pending: Approved']]) {
+    const f = fixture(); f.activate(); f.state.commandStatus = status;
+    f.host.onDecisionEdit(f.editEvent()); assert.equal(f.decisions.rows[2][5], expected);
+    assert.equal(f.decisions.rows[2][1], 'request.one'); assert.equal(f.decisions.rows[2][2], 1); assert.equal(f.decisions.rows[2][3], 'Approved');
+    if (status === 503) { const saved = f.decisions.rows[2][6]; f.state.now += 100; f.state.commandStatus = 200; f.host.flush(); assert.equal(f.decisions.rows[2][5], 'Committed: Approved'); assert.equal(f.decisions.rows[2][6], saved); }
+  }
+});
+
+test('committed status is visible even when downstream projection fails', () => {
+  const f = fixture(); f.activate(); f.runtime.consumeProjection = () => { throw Error('Synthetic projection unavailable'); };
+  assert.throws(() => f.host.onDecisionEdit(f.editEvent()), /Synthetic projection unavailable/);
+  assert.equal(f.decisions.rows[2][5], 'Committed: Approved'); assert.equal(f.journal.rows[1][3], 'committed');
+});
+
+test('editing a captured row cannot replace its pending payload or relabel the changed value as committed', () => {
+  const f = fixture(); f.activate(); f.state.commandStatus = 503; f.host.onDecisionEdit(f.editEvent());
+  const saved = f.decisions.rows[2][6]; const originalId = f.decisions.rows[2][4];
+  assert.deepEqual(f.host.onDecisionEdit(f.editEvent({ value: 'Denied' })), { status: 'saved-draft-retained' });
+  assert.equal(f.decisions.rows[2][6], saved); assert.equal(f.decisions.rows[2][4], originalId); assert.equal(f.decisions.rows[2][3], 'Denied'); assert.equal(f.state.commands.length, 1);
+  assert.equal(f.decisions.rows[2][5], 'Input changed; saved Retry pending: Approved');
+  f.state.commandStatus = 200; f.state.now += 100; f.host.flush();
+  assert.equal(f.decisions.rows[2][5], 'Input changed; saved Committed: Approved');
+  assert.equal(f.state.commands[1].payload.decision, 'Approved');
+});
+
+test('failure between verified draft capture and journal enqueue retains one identity and truthful status', () => {
+  const f = fixture(); f.activate(); const nativeRange = f.journal.getRange.bind(f.journal); let failOnce = true;
+  f.journal.getRange = (...args) => { const range = nativeRange(...args); return { ...range, setValues(values) { if (args[0] === 2 && failOnce) { failOnce = false; throw Error('Synthetic journal write unavailable'); } return range.setValues(values); } }; };
+  const event = f.editEvent(); assert.throws(() => f.host.onDecisionEdit(event), /Synthetic journal write unavailable/);
+  const saved = f.decisions.rows[2][6]; const id = f.decisions.rows[2][4];
+  assert.equal(f.state.commands.length, 0); assert.equal(f.decisions.rows[2][5], 'Not queued; retry the saved decision: Approved');
+  f.host.onDecisionEdit(event); assert.equal(f.decisions.rows[2][6], saved); assert.equal(f.decisions.rows[2][4], id); assert.equal(f.state.commands.length, 1); assert.equal(f.decisions.rows[2][5], 'Committed: Approved');
+});
+
+test('journal outcome with a different saved payload cannot mark the original draft committed', () => {
+  const f = fixture(); f.activate(); f.host.onDecisionEdit(f.editEvent()); const before = f.decisions.rows[2][5];
+  f.journal.rows[1][1] = f.journal.rows[1][1].replace('Approved', 'Denied');
+  assert.throws(() => f.host.flush(), code('journal_integrity')); assert.equal(f.decisions.rows[2][5], before);
+});
+
+test('multi-event native checkbox selections produce one atomic command with stable per-event child IDs', () => {
+  const f = fixture(); const catalog = JSON.parse(f.properties.get(P.excusalCatalog)); catalog.references['event.two'] = { kind: 'event', eventId: 'event.two' }; f.properties.set(P.excusalCatalog, JSON.stringify(catalog)); f.activate();
+  const original = f.excusalEvent(); const response = original.response;
+  const selected = ['Second [sr:event.two]', 'First [sr:event.one]'];
+  response.getItemResponses = () => [{ getItem: () => ({ getId: () => 50 }), getResponse: () => selected }, { getItem: () => ({ getId: () => 60 }), getResponse: () => 'E' }, { getItem: () => ({ getId: () => 70 }), getResponse: () => 'Synthetic multiple events' }];
+  f.host.onExcusalSubmit(original); const command = f.state.commands[0]; assert.equal(command.operation, 'excusal.submitMany');
+  assert.deepEqual(command.payload.events.map(e => e.eventId), ['event.one', 'event.two']); assert.equal(new Set(command.payload.events.map(e => e.requestId)).size, 2);
+  selected.reverse(); f.host.onExcusalSubmit(original); assert.equal(f.state.commands.length, 1); assert.equal(f.journal.rows.length, 2);
+  selected.splice(0, 1); assert.throws(() => f.host.onExcusalSubmit(original), code('command_collision'));
+});
+
+test('multi-event excusals reject empty, duplicated, unbound and oversized choices before dispatch', () => {
+  for (const selected of [[], ['Event [sr:event.one]', 'Again [sr:event.one]'], ['Unknown [sr:missing]'], Array(26).fill('Event [sr:event.one]')]) {
+    const f = fixture(); f.activate(); const event = f.excusalEvent();
+    const items = event.response.getItemResponses(); event.response.getItemResponses = () => items.map(item => item.getItem().getId() === 50 ? { ...item, getResponse: () => selected } : item);
+    assert.throws(() => f.host.onExcusalSubmit(event)); assert.equal(f.state.commands.length, 0); assert.equal(f.journal.rows.length, 1);
+  }
+});
+
+test('a newly submitted request gets a usable dynamic row and later versions cannot retarget its captured draft', () => {
+  const f = fixture(); delete f.config.decisionInput.slots; Object.assign(f.config.decisionInput, { mode: 'projection', maxSlots: 5 }); f.saveConfig();
+  f.decisions.rows = []; initializeDynamicDecisionSlots(f.decisions);
+  f.runtime.assertDecisionProtection = (_, headers) => assert.deepEqual(headers, DYNAMIC_DECISION_HEADERS.filter(h => h !== 'draft_decision'));
+  f.runtime.consumeProjection = context => {
+    assert.equal(f.lock.tryLock(100), true);
+    try {
+      const submitted = f.state.commands.find(command => command.operation === 'excusal.submit');
+      if (!submitted) return;
+      const decision = f.state.commands.find(command => command.operation === 'excusal.decide');
+      return appendProjectionDecisionSlots({ revision: decision ? 2 : 1, event: { eventId: submitted.payload.eventId, label: 'Synthetic event' }, unit: { unitId: 'unit.one', label: 'Unit' }, rows: [{ personId: submitted.payload.personId, displayName: 'Synthetic cadet', observedCode: 'P', requests: [{ requestId: submitted.payload.requestId, status: decision ? decision.payload.decision : 'Submitted', requestedOutcome: submitted.payload.requestedOutcome, version: decision ? 2 : 1 }] }] }, f.decisions, { binding: f.config.decisionInput, config: context.config, signer: context.signer });
+    } finally { f.lock.releaseLock(); }
+  };
+  f.activate(); assert.equal(f.decisions.rows.length, 2);
+  f.host.onExcusalSubmit(f.excusalEvent()); assert.equal(f.decisions.rows.length, 3); assert.equal(f.decisions.rows[2][2], 1);
+  const target = f.decisions.rows[2][1]; f.host.onDecisionEdit(f.editEvent());
+  assert.equal(f.state.commands[1].payload.requestId, target); assert.equal(f.decisions.rows[2][5], 'Committed: Approved');
+  assert.equal(f.decisions.rows[2][2], 1); assert.equal(f.decisions.rows[3][2], 2); assert.equal(f.decisions.rows[3][6], '');
+  f.decisions.rows[3][3] = 'Approved'; [f.decisions.rows[2], f.decisions.rows[3]] = [f.decisions.rows[3], f.decisions.rows[2]];
+  assert.throws(() => f.host.onDecisionEdit(f.editEvent()), code('draft_target_changed')); assert.equal(f.state.commands.length, 2);
+});
+
+test('500 protected dynamic slots use bounded bulk reads and one state-only reconciliation write', () => {
+  const f = fixture(); delete f.config.decisionInput.slots; Object.assign(f.config.decisionInput, { mode: 'projection', maxSlots: 500 }); f.saveConfig();
+  const adapter = { baseUrl: f.config.workerOrigin, keyId: f.config.keyId, environment: 'staging', generation: 1 };
+  const signer = { sha256: value => createHash('sha256').update(value).digest('hex') };
+  f.decisions.rows = []; initializeDynamicDecisionSlots(f.decisions); f.runtime.assertDecisionProtection = () => {};
+  appendProjectionDecisionSlots({ revision: 1, event: { eventId: 'event.one', label: 'Event' }, unit: { unitId: 'unit.one', label: 'Unit' }, rows: [{ personId: 'person.one', displayName: 'Synthetic cadet', observedCode: null, requests: Array.from({ length: 500 }, (_, i) => ({ requestId: `request.${i}`, status: 'Submitted', requestedOutcome: 'E', version: 1 })) }] }, f.decisions, { binding: f.config.decisionInput, config: adapter, signer });
+  let reads = 0; const writes = []; const original = f.decisions.getRange.bind(f.decisions);
+  f.decisions.getRange = (...args) => { const range = original(...args); return { getValues() { reads++; return range.getValues(); }, setValues(values) { writes.push(args); return range.setValues(values); } }; };
+  f.activate(); assert.ok(reads <= 12, `500-slot setup/resume used ${reads} range reads`);
+  for (let i = 0; i < 500; i++) {
+    const cells = f.decisions.rows[i + 2];
+    const draft = captureDecisionDraft({ slot: { slotId: cells[0], requestId: cells[1], baseVersion: cells[2] }, draftId: `saved.${i}`, resourceKey: f.config.decisionInput.resourceKey, decision: 'Approved', reason: 'Synthetic captured decision', editedCellCount: 1, eventUserEmail: cadetEmail }, { resolveVerifiedEmail: () => 'principal.cadet' });
+    cells[3] = draft.decision; cells[4] = draft.draftId; cells[5] = 'Queued: Approved'; cells[6] = JSON.stringify(draft);
+    const command = decisionCommandFromDraft(draft, adapter); const body = JSON.stringify(command);
+    f.journal.rows.push([command.commandId, body, signer.sha256(body), 'committed', 1, 0, '']);
+  }
+  reads = 0; writes.length = 0; f.host.flush();
+  assert.ok(reads <= 8, `500-slot reconciliation used ${reads} range reads`); assert.deepEqual(writes, [[3, 6, 500, 1]]);
+  assert.ok(f.decisions.rows.slice(2).every(row => row[5] === 'Committed: Approved' && row[3] === 'Approved' && row[2] === 1));
 });

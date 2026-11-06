@@ -2,7 +2,7 @@
 
 Status: isolated local, Cloudflare and Google staging implementation, not a production replacement. On 2026-11-05, deployed source `5e1057f4a13c45960e70844724aa5261e49f422e` passed a narrow live owner-account Google rehearsal using fictional records. The Worker is paused and both staging Forms are closed. The operator confirmed `shamrockV3StagingPause`, and its completed execution was independently observed in the staging editor; no direct Script Properties read-back was performed. The existing `src/`, production Forms, Sheets, triggers and Apps Script deployment remain the supported operational system. Creating a shared Google/GitHub/Cloudflare account does not migrate existing resource ownership or install replacement production automation.
 
-The organization's private [SHAMROCK operations repository](https://github.com/afrotc-det225/shamrock-ops) holds the handoff guide and release evidence. The shared project GitHub account has verified repository admin access. This does not establish organization-owner status. Actual staging bindings live in provider settings, outside either repository; no GitHub deployment workflow has been added.
+The organization's private [SHAMROCK operations repository](https://github.com/afrotc-det225/shamrock-ops) holds the handoff guide and release evidence. The shared project GitHub account has verified organization-owner and repository-admin access; the production Google account handoff is complete. Successor access to the password vault still needs a custodian rehearsal. Actual staging bindings live in provider settings, outside either repository; no GitHub deployment workflow has been added.
 
 Read the [redesign plan](../plans/D1_REDESIGN_AND_MIGRATION.md), [current-system audit](../plans/D1_CURRENT_SYSTEM_AUDIT.md) and [feature-parity matrix](../plans/D1_FEATURE_PARITY_MATRIX.md) for the full migration scope. The matrix describes proposed acceptance evidence; it is not a list of implemented tests.
 
@@ -24,6 +24,7 @@ Use Node.js 26 and npm 11, matching the initial validated environment. No Google
 npm ci
 npm run check
 npm run demo:v3
+npm run capacity:v3
 ```
 
 `check` builds and tests the current Apps Script source, then builds and tests the isolated v3 packages. `demo:v3` creates a temporary local D1 database, runs a fictional attendance/excusal scenario through the actual bundled Worker and Google adapter contracts, prints the results and disposes the database. It does not contact Google or a Cloudflare deployment. npm installation requires network access; the scenario itself does not.
@@ -40,6 +41,24 @@ The result should show three committed commands, three audit entries, one attend
 
 If npm blocks dependency installation scripts, inspect its reported packages and approve only the esbuild/workerd versions recorded in `package.json`; never disable installation-script protections globally. The dependency lock includes temporary patch overrides for Miniflare's `undici` and `sharp` dependencies. Reassess these when upgrading Miniflare, run the entire local suite and `npm audit`, and remove the overrides when the upstream dependency graph no longer needs them.
 
+## Second implementation milestone
+
+The next reviewed slice adds atomic multi-event excusals, projection-created spreadsheet decision slots, receipt-driven draft delivery status, and versioned staging schema upgrades. These additions have separate local acceptance tests; the earlier live checkpoint above describes the deployed first slice until a new staging release is recorded. They do not establish full feature parity.
+
+`excusal.submitMany` saves one native submission with up to 25 explicit event/request children, one receipt/audit and a publication job for each event. Child identity does not depend on selection order. One invalid event, collision or failed write rolls back the entire command. Each child can then receive its own version-checked decision. Original attendance evidence remains separate. Native single-event requests remain supported for the current staging binding.
+
+Projection-mode decision inputs append a protected slot for each request/version. Existing slots, captured payloads and draft cells are retained. A filter view can change what an operator sees; moving the underlying rows fails identity verification and requires repair. Journal reconciliation displays committed, conflict, rejected or attention states instead of leaving completed decisions labelled queued. A bounded slot allocation can stop with a visible capacity error; it never deletes old drafts to make room. See the [adapter contract](../../apps/google-adapter/README.md) for configuring a new staging tab; do not reinterpret an existing fixed-slot tab as the new schema.
+
+The release tools now support ordered additive migrations with a hash ledger, exact schema and paused-generation guards, recovery evidence and one atomic version upgrade at a time. They refuse unexplained schema drift and never enable command processing. This is staging tooling, not an automatic rollback or production migration engine.
+
+### Free-tier capacity evidence
+
+`npm run capacity:v3` executes the real bundled Worker handler against disposable local D1 with 500 fictional people, a 25-event excusal, a decision and 27 publication jobs. It reports database calls, SQL/parameter maxima and local row counters without printing SQL values, identities or credentials. It performs no cloud requests or account changes. The harness runs the handler in Node and SQL in Miniflare; it does **not** measure hosted Worker CPU, Google runtime or actual billing.
+
+The test found and removed a correlated roster scan: the 500-person attendance fixture fell from 130,769 to 7,019 locally counted rows read. Its regression budget is below 20,000 local rows read. The measured fixture requests use at most five D1 calls each; a transactional batch counts as one call. Future features must keep these checks and add representative hosted measurements, retries, scheduled work and a multi-year retention forecast before cutover.
+
+Comparison limits were checked on 2026-11-05: [Workers Free](https://developers.cloudflare.com/workers/platform/limits/) allows 100,000 requests/day and 10 ms CPU per invocation; [D1 Free pricing](https://developers.cloudflare.com/d1/platform/pricing/) includes 5 million rows read/day and 100,000 rows written/day. [D1 limits](https://developers.cloudflare.com/d1/platform/limits/) include 50 queries per invocation, 100 bound parameters per statement and 500 MB per database. Index writes count toward usage. These are provider limits, not reserved application capacity or a promise of permanent pricing. No paid service, subscription upgrade or GitHub paid feature is introduced. The SHAMROCK dashboard was verified on 2026-11-05 to show **Free — $0 — Current plan**, and the D1 page showed the corresponding hard limits. This closes the earlier account-plan evidence gap; the OAuth billing endpoint itself remains unavailable. No subscription was changed.
+
 ## Code map and build separation
 
 | Location | Responsibility |
@@ -47,7 +66,7 @@ If npm blocks dependency installation scripts, inspect its reported packages and
 | `src/` | Current Apps Script production code; existing namespace build |
 | `packages/domain/src/index.ts` | Pure versioned command validation and attendance/excusal rules |
 | `apps/worker/src/index.ts` | Signed HTTP operations, authorization, D1 persistence and projection jobs |
-| `database/migrations/0001_prototype.sql` | Initial isolated SQL schema; no environment credentials or real records |
+| `database/migrations/` | Ordered isolated SQL schema and additive migrations; no environment credentials or real records |
 | `apps/google-adapter/src/index.ts` | Form mapping, frozen decision drafts, command journal and publication contracts |
 | `apps/google-adapter/src/apps-script.ts` | Google service ports for signing, transport, Sheets journal and locks |
 | `apps/google-adapter/src/staging-host.ts` | Paused staging intake, native source identity and versioned trigger setup |
@@ -64,7 +83,7 @@ The local emulator uses its own pinned workerd release and a supported compatibi
 
 Only `local` and `staging` environments are accepted. Both application configuration and the SQL control row must agree on the environment and generation, and the control row must allow commands. Unknown actors, revoked grants, unregistered sources, stale roster versions and stale decision versions fail closed.
 
-The three commands are `attendance.report`, `excusal.submit` and `excusal.decide`. The Worker commits the command receipt, domain records, audit event and pending projection job together in one D1 batch. A failed assertion or later write rolls the batch back. Source identity and command identity prevent duplicate processing. Retrying uses the original frozen payload and ID; changing the payload under that ID is a conflict.
+The supported commands are `attendance.report`, `excusal.submit`, `excusal.submitMany` and `excusal.decide`. The Worker commits the command receipt, domain records, audit event and pending projection job together in one D1 batch. A failed assertion or later write rolls the batch back. Source identity and command identity prevent duplicate processing. Retrying uses the original frozen payload and ID; changing the payload under that ID is a conflict.
 
 The prototype's trust boundary is the private standalone Google adapter. Its HMAC authenticates that adapter; it does not independently prove which human edited a sheet. The adapter must obtain human identity from trusted Google evidence and map it to an enrolled principal. It must never invent an editor from the trigger owner, a typed email, or a missing `e.user`. Current database grants are checked again when processing the command. The signing key must not be available to ordinary spreadsheet editors.
 
@@ -79,7 +98,7 @@ All paths except health require a key ID, timestamp and HMAC-SHA256 signature ov
 
 Complete attendance reports currently assert the entire active unit roster at the referenced roster version; partial reports may cover a subset. The stored covered roster and selected members are explicit. Presence evidence is append-only in this slice. Corrections, including removing a mistaken `P`, require a later explicit correction operation. Excusal requests remain independent of observed attendance. No attendance credit, percentage, final absence or notification-recipient policy is guessed.
 
-This prototype requires exactly one active unit membership per person in an affected scope. Commands and projections reject ambiguous memberships. Membership movement, overlapping units, name changes and event/catalog changes need a reviewed revision and projection-job strategy before they can be supported. The current projection revision advances for the three implemented commands; direct database edits are not a supported directory workflow.
+This prototype requires exactly one active unit membership per person in an affected scope. Commands and projections reject ambiguous memberships. Membership movement, overlapping units, name changes and event/catalog changes need a reviewed revision and projection-job strategy before they can be supported. The current projection revision advances for the implemented commands; direct database edits are not a supported directory workflow.
 
 Interactive reports have a 500-member domain limit and a 64 KiB Worker request limit. The Google journal additionally bounds payload characters and retained entries, so some large-ID reports can reach a lower limit. Oversized workflows need a designed batch protocol; input is never silently truncated. Attendance writes use SQL JSON input sets and bounded statements rather than a query per person. This addresses per-request query growth, but quota and CPU headroom still need measurement in staging.
 
@@ -95,12 +114,12 @@ The first slice deliberately does not reclaim an expired Google-publication leas
 
 1. Preserve the paused state between controlled rehearsals. Extend owner-account validation to the participating accounts and verify succession access. Prefer APIs and command-line tools; use interactive login only where the provider requires it. Verify organization ownership separately from membership, account billing separately from API access, and Drive ownership separately from sharing.
 2. Rehearse successor access to the configured resources and credentials. Actual signing material stays in provider secret stores and Script Properties, with recovery material in the organization's password vault. Neither a private repo nor an `.env` handoff is a secret store. Validate the OAuth publishing/authorization arrangement over time before relying on unattended operation.
-3. Extend the initial staging release/migration tooling to subsequent schema versions, secret rotation, rollback and successor recovery. The current helper records hashes and the source commit, applies the initial migration atomically to an empty staging database, verifies matching repeat state and stops on unknown schema. It is not a general migration or repair engine.
-4. Test human editor identity across the participating accounts. Missing identity still needs an authenticated confirmation flow that preserves the frozen target and payload. Implement dynamic slots for new excusal requests and reconcile visible draft status after acceptance or failure; the live decision used only a preseeded fixed slot.
+3. Rehearse the versioned staging upgrade and isolated restore with the current release. Secret rotation, broader recovery and successor exercises remain unfinished. The migration helper is deliberately bounded; destructive migrations require a separately reviewed design.
+4. Test human editor identity across the participating accounts. Missing identity still needs an authenticated confirmation flow that preserves the frozen target and payload. Rehearse the new dynamic slots and receipt-driven status with real Google edits; the earlier live decision used only a preseeded fixed slot.
 5. Extend the successful literal-value publication/read-back check to real concurrent edits/sorting, partial writes, ambiguous responses and API failures. Full spreadsheet presentation, filter views, automated lease recovery and the complete workflow remain unfinished.
 
 Current production account succession is a separate workstream. Follow the [account handoff runbook](ACCOUNT_HANDOFF_RUNBOOK.md); adding editor access or transferring file ownership does not transfer installable triggers.
 
-Before migration/cutover, complete directory and leadership workflows, corrections, multi-event excusal expansion, notifications, reports/charts, imports/exports, term transitions, backups/restore, diagnostics and the rest of the parity matrix. The current unique source key supports one command per operation and native source revision; a multi-event response needs explicit child identities before multiple request commands can share that response. No production records have been imported or reconciled by this prototype.
+Before migration/cutover, complete directory and leadership workflows, corrections, multi-event notification intents, notifications, reports/charts, imports/exports, term transitions, backups/restore, diagnostics and the rest of the parity matrix. Multi-event submissions now use one parent command and explicit child identities; notification intent and withdrawal/amendment behavior remain separate work. No production records have been imported or reconciled by this prototype.
 
 Operational policy questions and approval to host the applicable records on Cloudflare remain production gates in the redesign plan. Continue developing engineering mechanisms with fictional data while resolving those gates. Ordinary attendance processing and spreadsheet filtering will not depend on AI availability or any maintainer's chat history.

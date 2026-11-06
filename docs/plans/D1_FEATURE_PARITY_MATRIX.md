@@ -2,7 +2,22 @@
 
 Prepared 2026-11-05 for the [redesign plan](D1_REDESIGN_AND_MIGRATION.md), using the [source audit](D1_CURRENT_SYSTEM_AUDIT.md). Baseline: `d8cfc0171db772f8d5f5aff031eb7b3fda483676`.
 
-These **151 proposed acceptance scenarios are not 151 implemented or passing tests**. All future D1 evidence is pending. They include the 121 scenarios found during subsystem review, rewritten to preserve needed outcomes and repair weak design, plus 30 design/reliability/optional-AI scenarios. The current 31 local regressions are a separate suite.
+These **151 proposed acceptance scenarios are not 151 implemented or passing tests**. Implementation evidence is tracked below; most full operational scenarios still need implementation and live validation. They include the 121 scenarios found during subsystem review, rewritten to preserve needed outcomes and repair weak design, plus 30 design/reliability/optional-AI scenarios. The current 31 local regressions are a separate suite.
+
+## Implemented evidence ledger
+
+Evidence is scoped to the tested behavior, not an entire row's completion. The first live staging checkpoint and account handoff are recorded in the [staging runbook](../runbooks/D1_STAGING_RUNBOOK.md). The second implementation slice is locally tested separately; no D1 production cutover is authorized by these results.
+
+| Cases | Automated evidence | Remaining scope |
+|---|---|---|
+| ATT-01, ATT-05, ATT-21, ATT-22 | `tests/v3/worker.test.mjs`, `domain.test.mjs`, `integration.test.mjs`: complete/partial/zero selections, source deduplication, transaction rollback, explicit roster/version | Actual participation rules, amendments, event-time roster and broader Google identities |
+| EXC-01, FORM-06 | Domain/Worker and Google adapter tests: explicit multi-event children, canonical retry, all-or-none persistence, event fan-out | Live multi-selection rehearsal, notification intents and operational policy |
+| EXC-15, EXC-16, UI-12 | Worker conflict/authorization tests; Google journal and decision-slot tests preserve payload/base and reconcile receipt state | Real concurrent users, uncertain external writes and operator recovery |
+| EXC-19, UI-04, UI-11 | `google-decision-slots.test.mjs` and Google host/native tests: dynamic protected identities, bounded append-only slots, no draft overwrite, moved-row rejection | Full presentation, filter views, intended non-owner permissions and live sorting |
+| REL-16, REL-01 | `release.test.mjs`: immutable ordered migration ledger, exact preflight guards, rollback on failed batch, recovery-evidence binding | Full backup/restore service, production rollback after accepted writes and successor rehearsal |
+| Free-tier engineering gate | `capacity.test.mjs`: 500-person report, 25-event request, bounded SQL calls and roster scan regression | Hosted CPU, actual daily mix/quotas, shared-account load, retention forecast; the current Workers Free plan is now dashboard-verified |
+
+None of these test groups completes directory, leadership, notifications, dashboards, archives, transitions or import parity. The 151 cases below remain the release acceptance contract.
 
 ## How to use this matrix
 

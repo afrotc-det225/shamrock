@@ -290,6 +290,8 @@ export interface Journal {
   /** Atomic under the journal's script lock; enforce capacity without deleting pending input. */
   insert(entry: JournalEntry): JournalEntry;
   due(nowSeconds: number, limit: number): JournalEntry[];
+  /** Bounded lookup includes terminal outcomes; callers hold the same journal lock. */
+  find(commandIds: readonly string[]): JournalEntry[];
   /** Compare expected attempts/status so a concurrent dispatch cannot silently overwrite state. */
   update(entry: JournalEntry, expected: { attempts: number; status: JournalStatus }): void;
 }
