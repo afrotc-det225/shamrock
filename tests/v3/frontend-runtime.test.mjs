@@ -456,3 +456,13 @@ test('lease recovery refuses an unreviewed checkpoint or mixed provider contents
     assert.throws(()=>consumeFrontendRefresh(runtime));assert.equal(fx.calls.includes('recover'),false);assert.equal(fx.fenced,true);
   }
 });
+
+
+test('explicit input setup can verify a disabled publisher without enabling ordinary publication or input',()=>{
+ const owner='automation@example.invalid',host={version:1,environment:'staging',generation:1,resourceReview:'EXISTING_RESOURCES_REVIEWED_FOR_STAGING',workerOrigin:'https://staging.example.invalid',keyId:'fixture',expectedAutomationEmail:owner,journal:{spreadsheetId:'journal',sheetId:1},attendance:{formId:'form',resourceKey:'attendance',itemRoles:{event:'event',scope:'scope',present:['present'],completeness:'complete'}}};
+ const frontend={version:1,environment:'staging',generation:1,enabled:false,resourceReview:'EXISTING_FICTIONAL_FRONTEND_REVIEWED_FOR_STAGING',workerId:'worker',principalId:'publisher',stateFileId:'state',main:{spreadsheetId:'main',expectedTitle:'Frontend Staging',sheets:{directory:{sheetId:1,tableId:'directory'},leadership:{sheetId:2,tableId:'leadership'},attendance:{sheetId:3,tableId:'attendance'}}},access:{ownerEmail:owner,automationEmail:owner},allowedFileEditors:[],seeds:[]};
+ const values={SHAMROCK_V3_HOST_CONFIG:JSON.stringify(host),SHAMROCK_V3_FRONTEND_CONFIG:JSON.stringify(frontend),SHAMROCK_V3_BRIDGE_SECRET:'fictional-input-setup-secret-long-enough',SHAMROCK_V3_FRONTEND_PAUSED:'true'};let fetched=0,locked=0,released=0,called=false;
+ const runtime=createNativeFrontendRuntime({PropertiesService:{getScriptProperties:()=>({getProperty:k=>values[k]??null,setProperty(){throw Error('must stay paused');},deleteProperty(){throw Error('must stay paused');}})},Session:{getEffectiveUser:()=>({getEmail:()=>owner})},ScriptApp:{getOAuthToken:()=> 'fixture'},Utilities:{DigestAlgorithm:{SHA_256:'sha'},Charset:{UTF_8:'utf8'},computeDigest:()=>Array(32).fill(0),computeHmacSha256Signature:()=>Array(32).fill(0)},LockService:{getScriptLock:()=>({tryLock:()=>{locked++;return true;},releaseLock:()=>{released++;}})},UrlFetchApp:{fetch(url,options){fetched++;assert.equal(options.method,'get');assert.match(url,/googleapis/);throw Error('stop at provider isolation');}}});
+ assert.equal(runtime.refresh().status,'disabled');assert.equal(runtime.inputSession(()=>{called=true;}).status,'disabled');assert.equal(fetched,0);assert.equal(locked,0);
+ assert.throws(()=>runtime.inputSession(()=>{called=true;},{allowPaused:true}),e=>e.code==='frontend_google_transport');assert.equal(called,false);assert.equal(fetched,1);assert.equal(locked,1);assert.equal(released,1);assert.equal(values.SHAMROCK_V3_FRONTEND_PAUSED,'true');
+});

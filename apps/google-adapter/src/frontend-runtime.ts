@@ -619,7 +619,10 @@ export function createNativeFrontendRuntime(services: NativeFrontendServices,
     return { frontend: clone(f), host };
   }
   function refresh(inputOperation?: (session: NativeFrontendInputSession) => unknown, allowPausedInput = false) {
-    const loaded = configuration(); if (!loaded || !loaded.frontend.enabled) return { status: 'disabled' as const };
+    const loaded = configuration();
+    // Only explicit input setup/control may inspect a disabled publisher. Ordinary
+    // refresh and edit delivery retain both independent publication gates.
+    if (!loaded || !loaded.frontend.enabled && !(inputOperation && allowPausedInput)) return { status: 'disabled' as const };
     const { frontend: config, host } = loaded;
     const supplemental = config.supplemental?.enabled ? config.supplemental : undefined;
     const signer = createGoogleSigner(services.Utilities, properties.getProperty(HOST_PROPERTIES.secret) ?? '');
