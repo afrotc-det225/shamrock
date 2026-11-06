@@ -158,3 +158,5 @@ The Google test files cover source mapping, duplicate names, delayed catalogs, n
 
 
 The optional [managed Forms runtime](../../docs/runbooks/D1_MANAGED_FORMS.md) publishes all three existing Forms without rebuilding their questions, freezes native response revisions and supports verified Directory activation/self-service. It is separately gated, uses private Drive checkpoints and still requires the documented live provider and retention-capacity rehearsals.
+
+The optional [native spreadsheet input runtime](../../docs/runbooks/D1_NATIVE_INPUT.md) freezes edits from the full Main and Blue/Gold Tables, checks immutable physical bindings, supports verified-email confirmation and reconciles exact command receipts. It has separate private setup/resume controls and does not replace the earlier technical decision-input handler automatically. Direct editing still requires the documented real non-owner FilterView and protection evidence.

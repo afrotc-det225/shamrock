@@ -55,6 +55,7 @@ function shamrockV3StagingPauseBoth_(host) {
   try { shamrockV3StagingFrontend_().pause(); } catch (error) { if (!failure) failure = error; }
   try { shamrockV3StagingMaintenance_().pause(); } catch (error) { if (!failure) failure = error; }
   try { if (typeof SHAMROCKV3 !== 'undefined' && SHAMROCKV3.createNativeFormsRuntime) shamrockV3StagingForms_().pause(); } catch (error) { if (!failure) failure = error; }
+  try { if (typeof SHAMROCKV3 !== 'undefined' && SHAMROCKV3.createNativeFrontendInput) shamrockV3NativeInput_().pause(); } catch (error) { if (!failure) failure = error; }
   if (failure) throw failure;
   return result;
 }
@@ -82,6 +83,7 @@ function shamrockV3StagingFlush() {
     var forms = shamrockV3StagingForms_();
     result.formIntake = forms.flush(); result.forms = forms.refresh();
   }
+  if (typeof SHAMROCKV3 !== 'undefined' && SHAMROCKV3.createNativeFrontendInput) result.nativeInput = shamrockV3NativeInput_().flush();
   return result;
 }
 function shamrockV3StagingFrontendRefresh() { return shamrockV3StagingFrontend_().refresh(); }
@@ -104,3 +106,16 @@ function shamrockV3ManagedExcusalSubmit(e) { return shamrockV3StagingForms_().su
 function shamrockV3ManagedDirectorySubmit(e) { return shamrockV3StagingForms_().submit('directory', e); }
 
 function shamrockV3ManagedFormReplay(key, responseId) { return shamrockV3StagingForms_().replay(key, responseId); }
+
+function shamrockV3NativeInput_() { return SHAMROCKV3.createNativeFrontendInput({ PropertiesService: PropertiesService, Utilities: Utilities,
+  UrlFetchApp: UrlFetchApp, ScriptApp: ScriptApp, Session: Session, FormApp: FormApp, LockService: LockService }); }
+function shamrockV3NativeInputSetup() { return shamrockV3NativeInput_().setup(); }
+function shamrockV3NativeInputPause() { return shamrockV3NativeInput_().pause(); }
+function shamrockV3NativeInputResume() { return shamrockV3NativeInput_().resume(); }
+function shamrockV3NativeInputFlush() { return shamrockV3NativeInput_().flush(); }
+function shamrockV3NativeInputStatus() { return shamrockV3NativeInput_().status(); }
+function shamrockV3NativeFrontendEdit(e) { return shamrockV3NativeInput_().onEdit(e); }
+function shamrockV3NativeFrontendConfirm(e) { return shamrockV3NativeInput_().confirm(e); }
+function shamrockV3NativeConfirmationReplay(responseId) { return shamrockV3NativeInput_().replayConfirmation(responseId); }
+
+function shamrockV3NativeInputReviewQueue() { return shamrockV3NativeInput_().reviewQueue(); }

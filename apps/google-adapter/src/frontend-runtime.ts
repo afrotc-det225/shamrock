@@ -68,6 +68,8 @@ export interface FrontendPublicationState {
   /** Written before the single atomic Google publication, retained across an ambiguous response. */
   pending?: { claim: FrontendRefreshClaim; plans: Record<Kind, FrontendPublicationPlan>; supplemental?: FrontendSupplementalPlans };
   completedClaim?: { effectId: string; claimToken: string };
+  /** Exact committed input receipts applied to this checkpoint, for cross-file recovery. */
+  inputReceipts?: Record<string, string>;
 }
 export interface FrontendRefreshPorts {
   config: AdapterConfig;
@@ -134,6 +136,7 @@ function validState(value: FrontendPublicationState, generation: number): Fronte
       || Object.keys(s.baselines ?? {}).sort().join(',') !== 'blue,gold' || Object.keys(s.drafts ?? {}).sort().join(',') !== 'blue,gold') fail('frontend_state', 'The private supplemental baseline is invalid.');
     for (const queue of QUEUES) if (s.baselines[queue]?.generation !== generation || !Array.isArray(s.baselines[queue]?.rows) || !Array.isArray(s.drafts[queue])) fail('frontend_state', 'A squadron queue baseline is invalid.');
   }
+  if (value.inputReceipts && (Object.keys(value.inputReceipts).length > 10000 || Object.entries(value.inputReceipts).some(([key, hash]) => !id(key) || !/^[a-f0-9]{64}$/.test(hash)))) fail('frontend_state', 'Applied input receipt evidence is invalid or needs archival.');
   if (bytes(JSON.stringify(value)) > MAX_STATE_BYTES) fail('frontend_capacity', 'The private frontend state exceeds its reviewed size.');
   return clone(value);
 }
@@ -510,6 +513,14 @@ export interface NativeFrontendConfig {
       seeds: NativeFrontendConfig['seeds']; };
   };
 }
+export interface NativeFrontendInputSession {
+  config: NativeFrontendConfig; automationEmail: string; adapter: AdapterConfig;
+  signer: Signer; transport: Transport; nowSeconds(): number;
+  state: FrontendPublicationState;
+  read(surface: 'directory'|'leadership'|'attendance'|'blue'|'gold'): FrontendTableRead;
+  save(state: FrontendPublicationState): void;
+  fence(): void; restore(): void;
+}
 export interface NativeFrontendServices {
   PropertiesService: { getScriptProperties(): { getProperty(key: string): string | null; setProperty(key: string, value: string): unknown; deleteProperty(key: string): unknown } };
   Utilities: UtilitiesPort & { formatDate?(date: Date, timeZone: string, format: string): string };
@@ -607,7 +618,7 @@ export function createNativeFrontendRuntime(services: NativeFrontendServices,
     }
     return { frontend: clone(f), host };
   }
-  function refresh() {
+  function refresh(inputOperation?: (session: NativeFrontendInputSession) => unknown, allowPausedInput = false) {
     const loaded = configuration(); if (!loaded || !loaded.frontend.enabled) return { status: 'disabled' as const };
     const { frontend: config, host } = loaded;
     const supplemental = config.supplemental?.enabled ? config.supplemental : undefined;
@@ -621,7 +632,7 @@ export function createNativeFrontendRuntime(services: NativeFrontendServices,
         return signer.sha256(canonical(state));
       } });
     }
-    if (properties.getProperty(FRONTEND_PROPERTIES.pause) === 'true') return { status: 'disabled' as const };
+    if (properties.getProperty(FRONTEND_PROPERTIES.pause) === 'true' && !allowPausedInput) return { status: 'disabled' as const };
     let publishedBaselines: FrontendPublicationState['baselines'] | undefined;
     let publishedSupplemental: FrontendSupplementalState | undefined;
     let metadataCache: Record<string, any> | undefined, cellsCache: Record<string, any> | undefined;
@@ -905,9 +916,24 @@ export function createNativeFrontendRuntime(services: NativeFrontendServices,
       verifyValidation: plan => verifyNativeValidation(plan, supplemental.excusals.spreadsheetId, readExcusalMetadata(), QUEUES.map(q => supplemental.excusals.sheets[q].sheetId)),
       writeAtomic: requests => writeContent(requests, true),
     };
+    if (inputOperation) {
+      if (!runtime.lock.tryLock(25_000)) fail('frontend_busy', 'Another adapter operation is active.');
+      try {
+        if (!runtime.enabled() && !allowPausedInput) return {status: 'disabled' as const};
+        runtime.assertIsolation(); const state = runtime.state.load();
+        if (runtime.claimStore.load() || state.pending) fail('frontend_input_fenced', 'Finish the retained publication before processing spreadsheet input.');
+        runtime.refreshReads?.(); runtime.assertEditPolicy();
+        return inputOperation({config, automationEmail: host.expectedAutomationEmail, adapter: runtime.config, signer, transport: runtime.transport, nowSeconds: now, state,
+          read: surface => surface === 'blue' || surface === 'gold' ? runtime.supplemental?.readExcusal(surface) ?? fail('frontend_configuration', 'The squadron queue is not bound.') : runtime.readTable(surface),
+          save: value => { runtime.state.save(value); if (!equal(runtime.state.load(), value)) fail('frontend_state', 'The input checkpoint did not persist.'); },
+          fence: () => { runtime.fenceEdits(); runtime.assertFenced(); runtime.refreshReads?.(); },
+          restore: () => { runtime.restoreEditPolicy(); runtime.assertEditPolicy(); runtime.refreshReads?.(); },
+        });
+      } finally { runtime.lock.releaseLock(); }
+    }
     return consumeFrontendRefresh(runtime);
   }
-  return { refresh,
+  return { refresh: () => refresh(), inputSession: (operation: (session: NativeFrontendInputSession) => unknown, options: {allowPaused?: boolean} = {}) => refresh(operation, options.allowPaused === true),
     pause() { pauseFrontend(); return { status: 'paused' as const }; },
     resume() {
       const configured = configuration(); if (!configured || !configured.frontend.enabled) fail('frontend_configuration', 'Enable only a reviewed staging frontend configuration.');
