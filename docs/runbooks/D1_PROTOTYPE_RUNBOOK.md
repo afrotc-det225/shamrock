@@ -128,9 +128,38 @@ The current prototype deliberately does not reclaim an expired Google-publicatio
 
 ## Remaining work after the second staging milestone
 
+### November 6 engineering checkpoint
+
+The normal Main and Excusals staging workbooks now use the intended operational
+canvas: a compact Dashboard, six resolved actions, calculated Overall/LLAB
+percentages, four visible Main tabs and Blue/Gold decision tabs. Test disclaimers
+and inactive preview buttons have been removed from the user-facing sheets.
+The environment remains identifiable in the file titles.
+
+The [protection model](D1_PROTECTION_MODEL.md) passed 19 real non-owner API probes,
+including role revocation while workbook editing permission remained. Fresh
+presentation read-back verified all 570 validation cells, 16 fictional photo
+file chips, five native Tables, four charts and unchanged private sharing.
+These checks establish native cell permissions and presentation; they do not
+establish delivery of edits from the replacement Main/Blue/Gold sheets to D1.
+
+A fresh version 2 staging export was restored into a separate hosted D1 database.
+Every record matched the paused source across all 21 tables; `quick_check` passed
+and `foreign_key_check` returned no violations. The source database was unchanged.
+This demonstrates hosted restoration of the fictional checkpoint, not recovery
+after an unknown production write or successor access to recovery material.
+
+New source modules cover [administrative commands and corrections](D1_ADMIN_COMMANDS.md),
+[attendance and birthday reporting](D1_REPORTING_RULES.md),
+[notification planning](D1_NOTIFICATIONS.md),
+[keyed frontend publication](D1_FRONTEND_PUBLICATION.md) and its
+[Google runtime](D1_FRONTEND_RUNTIME.md). Source completion, local tests and
+hosted deployment are separate evidence. Check the private release record for
+the actual deployed Worker, schema and Google source before resuming anything.
+
 1. Preserve the paused state between controlled rehearsals. Extend owner-account validation to the participating accounts and verify succession access. Prefer APIs and command-line tools; use interactive login only where the provider requires it. Verify organization ownership separately from membership, account billing separately from API access, and Drive ownership separately from sharing.
 2. Rehearse successor access to the configured resources and credentials. Actual signing material stays in provider secret stores and Script Properties, with recovery material in the organization's password vault. Neither a private repo nor an `.env` handoff is a secret store. Validate the OAuth publishing/authorization arrangement over time before relying on unattended operation.
-3. Extend the verified version 2 upgrade and local SQLite restore to hosted D1 recovery, secret rotation and successor exercises. The existing export/restore check does not establish provider restore timing or recovery after accepted writes. The migration helper is deliberately bounded; destructive migrations require a separately reviewed design.
+3. Extend the hosted version 2 restore checkpoint to release rollback, secret rotation and successor exercises. The fictional restore does not establish recovery after later accepted writes. The migration helper is deliberately bounded; destructive migrations require a separately reviewed design.
 4. Extend the verified owner-account decision/status path to controlled overlapping executions and human editor identity across participating accounts. Missing identity still needs an authenticated confirmation flow that preserves the frozen target and payload. The successful retry did not reproduce the original lock overlap.
 5. Extend the successful literal-value publication/read-back check to real concurrent edits/sorting, partial writes, ambiguous responses and API failures. The three current staging tables have an optional presentation implementation; full Main-workbook parity, non-owner interactions, automated lease recovery and the complete workflow remain unfinished.
 

@@ -7,8 +7,12 @@ import { NATIVE_PROPERTIES, parseNativePresentationConfig, type NativeProjection
 export const CONFIG_FILE_ID_PROPERTY = 'SHAMROCK_V3_CONFIG_FILE_ID';
 const PROPERTY_LIMIT = 8_000;
 const FILE_LIMIT = 65_536;
+// Kept here without importing frontend-runtime, which already imports this module.
+// Frontend bindings remain file-owned so later API updates do not require a UI import.
+const FRONTEND_CONFIG_PROPERTY = 'SHAMROCK_V3_FRONTEND_CONFIG';
+const FRONTEND_PAUSE_PROPERTY = 'SHAMROCK_V3_FRONTEND_PAUSED';
 const ALLOWED: readonly string[] = [HOST_PROPERTIES.config, HOST_PROPERTIES.principals, HOST_PROPERTIES.attendanceCatalog,
-  HOST_PROPERTIES.excusalCatalog, NATIVE_PROPERTIES.projectionConfig, NATIVE_PROPERTIES.presentationConfig];
+  HOST_PROPERTIES.excusalCatalog, NATIVE_PROPERTIES.projectionConfig, NATIVE_PROPERTIES.presentationConfig, FRONTEND_CONFIG_PROPERTY];
 const REQUIRED = [HOST_PROPERTIES.config, HOST_PROPERTIES.principals, HOST_PROPERTIES.attendanceCatalog, NATIVE_PROPERTIES.projectionConfig];
 type Json = Record<string, unknown>;
 export interface StagingConfigurationServices {
@@ -121,7 +125,8 @@ export function importStagingConfiguration(services: StagingConfigurationService
   // Pause before even reading the proposed configuration; this does not cancel an already-running execution.
   try {
     properties.setProperty(HOST_PROPERTIES.enabled, 'false');
-    if (properties.getProperty(HOST_PROPERTIES.enabled) !== 'false') throw new Error('Pause was not persisted.');
+    properties.setProperty(FRONTEND_PAUSE_PROPERTY, 'true');
+    if (properties.getProperty(HOST_PROPERTIES.enabled) !== 'false' || properties.getProperty(FRONTEND_PAUSE_PROPERTY) !== 'true') throw new Error('Pause was not persisted.');
   } catch { return fail('configuration_write_failed', 'Processing could not be paused; configuration was not imported.'); }
   let executor = '';
   try { executor = email(services.Session.getEffectiveUser().getEmail()); } catch { /* fail closed below */ }
@@ -175,7 +180,8 @@ export function importStagingConfiguration(services: StagingConfigurationService
   const pending: Record<string, string> = {}; const parsed: Record<string, Json> = {};
   for (const [key, value] of Object.entries(map)) {
     if (typeof value !== 'string') fail('configuration_invalid', 'Each imported property must contain a JSON string.');
-    parsed[key] = json(value, PROPERTY_LIMIT); pending[key] = value;
+    parsed[key] = json(value, key === FRONTEND_CONFIG_PROPERTY ? 16_000 : PROPERTY_LIMIT);
+    if (key !== FRONTEND_CONFIG_PROPERTY) pending[key] = value;
   }
   const host = parseStagingHostConfig(parsed[HOST_PROPERTIES.config]); sameShape(parsed[HOST_PROPERTIES.config], host);
   if (host.expectedAutomationEmail !== executor) fail('configuration_identity', 'The proposed staging configuration belongs to a different automation account.');
@@ -187,6 +193,22 @@ export function importStagingConfiguration(services: StagingConfigurationService
     parseNativePresentationConfig(parsed[NATIVE_PROPERTIES.presentationConfig], host,
       parsed[NATIVE_PROPERTIES.projectionConfig] as unknown as NativeProjectionConfig);
   }
+  const frontend = parsed[FRONTEND_CONFIG_PROPERTY];
+  if (frontend) {
+    keys(frontend, ['version', 'environment', 'generation', 'enabled', 'resourceReview', 'workerId', 'principalId', 'stateFileId', 'main', 'allowedFileEditors', 'access', 'seeds'], ['supplemental']);
+    if (frontend.version !== 1 || frontend.environment !== 'staging' || frontend.generation !== host.generation || typeof frontend.enabled !== 'boolean'
+      || frontend.resourceReview !== 'EXISTING_FICTIONAL_FRONTEND_REVIEWED_FOR_STAGING') fail('configuration_invalid', 'Frontend configuration must match the reviewed staging generation.');
+    id(frontend.workerId); id(frontend.principalId); id(frontend.stateFileId, 512);
+    const main = object(frontend.main); keys(main, ['spreadsheetId', 'expectedTitle', 'sheets']); id(main.spreadsheetId, 512);
+    if (typeof main.expectedTitle !== 'string' || main.expectedTitle.length > 200 || !/staging/i.test(main.expectedTitle)
+      || !Array.isArray(frontend.allowedFileEditors) || !Array.isArray(frontend.seeds)) fail('configuration_invalid', 'Frontend configuration requires an exact staging binding and bounded access/seed lists.');
+    const access = object(frontend.access);
+    if (email(access.ownerEmail) !== executor || email(access.automationEmail) !== executor) fail('configuration_identity', 'Frontend ownership must match the staging account.');
+    if (main.spreadsheetId === host.journal.spreadsheetId || main.spreadsheetId === host.decisionInput?.spreadsheetId
+      || frontend.stateFileId === main.spreadsheetId || frontend.stateFileId === fileId) fail('configuration_invalid', 'Frontend, private state and existing transport resources must remain separate.');
+    // Full native binding, role and seed validation occurs before a refresh can write.
+    // Import never copies this optional file-owned value into Script Properties.
+  }
 
   // All file, ACL and configuration validation finishes before any configuration mutation.
   // PropertiesService offers no transaction guarantee: a provider write failure stays paused
@@ -195,6 +217,7 @@ export function importStagingConfiguration(services: StagingConfigurationService
     properties.deleteProperty(HOST_PROPERTIES.setupReceipt);
     properties.deleteProperty(NATIVE_PROPERTIES.projectionReceipt);
     properties.deleteProperty(NATIVE_PROPERTIES.presentationReceipt);
+    properties.deleteProperty(FRONTEND_CONFIG_PROPERTY);
     properties.setProperties(pending, false);
     if (!pending[HOST_PROPERTIES.excusalCatalog]) properties.deleteProperty(HOST_PROPERTIES.excusalCatalog);
     if (!pending[NATIVE_PROPERTIES.presentationConfig]) properties.deleteProperty(NATIVE_PROPERTIES.presentationConfig);
@@ -202,6 +225,7 @@ export function importStagingConfiguration(services: StagingConfigurationService
       || (!pending[HOST_PROPERTIES.excusalCatalog] && properties.getProperty(HOST_PROPERTIES.excusalCatalog) !== null)
       || (!pending[NATIVE_PROPERTIES.presentationConfig] && properties.getProperty(NATIVE_PROPERTIES.presentationConfig) !== null)
       || properties.getProperty(HOST_PROPERTIES.enabled) !== 'false'
+      || properties.getProperty(FRONTEND_PAUSE_PROPERTY) !== 'true' || properties.getProperty(FRONTEND_CONFIG_PROPERTY) !== null
       || properties.getProperty(HOST_PROPERTIES.setupReceipt) !== null || properties.getProperty(NATIVE_PROPERTIES.projectionReceipt) !== null
       || properties.getProperty(NATIVE_PROPERTIES.presentationReceipt) !== null) {
       fail('configuration_write_failed', 'Configuration persistence could not be verified; processing remains paused.');

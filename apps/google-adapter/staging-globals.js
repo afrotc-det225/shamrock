@@ -13,15 +13,37 @@ function shamrockV3StagingHost_() {
   });
 }
 
+function shamrockV3StagingFrontend_() {
+  return SHAMROCKV3.createNativeFrontendRuntime({
+    PropertiesService: PropertiesService,
+    Utilities: Utilities,
+    UrlFetchApp: UrlFetchApp,
+    ScriptApp: ScriptApp,
+    Session: Session,
+    LockService: LockService
+  });
+}
+
 function shamrockV3StagingSetup() {
   var host = shamrockV3StagingHost_();
-  host.pause();
+  shamrockV3StagingPauseBoth_(host);
   host.initializeProjections();
   host.repairPresentation();
   return host.setup();
 }
 
-function shamrockV3StagingPause() { return shamrockV3StagingHost_().pause(); }
+function shamrockV3StagingPauseBoth_(host) {
+  var result;
+  var failure;
+  try { result = host.pause(); } catch (error) { failure = error; }
+  try { shamrockV3StagingFrontend_().pause(); } catch (error) { if (!failure) failure = error; }
+  if (failure) throw failure;
+  return result;
+}
+
+function shamrockV3StagingPause() {
+  return shamrockV3StagingPauseBoth_(shamrockV3StagingHost_());
+}
 function shamrockV3StagingRepairPresentation() { return shamrockV3StagingHost_().repairPresentation(); }
 function shamrockV3StagingImportConfig() {
   return SHAMROCKV3.importStagingConfiguration({
@@ -32,7 +54,15 @@ function shamrockV3StagingImportConfig() {
   });
 }
 function shamrockV3StagingResume() { return shamrockV3StagingHost_().resume(); }
-function shamrockV3StagingFlush() { return shamrockV3StagingHost_().flush(); }
+function shamrockV3StagingFlush() {
+  var intake = shamrockV3StagingHost_().flush();
+  // Frontend maintenance has a separate explicit gate; Forms may remain paused.
+  var frontend = shamrockV3StagingFrontend_().refresh();
+  return Object.assign({}, intake, { frontend: frontend });
+}
+function shamrockV3StagingFrontendRefresh() { return shamrockV3StagingFrontend_().refresh(); }
+function shamrockV3StagingFrontendPause() { return shamrockV3StagingFrontend_().pause(); }
+function shamrockV3StagingFrontendResume() { return shamrockV3StagingFrontend_().resume(); }
 function shamrockV3StagingAttendanceSubmit(e) { return shamrockV3StagingHost_().onAttendanceSubmit(e); }
 function shamrockV3StagingExcusalSubmit(e) { return shamrockV3StagingHost_().onExcusalSubmit(e); }
 function shamrockV3StagingDecisionEdit(e) { return shamrockV3StagingHost_().onDecisionEdit(e); }

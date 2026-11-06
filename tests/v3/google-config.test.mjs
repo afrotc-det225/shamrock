@@ -5,6 +5,7 @@ import { HOST_PROPERTIES as H } from '../../.build/v3/apps/google-adapter/src/st
 import { NATIVE_PROPERTIES as N } from '../../.build/v3/apps/google-adapter/src/native-runtime.js';
 
 const automation = 'automation@example.invalid';
+const F = { config: 'SHAMROCK_V3_FRONTEND_CONFIG', paused: 'SHAMROCK_V3_FRONTEND_PAUSED' };
 const code = expected => error => error.code === expected;
 function fixture() {
   const host = {
@@ -65,8 +66,8 @@ function fixture() {
 function assertOnlyPaused(f, expected) {
   const before = new Map(f.properties);
   assert.throws(() => f.run(), expected);
-  before.set(H.enabled, 'false'); assert.deepEqual(f.properties, before);
-  assert.deepEqual(f.state.mutations, [['set', H.enabled]]);
+  before.set(H.enabled, 'false'); before.set(F.paused, 'true'); assert.deepEqual(f.properties, before);
+  assert.deepEqual(f.state.mutations, [['set', H.enabled], ['set', F.paused]]);
   assert.equal(f.state.secretReads, 0);
 }
 
@@ -75,10 +76,25 @@ test('private owner-only configuration imports nonsecret bindings while paused a
   assert.deepEqual(f.run(), { status: 'imported-paused', propertyCount: 5, next: 'setup-required' });
   for (const [key, value] of Object.entries(f.map)) assert.equal(f.properties.get(key), value);
   assert.equal(f.properties.get(H.enabled), 'false'); assert.equal(f.properties.has(H.setupReceipt), false); assert.equal(f.properties.has(N.projectionReceipt), false);
+  assert.equal(f.properties.get(F.paused), 'true');
   assert.equal(f.properties.has(N.presentationConfig), false); assert.equal(f.properties.has(N.presentationReceipt), false);
   assert.equal(f.properties.get(H.secret), 'fixture-secret-untouched-never-read'); assert.equal(f.state.secretReads, 0);
   assert.equal(f.properties.get(N.projectionClaim), 'pending-claim-preserve'); assert.equal(f.properties.get('UNRELATED_SETTING'), 'preserve');
   assert.equal(f.state.calls.length, 3); assert.equal(f.state.mutations.filter(m => m[0] === 'batch').length, 1);
+});
+
+test('optional frontend bindings stay in the private file and imports pause both planes without touching claims or secrets', () => {
+  const f = fixture();
+  f.map[F.config] = JSON.stringify({ version: 1, environment: 'staging', generation: 1, enabled: true,
+    resourceReview: 'EXISTING_FICTIONAL_FRONTEND_REVIEWED_FOR_STAGING', workerId: 'frontend-worker', principalId: 'reader', stateFileId: 'frontend-state',
+    main: { spreadsheetId: 'frontend-main', expectedTitle: 'SHAMROCK — Staging', sheets: {} }, allowedFileEditors: [],
+    access: { ownerEmail: automation, automationEmail: automation }, seeds: [] });
+  f.properties.set(F.config, 'stale-property-override'); f.properties.set('SHAMROCK_V3_FRONTEND_CLAIM', 'retained-frontend-claim');
+  assert.equal(f.run().propertyCount, 5);
+  assert.equal(f.properties.has(F.config), false); assert.equal(f.properties.get(F.paused), 'true');
+  assert.equal(f.properties.get('SHAMROCK_V3_FRONTEND_CLAIM'), 'retained-frontend-claim'); assert.equal(f.state.secretReads, 0);
+  const bad = fixture(); bad.map[F.config] = f.map[F.config].replace('"generation":1', '"generation":2');
+  assertOnlyPaused(bad, code('configuration_invalid'));
 });
 
 test('optional excusal catalog is removed only after a valid import without that source', () => {
@@ -193,5 +209,5 @@ test('a property provider failure is never reported as an atomic successful impo
 test('an unconfirmed pause stops before downloading or replacing any configuration', () => {
   const f = fixture(); const before = new Map(f.properties); f.state.discardPause = true;
   assert.throws(() => f.run(), code('configuration_write_failed'));
-  assert.deepEqual(f.properties, before); assert.equal(f.state.calls.length, 0); assert.equal(f.state.mutations.length, 1);
+  assert.deepEqual(f.properties, before); assert.equal(f.state.calls.length, 0); assert.equal(f.state.mutations.length, 2);
 });

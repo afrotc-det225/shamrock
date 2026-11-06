@@ -222,3 +222,33 @@ test('managed duplicate identities are rejected instead of selecting an arbitrar
   assert.ok(p.description.startsWith(FRONTEND_PROTECTION_PREFIX)); input.metadata.sheets[0].protectedRanges.push(p);
   assert.throws(() => planFrontendProtections(input), invalid);
 });
+
+test('row-specific linked Leadership locks preserve manual-contact edits and cannot be bypassed by support', () => {
+  const input = fixture(), surface = input.surfaces.find(s => s.kind === 'leadership');
+  const profileFields = ['last_name', 'first_name', 'rank', 'role', 'email', 'cell_phone'];
+  surface.readonlyCells = [{ rowIndex: 2, headers: profileFields }, { rowIndex: 3, headers: profileFields }];
+  apply(input, planFrontendProtections(input).requests);
+  for (const email of [people.leadership, people.support]) {
+    for (const header of profileFields) {
+      assert.equal(nativeAllows(input, actor(input, 'leadership', header, email, 2)), false);
+      assert.equal(canEditFrontendCell(input, actor(input, 'leadership', header, email, 2)), false);
+      assert.equal(nativeAllows(input, actor(input, 'leadership', header, email, 4)), true);
+    }
+    for (const header of ['reports_to', 'office_phone', 'office_location']) assert.equal(nativeAllows(input, actor(input, 'leadership', header, email, 2)), true);
+  }
+  assert.equal(verifyFrontendProtections(input).ready, true); assert.equal(planFrontendProtections(input).requests.length, 0);
+  const scoped = input.metadata.sheets.find(s => s.properties.sheetId === surface.sheetId).protectedRanges;
+  assert.equal(scoped.length, 4, 'Adjacent equal row policies coalesce into two input regions plus manual region and sheet guard');
+});
+
+test('keyed row policy relocation and removal revoke previous cell grants without leaving holes', () => {
+  const input = fixture(), surface = input.surfaces.find(s => s.kind === 'leadership');
+  surface.readonlyCells = [{ rowIndex: 2, headers: ['role'] }]; apply(input, planFrontendProtections(input).requests);
+  surface.readonlyCells = [{ rowIndex: 4, headers: ['role'] }, { rowIndex: 5, headers: surface.headers }];
+  apply(input, planFrontendProtections(input).requests);
+  assert.equal(nativeAllows(input, actor(input, 'leadership', 'role', people.leadership, 2)), true);
+  assert.equal(nativeAllows(input, actor(input, 'leadership', 'role', people.leadership, 4)), false);
+  for (const header of surface.headers) assert.equal(nativeAllows(input, actor(input, 'leadership', header, people.support, 5)), false);
+  assert.equal(verifyFrontendProtections(input).ready, true);
+  surface.readonlyCells = [{ rowIndex: 1, headers: ['role'] }]; assert.throws(() => planFrontendProtections(input), invalid);
+});

@@ -18,6 +18,9 @@ export interface FrontendProtectionSurface {
   /** Explicit catalog mapping. Unknown columns are never assumed to be events. */
   eventColumns?: readonly { header: string; eventId: string }[];
   decisionHeader?: 'decision' | 'draft_decision';
+  /** Additional per-row locks, mapped from protected stable keys by the publisher.
+   * These only remove business grants; they can never unlock an otherwise closed field. */
+  readonlyCells?: readonly { rowIndex: number; headers: readonly string[] }[];
 }
 export interface FrontendProtectionAccess {
   ownerEmail: string;
@@ -145,12 +148,18 @@ function validate(input: FrontendProtectionInput): FrontendProtectionAccess {
           || machineField(event.header)) fail('Attendance event mapping targets a missing or protected field.');
       }
     } else if (surface.eventColumns?.length) fail('Only an attendance surface may declare event columns.');
+    if (surface.readonlyCells !== undefined) {
+      if (!Array.isArray(surface.readonlyCells) || surface.readonlyCells.length > MAX_ROWS
+        || new Set(surface.readonlyCells.map((r: { rowIndex: number }) => r.rowIndex)).size !== surface.readonlyCells.length) fail('Per-row protection locks are missing or ambiguous.');
+      for (const row of surface.readonlyCells) if (!integer(row.rowIndex, 2, surface.dataEndRow - 1) || !Array.isArray(row.headers)
+        || new Set(row.headers).size !== row.headers.length || row.headers.some((h: string) => !surface.headers.includes(h))) fail('Per-row protection locks must name exact occupied cells.');
+    }
   }
   const adopt = input.adoptProtectionIds ?? [];
   if (!Array.isArray(adopt) || new Set(adopt).size !== adopt.length || adopt.some(id => !allProtectionIds.has(id))) fail('Protection adoption must name existing reviewed protection identifiers.');
   return access;
 }
-function permittedColumns(surface: FrontendProtectionSurface, access: FrontendProtectionAccess): { column: number; users: string[] }[] {
+function permittedColumns(surface: FrontendProtectionSurface, access: FrontendProtectionAccess, rowIndex?: number): { column: number; users: string[] }[] {
   let fields: readonly string[] = []; let operational: readonly string[] = [];
   if (surface.kind === 'directory') { fields = DIRECTORY_EDIT_FIELDS; operational = access.directoryEditors; }
   if (surface.kind === 'leadership') { fields = LEADERSHIP_EDIT_FIELDS; operational = access.leadershipEditors; }
@@ -162,23 +171,33 @@ function permittedColumns(surface: FrontendProtectionSurface, access: FrontendPr
   if (surface.kind === 'readonly' || surface.dataEndRow === 2) return [];
   const users = emails([...operational, ...access.supportEditors]);
   if (!users.length) return [];
-  return surface.headers.flatMap((header, column) => fields.includes(header) ? [{ column, users }] : []);
+  const locked = surface.readonlyCells?.find(row => row.rowIndex === rowIndex)?.headers ?? [];
+  return surface.headers.flatMap((header, column) => fields.includes(header) && !locked.includes(header) ? [{ column, users }] : []);
 }
 function desired(input: FrontendProtectionInput, access: FrontendProtectionAccess): FrontendProtectionRequirement[] {
   const requirements: FrontendProtectionRequirement[] = [];
   const runtime = emails([access.ownerEmail, access.automationEmail]);
   for (const surface of input.surfaces) {
-    const blocks: { first: number; last: number; users: string[] }[] = [];
-    for (const entry of permittedColumns(surface, access)) {
-      const previous = blocks.at(-1);
-      if (previous && previous.last + 1 === entry.column && JSON.stringify(previous.users) === JSON.stringify(entry.users)) previous.last = entry.column;
-      else blocks.push({ first: entry.column, last: entry.column, users: entry.users });
+    const baseColumns = permittedColumns(surface, access);
+    const locks = new Map((surface.readonlyCells ?? []).map(row => [row.rowIndex, new Set(row.headers)]));
+    const rowGroups: { start: number; end: number; signature: string; columns: typeof baseColumns }[] = [];
+    for (let row = 2; row < surface.dataEndRow; row++) {
+      const closed = locks.get(row), columns = closed ? baseColumns.filter(c => !closed.has(surface.headers[c.column])) : baseColumns;
+      const signature = columns.map(c => c.column).join(','); const previous = rowGroups.at(-1);
+      if (previous?.signature === signature) previous.end = row + 1;
+      else rowGroups.push({ start: row, end: row + 1, signature, columns });
     }
-    const ranges = blocks.map(block => ({ sheetId: surface.sheetId, startRowIndex: 2, endRowIndex: surface.dataEndRow,
+    const blocks: { first: number; last: number; users: string[]; start: number; end: number }[] = [];
+    for (const group of rowGroups) for (const entry of group.columns) {
+      const previous = blocks.at(-1);
+      if (previous && previous.start === group.start && previous.end === group.end && previous.last + 1 === entry.column) previous.last = entry.column;
+      else blocks.push({ first: entry.column, last: entry.column, users: entry.users, start: group.start, end: group.end });
+    }
+    const ranges = blocks.map(block => ({ sheetId: surface.sheetId, startRowIndex: block.start, endRowIndex: block.end,
       startColumnIndex: block.first, endColumnIndex: block.last + 1 }));
     requirements.push({ description: `${FRONTEND_PROTECTION_PREFIX}${surface.sheetId}:sheet`, range: { sheetId: surface.sheetId },
       warningOnly: false, editors: { users: runtime, groups: [], domainUsersCanEdit: false }, unprotectedRanges: ranges });
-    blocks.forEach((block, index) => requirements.push({ description: `${FRONTEND_PROTECTION_PREFIX}${surface.sheetId}:input:${block.first}-${block.last}`,
+    blocks.forEach((block, index) => requirements.push({ description: `${FRONTEND_PROTECTION_PREFIX}${surface.sheetId}:input:${block.first}-${block.last}${block.start === 2 && block.end === surface.dataEndRow ? '' : `:rows:${block.start}-${block.end}`}`,
       range: ranges[index], warningOnly: false,
       editors: { users: emails([...runtime, ...block.users]), groups: [], domainUsersCanEdit: false }, unprotectedRanges: [] }));
   }
@@ -272,5 +291,5 @@ export function canEditFrontendCell(input: FrontendProtectionInput, actor: {
   if (!actor.workbookEditor) return false;
   if (principal === access.automationEmail) return true;
   if (actor.rowIndex < 2 || actor.rowIndex >= surface.dataEndRow) return false;
-  return permittedColumns(surface, access).some(entry => entry.column === actor.columnIndex && entry.users.includes(principal));
+  return permittedColumns(surface, access, actor.rowIndex).some(entry => entry.column === actor.columnIndex && entry.users.includes(principal));
 }
