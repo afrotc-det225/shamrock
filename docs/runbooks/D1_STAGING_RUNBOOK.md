@@ -2,7 +2,24 @@
 
 This procedure applies only to the fictional staging prototype. It does not deploy the current Apps Script project or authorize production data migration. Read the [prototype runbook](D1_PROTOTYPE_RUNBOOK.md) first. Keep account/database IDs and secret values out of Git, terminal output and release manifests.
 
-Observed on 2026-11-05: source `ea258715d890697b389b788c5caffc57eca6cf98` was deployed to isolated staging through the connected API. The initial schema/ledger, integrity checks and fictional cloud smoke passed. Three synthetic commands and their audit entries were recorded, three projection jobs were consumed by the smoke test, and the database was returned to `accepting_commands=0`. A correctly signed mutation was then rejected by the pause fence. Live Google publication was not tested. The private operations repository holds the release record.
+Observed on 2026-11-05: source `5e1057f4a13c45960e70844724aa5261e49f422e` is deployed to the isolated Cloudflare Worker and Google staging script. The owner-account rehearsal exercised real Google Forms, a sheet decision, D1 persistence and Google projection publication with fictional records. The Worker is fenced at `accepting_commands=0` and both Forms are closed. The operator confirmed `shamrockV3StagingPause`, and its completed execution was independently observed in the staging editor; Script Properties were not directly read back. Production source, installed triggers and resource ownership remain unchanged. The private operations repository holds the detailed release record.
+
+## Verified live Google checkpoint
+
+The operator linked the staging script to its standard Google Cloud project and completed Import and Setup. Headers were verified on all four journal/output tabs. The two uploaded script files still exactly match the deployed release; the rehearsal did not modify their source.
+
+| Live check | Observed result |
+|---|---|
+| Attendance Form | One complete report covering two fictional people committed. The selected member was recorded as `P`; the nonselected member's observed code remained blank. |
+| Duplicate delivery | Resending the identical saved command payload from that native response returned its original receipt and added no command. This was not a second Form submission with a new response ID. |
+| Excusal Form | A new request committed as `Submitted`, requested outcome `E`, version `1`. Existing observed `P` remained intact. |
+| Spreadsheet decision | An owner-account edit of `D3` to `Denied` acted on a **preseeded request**, advancing it from version `2` to `3`. Its audit evidence was `google-edit`. The input's frozen base version `2` and entered value remained intact. |
+| Journal and publication | All three Google journal entries reached `committed` on attempt `1`; the three Google projection jobs were acknowledged as done. Output and cursor revision reached `9`. |
+| Final database | Nine commands, nine audit records and nine completed jobs, with zero unfinished jobs. Integrity checks passed and the foreign-key check reported no violations. The first six jobs were completed by earlier test clients; the latest three exercised Google publication. |
+
+The decision input's `draft_state` still reads `Queued: Denied` after the accepted decision. This is an unreconciled UI status, not a requirement to preserve. Use the command receipt and protected recorded result/version to establish completion until draft-status reconciliation is implemented.
+
+This checkpoint validates the narrow owner-account path. Cross-domain `e.user`, authenticated confirmation for an unknown editor, dynamic input slots for newly submitted requests, concurrent human edits, failure recovery and full feature parity remain unfinished. The new excusal submission and the decision on the preseeded request were separate checks.
 
 ## Prepare a reviewed release
 
@@ -60,7 +77,7 @@ Do not place the key in command arguments, a committed file, a shell history ent
 
 When the smoke completes or fails, set `accepting_commands=0` again, verify the fence with a signed mutation and inspect the database. A successful first run leaves three commands, three audit entries, one presence observation, one approved request at version 2 and three completed jobs. Preserve that fictional evidence for debugging or remove it only through a reviewed staging reset. Never point the fixture/reset at live records.
 
-Record the source commit, hashes, migration verification, Worker configuration, synthetic result and final paused state in the private operations repository. Complete live Google identity checks, real spreadsheet publication and recovery before advancing beyond this stage. A passing smoke test is not full feature parity or a capacity certification.
+Record the source commit, hashes, migration verification, Worker configuration, synthetic result and final paused state in the private operations repository. Record live Google publication separately from test-client acknowledgements, then expand identity, concurrency and recovery validation before production. A passing smoke test is not full feature parity or a capacity certification.
 
 ## Standalone Google staging adapter
 
@@ -69,6 +86,8 @@ Use a separate standalone Apps Script project owned by the project automation ac
 The staging manifest requests Forms metadata/response access, spreadsheets, read-only Drive metadata/content, outbound requests, trigger management and the executing account's email. It requests no mail sending scope. The native runtime reads current Drive ACLs and Sheets protections instead of trusting a saved assertion. The standalone script and its private journal must be accessible only to the automation owner in this first rehearsal.
 
 Google CLI authorization and Apps Script runtime authorization are distinct. A successful clasp login does not authorize installed triggers or prove that a shared OAuth client's Google Cloud project enables the required APIs. If an API returns `SERVICE_DISABLED` for that shared client, do not attempt to change Google's project. Use a project-owned standard Google Cloud project for staging and enable only the necessary free Google Workspace APIs. Keep billing unlinked. Never change production's associated Google Cloud project to solve a staging login problem. The default/standard project choice, consent configuration and API enablement must be verified on the actual staging project before recording setup as successful.
+
+External OAuth apps left in **Testing** have test-user authorizations that expire after seven days; offline refresh tokens expire too. The basic profile/email exception does not cover this manifest's Forms, Sheets and Drive scopes. Plan reauthorization during staging and review the production consent publishing/verification configuration before unattended operation. This rehearsal did not test beyond seven days or establish an exact Apps Script trigger-expiry schedule. See [Google's app audience documentation](https://support.google.com/cloud/answer/15549945?hl=en).
 
 Prepare two private, explicitly named staging workbooks and two staging Forms containing only fictional data. The journal workbook contains separate command-journal and projection-cursor tabs. The operator workbook contains attendance results, recorded excusal results and a separate decision-input tab. The four journal/output tabs begin empty for the initializer; decision input uses the exact headers and fixed target slots in the [adapter contract](../../apps/google-adapter/README.md). Never bind these names to production by guessing or create replacements for missing configured resources.
 
