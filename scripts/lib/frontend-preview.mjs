@@ -1,21 +1,22 @@
 // Synthetic presentation fixtures only. No provider bindings, D1 commands or production records.
 // Baseline: src/config/schemas.ts, src/services/frontend-formatting.ts and src/services/excusals.ts.
 const COLORS = { header: '#356854', dark: '#173E32', green: '#2B6E55', band: '#F6F8F9', text: '#434343', canvas: '#F7F9F8' };
-const CODE_COLORS = {
-  P: ['#D9EAD3', '#274E13'], T: ['#FFF2CC', '#7F6000'], A: ['#F4CCCC', '#990000'],
-  R: ['#CFE2F3', '#073763'], D: ['#D9D2E9', '#674EA7'], U: ['#F4CCCC', '#990000'],
-  E: ['#D9EAD3', '#274E13'], ES: ['#D9EAD3', '#274E13'], MED: ['#CFE2F3', '#073763'], 'N/A': ['#E7E6E6', '#595959'],
-};
 const DECISION_COLORS = { Approved: ['#D9EAD3', '#274E13'], Denied: ['#F4CCCC', '#990000'], Withdrawn: ['#FFF2CC', '#7F6000'], Superseded: ['#D9D2E9', '#674EA7'] };
-// Native dropdown-chip backgrounds are a separate UI palette from cell fill/font pairs above.
-// Keep these explicit for native-editor finishing; Sheets validation JSON does not carry them.
-const CHIP = { green: '#d4edbc', blue: '#bfe1f6', yellow: '#ffe5a0', purple: '#e6cff2', orange: '#ffc8aa', red: '#ffcfc9', gray: '#e6e6e6' };
-const ATTENDANCE_CHIP_COLORS = { P: CHIP.green, E: CHIP.green, ES: CHIP.green, T: CHIP.yellow, A: CHIP.red, U: CHIP.red, R: CHIP.blue, MED: CHIP.blue, D: CHIP.purple, 'N/A': CHIP.gray };
-const YEAR_CHIP_COLORS = { AS100: CHIP.green, AS200: CHIP.blue, AS300: CHIP.yellow, AS400: CHIP.purple };
-const FLIGHT_CHIP_COLORS = { Alpha: CHIP.orange, Bravo: CHIP.yellow, Charlie: CHIP.blue, Delta: CHIP.purple };
-const SQUADRON_CHIP_COLORS = { Blue: CHIP.blue, Gold: CHIP.yellow };
-const DECISION_CHIP_COLORS = { Approved: CHIP.green, Denied: CHIP.red, Withdrawn: CHIP.yellow, Superseded: CHIP.purple };
-const CODES = Object.keys(CODE_COLORS);
+// Canonical option snapshot from src/utils/arrays.ts; regression tests prevent drift.
+// Year, Flight and Squadron keep the existing representative fixture choices
+// so native seed rules and their opaque option styles can be preserved.
+const OPTIONS = {
+  CADET_RANKS: ["C/4C","C/3C","C/2d Lt","C/1st Lt","C/Capt","C/Maj","C/Lt Col","C/Col"],
+  RANKS: ["AB","Amn","A1C","SrA","SSgt","TSgt","MSgt","SMSgt","CMSgt","2d Lt","1st Lt","Capt","Maj","Lt Col","Col","Brig Gen","Maj Gen","Lt Gen","Gen"],
+  HONORIFICS: ["Mr.","Mrs.","Ms.","Miss","Mx.","Dr.","Prof.","Rev.","Fr.","Sister","Brother"],
+  UNIVERSITIES: ["Notre Dame","St. Mary's","Holy Cross","Trine","Valparaiso"],
+  DORMS: ["Cross-Town","Off-Campus","Alumni Hall","Baumer Hall","Carroll Hall","Coyle Hall","Dillon Hall","Duncan Hall","Dunne Hall","Graham Family Hall","Keenan Hall","Keough Hall","Knott Hall","Morrissey Hall","O'Neill Family Hall","Siegfried Hall","Sorin Hall","Stanford Hall","St. Edward's Hall","Badin Hall","Breen-Phillips Hall","Cavanaugh Hall","Farley Hall","Flaherty Hall","Grojean Hall","Johnson Family Hall","Lewis Hall","Lyons Hall","McGlinn Hall","Pasquerilla East Hall","Pasquerilla West Hall","Ryan Hall","Walsh Hall","Welsh Family Hall","Undergraduate Community at Fischer","Fischer Graduate Residences"],
+  CIP_BROAD_AREAS: ["01 - Agricultural/Animal/Plant/Veterinary Science and Related Fields","03 - Natural Resources and Conservation","04 - Architecture and Related Services","05 - Area, Ethnic, Cultural, Gender, and Group Studies","09 - Communication, Journalism, and Related Programs","10 - Communications Technologies/Technicians and Support Services","11 - Computer and Information Sciences and Support Services","12 - Culinary, Entertainment, and Personal Services","13 - Education","14 - Engineering","15 - Engineering/Engineering-Related Technologies/Technicians","16 - Foreign Languages, Literatures, and Linguistics","19 - Family and Consumer Sciences/Human Sciences","21 - Reserved","22 - Legal Professions and Studies","23 - English Language and Literature/Letters","24 - Liberal Arts and Sciences, General Studies and Humanities","25 - Library Science","26 - Biological and Biomedical Sciences","27 - Mathematics and Statistics","28 - Military Science, Leadership and Operational Art","29 - Military Technologies and Applied Sciences","30 - Multi/Interdisciplinary Studies","31 - Parks, Recreation, Leisure, Fitness, and Kinesiology","32 - Basic Skills and Developmental/Remedial Education","33 - Citizenship Activities","34 - Health-Related Knowledge and Skills","35 - Interpersonal and Social Skills","36 - Leisure and Recreational Activities","37 - Personal Awareness and Self-Improvement","38 - Philosophy and Religious Studies","39 - Theology and Religious Vocations","40 - Physical Sciences","41 - Science Technologies/Technicians","42 - Psychology","43 - Homeland Security, Law Enforcement, Firefighting and Related Protective Services","44 - Public Administration and Social Service Professions","45 - Social Sciences","46 - Construction Trades","47 - Mechanic and Repair Technologies/Technicians","48 - Precision Production","49 - Transportation and Materials Moving","50 - Visual and Performing Arts","51 - Health Professions and Related Programs","52 - Business, Management, Marketing, and Related Support Services","53 - High School/Secondary Diplomas and Certificates","54 - History","55 - Reserved","60 - Health Professions Residency/Fellowship Programs","61 - Medical Residency/Fellowship Programs"],
+  AFSC_OPTIONS: ["Undecided","Space Force","11X - Pilot","12X - Combat Systems Officer","13A - Astronaut","13B - Air Battle Manager","13H - Aerospace Physiologist","13M - Airfield Operations","13N - Nuclear and Missile Operations","13O - Multi-Domain Warfare Officer","13S - Space Operations","13Z - Rated Multi-Domain Warfare Officer","14F - Information Operations","14N - Intelligence","15A - Operations Analysis Officer","15W - Weather and Environmental Sciences","16F - Foreign Area Officer (FAO)","16G - Air Force Operations Staff Officer","16K - Software Development Officer (SDO)","16P - Political-Military Affairs Strategist (PAS)","16R - Planning and Programming","16Z - Rated Foreign Area Officer (FAO)","17D - Warfighter Communications","17S - Cyberspace Effects Operations","17W - Warfighter Communications & IT Systems","17Y - Cyber Effects & Warfare Operations","18X - Remotely Piloted Aircraft (RPA) Pilot","19G - Space Warfare Officer","19Z - Special Warfare","21A - Aircraft Maintenance","21M - Munitions and Missile Maintenance","21R - Logistics Readiness","31P - Security Forces","32E - Civil Engineer","35B - Band","35P - Public Affairs","38F - Force Support","41A - Healthcare Administrator","42X - Biomedical Clinician","43X - Biomedical Specialists","44X - Physician","46X - Nurse","47X - Dental","48X - Aerospace Medicine","51J - Judge Advocate","52R - Chaplain","61C - Chemist/Nuclear Chemist","61D - Physicist/Nuclear Engineer","62E - Developmental Engineer","62S - Materiel Leader","63A - Acquisition Manager","64P - Contracting","65F - Financial Management","65W - Cost Analysis","71S - Special Investigations","92F0 - Foreign Area Officer (FAO) Trainee","92J0 - Non-designated Lawyer","92J1 - AFROTC Educational Delay Law Student","92J2 - Funded Legal Education Program Law Student","92J3 - Excess Leave Law Student","92M0 - HPSP Medical Student","92M1 - USUHS Student","92M2 - HPSP Biomedical Science Student","92P0 - Physician Assistant Student","92T0 - Pilot Trainee","92T1 - Combat Systems Officer Trainee","92T2 - Air Battle Manager Trainee","92T3 - Remotely Piloted Aircraft Pilot Trainee"],
+  HOME_STATES: ["Alabama","Alaska","Arizona","Arkansas","California","Colorado","Connecticut","Delaware","Florida","Georgia","Hawaii","Idaho","Illinois","Indiana","Iowa","Kansas","Kentucky","Louisiana","Maine","Maryland","Massachusetts","Michigan","Minnesota","Mississippi","Missouri","Montana","Nebraska","Nevada","New Hampshire","New Jersey","New Mexico","New York","North Carolina","North Dakota","Ohio","Oklahoma","Oregon","Pennsylvania","Rhode Island","South Carolina","South Dakota","Tennessee","Texas","Utah","Vermont","Virginia","Washington","West Virginia","Wisconsin","Wyoming"],
+  FLIGHT_PATH_STATUSES: ["Participating 1/4","Enrolled 2/4","Active 3/4","Ready 4/4","Inactive","Commissioned","Dropped"],
+};
+const CODES = ['P', 'T', 'A', 'R', 'D', 'U', 'E', 'ES', 'MED', 'N/A'];
 const DECISIONS = Object.keys(DECISION_COLORS);
 const FLIGHTS = ['Alpha', 'Bravo', 'Charlie', 'Delta'];
 const YEARS = ['AS100', 'AS200', 'AS300', 'AS400'];
@@ -45,14 +46,17 @@ const formula = x => ({ userEnteredValue: { formulaValue: x } });
 function write(sheetId, row, column, values) {
   return { updateCells: { start: { sheetId, rowIndex: row, columnIndex: column }, rows: values.map(row => ({ values: row.map(x => x?.userEnteredValue ? x : cell(x)) })), fields: 'userEnteredValue' } };
 }
-function format(r, f) { return { repeatCell: { range: r, cell: { userEnteredFormat: f }, fields: Object.keys(f).map(k => 'userEnteredFormat.' + k).join(',') } }; }
+function format(r, f) {
+  const style = f.textFormat ? { ...f, textFormat: { fontFamily: 'Roboto', ...f.textFormat } } : f;
+  return { repeatCell: { range: r, cell: { userEnteredFormat: style }, fields: Object.keys(style).map(k => 'userEnteredFormat.' + k).join(',') } };
+}
 function width(sheetId, startIndex, endIndex, pixelSize) { return { updateDimensionProperties: { range: { sheetId, dimension: 'COLUMNS', startIndex, endIndex }, properties: { pixelSize }, fields: 'pixelSize' } }; }
 function height(sheetId, startIndex, endIndex, pixelSize) { return { updateDimensionProperties: { range: { sheetId, dimension: 'ROWS', startIndex, endIndex }, properties: { pixelSize }, fields: 'pixelSize' } }; }
 function merge(sheetId, r0, r1, c0, c1) { return { mergeCells: { range: range(sheetId, r0, r1, c0, c1), mergeType: 'MERGE_ALL' } }; }
 function coloredRules(sheetId, r0, r1, c0, c1, palette) {
   return Object.entries(palette).map(([value, [background, foreground]], index) => ({ addConditionalFormatRule: { index, rule: { ranges: [range(sheetId, r0, r1, c0, c1)], booleanRule: { condition: { type: 'TEXT_EQ', values: [{ userEnteredValue: value }] }, format: { backgroundColor: rgb(background), textFormat: { foregroundColor: rgb(foreground), bold: true } } } } } }));
 }
-function validation(r, source) { return { setDataValidation: { range: r, rule: { condition: { type: 'ONE_OF_RANGE', values: [{ userEnteredValue: source }] }, strict: true, showCustomUi: true }, filteredRowsIncluded: true } }; }
+function validation(r, source, showCustomUi) { return { setDataValidation: { range: r, rule: { condition: { type: 'ONE_OF_RANGE', values: [{ userEnteredValue: source }] }, strict: true, showCustomUi }, filteredRowsIncluded: true } }; }
 function sheet(book, id, title, columns, rows, hidden = false) {
   book.sheets.push({ sheetId: id, title, visible: !hidden });
   book.requests.push({ addSheet: { properties: { sheetId: id, title, hidden, gridProperties: { rowCount: rows, columnCount: columns, hideGridlines: true } } } });
@@ -83,6 +87,10 @@ function legend(book, id, title, columns) {
     });
   });
   book.requests.push({ addProtectedRange: { protectedRange: { range: { sheetId: id }, description: 'SHAMROCK preview legend', warningOnly: false } } });
+  return Object.fromEntries(columns.map((column, index) => {
+    const letter = String.fromCharCode(65 + index), sourceA1 = `${letter}3:${letter}${column.values.length + 2}`;
+    return [column.key, { legendSheetId: id, sourceA1, values: column.values, source: `='${title}'!$${letter}$3:$${letter}$${column.values.length + 2}` }];
+  }));
 }
 function chart(sheetId, dataId, title, type, startRow, endRow, startColumn, endColumn, anchorRow, anchorColumn, axis) {
   const domain = range(dataId, startRow, endRow, startColumn, startColumn + 1);
@@ -96,8 +104,8 @@ function chart(sheetId, dataId, title, type, startRow, endRow, startColumn, endC
  * rules must be applied last. No Apps Script or D1 is attached.
  */
 export function buildFrontendPreview() {
-  const main = { title: 'SHAMROCK — Fictional production preview', sheets: [], requests: [], tables: [], dropdownSeeds: [] };
-  const excusals = { title: 'SHAMROCK Excusals — Fictional production preview', sheets: [], requests: [], tables: [], dropdownSeeds: [] };
+  const main = { title: 'SHAMROCK — Fictional production preview', sheets: [], requests: [], tables: [], dropdownSeeds: [], cellPresentation: [], photoChipTargets: [] };
+  const excusals = { title: 'SHAMROCK Excusals — Fictional production preview', sheets: [], requests: [], tables: [], dropdownSeeds: [], cellPresentation: [], photoChipTargets: [] };
   const ids = { dashboard: 101, leadership: 102, directory: 103, attendance: 104, legend: 105, chartData: 106, blue: 201, gold: 202, excusalLegend: 203 };
   const cadets = Array.from({ length: 16 }, (_, i) => ({ last: `Cadet ${String(i + 1).padStart(2, '0')}`, first: 'Example', year: YEARS[i % 4], flight: FLIGHTS[Math.floor(i / 4)], squadron: i < 8 ? 'Blue' : 'Gold', rank: ['C/4C', 'C/3C', 'C/2d Lt', 'C/Capt'][i % 4] }));
   const marks = cadets.map((_c, i) => ['P', 'P', i % 5 === 0 ? 'E' : 'P', i % 7 === 0 ? 'A' : 'P', i % 4 === 0 ? 'T' : 'P', i % 6 === 0 ? 'MED' : 'P']);
@@ -114,20 +122,65 @@ export function buildFrontendPreview() {
     ['Leader 03', 'Example', 'C/Lt Col', 'Gold Squadron Commander', 'Wing Commander', '', '', '', ''],
     ...FLIGHTS.map((f, i) => [`Leader ${String(i + 4).padStart(2, '0')}`, 'Example', 'C/Capt', `${f} Flight Commander`, `${i < 2 ? 'Blue' : 'Gold'} Squadron Commander`, '', '', '', '']),
   ], [115, 115, 95, 235, 235, 190, 125, 125, 150]);
-  table(main, ids.directory, 'Directory', DIRECTORY, cadets.map((c, i) => [c.last, c.first, c.year, c.flight, c.squadron, c.rank, i % 4 === 3 ? 'Flight Commander' : 'Cadet', 'Notre Dame', '', '', 'Off-Campus', 'Engineering', '', '', '', '', 2030 - i % 4, '', 'Active 3/4', '']), [115, 115, 100, 120, 85, 95, 160, 110, 190, 125, 150, 155, 75, 190, 130, 110, 75, 100, 125, 100]);
+  table(main, ids.directory, 'Directory', DIRECTORY, cadets.map((c, i) => [c.last, c.first, c.year, c.flight, c.squadron, c.rank, i % 4 === 3 ? 'Flight Commander' : 'Cadet', 'Notre Dame', '', '', 'Off-Campus', '14 - Engineering', '', '', '', '', 2030 - i % 4, '', 'Active 3/4', '']), [115, 115, 100, 120, 85, 95, 160, 110, 190, 125, 150, 155, 75, 190, 130, 110, 95, 100, 125, 150]);
   table(main, ids.attendance, 'Attendance', ATTENDANCE, cadets.map((c, i) => [c.last, c.first, c.year, c.flight, c.squadron, '', '', ...marks[i]]), [115, 115, 100, 85, 85, 95, 95, 130, 130, 130, 130, 130, 130]);
   main.requests.push(height(ids.attendance, 1, 2, 56));
   main.requests.push({ repeatCell: { range: range(ids.attendance, 2, 18, 5, 7), cell: { note: 'Presentation preview only. Percentages are intentionally blank until the approved attendance-credit policy is implemented and tested.' }, fields: 'note' } });
   main.requests.push(format(range(ids.attendance, 2, 32, 2, 13), { horizontalAlignment: 'CENTER' }), format(range(ids.attendance, 2, 32, 5, 7), { numberFormat: { type: 'PERCENT', pattern: '0.0%' } }));
-  legend(main, ids.legend, 'Data Legend', [{ key: 'as_year_options', label: 'AS Year', values: YEARS }, { key: 'flight_options', label: 'Flight', values: FLIGHTS }, { key: 'squadron_options', label: 'Squadron', values: ['Blue', 'Gold'] }, { key: 'attendance_code_options', label: 'Attendance Codes', values: CODES, colors: CODE_COLORS }]);
-  for (const [column, source] of [[2, "='Data Legend'!$A$3:$A$6"], [3, "='Data Legend'!$B$3:$B$6"], [4, "='Data Legend'!$C$3:$C$4"]]) main.requests.push(validation(range(ids.directory, 2, 32, column, column + 1), source));
-  main.requests.push(validation(range(ids.attendance, 2, 32, 7, 13), "='Data Legend'!$D$3:$D$12"), ...coloredRules(ids.attendance, 2, 32, 7, 13, CODE_COLORS));
-  main.dropdownSeeds.push(
-    { sheetId: ids.attendance, a1: 'H3:M32', legendSheetId: ids.legend, sourceA1: 'D3:D12', values: CODES, colors: CODE_COLORS, nativeChipColors: ATTENDANCE_CHIP_COLORS },
-    { sheetId: ids.directory, a1: 'C3:C32', legendSheetId: ids.legend, sourceA1: 'A3:A6', values: YEARS, nativeChipColors: YEAR_CHIP_COLORS },
-    { sheetId: ids.directory, a1: 'D3:D32', legendSheetId: ids.legend, sourceA1: 'B3:B6', values: FLIGHTS, nativeChipColors: FLIGHT_CHIP_COLORS },
-    { sheetId: ids.directory, a1: 'E3:E32', legendSheetId: ids.legend, sourceA1: 'C3:C4', values: ['Blue', 'Gold'], nativeChipColors: SQUADRON_CHIP_COLORS },
-  );
+  const sources = legend(main, ids.legend, 'Data Legend', [
+    { key: 'as_year_options', label: 'AS Year', values: YEARS },
+    { key: 'flight_options', label: 'Flight', values: FLIGHTS },
+    { key: 'squadron_options', label: 'Squadron', values: ['Blue', 'Gold'] },
+    { key: 'attendance_code_options', label: 'Attendance Codes', values: CODES },
+    { key: 'cadet_rank_options', label: 'Cadet Rank', values: OPTIONS.CADET_RANKS },
+    { key: 'rank_options', label: 'Rank', values: OPTIONS.RANKS },
+    { key: 'honorific_options', label: 'Honorific', values: OPTIONS.HONORIFICS },
+    { key: 'university_options', label: 'University', values: OPTIONS.UNIVERSITIES },
+    { key: 'dorm_options', label: 'Dorm', values: OPTIONS.DORMS },
+    { key: 'cip_broad_area_options', label: 'CIP Broad Area', values: OPTIONS.CIP_BROAD_AREAS },
+    { key: 'afsc_options', label: 'AFSC', values: OPTIONS.AFSC_OPTIONS },
+    { key: 'home_state_options', label: 'Home State', values: OPTIONS.HOME_STATES },
+    { key: 'flight_path_status_options', label: 'Flight Path', values: OPTIONS.FLIGHT_PATH_STATUSES },
+  ]);
+  // showCustomUi controls the presence of a dropdown, not Chip versus Arrow rendering.
+  // Preserve existing native option styling when refreshing an existing preview.
+  // Creation rules alone cannot reproduce this provider-managed presentation.
+  for (const [field, key, style] of [
+    ['as_year', 'as_year_options', 'chip'], ['flight', 'flight_options', 'arrow'],
+    ['squadron', 'squadron_options', 'arrow'], ['rank', 'cadet_rank_options', 'plain'],
+    ['university', 'university_options', 'plain'], ['dorm', 'dorm_options', 'arrow'],
+    ['cip_broad_area', 'cip_broad_area_options', 'plain'], ['desired_assigned_afsc', 'afsc_options', 'arrow'],
+    ['home_state', 'home_state_options', 'plain'], ['flight_path_status', 'flight_path_status_options', 'arrow'],
+  ]) {
+    const column = DIRECTORY.machine.indexOf(field), source = sources[key];
+    const target = range(ids.directory, 2, 32, column, column + 1);
+    main.requests.push(validation(target, source.source, style !== 'plain'));
+    const contract = { sheetId: ids.directory, field, style, range: target, ...source,
+      ...(['as_year', 'flight', 'squadron'].includes(field) ? { preserveNativeValidation: true } : {}) };
+    main.cellPresentation.push(contract);
+    if (style === 'chip') main.dropdownSeeds.push({ ...contract, a1: 'C3:C32' });
+  }
+  const rankColumn = LEADERSHIP.machine.indexOf('rank');
+  const leadershipRankSource = `='Data Legend'!$E$3:$G$${Math.max(OPTIONS.CADET_RANKS.length, OPTIONS.RANKS.length, OPTIONS.HONORIFICS.length) + 2}`;
+  const leadershipRankTarget = range(ids.leadership, 2, 32, rankColumn, rankColumn + 1);
+  main.requests.push(validation(leadershipRankTarget, leadershipRankSource, false));
+  main.cellPresentation.push({ sheetId: ids.leadership, field: 'rank', style: 'plain', range: leadershipRankTarget, source: leadershipRankSource });
+  main.requests.push(validation(range(ids.attendance, 2, 32, 7, 13), sources.attendance_code_options.source, false));
+  main.cellPresentation.push({ sheetId: ids.attendance, fields: ATTENDANCE.machine.slice(7), style: 'plain', preserveNativeValidation: true, range: range(ids.attendance, 2, 32, 7, 13), ...sources.attendance_code_options });
+  main.requests.push(format(range(ids.attendance, 2, 32, 7, 13), { numberFormat: { type: 'TEXT' }, textFormat: { fontFamily: 'Roboto', fontSize: 10, foregroundColor: rgb(COLORS.text), bold: true } }));
+  // Production has ordinary white/banded cell formats. Native validation option
+  // colors are opaque to the public API, including in Plain and Arrow display.
+  // Preserve them with validated native-seed copying, never invented cell fills.
+  for (const field of ['cip_code', 'class_year']) {
+    const column = DIRECTORY.machine.indexOf(field);
+    main.requests.push(format(range(ids.directory, 2, 32, column, column + 1), { numberFormat: { type: 'TEXT' } }));
+  }
+  const dob = DIRECTORY.machine.indexOf('dob'), photo = DIRECTORY.machine.indexOf('photo_link');
+  main.requests.push(format(range(ids.directory, 2, 32, dob, dob + 1), { numberFormat: { type: 'DATE', pattern: 'M/d/yyyy' } }));
+  const photoTarget = { sheetId: ids.directory, field: 'photo_link', style: 'file-chip', range: range(ids.directory, 2, 18, photo, photo + 1), assetBinding: 'fictional_portrait' };
+  main.photoChipTargets.push(photoTarget);
+  main.cellPresentation.push(photoTarget);
+  main.requests.push({ repeatCell: { range: photoTarget.range, cell: { note: 'Fictional preview: every Photo Link uses the same shared placeholder portrait when its private asset binding is supplied. No actual cadet photograph is used.' }, fields: 'note' } });
   for (const [i, f] of FLIGHTS.entries()) main.requests.push({ addFilterView: { filter: { title: `${f} Flight`, range: range(ids.attendance, 1, 18, 0, 13), criteria: { 3: { hiddenValues: FLIGHTS.filter(x => x !== f) } } } } });
   sheet(main, ids.chartData, 'Dashboard Data', 8, 20, true);
   const presentByFlight = FLIGHTS.map((f, index) => [f, marks.slice(index * 4, index * 4 + 4).flat().filter(x => x === 'P').length]);
@@ -162,9 +215,9 @@ export function buildFrontendPreview() {
   for (const [squadron, id] of [['Blue', ids.blue], ['Gold', ids.gold]]) {
     const data = requests.filter(r => r[0] === squadron).map((r, index) => { const c = cadets[r[1]], date = (Date.UTC(2027, 0, 12 + index, 8, 30) - Date.UTC(1899, 11, 30)) / 86400000; return [date, r[2], r[3], r[4], r[5], '', c.last, c.first, c.flight, `preview-${squadron.toLowerCase()}-${index + 1}`]; });
     table(excusals, id, squadron, EXCUSALS, data, [135, 135, 160, 265, 80, 180, 115, 115, 85, 150]);
-    excusals.requests.push({ updateDimensionProperties: { range: { sheetId: id, dimension: 'COLUMNS', startIndex: 9, endIndex: 10 }, properties: { hiddenByUser: true }, fields: 'hiddenByUser' } }, format(range(id, 2, 32, 0, 1), { numberFormat: { type: 'DATE_TIME', pattern: 'm/d/yy h:mm' } }), format(range(id, 2, 32, 3, 4), { wrapStrategy: 'WRAP' }), validation(range(id, 2, 32, 1, 2), "='_Excusals Data Legend'!$A$3:$A$6"), ...coloredRules(id, 2, 32, 1, 2, DECISION_COLORS));
+    excusals.requests.push({ updateDimensionProperties: { range: { sheetId: id, dimension: 'COLUMNS', startIndex: 9, endIndex: 10 }, properties: { hiddenByUser: true }, fields: 'hiddenByUser' } }, format(range(id, 2, 32, 0, 1), { numberFormat: { type: 'DATE_TIME', pattern: 'm/d/yy h:mm' } }), format(range(id, 2, 32, 3, 4), { wrapStrategy: 'WRAP' }), validation(range(id, 2, 32, 1, 2), "='_Excusals Data Legend'!$A$3:$A$6", true), ...coloredRules(id, 2, 32, 1, 2, DECISION_COLORS));
     excusals.requests.push({ addFilterView: { filter: { title: 'Awaiting decision', range: range(id, 1, 6, 0, 10), criteria: { 1: { hiddenValues: DECISIONS } } } } });
-    excusals.dropdownSeeds.push({ sheetId: id, a1: 'B3:B32', legendSheetId: ids.excusalLegend, sourceA1: 'A3:A6', values: DECISIONS, colors: DECISION_COLORS, nativeChipColors: DECISION_CHIP_COLORS });
+    excusals.cellPresentation.push({ sheetId: id, field: 'decision', style: 'arrow', preserveNativeValidation: true, range: range(id, 2, 32, 1, 2), legendSheetId: ids.excusalLegend, sourceA1: 'A3:A6', source: "='_Excusals Data Legend'!$A$3:$A$6", values: DECISIONS, colors: DECISION_COLORS });
   }
   excusals.sheets.sort((a, b) => a.sheetId - b.sheetId);
   for (const book of [main, excusals]) {
