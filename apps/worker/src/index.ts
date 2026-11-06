@@ -1,4 +1,5 @@
 import { prepareCloseout, advanceCloseout, closeoutStatus } from './closeout.js';
+import { listLegacyHistory, readLegacyHistory } from './legacy-history.js';
 import { recoverAdminEffect } from './effect-recovery.js';
 import { transitionCommand, transitionStatus, transitionArchive } from './transitions.js';
 import { planNotifications, notificationStatus, processNotificationTask, notificationDelivery } from './notifications.js';
@@ -452,6 +453,8 @@ export default {
         return json(await acceptAdminCommand(env, input));
       }
       if (url.pathname === '/v1/admin/directory/review-authorize' && !url.search) return json(await authorizeDirectoryReview(env, input));
+      if (url.pathname === '/v1/admin/history/list' && !url.search) return json(await listLegacyHistory(env, input));
+      if (url.pathname === '/v1/admin/history/read' && !url.search) return json(await readLegacyHistory(env, input));
       if (url.pathname === '/v1/admin/snapshot' && !url.search) return json(await frontendSnapshot(env, input));
       if (url.pathname === '/v1/admin/effects/recover' && !url.search) return json(await recoverAdminEffect(env, input));
       for (const action of ['claim', 'project', 'ack'] as const) {
