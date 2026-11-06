@@ -232,6 +232,31 @@ export function readFrontendValidationRanges(expectations: readonly FrontendVali
   return result;
 }
 
+/** Read only existing physical columns; the planner receives a padded canvas for future growth. */
+export function readFrontendDashboardValues(input: {
+  canvas: { sheetId: number; title: string; rowCount: number; columnCount: number };
+  data: { sheetId: number; title: string; rowCount: number; columnCount: number };
+}, read: (ranges: string[]) => { sheets?: Record<string, any>[] }): Pick<DashboardPublicationRead, 'canvas' | 'data'> {
+  const specs = [{ key: 'canvas' as const, binding: input.canvas, width: 12, maxRows: 602 },
+    { key: 'data' as const, binding: input.data, width: 16, maxRows: 1002 }];
+  const ranges = specs.map(({ binding: b, width, maxRows }) => {
+    if (!natural(b.sheetId) || !natural(b.rowCount) || b.rowCount < 1 || b.rowCount > maxRows
+      || !natural(b.columnCount) || b.columnCount < 1 || b.columnCount > width
+      || typeof b.title !== 'string' || !b.title || b.title.length > 100) fail('frontend_dashboard', 'Dashboard read bounds differ from the physical grid.');
+    return `'${b.title.replace(/'/g, "''")}'!A1:${String.fromCharCode(64 + b.columnCount)}${b.rowCount}`;
+  });
+  const response = read(ranges);
+  const cells = specs.map(({ binding: b, width }) => {
+    const sheets = response.sheets?.filter(s => s.properties?.sheetId === b.sheetId);
+    const blocks = sheets?.length === 1 ? sheets[0].data : undefined;
+    if (!Array.isArray(blocks) || blocks.length !== 1 || (blocks[0].startRow ?? 0) !== 0 || (blocks[0].startColumn ?? 0) !== 0)
+      fail('frontend_dashboard', 'Dashboard read-back has invalid bounds.');
+    return Array.from({ length: b.rowCount }, (_, r) => Array.from({ length: width }, (_, c) =>
+      c < b.columnCount ? blocks[0].rowData?.[r]?.values?.[c] ?? {} : {}));
+  });
+  return { canvas: cells[0], data: cells[1] };
+}
+
 /** Narrow growth-layout allowlist: no values, colors, validation or unrelated tabs. */
 export function assertNativeAttendanceLayoutRequest(request: Record<string, any>, attendanceSheetId: number): void {
   const entries = Object.entries(request);
@@ -243,9 +268,9 @@ export function assertNativeAttendanceLayoutRequest(request: Record<string, any>
       || !natural(r.startIndex) || !natural(r.endIndex) || r.endIndex <= r.startIndex) fail('frontend_request', 'Attendance size update is invalid.');
     const pixels = body.properties.pixelSize;
     const allowed = r.dimension === 'ROWS'
-      ? (r.startIndex === 1 && r.endIndex === 2 && natural(pixels) && pixels >= 40 && pixels <= 76)
-        || (r.startIndex >= 2 && r.endIndex <= 502 && pixels === 23)
-      : r.dimension === 'COLUMNS' && r.endIndex <= 160 && r.endIndex === r.startIndex + 1 && [60, 75, 80, 85, 90, 95, 100, 110].includes(pixels);
+      ? (r.startIndex === 1 && r.endIndex === 2 && (pixels === 21 || natural(pixels) && pixels >= 40 && pixels <= 76))
+        || (r.startIndex >= 2 && r.endIndex <= 502 && [21, 23].includes(pixels))
+      : r.dimension === 'COLUMNS' && r.endIndex <= 160 && r.endIndex === r.startIndex + 1 && [60, 75, 80, 85, 90, 95, 100, 110, 115].includes(pixels);
     if (!allowed) fail('frontend_request', 'Attendance dimension size exceeds the approved compact layout.');
     return;
   }
@@ -257,8 +282,8 @@ export function assertNativeAttendanceLayoutRequest(request: Record<string, any>
   const style = body.cell.userEnteredFormat, font = style.textFormat;
   if (Object.keys(style).some(key => !['textFormat', 'verticalAlignment', 'wrapStrategy', 'horizontalAlignment', 'numberFormat'].includes(key))
     || (font && (Object.keys(font).some(key => !['fontFamily', 'fontSize', 'bold'].includes(key)) || (font.fontFamily !== undefined && font.fontFamily !== 'Roboto')
-      || (font.fontSize !== undefined && ![7, 8, 9].includes(font.fontSize)) || (font.bold !== undefined && font.bold !== true)))
-    || (style.verticalAlignment !== undefined && style.verticalAlignment !== 'MIDDLE') || (style.horizontalAlignment !== undefined && style.horizontalAlignment !== 'CENTER')
+      || (font.fontSize !== undefined && ![5, 7, 8, 9, 10].includes(font.fontSize)) || (font.bold !== undefined && typeof font.bold !== 'boolean')))
+    || (style.verticalAlignment !== undefined && style.verticalAlignment !== 'MIDDLE') || (style.horizontalAlignment !== undefined && !['LEFT', 'CENTER'].includes(style.horizontalAlignment))
     || (style.wrapStrategy !== undefined && !['WRAP', 'CLIP'].includes(style.wrapStrategy))
     || (style.numberFormat && !equal(style.numberFormat, { type: 'TEXT' }) && !equal(style.numberFormat, { type: 'PERCENT', pattern: '0.0%' }))) fail('frontend_request', 'Attendance formatting differs from the compact native layout.');
 }
@@ -577,13 +602,10 @@ export function createNativeFrontendRuntime(services: NativeFrontendServices,
       const canvas = metadata.sheets?.find((s: any) => s.properties?.sheetId === bound.sheetId), data = metadata.sheets?.find((s: any) => s.properties?.sheetId === bound.dataSheetId);
       if (!canvas || !data || canvas.tables?.length || data.tables?.length || canvas.properties.gridProperties.columnCount !== 12
         || canvas.properties.gridProperties.rowCount > 602 || data.properties.gridProperties.rowCount > 1002 || data.properties.gridProperties.columnCount > 16) fail('frontend_dashboard', 'Dashboard managed bounds differ from the reviewed canvas.');
-      const rows = [canvas.properties.gridProperties.rowCount, data.properties.gridProperties.rowCount];
-      const result = api(`${sheetsUrl(config.main.spreadsheetId)}?ranges=${encodeURIComponent(`${quoted(canvas.properties.title)}!A1:L${rows[0]}`)}&ranges=${encodeURIComponent(`${quoted(data.properties.title)}!A1:P${rows[1]}`)}&includeGridData=true&fields=${encodeURIComponent('sheets(properties(sheetId),data(startRow,startColumn,rowData(values(userEnteredValue))))')}`);
-      const readCells = (sheetId: number, height: number, width: number) => {
-        const block = result.sheets?.find((s: any) => s.properties?.sheetId === sheetId)?.data?.[0];
-        if (!block || (block.startRow ?? 0) !== 0 || (block.startColumn ?? 0) !== 0) fail('frontend_dashboard', 'Dashboard read-back has invalid bounds.');
-        return Array.from({ length: height }, (_, r) => Array.from({ length: width }, (_, c) => block.rowData?.[r]?.values?.[c] ?? {}));
-      };
+      const cells = readFrontendDashboardValues({
+        canvas: { sheetId: bound.sheetId, title: canvas.properties.title, ...canvas.properties.gridProperties },
+        data: { sheetId: bound.dataSheetId, title: data.properties.title, ...data.properties.gridProperties },
+      }, ranges => api(`${sheetsUrl(config.main.spreadsheetId)}?${ranges.map(r => `ranges=${encodeURIComponent(r)}`).join('&')}&includeGridData=true&fields=${encodeURIComponent('sheets(properties(sheetId),data(startRow,startColumn,rowData(values(userEnteredValue))))')}`));
       const grid = (s: any) => ({ rowCount: s.properties.gridProperties.rowCount, columnCount: s.properties.gridProperties.columnCount });
       const ranges = (value: any): any => {
         if (Array.isArray(value)) return value.map(ranges);
@@ -592,7 +614,7 @@ export function createNativeFrontendRuntime(services: NativeFrontendServices,
         return natural(result.sheetId) && natural(result.endRowIndex) && natural(result.endColumnIndex)
           ? { ...result, startRowIndex: result.startRowIndex ?? 0, startColumnIndex: result.startColumnIndex ?? 0 } : result;
       };
-      dashboardCache = { sheetId: bound.sheetId, dataSheetId: bound.dataSheetId, canvas: readCells(bound.sheetId, rows[0], 12), data: readCells(bound.dataSheetId, rows[1], 16),
+      dashboardCache = { sheetId: bound.sheetId, dataSheetId: bound.dataSheetId, ...cells,
         canvasGrid: grid(canvas), dataGrid: grid(data), dataHidden: data.properties.hidden === true, merges: ranges(canvas.merges ?? []), charts: ranges(canvas.charts ?? []) };
       return dashboardCache;
     }

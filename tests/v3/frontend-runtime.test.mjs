@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash, createHmac } from 'node:crypto';
-import { consumeFrontendRefresh, buildSignedFrontendRequest, createNativeFrontendRuntime, buildCoherentFrontendModel, frontendRowLocks, readFrontendValidationRanges, assertNativeAttendanceLayoutRequest } from '../../.build/v3/apps/google-adapter/src/frontend-runtime.js';
+import { consumeFrontendRefresh, buildSignedFrontendRequest, createNativeFrontendRuntime, buildCoherentFrontendModel, frontendRowLocks, readFrontendValidationRanges, readFrontendDashboardValues, assertNativeAttendanceLayoutRequest } from '../../.build/v3/apps/google-adapter/src/frontend-runtime.js';
 import { frontendLiteralCell, planFrontendPublication } from '../../.build/v3/apps/google-adapter/src/frontend-publication.js';
 import { dashboardReadFingerprint } from '../../.build/v3/apps/google-adapter/src/frontend-supplemental.js';
 import { buildAttendanceGrowthLayout } from '../../.build/v3/apps/google-adapter/src/frontend-layout.js';
@@ -342,4 +342,56 @@ test('native content allowlist accepts compact Attendance growth and rejects oth
   assert.throws(() => assertNativeAttendanceLayoutRequest(format, 100));
   const size = copy(requests.find(r => r.updateDimensionProperties)); size.updateDimensionProperties.properties.pixelSize = 500;
   assert.throws(() => assertNativeAttendanceLayoutRequest(size, 100));
+});
+
+test('native Attendance growth accepts exact production geometry and keeps rejected sizes and styles bounded', () => {
+  const headers = ['last_name', 'first_name', 'as_year', 'flight', 'squadron', 'overall_attendance_pct', 'event:new'];
+  const requests = buildAttendanceGrowthLayout({ sheetId: 100, headers, labels: headers, eventHeaders: ['event:new'], dataEndRow: 20 }, [], 2);
+  for (const request of requests) assert.doesNotThrow(() => assertNativeAttendanceLayoutRequest(request, 100));
+  const formats = requests.filter(r => r.repeatCell).map(r => r.repeatCell.cell.userEnteredFormat);
+  assert.deepEqual([...new Set(formats.flatMap(f => f.textFormat?.fontSize ?? []))].sort((a, b) => a - b), [5, 10]);
+  assert(formats.some(f => f.textFormat?.bold === false && f.horizontalAlignment === 'LEFT'));
+  assert(formats.some(f => f.textFormat?.bold === true && f.horizontalAlignment === 'CENTER'));
+  assert.deepEqual([...new Set(requests.filter(r => r.updateDimensionProperties?.range.dimension === 'COLUMNS').map(r => r.updateDimensionProperties.properties.pixelSize))].sort((a, b) => a - b), [75, 100, 115]);
+  const row = copy(requests.find(r => r.updateDimensionProperties?.range.dimension === 'ROWS'));
+  assert.equal(row.updateDimensionProperties.properties.pixelSize, 21);
+  const header = copy(row); header.updateDimensionProperties.range.startIndex = 1; header.updateDimensionProperties.range.endIndex = 2;
+  assert.doesNotThrow(() => assertNativeAttendanceLayoutRequest(header, 100));
+  for (const pixels of [20, 22, 24, 500]) {
+    const invalid = copy(row); invalid.updateDimensionProperties.properties.pixelSize = pixels;
+    assert.throws(() => assertNativeAttendanceLayoutRequest(invalid, 100), e => e.code === 'frontend_request');
+  }
+  const format = requests.find(r => r.repeatCell?.cell.userEnteredFormat.textFormat?.fontSize === 5);
+  for (const [field, value] of [['fontSize', 6], ['fontSize', 11], ['bold', 'false']]) {
+    const invalid = copy(format); invalid.repeatCell.cell.userEnteredFormat.textFormat[field] = value;
+    assert.throws(() => assertNativeAttendanceLayoutRequest(invalid, 100), e => e.code === 'frontend_request');
+  }
+  const invalidAlignment = copy(format); invalidAlignment.repeatCell.cell.userEnteredFormat.horizontalAlignment = 'RIGHT';
+  assert.throws(() => assertNativeAttendanceLayoutRequest(invalidAlignment, 100), e => e.code === 'frontend_request');
+  for (const pixels of [74, 76, 114, 116]) {
+    const invalid = copy(requests.find(r => r.updateDimensionProperties?.range.dimension === 'COLUMNS'));
+    invalid.updateDimensionProperties.properties.pixelSize = pixels;
+    assert.throws(() => assertNativeAttendanceLayoutRequest(invalid, 100), e => e.code === 'frontend_request');
+  }
+});
+
+test('native Dashboard reads a narrow physical data grid before padding planned growth locally', () => {
+  const input = { canvas: { sheetId: 101, title: 'Dashboard', rowCount: 72, columnCount: 12 },
+    data: { sheetId: 106, title: "Dashboard's Data", rowCount: 20, columnCount: 8 } };
+  let calls = 0;
+  const read = ranges => {
+    calls++;
+    // This provider rejects reads outside its existing eight columns.
+    assert.deepEqual(ranges, ["'Dashboard'!A1:L72", "'Dashboard''s Data'!A1:H20"]);
+    return { sheets: [{ properties: { sheetId: 101 }, data: [{ rowData: [{ values: [{ userEnteredValue: { stringValue: 'Title' } }] }] }] },
+      { properties: { sheetId: 106 }, data: [{ rowData: [{ values: Array.from({ length: 8 }, (_, n) => ({ userEnteredValue: { numberValue: n } })) }] }] }] };
+  };
+  const result = readFrontendDashboardValues(input, read);
+  assert.equal(calls, 1); assert.equal(result.canvas.length, 72); assert.equal(result.canvas[0].length, 12);
+  assert.equal(result.data.length, 20); assert.equal(result.data[0].length, 16);
+  assert.equal(result.data[0][7].userEnteredValue.numberValue, 7);
+  assert.deepEqual(result.data[0].slice(8), Array.from({ length: 8 }, () => ({})));
+  assert.deepEqual(result.data[19], Array.from({ length: 16 }, () => ({})));
+  assert.throws(() => readFrontendDashboardValues({ ...input, data: { ...input.data, columnCount: 17 } }, read), e => e.code === 'frontend_dashboard');
+  assert.equal(calls, 1);
 });
