@@ -129,3 +129,35 @@ test('Dashboard refuses stale snapshots, an unfenced refresh or a mismatched nat
     const input = dashboardInput(); mutate(input); assert.throws(() => planDashboardPublication(input));
   }
 });
+
+test('native chart readback accepts only provider font/color representations, with strict data and axis checks', () => {
+  const plan = planDashboardPublication(dashboardInput());
+  const actual = structuredClone(plan.expectedAfter);
+  const encoded = color => Object.fromEntries(Object.entries(color).map(([k, v]) => [k, Math.fround(Math.floor(v * 255 + 0.00001) / 255)]));
+  for (const chart of actual.charts) {
+    const spec = chart.spec;
+    delete spec.backgroundColor; // Sheets omits the default white background.
+    spec.titleTextFormat.fontFamily = spec.fontName;
+    spec.titleTextFormat.foregroundColor = encoded(spec.titleTextFormat.foregroundColor);
+    spec.titleTextFormat.foregroundColorStyle = { rgbColor: structuredClone(spec.titleTextFormat.foregroundColor) };
+    for (const axis of spec.basicChart.axis) { axis.format = { fontFamily: spec.fontName }; axis.viewWindowOptions ??= {}; }
+    for (const series of spec.basicChart.series) {
+      series.colorStyle.rgbColor = encoded(series.colorStyle.rgbColor);
+      series.color = structuredClone(series.colorStyle.rgbColor);
+    }
+  }
+  assert.equal(verifyDashboardPublicationReadback(plan, actual), true);
+  for (const mutate of [
+    x => x.charts[0].spec.basicChart.axis[1].viewWindowOptions.viewWindowMax = 99,
+    x => x.charts[0].spec.basicChart.axis[0].format.fontFamily = 'Arial',
+    x => x.charts[0].spec.basicChart.series[0].series.sourceRange.sources[0].endRowIndex++,
+    x => x.charts[0].spec.basicChart.series[0].color.red = 0.9,
+    x => x.charts[0].spec.backgroundColor = { red: 0, green: 0, blue: 0 },
+    x => x.charts[0].spec.hiddenDimensionStrategy = 'SKIP_HIDDEN_ROWS_AND_COLUMNS',
+  ]) {
+    const changed = structuredClone(actual); mutate(changed);
+    assert.equal(verifyDashboardPublicationReadback(plan, changed), false);
+  }
+  const next = dashboardInput(); next.current = actual;
+  assert.equal(planDashboardPublication(next).requests.some(r => r.updateChartSpec), false);
+});

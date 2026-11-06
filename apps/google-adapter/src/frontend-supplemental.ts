@@ -10,6 +10,47 @@ import { frontendLiteralCell, planFrontendPublication, type FrontendPublicationI
 const canonical = (value: unknown): string => JSON.stringify(value, (_key, v) => v && typeof v === 'object' && !Array.isArray(v) ? Object.fromEntries(Object.keys(v).sort().map(k => [k, v[k]])) : v);
 const same = (a: unknown, b: unknown) => canonical(a) === canonical(b);
 const copy = <T>(x: T): T => JSON.parse(JSON.stringify(x)) as T;
+/** Sheets returns inherited fonts, deprecated color aliases and byte-encoded RGB.
+ * Normalize only those representations; data ranges, axes and every other field
+ * still require equality. Do not use a general subset or fuzzy chart comparison. */
+export function equivalentDashboardChart(a: Record<string, any>, b: Record<string, any>): boolean {
+  const normalize = (source: Record<string, any>) => {
+    const spec = copy(source);
+    const color = (c: Record<string, number>) => {
+      if (!c || Object.keys(c).some(k => !['red', 'green', 'blue', 'alpha'].includes(k))) throw Error('Invalid chart color.');
+      const result: Record<string, number> = {};
+      for (const k of ['red', 'green', 'blue', 'alpha']) {
+        const v = c[k] ?? (k === 'alpha' ? 1 : 0);
+        if (!Number.isFinite(v) || v < 0 || v > 1) throw Error('Invalid chart color.');
+        // Historical float palette inputs were truncated by the live provider.
+        // New planners supply exact byte colors; epsilon covers float32 output.
+        result[k] = Math.floor(v * 255 + 0.00001);
+      }
+      return result;
+    };
+    const aliases = (object: Record<string, any>, name: string, defaultColor?: Record<string, number>) => {
+      const styleName = `${name}Style`, style = object[styleName];
+      const old = object[name] === undefined ? undefined : color(object[name]);
+      const modern = style?.rgbColor ? { ...style, rgbColor: color(style.rgbColor) } : style;
+      if (old && modern && !same(modern, { rgbColor: old })) throw Error('Conflicting chart color aliases.');
+      object[styleName] = modern ?? (old ? { rgbColor: old } : defaultColor ? { rgbColor: color(defaultColor) } : undefined);
+      delete object[name];
+    };
+    aliases(spec, 'backgroundColor', { red: 1, green: 1, blue: 1 });
+    if (spec.titleTextFormat) {
+      spec.titleTextFormat.fontFamily ??= spec.fontName;
+      aliases(spec.titleTextFormat, 'foregroundColor');
+    }
+    for (const axis of spec.basicChart?.axis ?? []) {
+      axis.format ??= {};
+      axis.format.fontFamily ??= spec.fontName;
+      axis.viewWindowOptions ??= {};
+    }
+    for (const series of spec.basicChart?.series ?? []) aliases(series, 'color');
+    return spec;
+  };
+  try { return same(normalize(a), normalize(b)); } catch { return false; }
+}
 function fail(message: string): never { throw new AdapterError('frontend_supplemental', message); }
 const integer = (x: unknown, min = 0, max = 2147483647) => typeof x === 'number' && Number.isSafeInteger(x) && x >= min && x <= max;
 type Range = { sheetId: number; startRowIndex: number; endRowIndex: number; startColumnIndex: number; endColumnIndex: number };
@@ -198,10 +239,10 @@ export function planDashboardPublication(input: {
     if (i < 3) spec.basicChart.axis[1] = { position: 'LEFT_AXIS', title: 'Attendance', viewWindowOptions: { viewWindowMin: 0, viewWindowMax: 1 } };
     if (i === 0 && comparisons.length > 1) {
       const base = spec.basicChart.series[0]; spec.basicChart.legendPosition = 'BOTTOM_LEGEND';
-      spec.basicChart.series = comparisons.map((_t, j) => ({ ...copy(base), colorStyle: { rgbColor: [{ red: 0.17, green: 0.43, blue: 0.33 }, { red: 0.25, green: 0.48, blue: 0.7 }, { red: 0.72, green: 0.55, blue: 0.17 }][j] }, series: { sourceRange: { sources: [range(current.dataSheetId, 0, definitions[i].sourceEndRow, j + 1, j + 2)] } } }));
+      spec.basicChart.series = comparisons.map((_t, j) => ({ ...copy(base), colorStyle: { rgbColor: [{ red: 43 / 255, green: 110 / 255, blue: 85 / 255 }, { red: 64 / 255, green: 122 / 255, blue: 179 / 255 }, { red: 184 / 255, green: 140 / 255, blue: 43 / 255 }][j] }, series: { sourceRange: { sources: [range(current.dataSheetId, 0, definitions[i].sourceEndRow, j + 1, j + 2)] } } }));
     }
     const chart = expected.charts.find(c => c.chartId === input.chartIds[i])!;
-    if (!same(chart.spec, spec)) requests.push({ updateChartSpec: { chartId: chart.chartId, spec } }); chart.spec = spec;
+    if (!equivalentDashboardChart(chart.spec, spec)) requests.push({ updateChartSpec: { chartId: chart.chartId, spec } }); chart.spec = spec;
   });
   requests.push({ repeatCell: { range: range(current.sheetId, 49, expected.canvas.length, 0, 5), cell: { userEnteredFormat: { textFormat: { fontFamily: 'Roboto', fontSize: 10 }, wrapStrategy: 'WRAP', verticalAlignment: 'MIDDLE' } }, fields: 'userEnteredFormat.textFormat.fontFamily,userEnteredFormat.textFormat.fontSize,userEnteredFormat.wrapStrategy,userEnteredFormat.verticalAlignment' } },
     { repeatCell: { range: range(current.sheetId, 49, 51, 0, 5), cell: { userEnteredFormat: { textFormat: { bold: true } } }, fields: 'userEnteredFormat.textFormat.bold' } },
@@ -219,6 +260,6 @@ export function verifyDashboardPublicationReadback(plan: DashboardPublicationPla
   if (actual.sheetId !== expected.sheetId || actual.dataSheetId !== expected.dataSheetId || !actual.dataHidden || actual.canvas.length !== expected.canvas.length || actual.data.length !== expected.data.length || actual.charts.length !== expected.charts.length || !same(actual.canvasGrid, expected.canvasGrid) || !same(actual.dataGrid, expected.dataGrid)) return false;
   const merged = (ranges: Range[]) => ranges.map(canonical).sort();
   if (!same(merged(actual.merges), merged(expected.merges))) return false;
-  if (expected.charts.some(c => !actual.charts.some(a => a.chartId === c.chartId && same(a.spec, c.spec)))) return false;
+  if (expected.charts.some(c => !actual.charts.some(a => a.chartId === c.chartId && equivalentDashboardChart(a.spec, c.spec)))) return false;
   return (['canvas', 'data'] as const).every(key => actual[key].every((row, r) => row.length === expected[key][r].length && row.every((c, i) => same(entered(c), entered(expected[key][r][i])))));
 }
