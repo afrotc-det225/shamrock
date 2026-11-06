@@ -184,3 +184,13 @@ sharing, ambiguous writes, literal grid read-back, native Tables, resumable
 verification, formula injection and revision drift. Live OAuth, Google Table
 creation/rendering, permissions, recovery and real-data historical reporting
 still require a separately reviewed staging rehearsal before parity is claimed.
+
+
+Native archive date and percentage columns retain explicit date/percentage number
+formats after Table creation. Private checkpoint persistence compares canonical
+JSON content before writing and reads back the uploaded content plus fresh
+owner/ACL metadata afterward. A delayed metadata-only Drive version increase is
+not treated as a conflicting content edit. Changed content still fails before
+overwrite. These are content/concurrency checks under the host's ScriptLock,
+not a claim that Drive offers atomic version compare-and-swap. The archive's
+separate multi-chunk verification still stops on provider revision drift.

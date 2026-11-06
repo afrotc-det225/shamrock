@@ -61,13 +61,18 @@ interface ArchiveState {
     archive?: NonNullable<ReturnType<TransitionArchivePorts['state']['load']>>;
 }
 const clone = <T>(value: T): T => JSON.parse(JSON.stringify(value));
+const canonical = (value: unknown): string => JSON.stringify(value, (_key, item) => item && typeof item === 'object' && !Array.isArray(item) ? Object.fromEntries(Object.keys(item).sort().map(key => [key, item[key]])) : item);
 function fail(code: string, message: string): never { throw new AdapterError(code, message); }
 const bytes = (value: string) => encodeURIComponent(value).replace(/%[A-F0-9]{2}/g, 'x').length;
-const column = (index: number): string => { let n = index + 1, value = ''; while (n) {
-    n--;
-    value = String.fromCharCode(65 + n % 26) + value;
-    n = Math.floor(n / 26);
-} return value; };
+const column = (index: number): string => {
+    let n = index + 1, value = '';
+    while (n) {
+        n--;
+        value = String.fromCharCode(65 + n % 26) + value;
+        n = Math.floor(n / 26);
+    }
+    return value;
+};
 const quoted = (name: string) => `'${name.replace(/'/g, "''")}'`;
 /** Freeze values from D1, never from a possibly lagging live sheet. */
 export function nativeArchiveTables(claim: TransitionArchiveClaim, sha: (value: string) => string): ArchiveTable[] {
@@ -185,11 +190,21 @@ export function createNativeMaintenanceRuntime(services: NativeMaintenanceServic
         return { host, config, api };
     }
     function enabled() { return properties.getProperty(MAINTENANCE_PROPERTIES.paused) === 'false'; }
-    function pause() { properties.setProperty(MAINTENANCE_PROPERTIES.paused, 'true'); if (enabled())
-        fail('maintenance_pause', 'Maintenance pause was not saved.'); return { status: 'paused' }; }
-    function resume() { const c = configuration(); if (!c?.config.enabled)
-        fail('maintenance_config', 'Explicitly configure reviewed maintenance resources before enabling them.'); properties.setProperty(MAINTENANCE_PROPERTIES.paused, 'false'); if (!enabled())
-        fail('maintenance_pause', 'Maintenance enablement was not saved.'); return { status: 'enabled', mail: 'suppressed' }; }
+    function pause() {
+        properties.setProperty(MAINTENANCE_PROPERTIES.paused, 'true');
+        if (enabled())
+            fail('maintenance_pause', 'Maintenance pause was not saved.');
+        return { status: 'paused' };
+    }
+    function resume() {
+        const c = configuration();
+        if (!c?.config.enabled)
+            fail('maintenance_config', 'Explicitly configure reviewed maintenance resources before enabling them.');
+        properties.setProperty(MAINTENANCE_PROPERTIES.paused, 'false');
+        if (!enabled())
+            fail('maintenance_pause', 'Maintenance enablement was not saved.');
+        return { status: 'enabled', mail: 'suppressed' };
+    }
     function planNotifications() {
         if (!enabled())
             return { status: 'paused' };
@@ -200,8 +215,8 @@ export function createNativeMaintenanceRuntime(services: NativeMaintenanceServic
         if (!lock.tryLock(1000))
             return { status: 'busy' };
         try {
-            const source = {kind: 'sheet' as const, resourceKey: c.config.sourceResource};
-            const closeout = c.config.closeoutEnabled ? advanceSundayCloseout(c.api, source) : {state:'disabled'};
+            const source = { kind: 'sheet' as const, resourceKey: c.config.sourceResource };
+            const closeout = c.config.closeoutEnabled ? advanceSundayCloseout(c.api, source) : { state: 'disabled' };
             return { status: 'suppressed', closeout, ...planNotificationWork(c.api, source, true, c.config.closeoutEnabled) };
         }
         finally {
@@ -215,29 +230,41 @@ export function createNativeMaintenanceRuntime(services: NativeMaintenanceServic
         if (!candidate?.config.enabled)
             return { state: 'disabled' };
         const c = candidate;
-        let state: ArchiveState | undefined, version: string | undefined;
+        let state: ArchiveState | undefined, stateFingerprint: string | undefined;
         const metadata = () => google(`${sheets(c.config.archiveSpreadsheetId)}?fields=spreadsheetId,sheets(properties,protectedRanges,tables)`);
         function readState() {
             const before = inspect(c.config.stateFileId, c.host.expectedAutomationEmail);
             const value = google(`${drive(c.config.stateFileId)}?alt=media`) as ArchiveState;
+            const fingerprint = c.api.signer.sha256(canonical(value));
             const after = inspect(c.config.stateFileId, c.host.expectedAutomationEmail);
-            if (String(before.version) !== String(after.version) || value.version !== 1 || value.environment !== 'staging' || value.generation !== c.host.generation)
-                fail('maintenance_state', 'The private maintenance checkpoint changed or is invalid.');
-            version = String(after.version);
+            if (value.version !== 1 || value.environment !== 'staging' || value.generation !== c.host.generation)
+                fail('maintenance_state', 'The private maintenance checkpoint is invalid.');
+            // Drive can advance metadata versions after a successful content upload.
+            // Version drift triggers a content reread rather than proving another writer.
+            if (String(before.version) !== String(after.version)
+                && c.api.signer.sha256(canonical(google(`${drive(c.config.stateFileId)}?alt=media`))) !== fingerprint)
+                fail('maintenance_state', 'The private maintenance checkpoint changed during its read.');
+            stateFingerprint = fingerprint;
             state = value;
             return state;
         }
         function saveState(value: ArchiveState) {
-            const info = inspect(c.config.stateFileId, c.host.expectedAutomationEmail);
-            if (!version || String(info.version) !== version || bytes(JSON.stringify(value)) > 2000000)
-                fail('maintenance_state', 'The private maintenance checkpoint changed or exceeds its bound.');
+            inspect(c.config.stateFileId, c.host.expectedAutomationEmail);
+            const prior = google(`${drive(c.config.stateFileId)}?alt=media`);
+            if (!stateFingerprint || c.api.signer.sha256(canonical(prior)) !== stateFingerprint || bytes(JSON.stringify(value)) > 2000000)
+                fail('maintenance_state', 'The private maintenance checkpoint content changed or exceeds its bound.');
             const result = google(`https://www.googleapis.com/upload/drive/v3/files/${encodeURIComponent(c.config.stateFileId)}?uploadType=media&fields=id,version`, 'patch', value);
             if (result.id !== c.config.stateFileId || !/^[1-9][0-9]*$/.test(String(result.version)))
                 fail('maintenance_state', 'Checkpoint persistence was not confirmed.');
+            const expected = c.api.signer.sha256(canonical(value));
             const reread = google(`${drive(c.config.stateFileId)}?alt=media`);
-            if (c.api.signer.sha256(JSON.stringify(reread)) !== c.api.signer.sha256(JSON.stringify(value)))
+            if (c.api.signer.sha256(canonical(reread)) !== expected)
                 fail('maintenance_state', 'Checkpoint read-back differs.');
-            version = String(result.version);
+            // Recheck complete sharing and current provider metadata after upload.
+            // ScriptLock serializes this host; the content guard also detects an
+            // external writer. Drive does not offer an atomic version CAS here.
+            inspect(c.config.stateFileId, c.host.expectedAutomationEmail);
+            stateFingerprint = expected;
             state = clone(value);
         }
         function protect(sheet: any) {
@@ -282,8 +309,17 @@ export function createNativeMaintenanceRuntime(services: NativeMaintenanceServic
                     if (end < table.rows.length)
                         return { done: false, continuation: JSON.stringify({ table: cursor.table, row: end }) };
                     const observed = metadata().sheets.find((s: any) => s.properties.sheetId === table.sheetId);
+                    const finish: Record<string, unknown>[] = [];
                     if (!observed.tables?.length)
-                        google(`${sheets(c.config.archiveSpreadsheetId)}:batchUpdate`, 'post', { requests: [{ addTable: { table: { name: table.tableName, range: { sheetId: table.sheetId, startRowIndex: 1, endRowIndex: table.rows.length, startColumnIndex: 0, endColumnIndex: table.rows[0].length } } } }] });
+                        finish.push({ addTable: { table: { name: table.tableName, range: { sheetId: table.sheetId, startRowIndex: 1, endRowIndex: table.rows.length, startColumnIndex: 0, endColumnIndex: table.rows[0].length } } } });
+                    table.rows[0].forEach((header, index) => {
+                        const numberFormat = header === 'dob' ? { type: 'DATE', pattern: 'mm/dd/yyyy' }
+                            : ['overall_attendance_pct', 'llab_attendance_pct'].includes(String(header)) ? { type: 'PERCENT', pattern: '0.0%' } : null;
+                        if (numberFormat)
+                            finish.push({ repeatCell: { range: { sheetId: table.sheetId, startRowIndex: 2, endRowIndex: table.rows.length, startColumnIndex: index, endColumnIndex: index + 1 }, cell: { userEnteredFormat: { numberFormat } }, fields: 'userEnteredFormat.numberFormat' } });
+                    });
+                    if (finish.length)
+                        google(`${sheets(c.config.archiveSpreadsheetId)}:batchUpdate`, 'post', { requests: finish });
                     if (cursor.table + 1 < tables.length)
                         return { done: false, continuation: JSON.stringify({ table: cursor.table + 1, row: 0 }) };
                     return { done: true };

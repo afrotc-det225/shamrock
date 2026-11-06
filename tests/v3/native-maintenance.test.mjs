@@ -11,26 +11,27 @@ function fixture(){
  const snapshot={contractVersion:1,environment:'staging',generation:1,revision:{operations:0,administration:0},people:[],leadership:[],flights:[],squadrons:[],terms:[{termId:'current',label:'Fictional term',sortOrder:1,isCurrent:true}],events:[],observations:[],corrections:[],requests:[],attendanceVersions:[],diagnostics:[]};
  const claim={transitionId:'transition',asOfDate:'2026-11-06',snapshotHash:hash(JSON.stringify(snapshot)),planHash:'a'.repeat(64),claimToken:'token',leaseExpiresAt:new Date(1800000600*1000).toISOString(),snapshot};
  const properties={SHAMROCK_V3_HOST_CONFIG:JSON.stringify(host),SHAMROCK_V3_CONFIG_FILE_ID:'private-config',SHAMROCK_V3_BRIDGE_SECRET:'fictional-maintenance-bridge-signing-material'};
- const f={map,claim,properties,state:{version:1,environment:'staging',generation:1},stateVersion:1,archiveVersion:1,sheets:[],calls:[],writes:0,ack:0,active:owner,shared:false,loseWrite:false,gridFormula:false};
+ const f={map,claim,properties,state:{version:1,environment:'staging',generation:1},stateVersion:1,archiveVersion:1,sheets:[],calls:[],writes:0,ack:0,active:owner,shared:false,loseWrite:false,gridFormula:false,metadataDrift:false,externalState:false,patches:0,formats:[]};
  const metadata=id=>({id,name:id==='maintenance-archive'?config.archiveExpectedTitle:id,mimeType:id==='maintenance-archive'?'application/vnd.google-apps.spreadsheet':'application/json',size:String(JSON.stringify(id==='private-config'?map:f.state).length),version:String(id==='maintenance-state'?f.stateVersion:f.archiveVersion),owners:[{emailAddress:owner}]});
  const services={PropertiesService:{getScriptProperties:()=>({getProperty:k=>properties[k]??null,setProperty:(k,v)=>properties[k]=v})},Session:{getEffectiveUser:()=>({getEmail:()=>owner}),getActiveUser:()=>({getEmail:()=>f.active})},ScriptApp:{getOAuthToken:()=> 'fictional-oauth'},Utilities:{DigestAlgorithm:{SHA_256:'sha256'},Charset:{UTF_8:'utf8'},computeDigest:(_,v)=>[...createHash('sha256').update(v).digest()],computeHmacSha256Signature:(v,k)=>[...createHmac('sha256',k).update(v).digest()]},LockService:{getScriptLock:()=>({tryLock:()=>true,releaseLock(){}})},UrlFetchApp:{fetch(raw,options){
   f.calls.push(raw);const url=new URL(raw),body=options.payload?JSON.parse(options.payload):undefined;let result;
   if(url.hostname==='worker.example.invalid'){
-   if(url.pathname.endsWith('/claim'))result=claim;
+   if(url.pathname.endsWith('/claim')){if(f.externalState)f.state.operatorChange='retain';result=claim;}
    else if(url.pathname.endsWith('/ack')){f.ack++;result={status:'done'};}
    else if(url.pathname.endsWith('/commands'))result={status:'accepted'};
    else throw Error('Unexpected Worker request');
   }else if(url.hostname==='www.googleapis.com'){
    const id=url.pathname.split('/').filter(Boolean).at(-1)==='permissions'?url.pathname.split('/').at(-2):url.pathname.split('/').at(-1);
    if(url.pathname.endsWith('/permissions'))result={permissions:[{type:'user',role:'owner',emailAddress:owner},...(f.shared?[{type:'anyone',role:'reader'}]:[])]};
-   else if(options.method==='patch'){f.state=copy(body);f.stateVersion++;result={id,version:String(f.stateVersion)};}
+   else if(options.method==='patch'){f.state=copy(body);f.stateVersion++;f.patches++;result={id,version:String(f.stateVersion)};if(f.metadataDrift)f.stateVersion++;}
    else if(url.searchParams.get('alt')==='media')result=id==='private-config'?map:f.state;
-   else result=metadata(id);
+   else {result=metadata(id);if(f.metadataDrift&&id==='maintenance-state')f.stateVersion++;}
   }else if(url.pathname.endsWith(':batchUpdate')){
    for(const request of body.requests){
     if(request.addSheet){const properties=copy(request.addSheet.properties);f.sheets.push({properties,protectedRanges:[],tables:[],cells:[]});}
     if(request.addProtectedRange){const p=request.addProtectedRange.protectedRange;f.sheets.find(s=>s.properties.sheetId===p.range.sheetId).protectedRanges.push(copy(p));}
     if(request.updateCells){const u=request.updateCells,s=f.sheets.find(s=>s.properties.sheetId===u.start.sheetId);u.rows.forEach((row,i)=>s.cells[u.start.rowIndex+i]=copy(row.values));}
+    if(request.repeatCell?.fields==='userEnteredFormat.numberFormat')f.formats.push(copy(request.repeatCell));
     if(request.addTable){const t=request.addTable.table;f.sheets.find(s=>s.properties.sheetId===t.range.sheetId).tables.push({...copy(t),tableId:'native-'+f.sheets.length});}
    }
    f.archiveVersion++;f.writes++;result={};if(f.loseWrite){f.loseWrite=false;throw Error('ambiguous write');}
@@ -59,6 +60,7 @@ test('native archive retries an ambiguous chunk, writes native Tables and verifi
  for(const sheet of f.sheets){assert.equal(sheet.tables.length,1);assert.equal(sheet.protectedRanges.length,1);}
  const recovery=f.sheets.find(s=>s.properties.hidden),json=recovery.cells.slice(3).map(row=>row[1].userEnteredValue.stringValue).join('');
  assert.deepEqual(JSON.parse(json),f.claim.snapshot);
+ assert.equal(f.formats.filter(r=>r.cell.userEnteredFormat.numberFormat.type==='DATE').length,1);assert.equal(f.formats.filter(r=>r.cell.userEnteredFormat.numberFormat.type==='PERCENT').length,2);
  const planned=nativeArchiveTables(f.claim,hash);assert.equal(new Set(planned.map(t=>t.sheetId)).size,5);assert.ok(planned.every(t=>t.sheetId<2147483647));
 });
 test('native archive retains verification progress and rejects formula injection or archive revision changes',()=>{
@@ -70,4 +72,12 @@ test('native archive retains verification progress and rejects formula injection
   assert.throws(()=>f.runtime.archive('transition'),e=>e.code===(mode==='formula'?'archive_readback':'archive_changed'));
   assert.equal(f.ack,0);assert.equal(f.writes,writes);assert.ok(f.state.archive);
  }
+});
+
+test('native maintenance checkpoint permits metadata-only Drive drift but refuses changed external content',()=>{
+ const f=fixture();f.metadataDrift=true;f.runtime.resume();let result;
+ for(let i=0;i<40;i++){result=f.runtime.archive('transition');if(result.state==='ready-for-reviewed-acceptance')break;}
+ assert.equal(result.state,'ready-for-reviewed-acceptance');assert.equal(f.ack,1);assert.ok(f.patches>5);
+ const g=fixture();g.runtime.resume();g.externalState=true;assert.throws(()=>g.runtime.archive('transition'),e=>e.code==='maintenance_state');
+ assert.equal(g.state.operatorChange,'retain');assert.equal(g.patches,0);assert.equal(g.writes,0);assert.equal(g.ack,0);
 });
