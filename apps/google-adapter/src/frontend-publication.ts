@@ -486,7 +486,9 @@ export function planFrontendInitialization(input: {
   const headers = table.columns.map(c => c.header), labels = table.columns.map(c => c.label);
   const width = Math.max(current.headers.length, headers.length), rowCount = Math.max(1, current.rows.length);
   const virtual: FrontendTableRead = { ...clone(current), headers, labels, gridRowCount: Math.max(current.gridRowCount, rowCount + 2), gridColumnCount: Math.max(current.gridColumnCount, width),
-    rows: Array.from({ length: rowCount }, () => headers.map(() => ({}))), hiddenColumns: [],
+    rows: Array.from({ length: rowCount }, () => headers.map(() => ({}))),
+    // A reviewed reset clears values, not physical visibility (for example, Attendance Year/Flight/Squadron).
+    hiddenColumns: current.hiddenColumns.filter(c => c < headers.length),
     range: { sheetId: current.sheetId, startRowIndex: 1, endRowIndex: rowCount + 2, startColumnIndex: 0, endColumnIndex: headers.length } };
   const plan = planFrontendPublication({ ...input, current: virtual, baseline: { generation: input.generation, revision: input.revision, rows: [] }, drafts: [] });
   const prefix: Record<string, unknown>[] = [];

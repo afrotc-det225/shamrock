@@ -8,6 +8,38 @@ import { buildFrontendPreview } from '../../scripts/lib/frontend-preview.mjs';
 const fixtureRows = (book, sheetId) => book.requests.find(r => r.updateCells?.start.sheetId === sheetId)?.updateCells.rows.map(row => row.values.map(cell => cell.userEnteredValue.stringValue ?? cell.userEnteredValue.numberValue));
 const ruleFor = (book, target) => book.postTableRequests.find(r => JSON.stringify(r.setDataValidation.range) === JSON.stringify(target))?.setDataValidation.rule;
 
+test('Attendance presentation matches uniform production dimensions and preserves compact header typography', () => {
+  const { main } = buildFrontendPreview(), columns = new Map(), rows = new Map();
+  for (const request of main.requests) {
+    const d = request.updateDimensionProperties;
+    if (d?.range.sheetId !== 104 || d.properties.pixelSize === undefined) continue;
+    const target = d.range.dimension === 'COLUMNS' ? columns : rows;
+    for (let index = d.range.startIndex; index < d.range.endIndex; index++) target.set(index, d.properties.pixelSize);
+  }
+  assert.deepEqual(Array.from({ length: 13 }, (_, i) => columns.get(i)), [115, 115, 100, 75, 75, 75, 75, 75, 75, 75, 75, 75, 75]);
+  assert.equal(rows.get(1), 21); assert.equal(rows.get(2), 21); assert.equal(rows.get(17), 21);
+  const selectedStyle = (row, column) => {
+    const style = {};
+    for (const { repeatCell: r } of main.requests) {
+      if (!r || r.range.sheetId !== 104 || row < r.range.startRowIndex || row >= r.range.endRowIndex
+        || column < r.range.startColumnIndex || column >= r.range.endColumnIndex) continue;
+      for (const field of ['textFormat.fontSize', 'textFormat.bold', 'horizontalAlignment', 'wrapStrategy', 'numberFormat']) {
+        if (!r.fields.split(',').includes('userEnteredFormat.' + field)) continue;
+        style[field] = field.split('.').reduce((v, key) => v?.[key], r.cell.userEnteredFormat);
+      }
+    }
+    return style;
+  };
+  assert.deepEqual(selectedStyle(1, 8), { 'textFormat.fontSize': 5, 'textFormat.bold': true, horizontalAlignment: 'LEFT', wrapStrategy: 'WRAP' });
+  assert.deepEqual(selectedStyle(1, 5), { 'textFormat.fontSize': 10, 'textFormat.bold': true, horizontalAlignment: 'LEFT', wrapStrategy: 'CLIP' });
+  assert.equal(selectedStyle(2, 5)['textFormat.bold'], true);
+  assert.equal(selectedStyle(2, 5)['textFormat.fontSize'], 10);
+  assert.deepEqual(selectedStyle(2, 5).numberFormat, { type: 'PERCENT', pattern: '0.0%' });
+  assert.equal(selectedStyle(2, 2).horizontalAlignment, 'LEFT');
+  assert.equal(main.requests.findLast(r => r.updateSheetProperties?.properties.sheetId === 104
+    && r.updateSheetProperties.properties.gridProperties?.hideGridlines !== undefined).updateSheetProperties.properties.gridProperties.hideGridlines, false);
+});
+
 test('preview contracts preserve the production distinction between chip, arrow, plain validation and file chips', () => {
   const { main, excusals } = buildFrontendPreview();
   const directory = main.cellPresentation.filter(c => c.sheetId === 103);

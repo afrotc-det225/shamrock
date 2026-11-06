@@ -1,4 +1,4 @@
-/** Compact native Attendance layout. Never changes values, validation, colors or Tables. */
+/** Production Attendance layout. Never changes values, validation, colors or Tables. */
 export interface AttendanceLayoutInput {
   sheetId: number;
   headers: readonly string[];
@@ -8,7 +8,7 @@ export interface AttendanceLayoutInput {
 }
 type Request = Record<string, unknown>;
 const WIDTHS: Record<string, number> = {
-  last_name: 110, first_name: 100, as_year: 60, flight: 75, squadron: 60,
+  last_name: 115, first_name: 115, as_year: 100, flight: 75, squadron: 75,
   overall_attendance_pct: 75, llab_attendance_pct: 75,
 };
 function validate(input: AttendanceLayoutInput): void {
@@ -30,28 +30,27 @@ function columns(input: AttendanceLayoutInput, headers: readonly string[]): Requ
   const requests: Request[] = [];
   for (const header of headers) {
     const index = input.headers.indexOf(header), event = input.eventHeaders.includes(header);
-    // Native Table headers reserve room for their menu. Fit whole short words
-    // such as Mando and Secondary without returning to oversized 130px cells.
-    const longestWord = Math.max(0, ...input.labels[index].split(/\s+/).map(word => word.length));
-    const width = event ? Math.max(75, Math.min(95, Math.ceil((34 + longestWord * 6) / 5) * 5)) : WIDTHS[header];
+    // Production uses uniform event widths, including long event labels.
+    const width = event ? 75 : WIDTHS[header];
     if (width === undefined) continue;
     requests.push(dimension(input.sheetId, 'COLUMNS', index, index + 1, width));
     requests.push(format(input, 1, 2, index, index + 1, {
-      textFormat: { fontFamily: 'Roboto', fontSize: event || header.endsWith('_pct') ? 7 : 9, bold: true },
-      wrapStrategy: 'WRAP', verticalAlignment: 'MIDDLE',
-    }, 'userEnteredFormat.textFormat.fontFamily,userEnteredFormat.textFormat.fontSize,userEnteredFormat.textFormat.bold,userEnteredFormat.wrapStrategy,userEnteredFormat.verticalAlignment'));
-    if (event) requests.push(format(input, 2, input.dataEndRow, index, index + 1, {
-      numberFormat: { type: 'TEXT' }, horizontalAlignment: 'CENTER', textFormat: { fontSize: 9, bold: true },
-    }, 'userEnteredFormat.numberFormat,userEnteredFormat.horizontalAlignment,userEnteredFormat.textFormat.fontSize,userEnteredFormat.textFormat.bold'));
+      textFormat: { fontFamily: 'Roboto', fontSize: event ? 5 : 10, bold: true },
+      wrapStrategy: event ? 'WRAP' : 'CLIP', verticalAlignment: 'MIDDLE', horizontalAlignment: 'LEFT',
+    }, 'userEnteredFormat.textFormat.fontFamily,userEnteredFormat.textFormat.fontSize,userEnteredFormat.textFormat.bold,userEnteredFormat.wrapStrategy,userEnteredFormat.verticalAlignment,userEnteredFormat.horizontalAlignment'));
+    if (event || header.endsWith('_pct')) requests.push(format(input, 2, input.dataEndRow, index, index + 1, {
+      numberFormat: event ? { type: 'TEXT' } : { type: 'PERCENT', pattern: '0.0%' }, horizontalAlignment: 'CENTER',
+      verticalAlignment: 'MIDDLE', wrapStrategy: 'CLIP', textFormat: { fontFamily: 'Roboto', fontSize: 10, bold: true },
+    }, 'userEnteredFormat.numberFormat,userEnteredFormat.horizontalAlignment,userEnteredFormat.verticalAlignment,userEnteredFormat.wrapStrategy,userEnteredFormat.textFormat.fontFamily,userEnteredFormat.textFormat.fontSize,userEnteredFormat.textFormat.bold'));
   }
   return requests;
 }
 function rows(input: AttendanceLayoutInput, startRow: number): Request[] {
   if (startRow >= input.dataEndRow) return [];
-  const requests = [dimension(input.sheetId, 'ROWS', startRow, input.dataEndRow, 23),
+  const requests = [dimension(input.sheetId, 'ROWS', startRow, input.dataEndRow, 21),
     format(input, startRow, input.dataEndRow, 0, input.headers.length, {
-      textFormat: { fontFamily: 'Roboto', fontSize: 9 }, verticalAlignment: 'MIDDLE', wrapStrategy: 'CLIP',
-    }, 'userEnteredFormat.textFormat.fontFamily,userEnteredFormat.textFormat.fontSize,userEnteredFormat.verticalAlignment,userEnteredFormat.wrapStrategy')];
+      textFormat: { fontFamily: 'Roboto', fontSize: 10, bold: false }, verticalAlignment: 'MIDDLE', wrapStrategy: 'CLIP', horizontalAlignment: 'LEFT',
+    }, 'userEnteredFormat.textFormat.fontFamily,userEnteredFormat.textFormat.fontSize,userEnteredFormat.textFormat.bold,userEnteredFormat.verticalAlignment,userEnteredFormat.wrapStrategy,userEnteredFormat.horizontalAlignment')];
   for (const header of input.eventHeaders) {
     const column = input.headers.indexOf(header);
     requests.push(format(input, startRow, input.dataEndRow, column, column + 1, {
@@ -61,20 +60,21 @@ function rows(input: AttendanceLayoutInput, startRow: number): Request[] {
   for (const header of ['overall_attendance_pct', 'llab_attendance_pct']) {
     const column = input.headers.indexOf(header); if (column < 0) continue;
     requests.push(format(input, startRow, input.dataEndRow, column, column + 1, {
-      numberFormat: { type: 'PERCENT', pattern: '0.0%' }, horizontalAlignment: 'CENTER',
-    }, 'userEnteredFormat.numberFormat,userEnteredFormat.horizontalAlignment'));
+      numberFormat: { type: 'PERCENT', pattern: '0.0%' }, horizontalAlignment: 'CENTER', textFormat: { bold: true },
+    }, 'userEnteredFormat.numberFormat,userEnteredFormat.horizontalAlignment,userEnteredFormat.textFormat.bold'));
   }
   return requests;
 }
-function headerHeight(input: AttendanceLayoutInput): number {
-  const longest = Math.max(0, ...input.eventHeaders.map(h => input.labels[input.headers.indexOf(h)].length));
-  return Math.min(76, Math.max(40, 12 + 12 * Math.ceil(longest / 12)));
-}
 /** Explicit layout repair/initialization. Saved Flight filter views continue to
- * work with the production-standard Year/Flight/Squadron columns collapsed. */
+ * work with Year/Flight/Squadron hidden directly, without dimension groups. */
 export function buildAttendanceLayout(input: AttendanceLayoutInput, collapseIdentityDetails = true): Request[] {
   validate(input);
-  const requests = [dimension(input.sheetId, 'ROWS', 1, 2, headerHeight(input)), ...rows(input, 2), ...columns(input, input.headers)];
+  const requests: Request[] = [{ updateSheetProperties: { properties: { sheetId: input.sheetId,
+    gridProperties: { frozenRowCount: 2, frozenColumnCount: 2, hideGridlines: false } },
+  fields: 'gridProperties.frozenRowCount,gridProperties.frozenColumnCount,gridProperties.hideGridlines' } },
+  dimension(input.sheetId, 'ROWS', 0, 2, 21), ...rows(input, 2), ...columns(input, input.headers),
+  { updateDimensionProperties: { range: { sheetId: input.sheetId, dimension: 'ROWS', startIndex: 0, endIndex: 1 },
+    properties: { hiddenByUser: true }, fields: 'hiddenByUser' } }];
   if (collapseIdentityDetails) for (const header of ['as_year', 'flight', 'squadron']) {
     const index = input.headers.indexOf(header); if (index < 0) continue;
     requests.push({ updateDimensionProperties: { range: { sheetId: input.sheetId, dimension: 'COLUMNS', startIndex: index, endIndex: index + 1 },
@@ -88,6 +88,5 @@ export function buildAttendanceGrowthLayout(input: AttendanceLayoutInput, previo
   if (!Number.isSafeInteger(previousEndRow) || previousEndRow < 2 || previousEndRow > 10002
     || previousHeaders.some(h => !input.headers.includes(h))) throw Error('Invalid previous Attendance bounds.');
   const added = input.headers.filter(h => !previousHeaders.includes(h));
-  return [...rows(input, Math.max(2, previousEndRow)), ...columns(input, added),
-    ...(added.some(h => input.eventHeaders.includes(h)) ? [dimension(input.sheetId, 'ROWS', 1, 2, headerHeight(input))] : [])];
+  return [...rows(input, Math.max(2, previousEndRow)), ...columns(input, added)];
 }

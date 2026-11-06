@@ -163,11 +163,12 @@ private baselines and completing signed live publication are still pending.
 Local checks passed 370 tests, including 31 current-system regressions and 339
 prototype tests. No new Main or Blue/Gold edit-command capture is claimed.
 
-Attendance now uses compact 23-pixel body rows, 9-point body text, 7-point event
-and summary headers, and label-sized 75–95-pixel event columns. API comparisons
-and native rendering verified the existing sample cells, colors, validations,
-Table, four filter views and cell protections remained intact. This sizing is
-also applied to new Attendance rows and event columns by the publisher.
+The initial compact Attendance layout was superseded after measuring production
+directly: uniform 75-pixel event/percentage columns, 115-pixel name columns,
+21-pixel rows, 10-point body text and 5-point wrapped event headers. The same
+layout applies to new rows/events without resizing existing cells. Native colors,
+validation, Tables, saved views and cell protections remain separate preserved
+metadata. See the private release evidence for the live read-back checkpoint.
 
 New source modules cover [administrative commands and corrections](D1_ADMIN_COMMANDS.md),
 [attendance and birthday reporting](D1_REPORTING_RULES.md),

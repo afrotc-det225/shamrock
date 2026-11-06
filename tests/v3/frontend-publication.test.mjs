@@ -154,7 +154,7 @@ test('new rows and events use protected native seeds without changing existing v
   assert.ok(plan.requests.filter(r => r.copyPaste).every(r => r.copyPaste.pasteType === 'PASTE_DATA_VALIDATION'));
   assert.ok(plan.requests.filter(r => r.updateTable).every(r => r.updateTable.fields === 'range' && !r.updateTable.table.columnProperties));
   const layout = plan.requests.filter(r => r.repeatCell || r.updateDimensionProperties?.fields === 'pixelSize');
-  assert.equal(layout.find(r => r.updateDimensionProperties?.range.dimension === 'COLUMNS').updateDimensionProperties.properties.pixelSize, 95);
+  assert.equal(layout.find(r => r.updateDimensionProperties?.range.dimension === 'COLUMNS').updateDimensionProperties.properties.pixelSize, 75);
   assert.ok(layout.filter(r => r.updateDimensionProperties?.range.dimension === 'COLUMNS').every(r => r.updateDimensionProperties.range.startIndex === input.current.headers.length));
   assert.ok(layout.filter(r => r.repeatCell).every(r => {
     const { range, fields } = r.repeatCell;
@@ -204,6 +204,12 @@ test('initialization requires empty data or an exact reviewed fictional reset, n
   assert.ok(verifyFrontendPublicationReadback(plan, apply(input.current, plan.requests)));
   assert.ok(plan.requests.every(r => !r.deleteSheet && !r.sortRange && !r.deleteDimension));
   input.reviewedFictionalReset.tableId = 'other-table'; assert.throws(() => planFrontendInitialization(input));
+  const hidden = attendanceInput(2, 6); hidden.current.hiddenColumns = [2, 3, 4];
+  hidden.reviewedFictionalReset = { environment: 'staging', generation: 1, sheetId: hidden.current.sheetId,
+    tableId: hidden.current.tableId, expectedRead: frontendReadFingerprint(hidden.current) };
+  const retained = planFrontendInitialization(hidden);
+  assert.deepEqual(retained.expectedAfter.hiddenColumns, [2, 3, 4, 7]);
+  assert.ok(verifyFrontendPublicationReadback(retained, apply(hidden.current, retained.requests)), 'reset retains reviewed pre-hidden physical columns');
 });
 
 test('500×128 refresh coalesces values into bounded requests and sub-megabyte batches', () => {
