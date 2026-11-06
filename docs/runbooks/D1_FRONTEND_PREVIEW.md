@@ -1,4 +1,19 @@
-# Fictional frontend preview
+# Staging frontend presentation
+
+The user-facing canvas uses the intended operational presentation. Dashboard
+starts with its title, Quick actions and At a glance; the former disclaimer row
+and empty spacer are removed. Test explanations and inactive “Preview only”
+buttons do not belong in normal sheets. The file title identifies staging;
+fictional records and provider isolation remain unchanged.
+
+`buildFrontendDashboard` accepts computed metrics, bounded chart sources and
+resolved Google resource links. It never fabricates a Form URL or displays an
+inactive action as a working link. Callers supply only actions actually bound
+to that environment. Updating the canvas must preserve other sheets' native
+Tables, validation seeds, cell styles and business data. Clear only Dashboard
+merges/charts before applying its layout, and verify hidden chart sources after
+publication. This presentation change alone does not establish operational
+feature parity or authorize a production cutover.
 
 The preview shows the proposed production-facing spreadsheet presentation using fictional cadets and events. It is separate from both production SHAMROCK and the D1 transport rehearsal. It has no production bindings, installed business triggers or working notification delivery. Editing preview cells does not submit a D1 command or change a real attendance or excusal record.
 
@@ -15,7 +30,7 @@ Use the existing SHAMROCK layout, native Tables, Roboto text, green headers, row
 
 ## Build and verification boundary
 
-The reusable fixture generator is `scripts/lib/frontend-preview.mjs`. It describes fictional content and Sheets API requests; it must not discover or mutate production resources. Provision only explicitly identified new preview workbooks under the project account. Keep their actual bindings and execution evidence in ignored local/provider configuration, outside Git. Rebuilding a preview must target its approved preview resources explicitly, preserve the native dropdown seed cells, and never reuse a production workbook identifier.
+Run `npm run build:v3` before using the reusable fixture generator, `scripts/lib/frontend-preview.mjs`; it imports the compiled shared Dashboard planner. It describes fictional content and Sheets API requests; it must not discover or mutate production resources. Provision only explicitly identified new preview workbooks under the project account. Keep their actual bindings and execution evidence in ignored local/provider configuration, outside Git. Rebuilding a preview must target its approved preview resources explicitly, preserve the native dropdown seed cells, and never reuse a production workbook identifier.
 
 `buildFrontendPreview()` returns `{ main, excusals }`. Each descriptor provides the title, explicit sheet definitions, `requests`, `tables`, `postTableRequests`, `cellPresentation`, `dropdownSeeds` and `photoChipTargets`. This JSON builder creates the initial fictional fixture; it must not be rerun over existing native dropdown styling. Apply an initial fixture in this order:
 
@@ -25,9 +40,9 @@ The reusable fixture generator is `scripts/lib/frontend-preview.mjs`. It describ
 
 Use `cellPresentation` and the field contract below to select each control; the descriptors identify ranges, legend sources and choices. `preserveNativeValidation` identifies existing native rules that must be copied from a seed rather than recreated. This applies to Year, Flight, Squadron, Attendance and Decision even though they use different display styles: native option-color metadata can remain opaque for chip, arrow and plain controls. `dropdownSeeds` identifies the Year chip, while `photoChipTargets` requires an actual private fictional asset binding. Fresh JSON rules are bootstrap fallbacks, not proof that a native rule was reproduced. Verify rules both inside and beyond the populated Table.
 
-No paid service, API subscription, production migration or staging command intake is needed to render the preview. A fixture formula or chart demonstrates only the calculation shown by the fictional fixture. It is not evidence that the full D1 business rule, authorization or publishing workflow has been implemented. Do not invent attendance credit policies to populate a dashboard; label fixture-only summaries clearly.
+No paid service, API subscription, production migration or staging command intake is needed to render the preview. A fixture formula or chart demonstrates only the calculation shown by the fictional fixture. It is not evidence that the full D1 business rule, authorization or publishing workflow has been implemented. Do not invent attendance credit policies to populate a dashboard; document the evidence and policy version in the operations record.
 
-The current fixture has sixteen fictional cadets, four flights in two squadrons, six attendance events and eight excusal requests. Main is read-only; only the excusal Decision ranges are editable for demonstration. Overall and LLAB percentages remain blank, with explanatory notes, because this visual fixture does not implement an approved credit policy. Dashboard charts summarize fixture counts, and preview Form actions remain disabled. Sixteen native photo-file chips use the same private fictional portrait asset; this demonstrates file-chip structure, not per-cadet photo synchronization. Year, Flight and Squadron choices are representative canonical subsets of four, four and two options respectively. Seven additional Directory validation fields use their complete canonical source lists. Birthday/history reporting, complete production formulas, full option coverage, real photo synchronization and operational edit delivery remain separate parity work.
+The initial fixture had sixteen fictional cadets, four flights in two squadrons, six attendance events and eight excusal requests. Initially Main was read-only and only excusal Decision ranges were editable. The replacement [field-level protection model](D1_PROTECTION_MODEL.md) defines the operational edit scopes and its own verification gate. Overall and LLAB percentages were initially blank pending extraction of the credit policy. Dashboard charts summarize the supplied data. Unbound Form actions are omitted; configured actions use verified links from the same environment. Sixteen native photo-file chips use the same private fictional portrait asset; this demonstrates file-chip structure, not per-cadet photo synchronization. Year, Flight and Squadron choices are representative canonical subsets of four, four and two options respectively. Seven additional Directory validation fields use their complete canonical source lists. Birthday/history reporting, complete production formulas, full option coverage, real photo synchronization and operational edit delivery remain separate parity work.
 
 ## Field presentation contract
 
