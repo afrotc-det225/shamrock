@@ -223,6 +223,7 @@ function width(header: string): number {
   if (header === 'unit_label') return 135;
   if (header === 'draft_state') return 245;
   if (header === 'draft_decision') return 175;
+  if (header === 'base_version') return 150;
   if (header.endsWith('version')) return 95;
   if (header === 'recorded_status') return 155;
   return 135;
