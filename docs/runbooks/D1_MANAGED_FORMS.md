@@ -72,3 +72,16 @@ Queued command dispatch retries the saved command after an ambiguous response. C
 ## Required live acceptance evidence
 
 Before claiming parity, use the staged copies to verify all existing branch paths, selected-event scope, choice/reference rendering, preserved item IDs/response destinations, edited-response revisions and old-edition response binding. Submit as a real non-owner account, verify automatic enrollment and self excusal submission, and prove another cadet's profile and managerial actions remain inaccessible. Confirm photo URI/file chip behavior with the real Drive permissions. Test a manager review and stale self update, a paused response replay, forced partial publication/recovery, private state readback and final pause. Record actual Google quotas, lease duration and retained-state growth for the target wing size. The local tests exercise code and injected ports; they do not substitute for those provider checks.
+
+The same controls can be requested through the owner-only config without opening the
+Apps Script editor. Optional `controlRequest` contains a unique `requestId`, increasing
+positive `sequence`, `action` (`setup`, `resume-publication`, `resume-intake`, or `pause`),
+and canonical SHA-256 hashes `stateSha256` and `intakeSha256` of the reviewed private
+journals. The scheduled refresh verifies both checkpoints and consumes the request
+once before performing that control. A retained request cannot override a later pause.
+An interrupted control requires a fresh reviewed sequence. This controls only the
+bound staging Forms; it grants no new identity or operational capability.
+
+Private Form journals verify canonical prior content before every write and exact
+readback afterward. Provider metadata-only Drive version changes do not invalidate
+an otherwise unchanged checkpoint. Changed content still stops the operation.

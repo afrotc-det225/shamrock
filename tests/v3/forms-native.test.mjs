@@ -66,3 +66,14 @@ test('native Directory response is reread by ID, activated, journaled and linked
  f.fx.responses['form-excusals']={responseId:'excusal-response',lastSubmittedTime:'2026-11-06T12:01:00.000Z',respondentEmail:'new@example.invalid',answers:Object.fromEntries(Object.entries({'q-0':event,outcome:'E',reason:'Fictional reason'}).map(([questionId,value])=>[questionId,{questionId,textAnswers:{answers:[{value}]}}]))};
  assert.equal(f.runtime.replay('excusals','excusal-response').status,'committed');assert.equal(f.fx.commands[1].payload.personId,'person-enrolled');assert.equal(f.fx.commands[1].actor.principalId,`google.${hash('new@example.invalid')}`);
 });
+
+const canonical=value=>JSON.stringify(value,(_k,v)=>v&&typeof v==='object'&&!Array.isArray(v)?Object.fromEntries(Object.keys(v).sort().map(k=>[k,v[k]])):v);
+function control(f,action,sequence){f.config.controlRequest={requestId:`review-${sequence}`,sequence,action,stateSha256:hash(canonical(f.fx.files['state-file'].value)),intakeSha256:hash(canonical(f.fx.files['intake-file'].value))};}
+test('private reviewed control requests set up and resume Forms once without overriding a later pause',()=>{
+ const f=fixture();f.config.enabled=false;f.config.intakeEnabled=false;control(f,'setup',1);assert.equal(f.runtime.refresh().status,'disabled');assert.equal(f.fx.triggers.length,3);
+ f.config.enabled=true;control(f,'resume-publication',2);assert.equal(f.runtime.refresh().status,'published');f.runtime.pause();assert.equal(f.runtime.refresh().status,'disabled');assert.equal(f.fx.triggers.length,3);
+ f.config.controlRequest.sequence=1;assert.throws(()=>f.runtime.refresh(),{code:'forms_control'});
+});
+test('private control refuses changed checkpoints before installing triggers or opening Forms',()=>{
+ const f=fixture();control(f,'setup',1);f.fx.files['intake-file'].value.entries.changed={};assert.throws(()=>f.runtime.refresh(),{code:'forms_control'});assert.equal(f.fx.triggers.length,0);assert(Object.values(f.fx.open).every(x=>!x));
+});

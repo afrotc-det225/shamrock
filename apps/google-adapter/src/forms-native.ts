@@ -1,4 +1,5 @@
 /** Optional standalone Google host. Config and journals remain in automation-owned Drive JSON. */
+import { createPrivateCheckpoint } from './private-checkpoint.js';
 import { AdapterError, type AdapterConfig, type Signer } from './index.js';
 import { createGoogleSigner } from './apps-script.js';
 import { HOST_PROPERTIES, parseStagingHostConfig } from './staging-host.js';
@@ -9,12 +10,13 @@ import { commandsFromManagedForm, directoryDraftFromManagedForm, directoryReview
   type DirectorySubmissionDraft, type FormIntakeBinding, type FormPrincipal, type VerifiedFormSubmission } from './forms-intake.js';
 import type { DirectoryProfile } from '../../../packages/domain/src/admin.js';
 
-export const FORMS_PROPERTIES = { config: 'SHAMROCK_V3_FORMS_CONFIG', pause: 'SHAMROCK_V3_FORMS_PAUSED', intakePause: 'SHAMROCK_V3_FORM_INTAKE_PAUSED', setup: 'SHAMROCK_V3_FORMS_SETUP' } as const;
+export const FORMS_PROPERTIES = { config: 'SHAMROCK_V3_FORMS_CONFIG', pause: 'SHAMROCK_V3_FORMS_PAUSED', intakePause: 'SHAMROCK_V3_FORM_INTAKE_PAUSED', setup: 'SHAMROCK_V3_FORMS_SETUP', controlReceipt: 'SHAMROCK_V3_FORMS_CONTROL_RECEIPT' } as const;
 export const MANAGED_FORM_HANDLERS = { attendance: 'shamrockV3ManagedAttendanceSubmit', excusals: 'shamrockV3ManagedExcusalSubmit', directory: 'shamrockV3ManagedDirectorySubmit' } as const;
 export interface NativeFormsConfig {
   version: 1; environment: 'staging'; generation: number; enabled: boolean; intakeEnabled: boolean;
   resourceReview: 'EXISTING_FORMS_REVIEWED_FOR_STAGING'; principalId: string; workerId: string;
   stateFileId: string; intakeFileId: string; reviewResourceKey: string; principals: FormPrincipal[];
+  controlRequest?: { requestId: string; sequence: number; action: 'setup' | 'resume-publication' | 'resume-intake' | 'pause'; stateSha256: string; intakeSha256: string };
   forms: (ManagedFormBinding & { allowedEditors: string[]; intake: FormIntakeBinding })[];
 }
 type CommandEntry = { command: any; path: '/v1/commands' | '/v1/admin/commands'; status: 'queued' | 'committed' | 'conflict' | 'rejected'; receipt?: unknown };
@@ -91,14 +93,12 @@ export function createNativeFormsRuntime(services: NativeFormsServices) {
       if (result.status !== 200) fail('forms_effect', `D1 Form publication failed (HTTP ${result.status}).`); return result.body;
     }
     function storage<T>(id: string) {
-      let version: string | undefined;
-      return { load(): T { const read = privateJson(id, owner); version = String(read.metadata.version); return read.value; },
-        save(value: T) {
-          const text = JSON.stringify(value); if (bytes(text) > 5_000_000) fail('forms_capacity', 'Private Form storage needs reviewed archival.');
-          const meta = file(id, owner); if (version === undefined || String(meta.version) !== version) fail('forms_state_changed', 'Private state changed outside the current script lock.');
-          api(`https://www.googleapis.com/upload/drive/v3/files/${encodeURIComponent(id)}?uploadType=media&fields=id,version`, value, 'patch');
-          const after = privateJson(id, owner); if (formsCanonical(after.value) !== formsCanonical(value)) fail('forms_state_changed', 'Private Form state failed readback.'); version = String(after.metadata.version);
-        } };
+      return createPrivateCheckpoint<T>({ version: () => String(file(id, owner).version),
+        read: () => privateJson(id, owner).value,
+        validate(value) { if (!value || typeof value !== 'object' || Array.isArray(value) || bytes(JSON.stringify(value)) > 5_000_000) fail('forms_state', 'Private Form storage is invalid or oversized.'); return value as T; },
+        digest: value => signer.sha256(formsCanonical(value)),
+        write(value) { api(`https://www.googleapis.com/upload/drive/v3/files/${encodeURIComponent(id)}?uploadType=media&fields=id,version`, value, 'patch'); },
+      });
     }
     function read(binding: ManagedFormBinding): NativeFormRead {
       const response = api(forms(binding.formId));
@@ -148,7 +148,36 @@ export function createNativeFormsRuntime(services: NativeFormsServices) {
     return { attempted: sent };
   }
   return {
+    applyControl() {
+      const ctx = context(), request = ctx?.config.controlRequest;
+      if (!ctx || !request) return { status: 'none' };
+      if (!/^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/.test(request.requestId) || !Number.isSafeInteger(request.sequence) || request.sequence < 1
+        || !['setup', 'resume-publication', 'resume-intake', 'pause'].includes(request.action)
+        || ![request.stateSha256, request.intakeSha256].every(h => /^[a-f0-9]{64}$/.test(h))
+        || Object.keys(request).sort().join(',') !== 'action,intakeSha256,requestId,sequence,stateSha256') fail('forms_control', 'Use an exact reviewed Form control request.');
+      const consume = lock(() => {
+        const raw = props.getProperty(FORMS_PROPERTIES.controlReceipt);
+        if (raw === formsCanonical(request)) return false;
+        if (raw) { const prior = JSON.parse(raw); if (prior.sequence >= request.sequence || prior.requestId === request.requestId) fail('forms_control', 'Consumed Form requests cannot be reused.'); }
+        ctx.isolation();
+        if (ctx.signer.sha256(formsCanonical(ctx.storage<FormsState>(ctx.config.stateFileId).load())) !== request.stateSha256
+          || ctx.signer.sha256(formsCanonical(ctx.storage<IntakeState>(ctx.config.intakeFileId).load())) !== request.intakeSha256) fail('forms_control', 'Private Form checkpoints changed after review.');
+        if (request.action === 'resume-publication') paused(FORMS_PROPERTIES.pause);
+        else { paused(FORMS_PROPERTIES.intakePause); if (request.action !== 'resume-intake') paused(FORMS_PROPERTIES.pause); }
+        props.setProperty(FORMS_PROPERTIES.controlReceipt, formsCanonical(request));
+        if (props.getProperty(FORMS_PROPERTIES.controlReceipt) !== formsCanonical(request)) fail('forms_control', 'Control consumption did not persist.');
+        return true;
+      });
+      if (!consume) return { status: 'already-consumed' };
+      // Each operation reacquires the shared lock; failure retains its pause. A new
+      // reviewed sequence is required after an interrupted control operation.
+      if (request.action === 'setup') return this.setup();
+      if (request.action === 'resume-publication') return this.resumePublication();
+      if (request.action === 'resume-intake') return this.resumeIntake();
+      return this.pause();
+    },
     refresh() {
+      this.applyControl();
       if (props.getProperty(FORMS_PROPERTIES.pause) === 'true') return { status: 'disabled' };
       const ctx = context(); if (!ctx) return { status: 'disabled' };
       return consumeFormsRefresh({ config: ctx.adapter, enabled: ctx.enabled, intakeEnabled: ctx.intakeEnabled, now, signer: ctx.signer,
