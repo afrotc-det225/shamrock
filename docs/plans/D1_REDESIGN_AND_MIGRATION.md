@@ -1,6 +1,6 @@
 # SHAMROCK D1 redesign and migration plan
 
-Status: proposed full design, with an isolated implementation started on 2026-11-05. Domain commands, D1 transactions, Google adapter contracts and fictional integration tests now exist. A Cloudflare staging Worker/database passed a fictional API smoke test and remains paused; no production migration or live Google workflow validation has occurred. See the [prototype runbook](../runbooks/D1_PROTOTYPE_RUNBOOK.md) and [staging runbook](../runbooks/D1_STAGING_RUNBOOK.md) for the implemented boundary. Shared service accounts and a private operations repository exist; remaining Google ownership/access and institutional deployment gates still apply.
+Status: proposed full design, with an isolated implementation started on 2026-11-05. Domain commands, D1 transactions, Google adapter contracts and fictional integration tests now exist. The staging system passed a narrow live Google Forms, sheet-decision and D1 rehearsal with fictional records and remains paused. Separately, the existing production Google system completed its [project-account handoff](../runbooks/ACCOUNT_HANDOFF_RUNBOOK.md), preserving its source and resource bindings. Production has not migrated to D1. See the [prototype runbook](../runbooks/D1_PROTOTYPE_RUNBOOK.md) and [staging runbook](../runbooks/D1_STAGING_RUNBOOK.md) for the implemented boundary; full feature parity, recovery and institutional deployment gates still apply.
 
 Prepared: 2026-11-05. Source baseline: `d8cfc0171db772f8d5f5aff031eb7b3fda483676` on `dev`.
 
