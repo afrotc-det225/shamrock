@@ -1,5 +1,6 @@
 /** Optional standalone Google host. Config and journals remain in automation-owned Drive JSON. */
 import { createPrivateCheckpoint } from './private-checkpoint.js';
+import type { PageContinuation } from './forms-layout.js';
 import { AdapterError, type AdapterConfig, type Signer } from './index.js';
 import { createGoogleSigner } from './apps-script.js';
 import { HOST_PROPERTIES, parseStagingHostConfig } from './staging-host.js';
@@ -31,7 +32,7 @@ export interface NativeFormsServices {
   Utilities: Parameters<typeof createGoogleSigner>[0] & { getUuid(): string };
   ScriptApp: any; Session: { getEffectiveUser(): { getEmail(): string }; getActiveUser(): { getEmail(): string } };
   UrlFetchApp: { fetch(url: string, options: Record<string, unknown>): { getResponseCode(): number; getContentText(): string } };
-  FormApp: { openById(id: string): { isAcceptingResponses(): boolean; setAcceptingResponses(enabled: boolean): unknown } };
+  FormApp: { PageNavigationType?: { SUBMIT: unknown }; openById(id: string): { isAcceptingResponses(): boolean; setAcceptingResponses(enabled: boolean): unknown; getItems?(): any[] } };
   LockService: { getScriptLock(): { tryLock(ms: number): boolean; releaseLock(): void } };
   now?: () => number;
 }
@@ -100,17 +101,52 @@ export function createNativeFormsRuntime(services: NativeFormsServices) {
         write(value) { api(`https://www.googleapis.com/upload/drive/v3/files/${encodeURIComponent(id)}?uploadType=media&fields=id,version`, value, 'patch'); },
       });
     }
+    function nativeItems(binding: ManagedFormBinding, response: { items: any[] }) {
+      const items = services.FormApp.openById(binding.formId).getItems?.();
+      if (!items || items.length !== response.items.length || items.some((item, index) => item.getIndex() !== index
+        || item.getTitle() !== (response.items[index].title ?? '')
+        || Boolean(response.items[index].pageBreakItem) !== (String(item.getType()) === 'PAGE_BREAK'))) fail('forms_layout', 'Native Form item order, title or type changed during layout verification.');
+      return items;
+    }
     function read(binding: ManagedFormBinding): NativeFormRead {
       const response = api(forms(binding.formId));
+      let navigation: Record<string, PageContinuation> | undefined;
+      if (binding.attendanceLayout) {
+        const items = nativeItems(binding, response); navigation = {};
+        const templateIndex = response.items.findIndex((i: any) => i.itemId === binding.attendanceLayout!.questionTemplateItemId);
+        const template = items[templateIndex]?.asCheckboxItem?.();
+        if (!template || template.isRequired() || template.hasOtherOption()) fail('forms_layout', 'The reviewed optional checkbox template changed.');
+        // FormApp exposes no validation getter. The reviewed source policy creates new
+        // optional, unvalidated checkboxes; it never resets validation on existing items.
+        for (let i = 0; i < response.items.length; i++) if (response.items[i].pageBreakItem) {
+          const page = items[i].asPageBreakItem(), action = String(page.getPageNavigationType());
+          if (!['CONTINUE', 'SUBMIT', 'RESTART', 'GO_TO_PAGE'].includes(action)) fail('forms_layout', 'A native section continuation is unsupported.');
+          let targetSectionId: string | undefined;
+          if (action === 'GO_TO_PAGE') { const target = page.getGoToPage(), targetIndex = target?.getIndex();
+            if (!Number.isInteger(targetIndex) || !response.items[targetIndex]?.pageBreakItem) fail('forms_layout', 'A native continuation target is missing.');
+            targetSectionId = response.items[targetIndex].itemId;
+          }
+          navigation[response.items[i].itemId] = { action: action as PageContinuation['action'], ...(targetSectionId ? { targetSectionId } : {}) };
+        }
+        if (api(`${forms(binding.formId)}?fields=revisionId`).revisionId !== response.revisionId) fail('forms_layout', 'The Form changed during native continuation readback.');
+      }
       return { formId: response.formId, revisionId: response.revisionId, info: response.info, settings: response.settings,
         ...(response.linkedSheetId ? { linkedSheetId: response.linkedSheetId } : {}), items: response.items ?? [],
-        acceptingResponses: services.FormApp.openById(binding.formId).isAcceptingResponses() };
+        acceptingResponses: services.FormApp.openById(binding.formId).isAcceptingResponses(), ...(navigation ? { pageBreakNavigation: navigation } : {}) };
+    }
+    function setSubmitContinuation(binding: ManagedFormBinding, sectionId: string) {
+      if (!binding.attendanceLayout || !services.FormApp.PageNavigationType) fail('forms_layout', 'The native continuation provider is unavailable.');
+      const response = read(binding);
+      if (response.acceptingResponses) fail('forms_fence', 'Additive Form layout requires closed intake.');
+      const index = response.items.findIndex(i => i.itemId === sectionId && i.pageBreakItem);
+      if (index < 0 || !['CONTINUE', 'SUBMIT'].includes(response.pageBreakNavigation?.[sectionId]?.action ?? '')) fail('forms_layout', 'A new section has unexpected continuation state.');
+      nativeItems(binding, response)[index].asPageBreakItem().setGoToPage(services.FormApp.PageNavigationType.SUBMIT);
     }
     function isolation() {
       for (const b of config.forms) { const info = file(b.formId, owner, b.allowedEditors); if (info.name !== b.expectedTitle || info.mimeType !== 'application/vnd.google-apps.form') fail('forms_isolation', 'The bound staging Form changed.'); }
       privateJson(config.stateFileId, owner); privateJson(config.intakeFileId, owner);
     }
-    return { config, adapter, owner, signer, enabled, intakeEnabled, request, effect, storage, read, isolation };
+    return { config, adapter, owner, signer, enabled, intakeEnabled, request, effect, storage, read, isolation, setSubmitContinuation };
   }
   function paused(key: string) { props.setProperty(key, 'true'); if (props.getProperty(key) !== 'true') fail('forms_pause', 'The local pause did not persist.'); }
   function lock<T>(operation: () => T): T { const l = services.LockService.getScriptLock(); if (!l.tryLock(25_000)) fail('forms_busy', 'Form intake is busy; replay the retained native response.'); try { return operation(); } finally { l.releaseLock(); } }
@@ -183,7 +219,7 @@ export function createNativeFormsRuntime(services: NativeFormsServices) {
       return consumeFormsRefresh({ config: ctx.adapter, enabled: ctx.enabled, intakeEnabled: ctx.intakeEnabled, now, signer: ctx.signer,
         bindings: ctx.config.forms, lock: services.LockService.getScriptLock(), assertIsolation: ctx.isolation, state: ctx.storage<FormsState>(ctx.config.stateFileId),
         effects: { claim: () => ctx.effect('claim').effect, project: claim => ctx.effect('project', claim), ack: claim => { const result = ctx.effect('ack', claim); if (result.acknowledged !== true) fail('forms_effect', 'Form acknowledgement did not verify.'); } },
-        forms: { read: ctx.read, setAccepting: (b, open) => { services.FormApp.openById(b.formId).setAcceptingResponses(open); },
+        forms: { read: ctx.read, setSubmitContinuation: ctx.setSubmitContinuation, setAccepting: (b, open) => { services.FormApp.openById(b.formId).setAcceptingResponses(open); },
           write: (b, requests, requiredRevisionId) => { api(`${forms(b.formId)}:batchUpdate`, { requests, writeControl: { requiredRevisionId } }); } },
         pause: () => paused(FORMS_PROPERTIES.pause) });
     },

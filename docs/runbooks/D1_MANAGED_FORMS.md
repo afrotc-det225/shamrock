@@ -4,13 +4,78 @@ Status: implemented for the isolated staging adapter, with local D1 and injected
 
 ## Supported workflow
 
-The existing Attendance, Excusals and Directory Forms remain native Google Forms. Their item IDs, question IDs, response history, linked response destinations, descriptions, validation and section structure are preserved. Publication updates only explicitly bound choice options, with Google revision preconditions. It never deletes, moves or recreates questions. Existing branches require explicit stable destination bindings; adding a Flight that lacks a reviewed branch stops publication.
+The existing Attendance, Excusals and Directory Forms remain native Google Forms. Their existing item IDs, question IDs, response history, linked response destinations, descriptions and validation are preserved. Ordinary publication updates explicitly bound choice options with Google revision preconditions. It never deletes, moves or replaces existing questions. Optional reviewed Attendance layout provisioning adds missing AS-year checkboxes and Flight sections, using the existing private checkpoint and native continuation readback described below. Without that layout configuration, a Flight lacking an explicitly bound section stops publication.
 
 Attendance event, Flight and cadet choices come from one coherent D1 snapshot. Explicit Flight, AS year and university filters preserve the existing Flight/crosstown question partitions; labels do not infer these partitions. Excusal event choices use the same event catalog. Directory choice lists use explicit private catalogs, matching the current nineteen-question Directory Form and its ten canonical dropdowns. Flight choices include empty Flights so a verified new cadet can enroll. Squadron is derived from the selected Flight in D1; its Form answer cannot grant a conflicting assignment.
 
 Choices contain short, immutable twelve-character reference suffixes. Full catalog hashes stay private; a short-reference collision stops publication before any Form changes. The reference binds the original event/version, Flight roster/version or person. Publication retains old editions; submitting an older Form cannot silently target a different event or roster. Only changed catalog dependencies create another edition: an unrelated attendance observation does not rewrite Form choices. A response mixing editions or submitting a token to another question is retained for review. Required questions with no available choices keep the affected Form closed.
 
 Native submission handlers fetch the response from the Google Forms API by its response ID. Verified responder email, question IDs and `lastSubmittedTime` establish identity and revision. The [native Forms response](https://developers.google.com/workspace/forms/api/reference/rest/v1/forms.responses) may contain zero through nine fractional timestamp digits; the journal preserves that exact timestamp. Backend numeric revisions use milliseconds, so a differing sub-millisecond revision conflicts rather than silently replaying another payload. Typed email, names, display labels and the installable trigger owner do not establish the human respondent. Every accepted native revision is captured in the private journal before commands are dispatched. Attendance with multiple events freezes one deterministic command per event; Excusals freezes one multi-event command. Retries reuse the exact command and source revision. New commands check frozen event versions; replay of an already committed command returns its original receipt.
+
+## Additive Attendance sections and cohorts
+
+The optional `ManagedFormBinding.attendanceLayout` uses `AttendanceLayout` in
+`apps/google-adapter/src/forms-layout.ts`. It identifies the existing optional
+checkbox template, section template, Mando/LLAB selector questions and section
+anchors, crosstown university profiles, Secondary/Other section anchors and their
+stable event-question IDs. Its review marker is
+`OPTIONAL_UNVALIDATED_CHECKBOX_AND_SUBMIT_SECTIONS_REVIEWED`. The excluded Flight
+labels explicitly include `Abroad` for the current detachment policy.
+
+For every active Flight and AS year in the coherent D1 snapshot, the planner
+keeps an existing cohort question or adds its missing counterpart. New Flight
+sections append at the end; new cohort questions insert within their existing
+section. Existing items retain their relative order and identities. Stable IDs
+come from the private source binding and logical Flight/cohort key, with collision
+checks. Each new section receives a verified Submit continuation, which also
+preserves submission at the end of the formerly last section. No existing
+section continuation is rewritten.
+
+The new questions follow the current production policy: optional, unvalidated
+checkboxes, with the reviewed template's native description and basic question
+shape. Google [CheckboxItem](https://developers.google.com/apps-script/reference/forms/checkbox-item)
+has no validation getter; this code does not claim to read or clone opaque
+validation. It never clears validation on an existing question. A deployment
+requiring validation on newly created cohort questions must explicitly extend
+this reviewed template policy before release.
+
+The complete create/update batch, final content, catalog and new continuation
+IDs are saved before any mutation. Google supports caller-provided
+[item and question IDs](https://developers.google.com/workspace/forms/api/reference/rest/v1/forms#Item)
+and revision-guarded
+[createItem requests](https://developers.google.com/workspace/forms/api/reference/rest/v1/forms/batchUpdate#CreateItemRequest).
+REST does not expose page-break continuation settings. The native host reads
+those through FormApp, cross-checks item order/title/type against REST and checks
+the REST revision again. It finishes only the newly created page breaks through
+[setGoToPage](https://developers.google.com/apps-script/reference/forms/page-break-item#setGoToPage(PageNavigationType)),
+with exact readback before acknowledgement or reopening. The script lock is
+cooperative serialization; the API and FormApp phase are not one transaction.
+
+If REST creation succeeds but its response is lost, replay recognizes the exact
+saved content and does not create duplicates. If only some new continuations
+were finished, replay accepts only their saved Continue/Submit intermediate
+states and finishes the remainder. An unrelated edit, changed original
+continuation, unknown cohort, expired lease or missing template stops the work
+with intake closed. Retained editions include the exact generated cohort IDs
+and per-event intake rules, so an older response still uses its original roster.
+A cohort that later empties keeps its question identity but loses stale cadet
+choices; the prior catalog stays available for genuine old responses.
+
+The hard limits remain **300 total Form items**, with at most **250 managed
+choice bindings** for additive Attendance and **150 creations per publication**.
+Non-additive Forms retain the 150-binding limit. A local synthetic capacity
+rehearsal with six Flights, all eleven canonical AS-year values and both
+crosstown groups fit in 227 items, 199 bindings and 119 additions from the copied
+108-item layout; its native request was approximately 94 KB. This measures the
+bounded planner, not live Google quota or execution-time capacity. Bounds fail
+before provider writes and never delete history. Active cadets without a
+reportable Flight also stop publication instead of disappearing silently.
+
+Before release, add a fictional Flight and previously absent AS year through
+staging, inspect both Mando and LLAB navigation, submit the new cohort, empty it,
+replay an old response and rehearse interruption between REST creation and
+native continuation completion. The local injected-port tests cover these
+contracts; live Google acceptance is still required.
 
 ## Directory activation and personal changes
 

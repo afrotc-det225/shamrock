@@ -56,7 +56,10 @@ export function commandsFromManagedForm(input: { submission: VerifiedFormSubmiss
   if (b.kind === 'directory') fail('forms_binding', 'Directory submissions use the reviewable Directory intake.');
   const actor = principals.filter(p => p.email.toLowerCase() === s.respondentEmail.toLowerCase());
   if (actor.length !== 1) fail('confirmation_required', 'The verified responder requires an enrolled principal.');
-  const selected = references(s, editions, [...(b.events ?? []), ...(b.scope ?? []), ...(b.present ?? []), ...(b.attendanceRules ?? []).flatMap(r => [...(r.scopeQuestions ?? []), ...r.presentQuestions])]);
+  // Event questions are stable. Their retained edition selects the exact historical dynamic cohort IDs.
+  const eventEdition = references(s, editions, b.events ?? []).edition;
+  const attendanceRules = eventEdition.attendanceRules ?? b.attendanceRules;
+  const selected = references(s, editions, [...(b.events ?? []), ...(b.scope ?? []), ...(b.present ?? []), ...(attendanceRules ?? []).flatMap(r => [...(r.scopeQuestions ?? []), ...r.presentQuestions])]);
   if (selected.edition.generation !== config.generation || selected.edition.resourceKey !== b.resourceKey) fail('forms_generation', 'This response belongs to another generation or binding.');
   const events = selected.choices.filter(c => b.events?.includes(c.questionId)).map(c => c.reference);
   if (!events.length || events.length > 25 || events.some(e => e.kind !== 'event') || new Set(events.map(e => e.kind === 'event' ? e.eventId : '')).size !== events.length) fail('forms_answer', 'Select one to twenty-five distinct bound events.');
@@ -72,7 +75,7 @@ export function commandsFromManagedForm(input: { submission: VerifiedFormSubmiss
   return events.flatMap(e => {
     if (e.kind !== 'event') return fail('forms_answer', 'Invalid event reference.');
     const eventQuestion = selected.choices.find(c => c.reference === e)!.questionId;
-    const matching = b.attendanceRules?.filter(r => r.eventQuestions.includes(eventQuestion));
+    const matching = attendanceRules?.filter(r => r.eventQuestions.includes(eventQuestion));
     if (matching && matching.length !== 1) fail('forms_binding', 'An attendance event requires exactly one reviewed intake rule.');
     const rule = matching?.[0], scopeQuestions = rule?.scopeQuestions ?? b.scope ?? [], presentQuestions = rule?.presentQuestions ?? b.present ?? [];
     const chosen = selected.choices.filter(c => scopeQuestions.includes(c.questionId)).map(c => c.reference);

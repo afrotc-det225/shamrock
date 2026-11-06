@@ -1,7 +1,7 @@
 /** Resumable all-Form publication. A private checkpoint precedes every native mutation. */
 import { AdapterError, type AdapterConfig, type Signer } from './index.js';
 import type { FrontendSnapshot } from '../../../packages/domain/src/admin.js';
-import { formReadFingerprint, formsCanonical, planNativeFormPublication, retainFormEdition, verifyNativeFormPlan,
+import { formReadFingerprint, formsCanonical, planNativeFormPublication, retainFormEdition, verifyNativeFormPlan, verifyFormBeforeContinuations,
   type FormEdition, type ManagedFormBinding, type NativeFormPlan, type NativeFormRead } from './forms-publication.js';
 
 export interface FormsClaim { effectId: string; claimToken: string; kind: 'forms.refresh'; leaseExpiresAt: string }
@@ -22,7 +22,8 @@ export interface FormsRefreshPorts {
   state: { load(): FormsState; save(state: FormsState): void };
   effects: { claim(): FormsClaim | null; project(claim: FormsClaim): { effect: { effectId: string; kind: string }; snapshot: FrontendSnapshot }; ack(claim: FormsClaim): void };
   forms: { read(binding: ManagedFormBinding): NativeFormRead; setAccepting(binding: ManagedFormBinding, enabled: boolean): void;
-    write(binding: ManagedFormBinding, requests: Record<string, unknown>[], requiredRevisionId: string): void };
+    write(binding: ManagedFormBinding, requests: Record<string, unknown>[], requiredRevisionId: string): void;
+    setSubmitContinuation?(binding: ManagedFormBinding, sectionId: string): void };
   pause(): void;
 }
 function fail(code: string, message: string): never { throw new AdapterError(code, message); }
@@ -50,7 +51,7 @@ export function consumeFormsRefresh(io: FormsRefreshPorts): { status: 'disabled'
         const projected = io.effects.project(claim);
         if (projected.effect.effectId !== claim.effectId || projected.effect.kind !== 'forms.refresh' || projected.snapshot.environment !== io.config.environment || projected.snapshot.generation !== io.config.generation) fail('forms_snapshot', 'Form publication requires one coherent matching snapshot.');
         const reads = bindings.map(b => io.forms.read(b));
-        const plans = bindings.map((binding, i) => planNativeFormPublication({ snapshot: projected.snapshot, binding, current: reads[i], signer: io.signer }));
+        const plans = bindings.map((binding, i) => planNativeFormPublication({ snapshot: projected.snapshot, binding, current: reads[i], signer: io.signer, previousEdition: state.editions[state.current[binding.key]] }));
         // Catalog history is frozen alongside the plans before a respondent can see a new token.
         for (const plan of plans) state.editions = retainFormEdition(state.editions, plan.edition);
         state.pending = { plans, previouslyAccepting: Object.fromEntries(bindings.map((b, i) => [b.key, reads[i].acceptingResponses])) }; save();
@@ -61,9 +62,21 @@ export function consumeFormsRefresh(io: FormsRefreshPorts): { status: 'disabled'
       for (const plan of pending.plans) {
         currentClaim(); const read = io.forms.read(plan.binding);
         if (verifyNativeFormPlan(plan, read)) continue; // An ambiguous successful write is not repeated.
-        if (formReadFingerprint(read) !== plan.expectedBefore) fail('forms_changed', 'A Form changed outside the retained publication plan.');
-        if (plan.requests.length) io.forms.write(plan.binding, plan.requests, read.revisionId);
-        if (!verifyNativeFormPlan(plan, io.forms.read(plan.binding))) fail('forms_readback', 'Native Form choices did not verify; intake remains closed.');
+        if (!verifyFormBeforeContinuations(plan, read)) {
+          if (formReadFingerprint(read) !== plan.expectedBefore) fail('forms_changed', 'A Form changed outside the retained publication plan.');
+          if (plan.requests.length) io.forms.write(plan.binding, plan.requests, read.revisionId);
+        }
+        let after = io.forms.read(plan.binding);
+        if (plan.continuations?.length && !verifyNativeFormPlan(plan, after)) {
+          if (!verifyFormBeforeContinuations(plan, after) || !io.forms.setSubmitContinuation) fail('forms_readback', 'Additive Form content or continuation provider did not verify.');
+          for (const sectionId of plan.continuations) {
+            currentClaim();
+            if (after.pageBreakNavigation?.[sectionId]?.action !== 'SUBMIT') io.forms.setSubmitContinuation(plan.binding, sectionId);
+            after = io.forms.read(plan.binding);
+            if (!verifyFormBeforeContinuations(plan, after)) fail('forms_readback', 'A Form changed while finishing new section navigation.');
+          }
+        }
+        if (!verifyNativeFormPlan(plan, after)) fail('forms_readback', 'Native Form choices did not verify; intake remains closed.');
       }
       currentClaim();
       for (const plan of pending.plans) if (!verifyNativeFormPlan(plan, io.forms.read(plan.binding))) fail('forms_readback', 'One Form changed before the shared checkpoint.');

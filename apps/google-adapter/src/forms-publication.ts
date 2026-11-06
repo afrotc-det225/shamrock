@@ -1,5 +1,6 @@
 /** Non-destructive native Form publication. All bindings and retained catalogs are private. */
 import { AdapterError, type Signer } from './index.js';
+import { expandAttendanceLayout, type AttendanceLayout, type AttendanceRule, type PageContinuation } from './forms-layout.js';
 import type { FrontendSnapshot, SnapshotRevision, DirectoryRecord } from '../../../packages/domain/src/admin.js';
 
 export interface NativeFormRead {
@@ -8,6 +9,8 @@ export interface NativeFormRead {
   linkedSheetId?: string;
   items: Record<string, any>[];
   acceptingResponses: boolean;
+  /** Native FormApp continuation read, omitted unless additive layout is enabled. */
+  pageBreakNavigation?: Record<string, PageContinuation>;
 }
 export interface FormRosterFilter { flightIds?: string[]; asYears?: string[]; universities?: string[]; excludeUniversities?: string[] }
 export interface FrozenFormScope { unitId: string; rosterVersion: number; coveredPersonIds: string[] }
@@ -29,6 +32,7 @@ export interface ManagedFormBinding {
   key: 'attendance' | 'excusals' | 'directory'; formId: string; resourceKey: string;
   expectedTitle: string; linkedSheetId?: string; choices: NativeChoiceBinding[];
   attendanceProfiles?: Record<string, FormRosterFilter>;
+  attendanceLayout?: AttendanceLayout;
 }
 export type RetainedChoice = { editionId: string; questionId: string } & (
   { kind: 'category'; key: string }
@@ -43,10 +47,14 @@ export interface FormEdition {
   /** Frozen Directory bases are needed to avoid refreshing expected versions behind a respondent. */
   people: DirectoryRecord[];
   attendanceScopes?: Record<string, FrozenFormScope[]>;
+  attendanceRules?: AttendanceRule[];
+  attendanceChoices?: NativeChoiceBinding[];
 }
 export interface NativeFormPlan {
   binding: ManagedFormBinding; expectedBefore: string; expectedAfter: NativeFormRead;
   requiredRevisionId: string; requests: Record<string, unknown>[]; edition: FormEdition; canAccept: boolean;
+  /** New page breaks are finished via FormApp after REST creation; existing continuations never change. */
+  continuations?: string[];
 }
 const copy = <T>(x: T): T => JSON.parse(JSON.stringify(x));
 export const formsCanonical = (x: unknown): string => JSON.stringify(x, (_k, v) => v && typeof v === 'object' && !Array.isArray(v)
@@ -61,6 +69,17 @@ function semantic(read: NativeFormRead): unknown {
 export function formReadFingerprint(read: NativeFormRead): string { return formsCanonical(semantic(read)); }
 export function verifyNativeFormPlan(plan: NativeFormPlan, actual: NativeFormRead): boolean {
   return actual.acceptingResponses === false && same(semantic(actual), semantic(plan.expectedAfter));
+}
+/** Accept only the frozen REST result plus unfinished newly-created Submit continuations. */
+export function verifyFormBeforeContinuations(plan: NativeFormPlan, actual: NativeFormRead): boolean {
+  if (!plan.continuations?.length || actual.acceptingResponses || !actual.pageBreakNavigation) return false;
+  const normalized = copy(actual);
+  for (const id of plan.continuations) {
+    const found = normalized.pageBreakNavigation![id];
+    if (!found || !['CONTINUE', 'SUBMIT'].includes(found.action) || found.targetSectionId) return false;
+    normalized.pageBreakNavigation![id] = { action: 'SUBMIT' };
+  }
+  return verifyNativeFormPlan(plan, normalized);
 }
 function frozenScopes(snapshot: FrontendSnapshot, filter: FormRosterFilter): FrozenFormScope[] {
   return snapshot.flights.filter(f => !filter.flightIds || filter.flightIds.includes(f.flightId)).map(f => ({unitId: f.flightId, rosterVersion: f.rosterVersion,
@@ -99,19 +118,22 @@ function choiceCandidates(snapshot: FrontendSnapshot, source: FormChoiceSource, 
   }
   return choices;
 }
-export function planNativeFormPublication(input: { snapshot: FrontendSnapshot; binding: ManagedFormBinding; current: NativeFormRead; signer: Signer }): NativeFormPlan {
-  const { snapshot, binding, current, signer } = input;
+export function planNativeFormPublication(input: { snapshot: FrontendSnapshot; binding: ManagedFormBinding; current: NativeFormRead; signer: Signer; previousEdition?: FormEdition }): NativeFormPlan {
+  const { snapshot, signer } = input;
+  const configured = input.binding, original = input.current;
+  const expanded = configured.attendanceLayout ? expandAttendanceLayout(snapshot, configured, original, signer, input.previousEdition) : undefined;
+  const binding = expanded?.binding ?? configured, current = expanded?.current ?? original;
   if (!['local', 'staging'].includes(snapshot.environment) || current.formId !== binding.formId || !current.revisionId
     || current.info.title !== binding.expectedTitle || current.linkedSheetId !== binding.linkedSheetId
     || current.settings.emailCollectionType !== 'VERIFIED' || !Array.isArray(current.items) || current.items.length > 300
-    || binding.choices.length > 150 || new Set(binding.choices.map(b => b.itemId)).size !== binding.choices.length) fail('Existing verified Form bindings differ from the reviewed resource.');
+    || binding.choices.length > (binding.attendanceLayout ? 250 : 150) || new Set(binding.choices.map(b => b.itemId)).size !== binding.choices.length) fail('Existing verified Form bindings differ from the reviewed resource.');
   const term = snapshot.terms.filter(t => t.isCurrent); if (term.length !== 1) fail('A single current term is required.');
   const attendanceScopes = Object.fromEntries(Object.entries(binding.attendanceProfiles ?? {}).map(([key, filter]) => [key, frozenScopes(snapshot, filter)]));
   const editionId = hash(signer, { generation: snapshot.generation, binding, attendanceScopes, choices: binding.choices.map(b => choiceCandidates(snapshot, b.source, binding.key, term[0].termId)), people: binding.key === 'directory' ? snapshot.people : [] });
   const edition: FormEdition = { editionId, formId: binding.formId, resourceKey: binding.resourceKey, generation: snapshot.generation,
-    revision: copy(snapshot.revision), references: {}, attendanceScopes, people: binding.key === 'directory' ? copy(snapshot.people) : [] };
+    revision: copy(snapshot.revision), references: {}, attendanceScopes, ...(expanded ? { attendanceRules: copy(expanded.rules), attendanceChoices: copy(binding.choices.filter(c => c.source.kind === 'people')) } : {}), people: binding.key === 'directory' ? copy(snapshot.people) : [] };
   const after = copy(current); after.acceptingResponses = false;
-  const requests: Record<string, unknown>[] = []; let canAccept = true;
+  const requests: Record<string, unknown>[] = copy(expanded?.requests ?? []); let canAccept = true;
   for (const b of binding.choices) {
     const matches = current.items.map((item, index) => ({ item, index })).filter(v => v.item.itemId === b.itemId);
     if (matches.length !== 1) fail('A bound existing question is missing or duplicated.');
@@ -138,8 +160,8 @@ export function planNativeFormPublication(input: { snapshot: FrontendSnapshot; b
       location: { index }, updateMask: 'questionItem.question.choiceQuestion.options' } });
   }
   if (formsCanonical({ requests }).length > 900_000) fail('The atomic Form update exceeds its reviewed size.');
-  return { binding: copy(binding), expectedBefore: formReadFingerprint(current), expectedAfter: after,
-    requiredRevisionId: current.revisionId, requests, edition, canAccept };
+  return { binding: copy(configured), expectedBefore: formReadFingerprint(original), expectedAfter: after,
+    requiredRevisionId: original.revisionId, requests, edition, canAccept, ...(expanded?.continuations.length ? { continuations: expanded.continuations } : {}) };
 }
 
 /** Old references remain immutable; capacity exhaustion stops publication instead of deleting history. */

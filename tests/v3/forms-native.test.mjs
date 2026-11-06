@@ -39,7 +39,7 @@ function fixture(){
   if(u.host==='forms.googleapis.com'){
    const id=u.pathname.split('/')[3].replace(':batchUpdate','');
    if(u.pathname.includes('/responses/'))return response(fx.responses[id]);
-   if(u.pathname.endsWith(':batchUpdate')){assert(fx.files['state-file'].value.pending);assert.equal(fx.open[id],false);assert.equal(body.writeControl.requiredRevisionId,fx.forms[id].revisionId);for(const r of body.requests){assert.equal(r.updateItem.updateMask,'questionItem.question.choiceQuestion.options');fx.forms[id].items[r.updateItem.location.index].questionItem.question.choiceQuestion.options=clone(r.updateItem.item.questionItem.question.choiceQuestion.options);}fx.forms[id].revisionId+='b';return response({});}
+   if(u.pathname.endsWith(':batchUpdate')){assert(fx.files['state-file'].value.pending);assert.equal(fx.open[id],false);assert.equal(body.writeControl.requiredRevisionId,fx.forms[id].revisionId);for(const r of body.requests){if(r.createItem){const{item,location}=r.createItem;fx.forms[id].items.splice(location.index,0,clone(item));if(item.pageBreakItem)(fx.nativeNavigation??={})[item.itemId]='CONTINUE';continue;}assert.equal(r.updateItem.updateMask,'questionItem.question.choiceQuestion.options');fx.forms[id].items[r.updateItem.location.index].questionItem.question.choiceQuestion.options=clone(r.updateItem.item.questionItem.question.choiceQuestion.options);}fx.forms[id].revisionId+='b';return response({});}
    return response(clone(fx.forms[id]));
   }
   const id=u.pathname.split('/').at(-1),file=fx.files[id];assert(file,`unknown file ${id}`);
@@ -47,7 +47,7 @@ function fixture(){
   if(u.searchParams.get('alt')==='media')return response(clone(file.value));
   return response({id:file.id,name:file.name,mimeType:file.mimeType,size:JSON.stringify(file.value??{}).length,version:String(file.version??1),owners:[{emailAddress:owner}],permissions:[{type:'user',role:'owner',emailAddress:owner}]});
  }}};
- return{fx,config,values,services,runtime:createNativeFormsRuntime(services)};
+ return{fx,config,values,services,snapshot,runtime:createNativeFormsRuntime(services)};
 }
 
 test('native host uses owner-only Drive fallback/checkpoints and fresh Form revisions with idempotent trigger setup',()=>{
@@ -76,4 +76,17 @@ test('private reviewed control requests set up and resume Forms once without ove
 });
 test('private control refuses changed checkpoints before installing triggers or opening Forms',()=>{
  const f=fixture();control(f,'setup',1);f.fx.files['intake-file'].value.entries.changed={};assert.throws(()=>f.runtime.refresh(),{code:'forms_control'});assert.equal(f.fx.triggers.length,0);assert(Object.values(f.fx.open).every(x=>!x));
+});
+
+test('native additive layout creates stable cohorts and verifies new Submit continuations through FormApp',()=>{
+ const f=fixture(),binding=f.config.forms[0],form=f.fx.forms[binding.formId];
+ const q=(id,type)=>({itemId:`i-${id}`,title:id,questionItem:{question:{questionId:id,choiceQuestion:{type,options:[{value:'old'}]}}}});
+ for(const[id,source]of[['mando-scope',{kind:'profiles',profiles:[]}],['llab-scope',{kind:'flights'}]]){form.items.push(q(id,'RADIO'));binding.choices.push({itemId:`i-${id}`,questionId:id,source});}
+ f.fx.nativeNavigation={};for(const branch of['mando','llab','secondary','other','trine']){const id=`page-${branch}`;form.items.push({itemId:id,title:id,pageBreakItem:{}});f.fx.nativeNavigation[id]='SUBMIT';if(branch==='mando'){form.items.push(q('template','CHECKBOX'));binding.choices.push({itemId:'i-template',questionId:'template',source:{kind:'people',flightIds:['alpha'],asYears:['AS100']}});}}
+ binding.attendanceLayout={version:1,review:'OPTIONAL_UNVALIDATED_CHECKBOX_AND_SUBMIT_SECTIONS_REVIEWED',questionTemplateItemId:'i-template',sectionTemplateItemId:'page-mando',excludedFlightLabels:['Abroad'],mando:{scopeQuestionId:'mando-scope',eventQuestions:[],flights:[{flightId:'alpha',sectionId:'page-mando'}],crosstown:[{key:'trine',label:'Trine',universities:['Trine'],sectionId:'page-trine'}]},llab:{scopeQuestionId:'llab-scope',eventQuestions:['q-0'],flights:[{flightId:'alpha',sectionId:'page-llab'}]},secondary:{sectionId:'page-secondary',eventQuestions:[]},other:{sectionId:'page-other',eventQuestions:[]}};
+ f.snapshot.people=[{personId:'alpha-one',firstName:'One',lastName:'Example',flightId:'alpha',asYear:'AS100',university:'Notre Dame',active:true},{personId:'bravo-one',firstName:'Two',lastName:'Example',flightId:'bravo',asYear:'AS200',university:'Notre Dame',active:true}];f.snapshot.flights.push({flightId:'bravo',label:'Bravo',rosterVersion:1});
+ const open=f.services.FormApp.openById;let changes=0;
+ f.services.FormApp.PageNavigationType={SUBMIT:'SUBMIT'};
+ f.services.FormApp.openById=id=>({...open(id),getItems:()=>f.fx.forms[id].items.map((item,index)=>({getIndex:()=>index,getTitle:()=>item.title??'',getType:()=>item.pageBreakItem?'PAGE_BREAK':item.questionItem?.question?.choiceQuestion?.type==='CHECKBOX'?'CHECKBOX':'TEXT',asCheckboxItem:()=>({isRequired:()=>Boolean(item.questionItem?.question?.required),hasOtherOption:()=>false}),asPageBreakItem:()=>({getPageNavigationType:()=>f.fx.nativeNavigation[item.itemId],setGoToPage:value=>{assert.equal(f.fx.open[id],false);assert(f.fx.files['state-file'].value.pending);f.fx.nativeNavigation[item.itemId]=value;f.fx.forms[id].revisionId+='n';changes++;}})}))});
+ f.runtime.setup();f.runtime.resumePublication();assert.equal(f.runtime.refresh().status,'published');assert.equal(changes,2);assert.equal(f.fx.claim,false);assert(Object.values(f.fx.nativeNavigation).every(x=>x==='SUBMIT'));const state=f.fx.files['state-file'].value;assert.equal(Object.values(state.editions).find(e=>e.formId===binding.formId).attendanceRules.length,4);
 });
