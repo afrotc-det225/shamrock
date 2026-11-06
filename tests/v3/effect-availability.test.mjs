@@ -1,0 +1,15 @@
+import test from 'node:test';import assert from 'node:assert/strict';import {resolve} from 'node:path';import {createHmac,createHash} from 'node:crypto';import {Miniflare,Log,LogLevel} from 'miniflare';
+import {initializeLocalDatabase} from '../../scripts/lib/v3-local-database.mjs';
+import {instrumentDatabase} from '../../scripts/lib/v3-capacity.mjs';
+import {adminEffectAvailability} from '../../.build/v3/apps/worker/src/effect-availability.js';
+const secret='fictional-availability-key-long-enough-for-testing';
+test('signed availability is read-only, indexed, current-authority checked and readable while commands are paused',async t=>{
+ const mf=new Miniflare({modules:true,scriptPath:resolve('.build/v3-artifacts/worker.mjs'),compatibilityDate:'2026-07-01',d1Databases:{DB:'availability-fixture'},bindings:{ENVIRONMENT:'local',GENERATION:'1',BRIDGE_KEY_ID:'fixture',BRIDGE_SECRET:secret},log:new Log(LogLevel.NONE)});t.after(()=>mf.dispose());const db=await mf.getD1Database('DB');await initializeLocalDatabase(db);
+ await db.batch([db.prepare("INSERT INTO system_control VALUES(1,'local',1,0)"),db.prepare("INSERT INTO principals VALUES('reader',NULL,1),('outsider',NULL,1)"),db.prepare("INSERT INTO admin_grants VALUES('reader','frontend.read','wing','*')"),db.prepare("INSERT INTO command_registry VALUES('seed','admin')"),db.prepare("INSERT INTO admin_effects(effect_id,command_id,kind,state,created_at) VALUES('front','seed','frontend.refresh','pending','2026-01-01'),('forms','seed','forms.refresh','leased','2026-01-01')")]);
+ const request={environment:'local',generation:1,principalId:'reader'},probe=instrumentDatabase(db);probe.begin('availability');const result=await adminEffectAvailability({DB:probe.db,ENVIRONMENT:'local',GENERATION:'1'},request),counts=probe.end();
+ assert.deepEqual(result,{acceptingCommands:false,frontendPending:true,frontendLeased:false,formsPending:false,formsLeased:true});assert.equal(counts.d1Calls,1);assert.equal(counts.localRowsWritten,0);assert(counts.localRowsRead<30);
+ const before=await db.prepare('SELECT * FROM admin_effects ORDER BY effect_id').all();
+ const send=async(input,signed=true)=>{const path='/v1/admin/effects/availability',body=JSON.stringify(input),timestamp=String(Math.floor(Date.now()/1000)),signature=createHmac('sha256',secret).update(`POST\n${path}\n${timestamp}\n${createHash('sha256').update(body).digest('hex')}`).digest('hex');return mf.dispatchFetch('https://fixture.invalid'+path,{method:'POST',body,headers:{'content-type':'application/json','x-shamrock-key-id':'fixture','x-shamrock-timestamp':timestamp,'x-shamrock-signature':signed?signature:'0'.repeat(64)}});};
+ assert.equal((await send(request)).status,200);assert.equal((await send(request,false)).status,401);assert.equal((await send({...request,principalId:'outsider'})).status,403);assert.equal((await send({...request,extra:true})).status,400);
+ await db.prepare("DELETE FROM admin_grants WHERE principal_id='reader'").run();assert.equal((await send(request)).status,403);assert.deepEqual((await db.prepare('SELECT * FROM admin_effects ORDER BY effect_id').all()).results,before.results);
+});

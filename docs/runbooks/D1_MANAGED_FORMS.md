@@ -150,3 +150,5 @@ bound staging Forms; it grants no new identity or operational capability.
 Private Form journals verify canonical prior content before every write and exact
 readback afterward. Provider metadata-only Drive version changes do not invalidate
 an otherwise unchanged checkpoint. Changed content still stops the operation.
+
+The shared five-minute scheduler discovers private setup controls every tick. It checks current backend queue availability before full publication and uses generation/file-bound work markers to avoid rereading empty intake/publication checkpoints. Writes mark pending before persistence; an interrupted publication retains its pending marker. An hourly pass reconciles state even after an idle result. Direct native Form submission remains immediate. Configuration caching lasts one invocation only and excludes journals, Form content and provider write/readback results. See the [free-tier forecast](D1_FREE_TIER_FORECAST.md) for measured local idle-call counts and remaining hosted CPU/runtime gates.

@@ -1,3 +1,4 @@
+import type {ScheduledHints} from './scheduled-runtime.js';
 /** Optional standalone Google host. Config and journals remain in automation-owned Drive JSON. */
 import { createPrivateCheckpoint } from './private-checkpoint.js';
 import type { PageContinuation } from './forms-layout.js';
@@ -11,7 +12,7 @@ import { commandsFromManagedForm, directoryDraftFromManagedForm, directoryReview
   type DirectorySubmissionDraft, type FormIntakeBinding, type FormPrincipal, type VerifiedFormSubmission } from './forms-intake.js';
 import type { DirectoryProfile } from '../../../packages/domain/src/admin.js';
 
-export const FORMS_PROPERTIES = { config: 'SHAMROCK_V3_FORMS_CONFIG', pause: 'SHAMROCK_V3_FORMS_PAUSED', intakePause: 'SHAMROCK_V3_FORM_INTAKE_PAUSED', setup: 'SHAMROCK_V3_FORMS_SETUP', controlReceipt: 'SHAMROCK_V3_FORMS_CONTROL_RECEIPT' } as const;
+export const FORMS_PROPERTIES = { config: 'SHAMROCK_V3_FORMS_CONFIG', pause: 'SHAMROCK_V3_FORMS_PAUSED', intakePause: 'SHAMROCK_V3_FORM_INTAKE_PAUSED', setup: 'SHAMROCK_V3_FORMS_SETUP', controlReceipt: 'SHAMROCK_V3_FORMS_CONTROL_RECEIPT', intakeWork:'SHAMROCK_V3_FORM_INTAKE_WORK', publicationWork:'SHAMROCK_V3_FORMS_WORK' } as const;
 export const MANAGED_FORM_HANDLERS = { attendance: 'shamrockV3ManagedAttendanceSubmit', excusals: 'shamrockV3ManagedExcusalSubmit', directory: 'shamrockV3ManagedDirectorySubmit' } as const;
 export interface NativeFormsConfig {
   version: 1; environment: 'staging'; generation: number; enabled: boolean; intakeEnabled: boolean;
@@ -28,6 +29,7 @@ interface IntakeEntry {
 }
 interface IntakeState { version: 1; environment: 'staging'; generation: number; entries: Record<string, IntakeEntry>; enrollments?: Record<string, {principalId: string; personId: string}> }
 export interface NativeFormsServices {
+  scheduled?: ScheduledHints;
   PropertiesService: { getScriptProperties(): { getProperty(k: string): string | null; setProperty(k: string, v: string): unknown } };
   Utilities: Parameters<typeof createGoogleSigner>[0] & { getUuid(): string };
   ScriptApp: any; Session: { getEffectiveUser(): { getEmail(): string }; getActiveUser(): { getEmail(): string } };
@@ -158,6 +160,8 @@ export function createNativeFormsRuntime(services: NativeFormsServices) {
     if (result.status !== 200 || result.body.authorized !== true) fail('confirmation_required', 'Current Wing Directory authority is required.');
     return actor;
   }
+  const idleMarker=(ctx:NonNullable<ReturnType<typeof context>>,fileId:string)=>'idle:'+ctx.signer.sha256(formsCanonical([ctx.config.generation,fileId]));
+  function markWork(key:string,value='pending'){props.setProperty(key,value);if(props.getProperty(key)!==value)fail('forms_state','The private work marker did not persist.');}
   function flushIntakes(ctx: NonNullable<ReturnType<typeof context>>) {
     const store = ctx.storage<IntakeState>(ctx.config.intakeFileId), state = store.load();
     if (state.version !== 1 || state.environment !== 'staging' || state.generation !== ctx.config.generation) fail('forms_state', 'The intake journal has another generation.');
@@ -181,6 +185,7 @@ export function createNativeFormsRuntime(services: NativeFormsServices) {
         : entry.commands.some(c => c.status === 'queued') ? 'queued' : entry.directory?.status === 'pending-review' ? 'pending-review' : 'committed';
       store.save(state);
     }
+    markWork(FORMS_PROPERTIES.intakeWork,Object.values(state.entries).some(e=>e.commands.some(c=>c.status==='queued'))?'pending':idleMarker(ctx,ctx.config.intakeFileId));
     return { attempted: sent };
   }
   return {
@@ -215,13 +220,20 @@ export function createNativeFormsRuntime(services: NativeFormsServices) {
     refresh() {
       this.applyControl();
       if (props.getProperty(FORMS_PROPERTIES.pause) === 'true') return { status: 'disabled' };
-      const ctx = context(); if (!ctx) return { status: 'disabled' };
-      return consumeFormsRefresh({ config: ctx.adapter, enabled: ctx.enabled, intakeEnabled: ctx.intakeEnabled, now, signer: ctx.signer,
+      const ctx = context(); if (!ctx || !ctx.enabled()) return { status: 'disabled' };
+      if (services.scheduled) {
+        const available=services.scheduled.availability(ctx.config.principalId);
+        if(!available.acceptingCommands)return{status:'disabled'};
+        if(!services.scheduled.reconcile && props.getProperty(FORMS_PROPERTIES.publicationWork)===idleMarker(ctx,ctx.config.stateFileId) && !available.formsPending && !available.formsLeased)return{status:'idle'};
+      }
+      markWork(FORMS_PROPERTIES.publicationWork);
+      const result=consumeFormsRefresh({ config: ctx.adapter, enabled: ctx.enabled, intakeEnabled: ctx.intakeEnabled, now, signer: ctx.signer,
         bindings: ctx.config.forms, lock: services.LockService.getScriptLock(), assertIsolation: ctx.isolation, state: ctx.storage<FormsState>(ctx.config.stateFileId),
         effects: { claim: () => ctx.effect('claim').effect, project: claim => ctx.effect('project', claim), ack: claim => { const result = ctx.effect('ack', claim); if (result.acknowledged !== true) fail('forms_effect', 'Form acknowledgement did not verify.'); } },
         forms: { read: ctx.read, setSubmitContinuation: ctx.setSubmitContinuation, setAccepting: (b, open) => { services.FormApp.openById(b.formId).setAcceptingResponses(open); },
           write: (b, requests, requiredRevisionId) => { api(`${forms(b.formId)}:batchUpdate`, { requests, writeControl: { requiredRevisionId } }); } },
         pause: () => paused(FORMS_PROPERTIES.pause) });
+      markWork(FORMS_PROPERTIES.publicationWork,idleMarker(ctx,ctx.config.stateFileId));return result;
     },
     pause() { let failure: unknown; for (const key of [FORMS_PROPERTIES.pause, FORMS_PROPERTIES.intakePause]) { try { paused(key); } catch (e) { failure ??= e; } }
       try { const ctx = context(); if (ctx) for (const b of ctx.config.forms) { services.FormApp.openById(b.formId).setAcceptingResponses(false); if (ctx.read(b).acceptingResponses) fail('forms_pause', 'A managed Form did not close.'); } } catch (e) { failure ??= e; }
@@ -239,9 +251,12 @@ export function createNativeFormsRuntime(services: NativeFormsServices) {
         } catch (error) { paused(FORMS_PROPERTIES.intakePause); for (const b of ctx.config.forms) { try { services.FormApp.openById(b.formId).setAcceptingResponses(false); } catch {} } throw error; }
         return { status: 'intake-enabled' };
       }); },
-    flush() { const ctx = context(); if (!ctx || !ctx.intakeEnabled()) return { status: 'paused' }; return lock(() => { ctx.isolation(); return flushIntakes(ctx); }); },
+    flush() { const ctx = context(); if (!ctx || !ctx.intakeEnabled()) return { status: 'paused' };
+      if(services.scheduled&&!services.scheduled.availability(ctx.config.principalId).acceptingCommands)return{status:'paused'};
+      if(services.scheduled&&!services.scheduled.reconcile&&props.getProperty(FORMS_PROPERTIES.intakeWork)===idleMarker(ctx,ctx.config.intakeFileId))return{status:'idle',attempted:0};
+      return lock(() => { ctx.isolation(); markWork(FORMS_PROPERTIES.intakeWork);return flushIntakes(ctx); }); },
     setup() {
-      paused(FORMS_PROPERTIES.intakePause); const ctx = context(); if (!ctx) return fail('forms_configuration', 'Managed Forms are not configured.');
+      paused(FORMS_PROPERTIES.intakePause); markWork(FORMS_PROPERTIES.intakeWork);markWork(FORMS_PROPERTIES.publicationWork); const ctx = context(); if (!ctx) return fail('forms_configuration', 'Managed Forms are not configured.');
       return lock(() => { ctx.isolation(); const ids: Record<string, string> = {};
         for (const b of ctx.config.forms) {
           services.FormApp.openById(b.formId).setAcceptingResponses(false);
@@ -283,7 +298,7 @@ export function createNativeFormsRuntime(services: NativeFormsServices) {
           if (journal.entries[id].status !== 'captured') return { status: journal.entries[id].status, intakeId: id };
         }
         const entry: IntakeEntry = journal.entries[id] ?? { id, source, formKey: key, sourceHash: ctx.signer.sha256(formsCanonical(source)), status: 'captured', commands: [] };
-        journal.entries[id] = entry; store.save(journal); // Preserve even invalid or unenrolled submissions before interpretation.
+        markWork(FORMS_PROPERTIES.intakeWork);journal.entries[id] = entry; store.save(journal); // Preserve even invalid or unenrolled submissions before interpretation.
         try {
           const catalog = ctx.storage<FormsState>(ctx.config.stateFileId).load();
           const input = { submission: source, binding: binding.intake, editions: catalog.editions, principals: [...ctx.config.principals.filter(p => p.personId || !journal.enrollments?.[p.email.toLowerCase()]), ...Object.entries(journal.enrollments ?? {}).filter(([email]) => !ctx.config.principals.some(p => p.personId && p.email.toLowerCase() === email)).map(([email, p]) => ({email, ...p}))], config: ctx.adapter, signer: ctx.signer };
@@ -314,7 +329,7 @@ export function createNativeFormsRuntime(services: NativeFormsServices) {
         const command = directoryReviewCommand({ ...input, draft: entry.directory, reviewerPrincipalId: actor.principalId, authenticatedReviewer: true,
           resourceKey: ctx.config.reviewResourceKey, config: ctx.adapter, signer: ctx.signer });
         if (entry.commands.some(c => c.command.commandId === command.commandId)) return { status: entry.status, intakeId: input.intakeId };
-        entry.commands.push({ command, path: '/v1/admin/commands', status: 'queued' }); entry.directory.status = 'ready'; entry.status = 'queued'; store.save(journal);
+        markWork(FORMS_PROPERTIES.intakeWork);entry.commands.push({ command, path: '/v1/admin/commands', status: 'queued' }); entry.directory.status = 'ready'; entry.status = 'queued'; store.save(journal);
         return flushIntakes(ctx);
       });
     },

@@ -13,3 +13,5 @@ export { createNativeMaintenanceRuntime } from './native-maintenance.js';
 export { createNativeFormsRuntime, FORMS_PROPERTIES, MANAGED_FORM_HANDLERS } from './forms-native.js';
 
 export { createNativeFrontendInput, INPUT_PROPERTIES, INPUT_HANDLERS } from './frontend-input-native.js';
+
+export { runScheduledStaging } from './scheduled-runtime.js';

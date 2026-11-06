@@ -1,3 +1,4 @@
+import type {ScheduledHints} from './scheduled-runtime.js';
 /** Optional staging-only frontend consumer. All IO is explicit; loading performs no work. */
 import { AdapterError, type AdapterConfig, type SignedRequest, type Signer, type Transport } from './index.js';
 import { createGoogleSigner, createGoogleTransport, type ScriptLockPort, type UtilitiesPort } from './apps-script.js';
@@ -522,6 +523,7 @@ export interface NativeFrontendInputSession {
   fence(): void; restore(): void;
 }
 export interface NativeFrontendServices {
+  scheduled?: ScheduledHints;
   PropertiesService: { getScriptProperties(): { getProperty(key: string): string | null; setProperty(key: string, value: string): unknown; deleteProperty(key: string): unknown } };
   Utilities: UtilitiesPort & { formatDate?(date: Date, timeZone: string, format: string): string };
   UrlFetchApp: { fetch(url: string, options: { method: 'get' | 'post' | 'patch'; headers: Record<string, string>; payload?: string; contentType?: string;
@@ -636,6 +638,11 @@ export function createNativeFrontendRuntime(services: NativeFrontendServices,
       } });
     }
     if (properties.getProperty(FRONTEND_PROPERTIES.pause) === 'true' && !allowPausedInput) return { status: 'disabled' as const };
+    if (!inputOperation && services.scheduled) {
+      const available=services.scheduled.availability(config.principalId);
+      if (!available.acceptingCommands) return {status:'disabled' as const};
+      if (!services.scheduled.reconcile && !properties.getProperty(FRONTEND_PROPERTIES.claim) && !available.frontendPending && !available.frontendLeased) return {status:'idle' as const};
+    }
     let publishedBaselines: FrontendPublicationState['baselines'] | undefined;
     let publishedSupplemental: FrontendSupplementalState | undefined;
     let metadataCache: Record<string, any> | undefined, cellsCache: Record<string, any> | undefined;
@@ -739,7 +746,7 @@ export function createNativeFrontendRuntime(services: NativeFrontendServices,
     }
     function protectionInput(closed: boolean): FrontendProtectionInput {
       const metadata = readMetadata();
-      const access = closed ? { ...config.access, supportEditors: [], directoryEditors: [], leadershipEditors: [], attendanceEditors: [], squadronCommanders: [] } : config.access;
+      const access = closed ? { ...config.access, supportEditors: [], permissionManagers: [], directoryEditors: [], leadershipEditors: [], attendanceEditors: [], squadronCommanders: [] } : config.access;
       // A closed sheet has no editable holes, so cell reads cannot add assurance.
       // Verify its complete native guard from metadata alone on every fence check.
       if (closed) return { access, metadata, surfaces: metadata.sheets.map((s: any) => ({ kind: 'readonly', sheetId: s.properties.sheetId,
@@ -756,7 +763,7 @@ export function createNativeFrontendRuntime(services: NativeFrontendServices,
     }
     function excusalProtectionInput(closed: boolean): FrontendProtectionInput {
       const book = supplemental!.excusals, metadata = readExcusalMetadata();
-      const access = closed ? { ...book.access, supportEditors: [], directoryEditors: [], leadershipEditors: [], attendanceEditors: [], squadronCommanders: [] } : book.access;
+      const access = closed ? { ...book.access, supportEditors: [], permissionManagers: [], directoryEditors: [], leadershipEditors: [], attendanceEditors: [], squadronCommanders: [] } : book.access;
       if (closed) return { access, metadata, surfaces: metadata.sheets.map((s: any) => ({ kind: 'readonly', sheetId: s.properties.sheetId,
         headers: [], dataEndRow: 2, gridRowCount: s.properties.gridProperties.rowCount, gridColumnCount: s.properties.gridProperties.columnCount })) };
       return { access, metadata, surfaces: metadata.sheets.map((s: any) => {

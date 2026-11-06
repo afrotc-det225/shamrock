@@ -135,3 +135,5 @@ under the shared script lock and with ownership/ACL checks on metadata reads.
 Metadata-only version drift is tolerated; changed content, unstable reads or a
 mismatched post-write readback stops publication and retains its recovery state.
 This is cooperative writer serialization, not a transactional Drive compare-and-swap.
+
+Scheduled idle discovery uses the signed read-only `POST /v1/admin/effects/availability` route under current Wing frontend-read authority. It returns only gate/pending/leased booleans; it never creates a claim or reads a full snapshot. A retained local claim and hourly reconciliation bypass an old idle result. A paused backend defers scheduled publication without changing its retained claim. Configuration reads may be shared within one scheduled invocation; checkpoints and all native writes/readbacks remain uncached. The maintenance planner runs at most once per 15-minute window while direct input handlers retain immediate processing.

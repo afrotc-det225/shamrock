@@ -74,17 +74,9 @@ function shamrockV3StagingImportConfig() {
 }
 function shamrockV3StagingResume() { return shamrockV3StagingHost_().resume(); }
 function shamrockV3StagingFlush() {
-  var intake = shamrockV3StagingHost_().flush();
-  // Frontend maintenance has a separate explicit gate; Forms may remain paused.
-  var frontend = shamrockV3StagingFrontend_().refresh();
-  var maintenance = shamrockV3StagingMaintenance_().planNotifications();
-  var result = Object.assign({}, intake, { frontend: frontend, maintenance: maintenance });
-  if (typeof SHAMROCKV3 !== 'undefined' && SHAMROCKV3.createNativeFormsRuntime) {
-    var forms = shamrockV3StagingForms_();
-    result.formIntake = forms.flush(); result.forms = forms.refresh();
-  }
-  if (typeof SHAMROCKV3 !== 'undefined' && SHAMROCKV3.createNativeFrontendInput) result.nativeInput = shamrockV3NativeInput_().flush();
-  return result;
+  return SHAMROCKV3.runScheduledStaging({ PropertiesService: PropertiesService, Utilities: Utilities,
+    UrlFetchApp: UrlFetchApp, ScriptApp: ScriptApp, Session: Session, FormApp: FormApp,
+    SpreadsheetApp: SpreadsheetApp, LockService: LockService });
 }
 function shamrockV3StagingFrontendRefresh() { return shamrockV3StagingFrontend_().refresh(); }
 function shamrockV3StagingFrontendPause() { return shamrockV3StagingFrontend_().pause(); }

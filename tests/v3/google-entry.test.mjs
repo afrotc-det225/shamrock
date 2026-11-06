@@ -47,14 +47,11 @@ test('operator setup pauses and validates projection outputs before installing t
   assert.deepEqual(calls, ['pause', 'frontend-pause', 'maintenance-pause', 'outputs', 'presentation', 'triggers']);
 });
 
-test('installed scheduled flush preserves intake results and independently runs optional frontend publication while intake is paused', async () => {
-  const source = await readFile(new URL('../../apps/google-adapter/staging-globals.js', import.meta.url), 'utf8');
-  const calls = [], context = vm.createContext({}); vm.runInContext(source, context);
-  context.shamrockV3StagingHost_ = () => ({ flush() { calls.push('intake'); return { status: 'paused', committed: 0 }; } });
-  context.shamrockV3StagingFrontend_ = () => ({ refresh() { calls.push('frontend'); return { status: 'published', retainedDrafts: 0 }; } });
-  context.shamrockV3StagingMaintenance_ = () => ({planNotifications(){calls.push('maintenance');return {status:'paused'};}});
-  assert.deepEqual(JSON.parse(JSON.stringify(context.shamrockV3StagingFlush())), { status: 'paused', committed: 0, frontend: { status: 'published', retainedDrafts: 0 }, maintenance:{status:'paused'} });
-  assert.deepEqual(calls, ['intake', 'frontend', 'maintenance']);
+test('installed scheduled flush delegates once to the shared invocation scheduler',async()=>{
+ const source=await readFile(new URL('../../apps/google-adapter/staging-globals.js',import.meta.url),'utf8');let calls=0;
+ const services=Object.fromEntries(['PropertiesService','Utilities','UrlFetchApp','ScriptApp','Session','FormApp','SpreadsheetApp','LockService'].map(name=>[name,{}]));
+ const context=vm.createContext({...services,SHAMROCKV3:{runScheduledStaging(s){calls++;assert.equal(s.UrlFetchApp,services.UrlFetchApp);return{status:'paused',reconciled:true};}}});vm.runInContext(source,context);
+ assert.deepEqual(context.shamrockV3StagingFlush(),{status:'paused',reconciled:true});assert.equal(calls,1);
 });
 
 test('global staging pause stops both planes while each resume remains explicit and separate', async () => {

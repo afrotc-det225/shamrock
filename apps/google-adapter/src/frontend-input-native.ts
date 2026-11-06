@@ -7,7 +7,7 @@ import {createNativeFrontendRuntime,type NativeFrontendInputSession,type NativeF
 import {assertImmutableInputSlots,bindImmutableInputSlots,captureFrontendEdit,commandsForCapturedEdit,inputCanonical,nativeInputValue,type InputPrincipal,type InputSurfaceBinding,type NativeEditEvidence,type CapturedFrontendEdit} from './frontend-input.js';
 import {deliverFrontendInputs,inputSurfaceState,retainCapturedInput,supersedeUnattemptedInput,type FrontendInputJournal,type InputJournalPorts,type InputJournalEntry} from './frontend-input-journal.js';
 
-export const INPUT_PROPERTIES={config:'SHAMROCK_V3_INPUT_CONFIG',pause:'SHAMROCK_V3_INPUT_PAUSED',setup:'SHAMROCK_V3_INPUT_SETUP',controlReceipt:'SHAMROCK_V3_INPUT_CONTROL_RECEIPT'} as const;
+export const INPUT_PROPERTIES={config:'SHAMROCK_V3_INPUT_CONFIG',pause:'SHAMROCK_V3_INPUT_PAUSED',setup:'SHAMROCK_V3_INPUT_SETUP',controlReceipt:'SHAMROCK_V3_INPUT_CONTROL_RECEIPT',work:'SHAMROCK_V3_INPUT_WORK'} as const;
 export const INPUT_HANDLERS={edit:'shamrockV3NativeFrontendEdit',confirmation:'shamrockV3NativeFrontendConfirm'} as const;
 export interface NativeInputConfig {
   version:1;environment:'staging';generation:number;enabled:boolean;resourceReview:'EXISTING_INPUT_SURFACES_REVIEWED_FOR_STAGING';
@@ -92,8 +92,11 @@ export function createNativeFrontendInput(services:NativeInputServices,frontend=
       const binding=(book.sheets as Record<string,{sheetId:number;tableId:string}>)[b.surface];if(book.spreadsheetId!==b.spreadsheetId||binding?.sheetId!==b.sheetId||binding.tableId!==b.tableId)fail('input_configuration','An input surface differs from the reviewed native publisher.');}
     ctx.confirmationRead();
   }
+  function work(value='pending'){properties.setProperty(INPUT_PROPERTIES.work,value);if(properties.getProperty(INPUT_PROPERTIES.work)!==value)fail('input_state','The input work marker did not persist.');}
+  const idleMarker=(ctx:NonNullable<ReturnType<typeof context>>)=>'idle:'+ctx.signer.sha256(inputCanonical([ctx.config.generation,ctx.config.journalFileId]));
+  function finish(ctx:NonNullable<ReturnType<typeof context>>,io:InputJournalPorts){work(Object.values(io.journal.entries).some(e=>!e.superseded&&e.commands.some(c=>c.status==='queued'||c.status==='committed'&&!c.applied)||e.superseded&&!e.supersededApplied)?'pending':idleMarker(ctx));}
   function ports(ctx:NonNullable<ReturnType<typeof context>>,session:NativeFrontendInputSession):InputJournalPorts{
-    const store=ctx.journal(),journal=store.load();return{journal,state:session.state,saveJournal:value=>store.save(value),saveState:value=>session.save(value),sha256:text=>ctx.signer.sha256(text),send:(path,command)=>ctx.request(path,command),stillVisible(edit){
+    const store=ctx.journal(),journal=store.load();return{journal,state:session.state,saveJournal:value=>{work();store.save(value);},saveState:value=>session.save(value),sha256:text=>ctx.signer.sha256(text),send:(path,command)=>ctx.request(path,command),stillVisible(edit){
       const read=session.read(edit.surface),table=inputSurfaceState(session.state,edit.surface);assertImmutableInputSlots(table.baseline,read,edit.surface);return edit.drafts.every(d=>{const row=table.baseline.slots?.keys.indexOf(d.key),column=read.headers.indexOf(d.header);return row!==undefined&&row>=0&&column>=0&&inputCanonical(nativeInputValue(read.rows[row]?.[column]))===inputCanonical(d.value);});
     }};
   }
@@ -121,7 +124,7 @@ export function createNativeFrontendInput(services:NativeInputServices,frontend=
     io.saveJournal(io.journal);
   }
   function sessionRun(operation:(ctx:NonNullable<ReturnType<typeof context>>,session:NativeFrontendInputSession)=>unknown){const ctx=context();if(!ctx||!ctx.enabled())return{status:'paused'};
-    return frontend.inputSession(session=>{if(!ctx.enabled())return{status:'paused'};checkSession(ctx,session);ctx.setupReceipt();return operation(ctx,session);});}
+    return frontend.inputSession(session=>{if(!ctx.enabled()||services.scheduled&&!services.scheduled.availability(session.config.principalId).acceptingCommands)return{status:'paused'};checkSession(ctx,session);ctx.setupReceipt();return operation(ctx,session);});}
   return{
     applyControl(){const ctx=context(),request=ctx?.config.controlRequest;if(!ctx||!request)return{status:'none'};
       if(!/^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/.test(request.requestId)||!Number.isSafeInteger(request.sequence)||request.sequence<1||!['setup','resume','pause'].includes(request.action)
@@ -136,7 +139,7 @@ export function createNativeFrontendInput(services:NativeInputServices,frontend=
       if(request.action==='setup')return this.setup();if(request.action==='resume')return this.resume();return this.pause();
     },
     pause,
-    setup(){pause();const ctx=context();if(!ctx)fail('input_configuration','Configure the isolated input resources first.');let verified=false;frontend.inputSession(session=>{
+    setup(){pause();work();const ctx=context();if(!ctx)fail('input_configuration','Configure the isolated input resources first.');let verified=false;frontend.inputSession(session=>{
         checkSession(ctx,session);
         if(ctx.config.surfaces.some(b=>inputSurfaceState(session.state,b.surface).drafts.length))fail('input_slots','Resolve all frozen frontend drafts before establishing input slots.');
         session.fence();try{
@@ -169,11 +172,13 @@ export function createNativeFrontendInput(services:NativeInputServices,frontend=
         const result=ctx.request('/v1/admin/snapshot',{environment:'staging',generation:ctx.config.generation,principalId:session.config.principalId});if(result.status!==200)fail('input_snapshot','The coherent input context is unavailable.');
         const review=ctx.config.providerReview,verified=Boolean(review?.reviewId&&review.bindingsSha256===ctx.signer.sha256(inputCanonical(ctx.config.surfaces))&&review.filterViewCoordinatesVerified===true&&review.protectedSortDenied===true);
         const edit=captureFrontendEdit({event:evidence,binding:b,baseline:table.baseline,drafts:table.drafts,current:read,snapshot:result.body,principals:ctx.config.principals,config:session.adapter,signer:ctx.signer,providerCoordinatesVerified:verified,automationEmail:ctx.owner,captureSequence});
-        if(edit.status==='noop'){note(evidence,'');return{status:'noop'};}
-        const entry=retainCapturedInput(io,edit,edit.status==='ready'?commandsForCapturedEdit({edit,principals:ctx.config.principals}):[]);deliverFrontendInputs(io);updateNote(ctx,entry,io);return{status:status(entry),editId:edit.editId};
+        if(edit.status==='noop'){note(evidence,'');finish(ctx,io);return{status:'noop'};}
+        const entry=retainCapturedInput(io,edit,edit.status==='ready'?commandsForCapturedEdit({edit,principals:ctx.config.principals}):[]);deliverFrontendInputs(io);updateNote(ctx,entry,io);finish(ctx,io);return{status:status(entry),editId:edit.editId};
       }catch(error){const issue=error instanceof AdapterError?error.code:'input-review';io.journal.held??={};io.journal.held[services.Utilities.getUuid()]={event:copy(evidence),issue};io.saveJournal(io.journal);note(evidence,'SHAMROCK: This edit was retained for review and was not confirmed as saved. Ask Wing staff to resolve the original version before retrying.');throw error;}
     });},
-    flush(){this.applyControl();return sessionRun((ctx,session)=>{const io=ports(ctx,session);recoverUnclaimed(ctx,session,io);const result=deliverFrontendInputs(io);for(const entry of Object.values(io.journal.entries))if(entry.commands.length)updateNote(ctx,entry,io);return result;});},
+    flush(options:{force?:boolean}={}){this.applyControl();const configured=context();if(!configured||!configured.enabled())return{status:'paused'};
+      if(services.scheduled&&!services.scheduled.reconcile&&!options.force&&properties.getProperty(INPUT_PROPERTIES.work)===idleMarker(configured))return{status:'idle',attempted:0};
+      return sessionRun((ctx,session)=>{const io=ports(ctx,session);recoverUnclaimed(ctx,session,io);const result=deliverFrontendInputs(io);for(const entry of Object.values(io.journal.entries))updateNote(ctx,entry,io);finish(ctx,io);return result;});},
     confirm(event:any){const sourceId=String(event.source.getId()),responseId=String(event.response.getId()),trigger=String(event.triggerUid??'');return sessionRun((ctx,session)=>{
       const b=ctx.config.confirmation;if(sourceId!==b.formId||ctx.setupReceipt().ids[sourceId]!==trigger)fail('input_identity','Unexpected confirmation trigger.');
       const native=api(`${form(b.formId)}/responses/${encodeURIComponent(responseId)}`);if(native.formId!==b.formId||native.responseId!==responseId||!native.respondentEmail||!Number.isFinite(Date.parse(native.lastSubmittedTime)))fail('input_confirmation','Verified native confirmation identity is missing.');
@@ -183,7 +188,7 @@ export function createNativeFrontendInput(services:NativeInputServices,frontend=
       const commands=commandsForCapturedEdit({edit:entry.edit,principals:ctx.config.principals,confirmation:{verified:true,verifiedEmail:native.respondentEmail,reference,summary,action}});
       if(entry.commands.length&&inputCanonical(entry.commands.map(c=>c.command))!==inputCanonical(commands))fail('input_confirmation','A dispatched edit cannot change its confirmed actor or command.');
       if(!entry.commands.length){entry.commands=commands.map((command,templateIndex)=>({command,templateIndex,status:'queued',attempted:false}));entry.confirmation={responseId,submittedAt:native.lastSubmittedTime,email:native.respondentEmail};io.saveJournal(io.journal);}
-      deliverFrontendInputs(io);updateNote(ctx,entry,io);return{status:status(entry),editId:reference};
+      deliverFrontendInputs(io);updateNote(ctx,entry,io);finish(ctx,io);return{status:status(entry),editId:reference};
     });},
     reviewQueue(){const ctx=context();if(!ctx)fail('input_configuration','Input is not configured.');const email=services.Session.getActiveUser().getEmail().trim().toLowerCase(),actor=ctx.config.principals.find(p=>p.email.toLowerCase()===email);if(!actor)fail('confirmation_required','Authenticate as a current Wing reviewer.');const result=ctx.request('/v1/admin/snapshot',{environment:'staging',generation:ctx.config.generation,principalId:actor.principalId});if(result.status!==200)fail('confirmation_required','Current Wing frontend authority is required.');return ctx.journal().load();},
     replayConfirmation(responseId:string){const ctx=context();if(!ctx||!ctx.enabled())return{status:'paused'};return this.confirm({source:{getId:()=>ctx.config.confirmation.formId},response:{getId:()=>responseId},triggerUid:ctx.setupReceipt().ids[ctx.config.confirmation.formId]});},

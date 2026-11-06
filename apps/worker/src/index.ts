@@ -1,3 +1,4 @@
+import { adminEffectAvailability } from './effect-availability.js';
 import { prepareCloseout, advanceCloseout, closeoutStatus } from './closeout.js';
 import { listLegacyHistory, readLegacyHistory, listLegacyRequestHistory } from './legacy-history.js';
 import { recoverAdminEffect } from './effect-recovery.js';
@@ -456,6 +457,7 @@ export default {
       if (url.pathname === '/v1/admin/history/list' && !url.search) return json(await listLegacyHistory(env, input));
       if (url.pathname === '/v1/admin/history/requests' && !url.search) return json(await listLegacyRequestHistory(env, input));
       if (url.pathname === '/v1/admin/history/read' && !url.search) return json(await readLegacyHistory(env, input));
+      if (url.pathname === '/v1/admin/effects/availability' && !url.search) return json(await adminEffectAvailability(env, input));
       if (url.pathname === '/v1/admin/snapshot' && !url.search) return json(await frontendSnapshot(env, input));
       if (url.pathname === '/v1/admin/effects/recover' && !url.search) return json(await recoverAdminEffect(env, input));
       for (const action of ['claim', 'project', 'ack'] as const) {
