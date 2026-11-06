@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {createHash,createHmac} from 'node:crypto';
 import {createNativeFormsRuntime,FORMS_PROPERTIES} from '../../.build/v3/apps/google-adapter/src/forms-native.js';
 import {HOST_PROPERTIES} from '../../.build/v3/apps/google-adapter/src/staging-host.js';
+import {FRONTEND_SECTIONS,FRONTEND_PAGE_VERSION} from '../../.build/v3/packages/domain/src/frontend-transport.js';
 const clone=x=>structuredClone(x),hash=x=>createHash('sha256').update(x).digest('hex'),owner='automation@example.invalid',secret='fictional-bridge-key-with-at-least-32-characters';
 function fixture(){
  const fx={log:[],files:{},forms:{},open:{},triggers:[],responses:{},claim:true,failWrite:false,commands:[]};
@@ -26,7 +27,9 @@ function fixture(){
   if(u.host==='worker.example.invalid'){
    const path=u.pathname;assert.equal(options.headers['x-shamrock-signature'],createHmac('sha256',secret).update(`POST\n${path}\n${options.headers['x-shamrock-timestamp']}\n${hash(options.payload)}`).digest('hex'));
    if(path.endsWith('/claim'))return response({effect:fx.claim?clone(claim):null});
-   if(path.endsWith('/project'))return response({effect:{effectId:'effect',kind:'forms.refresh'},snapshot});
+   if(path.endsWith('/project/page')){const data=Object.fromEntries(FRONTEND_SECTIONS.map(s=>[s,snapshot[s]??[]]));data.people=data.people.map(p=>({role:'Cadet',flightPathStatus:'Active',version:1,...p}));data.events=data.events.map(e=>({...e,hasRoster:Array.isArray(e.eligiblePersonIds)?1:0}));data.eventRosters=snapshot.events.flatMap(e=>(e.eligiblePersonIds??[]).map(personId=>({eventId:e.eventId,personId})));
+    const shared={contractVersion:FRONTEND_PAGE_VERSION,section:body.section,revision:snapshot.revision},effect={effectId:'effect',kind:'forms.refresh'};
+    return response(body.section==='manifest'?{...shared,environment:'staging',generation:1,effect,sections:FRONTEND_SECTIONS.map(section=>({section,count:data[section].length})),diagnostics:[]}:body.section==='verify'?{...shared,verified:true,effect}:{...shared,offset:0,rows:data[body.section],nextOffset:null});}
    if(path.endsWith('/ack')){assert(Object.values(fx.forms).every(f=>f.items[0].questionItem.question.choiceQuestion.options[0].value.includes('[sr:')));fx.claim=false;return response({acknowledged:true});}
    if(path.endsWith('/review-authorize'))return response({authorized:true});
    if(path==='/v1/admin/commands'){

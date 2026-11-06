@@ -1,6 +1,7 @@
 /** Optional native edit and verified-email confirmation host. No IO during module loading. */
 import {AdapterError,type Signer} from './index.js';
-import {createGoogleSigner} from './apps-script.js';
+import {createGoogleSigner,createGoogleTransport} from './apps-script.js';
+import {createPagedFrontendTransport} from './frontend-page-client.js';
 import {HOST_PROPERTIES,parseStagingHostConfig} from './staging-host.js';
 import {CONFIG_FILE_ID_PROPERTY} from './staging-config.js';
 import {createNativeFrontendRuntime,type NativeFrontendInputSession,type NativeFrontendServices} from './frontend-runtime.js';
@@ -58,13 +59,14 @@ export function createNativeFrontendInput(services:NativeInputServices,frontend=
       ||!Array.isArray(config.principals)||new Set(config.principals.map(p=>p.email.toLowerCase())).size!==config.principals.length||!config.confirmation?.expectedTitle.includes('Staging')
       ||config.journalFileId===config.confirmation.formId)fail('input_configuration','An exact reviewed staging input configuration is required.');
     const signer=createGoogleSigner(services.Utilities,properties.getProperty(HOST_PROPERTIES.secret)??'');
+    const transport=createPagedFrontendTransport(createGoogleTransport(services.UrlFetchApp),{environment:'staging',generation:config.generation,baseUrl:host.workerOrigin,keyId:host.keyId},signer,now);
     const fingerprint=signer.sha256(inputCanonical({surfaces:config.surfaces,confirmation:config.confirmation}));
     const enabled=()=>config.enabled&&properties.getProperty(INPUT_PROPERTIES.pause)!=='true';
     function request(path:string,body:unknown){
       const payload=JSON.stringify(body),timestamp=String(now());if(bytes(payload)>65536)fail('input_capacity','The frozen command exceeds its request bound.');
-      const response=services.UrlFetchApp.fetch(host.workerOrigin+path,{method:'post',contentType:'application/json',payload,headers:{'x-shamrock-key-id':host.keyId,'x-shamrock-timestamp':timestamp,'x-shamrock-signature':signer.hmacSha256(`POST\n${path}\n${timestamp}\n${signer.sha256(payload)}`)},muteHttpExceptions:true,followRedirects:false,validateHttpsCertificates:true});
-      const text=response.getContentText();if(bytes(text)>5*1024*1024)fail('input_capacity','The backend response exceeds its reviewed bound.');
-      let value:any;try{value=JSON.parse(text);}catch{return fail('input_transport','The signed delivery result is ambiguous.');}return {status:response.getResponseCode(),body:value};
+      const response=transport.send({method:'POST',url:host.workerOrigin+path,body:payload,headers:{'x-shamrock-key-id':host.keyId,'x-shamrock-timestamp':timestamp,'x-shamrock-signature':signer.hmacSha256(`POST\n${path}\n${timestamp}\n${signer.sha256(payload)}`)}});
+      const text=response.body;if(bytes(text)>5*1024*1024)fail('input_capacity','The backend response exceeds its reviewed bound.');
+      let value:any;try{value=JSON.parse(text);}catch{return fail('input_transport','The signed delivery result is ambiguous.');}return {status:response.status,body:value};
     }
     function journal(){let previous:string|undefined;return{load():FrontendInputJournal{
       const value=privateRead(config.journalFileId,owner);if(value.version!==1||value.environment!=='staging'||value.generation!==config.generation||!value.entries)fail('input_state','The input journal belongs to another generation.');previous=inputCanonical(value);return value;

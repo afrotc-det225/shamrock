@@ -3,7 +3,8 @@ import type {ScheduledHints} from './scheduled-runtime.js';
 import { createPrivateCheckpoint } from './private-checkpoint.js';
 import type { PageContinuation } from './forms-layout.js';
 import { AdapterError, type AdapterConfig, type Signer } from './index.js';
-import { createGoogleSigner } from './apps-script.js';
+import { createGoogleSigner,createGoogleTransport } from './apps-script.js';
+import {createPagedFrontendTransport} from './frontend-page-client.js';
 import { HOST_PROPERTIES, parseStagingHostConfig } from './staging-host.js';
 import { CONFIG_FILE_ID_PROPERTY } from './staging-config.js';
 import { consumeFormsRefresh, type FormsClaim, type FormsState } from './forms-refresh.js';
@@ -79,16 +80,18 @@ export function createNativeFormsRuntime(services: NativeFormsServices) {
     for (const b of config.forms) if (!b.expectedTitle.includes('Staging') || b.intake.formId !== b.formId || b.intake.resourceKey !== b.resourceKey || b.intake.kind !== b.key) fail('forms_configuration', 'Native intake and publication must bind the same staging Forms.');
     const signer = createGoogleSigner(services.Utilities, props.getProperty(HOST_PROPERTIES.secret) ?? '');
     const adapter: AdapterConfig = { environment: 'staging', generation: config.generation, baseUrl: host.workerOrigin, keyId: host.keyId };
+    const transport=createPagedFrontendTransport(createGoogleTransport(services.UrlFetchApp),adapter,signer,()=>Math.floor(now()/1000));
     const enabled = () => props.getProperty(FORMS_PROPERTIES.pause) !== 'true' && config.enabled;
     const intakeEnabled = () => props.getProperty(FORMS_PROPERTIES.intakePause) !== 'true' && config.intakeEnabled && props.getProperty(HOST_PROPERTIES.enabled) !== 'true';
     function request(path: string, body: unknown) {
       const payload = JSON.stringify(body), timestamp = String(Math.floor(now() / 1000));
       if (bytes(payload) > 65_536) fail('forms_capacity', 'The frozen command exceeds the bounded D1 request size.');
-      const response = services.UrlFetchApp.fetch(`${adapter.baseUrl}${path}`, { method: 'post', contentType: 'application/json', payload,
+      const response = transport.send({method:'POST',url:`${adapter.baseUrl}${path}`,body:payload,
         headers: { 'x-shamrock-key-id': adapter.keyId, 'x-shamrock-timestamp': timestamp, 'x-shamrock-signature': signer.hmacSha256(`POST\n${path}\n${timestamp}\n${signer.sha256(payload)}`) },
-        muteHttpExceptions: true, followRedirects: false, validateHttpsCertificates: true });
-      let responseBody: any; try { responseBody = JSON.parse(response.getContentText()); } catch { fail('forms_transport', 'The D1 response is ambiguous; retain the same command.'); }
-      return { status: response.getResponseCode(), body: responseBody };
+      });
+      if(bytes(response.body)>5*1024*1024)fail('forms_capacity','The backend response exceeds its reviewed bound.');
+      let responseBody: any; try { responseBody = JSON.parse(response.body); } catch { fail('forms_transport', 'The D1 response is ambiguous; retain the same command.'); }
+      return { status: response.status, body: responseBody };
     }
     function effect(action: string, claim?: FormsClaim) {
       const result = request(`/v1/admin/effects/${action}`, { environment: 'staging', generation: config.generation, principalId: config.principalId, workerId: config.workerId,

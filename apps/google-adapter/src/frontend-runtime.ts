@@ -2,6 +2,7 @@ import type {ScheduledHints} from './scheduled-runtime.js';
 /** Optional staging-only frontend consumer. All IO is explicit; loading performs no work. */
 import { AdapterError, type AdapterConfig, type SignedRequest, type Signer, type Transport } from './index.js';
 import { createGoogleSigner, createGoogleTransport, type ScriptLockPort, type UtilitiesPort } from './apps-script.js';
+import {createPagedFrontendTransport} from './frontend-page-client.js';
 import { HOST_PROPERTIES, parseStagingHostConfig } from './staging-host.js';
 import { CONFIG_FILE_ID_PROPERTY } from './staging-config.js';
 import { planFrontendProtections, verifyFrontendProtections, type FrontendProtectionAccess, type FrontendProtectionInput } from './frontend-protections.js';
@@ -867,7 +868,7 @@ export function createNativeFrontendRuntime(services: NativeFrontendServices,
     const runtime: FrontendRefreshPorts = {
       config: { baseUrl: host.workerOrigin, keyId: host.keyId, environment: 'staging', generation: host.generation }, workerId: config.workerId, principalId: config.principalId,
       recovery: config.leaseRecovery,
-      signer, transport: createGoogleTransport(services.UrlFetchApp), lock: services.LockService.getScriptLock(), nowSeconds: now,
+      signer, transport: createPagedFrontendTransport(createGoogleTransport(services.UrlFetchApp), {environment:'staging',generation:config.generation,baseUrl:host.workerOrigin,keyId:host.keyId},signer,now), lock: services.LockService.getScriptLock(), nowSeconds: now,
       enabled: () => config.enabled && properties.getProperty(FRONTEND_PROPERTIES.pause) !== 'true',
       assertIsolation() {
         if (account() !== host.expectedAutomationEmail) fail('frontend_identity', 'Frontend execution identity changed.');

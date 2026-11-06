@@ -2,6 +2,7 @@ import test from 'node:test';import assert from 'node:assert/strict';import {cre
 import {createNativeFrontendInput,INPUT_PROPERTIES} from '../../.build/v3/apps/google-adapter/src/frontend-input-native.js';
 import {inputCanonical} from '../../.build/v3/apps/google-adapter/src/frontend-input.js';
 import {HOST_PROPERTIES} from '../../.build/v3/apps/google-adapter/src/staging-host.js';
+import {FRONTEND_SECTIONS,FRONTEND_PAGE_VERSION} from '../../.build/v3/packages/domain/src/frontend-transport.js';
 const copy=x=>structuredClone(x),sha=x=>createHash('sha256').update(x).digest('hex'),owner='automation@example.invalid',email='editor@example.invalid',secret='fictional-native-input-secret-with-32-characters';
 const cell=v=>v===null?{}:{userEnteredValue:{stringValue:v}};
 function fixture(){
@@ -27,7 +28,7 @@ function fixture(){
    const u=new URL(url),body=options.payload?JSON.parse(options.payload):undefined;
    if(u.host==='worker.example.invalid'){
     assert.equal(options.headers['x-shamrock-signature'],createHmac('sha256',secret).update(`POST\n${u.pathname}\n${options.headers['x-shamrock-timestamp']}\n${sha(options.payload)}`).digest('hex'));
-    if(u.pathname==='/v1/admin/snapshot')return response({environment:'staging',generation:1,revision:{operations:1,administration:1},people:[],leadership:[],flights:[]});
+    if(u.pathname==='/v1/admin/snapshot/page'){const shared={contractVersion:FRONTEND_PAGE_VERSION,section:body.section,revision:{operations:1,administration:1}};return response(body.section==='manifest'?{...shared,environment:'staging',generation:1,sections:FRONTEND_SECTIONS.map(section=>({section,count:0})),diagnostics:[]}:body.section==='verify'?{...shared,verified:true}:{...shared,offset:0,rows:[],nextOffset:null});}
     assert.equal(u.pathname,'/v1/admin/commands');const entry=Object.values(fx.journal.entries).find(e=>e.commands.some(c=>c.command.commandId===body.commandId));assert(entry?.commands[0].attempted);assert.equal(fx.state.drafts.attendance.length,1);fx.commands.push(copy(body));return response({commandId:body.commandId,status:'committed',operation:'attendance.correct',result:{personId:'person',eventId:'event',version:4,code:body.payload.code}});
    }
    assert.equal(options.headers.Authorization,'Bearer fixture-oauth');
