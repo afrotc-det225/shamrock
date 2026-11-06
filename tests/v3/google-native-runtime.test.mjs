@@ -266,3 +266,36 @@ test('native projection creates immutable dynamic slots before ACK and appends l
   f.runtime.consumeProjection(context); assert.equal(f.decision.values.length, 4); assert.deepEqual(f.decision.values[2], original); assert.equal(f.decision.values[3][2], 2);
   assert.equal(f.properties.has(N.projectionClaim), false);
 });
+
+test('native HTTP failures retain safe service, operation and status diagnostics without reading Google error bodies', () => {
+  for (const [status, category] of [[429, 'rate-limited'], [401, 'authorization'], [403, 'forbidden'], [404, 'not-found'], [400, 'invalid-request'], [503, 'server-error'], [504, 'timeout'], [302, 'other']]) {
+    const f = fixture(); const sheet = f.runtime.spreadsheetApp.openById('review-book').getSheets()[0]; let calls = 0;
+    f.services.UrlFetchApp.fetch = () => { calls++; return { getResponseCode: () => status, getContentText() { throw Error('Raw provider error body must never be read or exposed'); } }; };
+    assert.throws(() => sheet.getRange(1, 1, 1, 1).getValues(), error => {
+      assert.equal(error.code, 'google_read_failed'); assert.equal(error.message, `Google Sheets read failed (HTTP ${status}; ${category}). Saved work was retained.`); return true;
+    });
+    assert.equal(calls, 1, 'Diagnostics do not add an automatic retry');
+  }
+  const f = fixture(); const sheet = f.runtime.spreadsheetApp.openById('review-book').getSheets()[0];
+  f.services.UrlFetchApp.fetch = () => ({ getResponseCode: () => 503, getContentText() { throw Error('Must not expose provider payload'); } });
+  assert.throws(() => sheet.getRange(3, 6, 1, 1).setValues([['Synthetic status']]), error => error.code === 'google_write_failed' && error.message === 'Google Sheets write failed (HTTP 503; server-error). Saved work was retained.');
+  assert.throws(() => f.runtime.assertJournalPrivate(f.config.journal), error => error.code === 'google_read_failed' && error.message === 'Google Drive read failed (HTTP 503; server-error). Saved work was retained.');
+});
+
+test('a Google 429 retains the durable projection claim without ACK or payload changes and later resumes it', () => {
+  const f = fixture(); f.runtime.initializeProjections(); const originalJournal = structuredClone(f.journal.values);
+  const signer = createGoogleSigner(f.services.Utilities, 'fictional-signing-material-never-deploy');
+  const claim = { jobId: 'job.rate-limit', claimToken: 'claim.fixture', leaseExpiresAt: new Date((1800000000 + 300) * 1000).toISOString(), eventId: 'event.one', unitId: 'unit.one', kind: 'attendance.projection' };
+  const snapshot = { revision: 7, event: { eventId: 'event.one', label: 'Synthetic event' }, unit: { unitId: 'unit.one', label: 'Unit' }, rows: [{ personId: 'person.one', displayName: 'Synthetic cadet', observedCode: 'P', requests: [{ requestId: 'request.one', status: 'Denied', requestedOutcome: 'E', version: 2 }] }] };
+  const calls = []; const context = { config: { baseUrl: f.config.workerOrigin, keyId: f.config.keyId, environment: 'staging', generation: 1 }, signer, nowSeconds: () => 1800000000, transport: { send(request) {
+    const route = new URL(request.url).pathname; calls.push(route);
+    return { status: 200, body: JSON.stringify(route.endsWith('/claim') ? { job: claim } : route.endsWith('/project') ? snapshot : { acknowledged: true }) };
+  } } };
+  const fetch = f.services.UrlFetchApp.fetch; let throttled = true;
+  f.services.UrlFetchApp.fetch = (url, options) => throttled && url.startsWith('https://sheets.googleapis.com/') && options.method === 'get'
+    ? { getResponseCode: () => 429, getContentText() { throw Error('Private response details must not be read'); } } : fetch(url, options);
+  assert.throws(() => f.runtime.consumeProjection(context), error => error.code === 'google_read_failed' && /HTTP 429; rate-limited/.test(error.message));
+  assert.deepEqual(JSON.parse(f.properties.get(N.projectionClaim)).claim, claim); assert.equal(calls.some(route => route.endsWith('/ack')), false); assert.equal(f.lock.held, false); assert.deepEqual(f.journal.values, originalJournal);
+  throttled = false; assert.deepEqual(f.runtime.consumeProjection(context), { published: 1, idle: false });
+  assert.equal(calls.filter(route => route.endsWith('/claim')).length, 1); assert.equal(calls.filter(route => route.endsWith('/ack')).length, 1); assert.equal(f.properties.has(N.projectionClaim), false); assert.deepEqual(f.journal.values, originalJournal);
+});

@@ -132,7 +132,22 @@ export function createNativeStagingRuntime(services: NativeStagingServices): Sta
         muteHttpExceptions: true, followRedirects: false, validateHttpsCertificates: true,
       });
     } catch { return fail('google_transport', 'A Google request did not complete; saved work was retained.'); }
-    if (response.getResponseCode() !== 200) fail(body === undefined ? 'google_read_failed' : 'google_write_failed', 'Google did not confirm the staging operation.');
+    const status = response.getResponseCode();
+    if (status !== 200) {
+      // Expose only fixed labels and a valid HTTP integer. Google error bodies can
+      // include resource identifiers, request values and account information.
+      const safeStatus = Number.isSafeInteger(status) && status >= 100 && status <= 599 ? String(status) : 'unknown';
+      const category = status === 429 ? 'rate-limited' : status === 401 ? 'authorization'
+        : status === 403 ? 'forbidden' : status === 404 ? 'not-found'
+          : status === 400 || status === 422 ? 'invalid-request'
+            : status === 408 || status === 504 ? 'timeout'
+              : status >= 500 && status <= 599 ? 'server-error' : 'other';
+      const service = url.startsWith('https://sheets.googleapis.com/') ? 'Sheets'
+        : url.startsWith('https://www.googleapis.com/drive/') ? 'Drive' : 'API';
+      const operation = body === undefined ? 'read' : 'write';
+      fail(body === undefined ? 'google_read_failed' : 'google_write_failed',
+        `Google ${service} ${operation} failed (HTTP ${safeStatus}; ${category}). Saved work was retained.`);
+    }
     const text = response.getContentText();
     if (text.length > 2_000_000) fail('google_response_size', 'Google returned an unexpectedly large response.');
     try {
