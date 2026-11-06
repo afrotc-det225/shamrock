@@ -349,6 +349,23 @@ function dimensionAt(metadata: Record<string, any>, dimension: 'row' | 'column',
   }
   return undefined;
 }
+function bodyFormatMatches(header: string, cell: Record<string, any> | undefined): boolean {
+  if (!cell) return false;
+  const { numberFormat, ...base } = bodyFormat(header);
+  // Conditional rules intentionally change effective ink/bold. Verify the base
+  // cell styling separately from those already-verified rules.
+  if (!same(base, cell.userEnteredFormat)) return false;
+  const entered = cell.userEnteredFormat?.numberFormat, effective = cell.effectiveFormat?.numberFormat;
+  if (same(numberFormat, entered ?? effective)) return true;
+  if (numberFormat.type !== 'TEXT' || entered !== undefined || effective !== undefined) return false;
+  // Google drops explicit TEXT/@ after RAW literal writes, including empty
+  // strings. This is automatic formatting, not a date/formula conversion. Never
+  // excuse an explicit wrong format, a formula, or a missing integer format.
+  const value = cell.userEnteredValue;
+  return value === undefined || (!!value && typeof value === 'object' && Object.keys(value).length === 1
+    && (typeof value.stringValue === 'string' || typeof value.boolValue === 'boolean'
+      || (typeof value.numberValue === 'number' && Number.isFinite(value.numberValue))));
+}
 /** Structural checks are separate from sampled style read-back. Missing real Table
  * metadata always fails, even if every cell happens to look like a table. */
 export function verifyPresentation(input: PresentationInput): PresentationVerification {
@@ -373,10 +390,13 @@ export function verifyPresentation(input: PresentationInput): PresentationVerifi
     if (!same({ hiddenByUser: true }, dimensionAt(metadata, 'row', 0)) || !same({ hiddenByUser: false, pixelSize: 42 }, dimensionAt(metadata, 'row', 1))) issues.push(`${surface.role}:header-dimensions`);
     surface.headers.forEach((header, column) => {
       if (!same({ hiddenByUser: HIDDEN.has(header), pixelSize: width(header) }, dimensionAt(metadata, 'column', column))) issues.push(`${surface.role}:column-dimensions:${header}`);
-      if (!same(headerFormat(), cellAt(metadata, 1, column)?.userEnteredFormat)) issues.push(`${surface.role}:header-format:${header}`);
+      // Table range updates can move header colors from explicit cell formatting
+      // to inherited Table formatting. Verify the actual rendered header colors.
+      const headerCell = cellAt(metadata, 1, column);
+      if (!same(headerFormat(), headerCell?.effectiveFormat ?? headerCell?.userEnteredFormat)) issues.push(`${surface.role}:header-format:${header}`);
       for (const row of new Set([2, capacity(surface) - 1])) {
         const cell = cellAt(metadata, row, column);
-        if (!same(bodyFormat(header), cell?.userEnteredFormat)) issues.push(`${surface.role}:body-format:${header}`);
+        if (!bodyFormatMatches(header, cell)) issues.push(`${surface.role}:body-format:${header}`);
         if (header === 'draft_decision' && !same(validationRule(input), cell?.dataValidation)) issues.push(`${surface.role}:decision-validation`);
       }
     });

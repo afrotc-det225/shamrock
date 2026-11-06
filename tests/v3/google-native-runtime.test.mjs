@@ -251,6 +251,31 @@ test('projection presentation grows before ACK, retains failed claims and never 
   const end = f.state.presentationWrites.length; f.runtime.consumeProjection(context); assert.equal(f.state.presentationWrites.length, end);
 });
 
+test('projection acknowledges provider-normalized table headers and RAW body cells using effective format read-back', () => {
+  const f = presentationFixture(); f.runtime.repairPresentation();
+  for (const sheet of [f.attendance, f.decisions, f.decision]) for (const [key, cell] of sheet.cells) {
+    const row = Number(key.split(',')[0]);
+    if (row === 1) {
+      cell.effectiveFormat = structuredClone(cell.userEnteredFormat);
+      delete cell.userEnteredFormat.backgroundColorStyle;
+      delete cell.userEnteredFormat.textFormat.foregroundColorStyle;
+    } else if (row >= 2 && cell.userEnteredFormat?.numberFormat?.type === 'TEXT') delete cell.userEnteredFormat.numberFormat;
+  }
+  const signer = createGoogleSigner(f.services.Utilities, 'fictional-signing-material-never-deploy');
+  const claim = { jobId: 'job.normalized', claimToken: 'claim.normalized', leaseExpiresAt: new Date((1800000000 + 300) * 1000).toISOString(), eventId: 'event.one', unitId: 'unit.one', kind: 'attendance.projection' };
+  const snapshot = { revision: 7, event: { eventId: 'event.one', label: 'Synthetic event' }, unit: { unitId: 'unit.one', label: 'Unit' }, rows: [{ personId: 'person.one', displayName: 'Synthetic cadet', observedCode: 'P', requests: [] }] };
+  let acknowledged = false;
+  const context = { config: { baseUrl: f.config.workerOrigin, keyId: f.config.keyId, environment: 'staging', generation: 1 }, signer, nowSeconds: () => 1800000000, transport: { send(request) {
+    const route = new URL(request.url).pathname;
+    if (route.endsWith('/ack')) acknowledged = true;
+    return { status: 200, body: JSON.stringify(route.endsWith('/claim') ? { job: claim } : route.endsWith('/project') ? snapshot : { acknowledged: true }) };
+  } } };
+  assert.deepEqual(f.runtime.consumeProjection(context), { published: 1, idle: false });
+  assert.equal(acknowledged, true); assert.equal(f.properties.has(N.projectionClaim), false);
+  const gridReads = f.state.calls.filter(call => new URL(call.url).searchParams.get('fields')?.includes('userEnteredFormat'));
+  assert.ok(gridReads.length > 0); assert.ok(gridReads.every(call => new URL(call.url).searchParams.get('fields').includes('effectiveFormat')));
+});
+
 test('native paused setup upgrades legacy 14-column slots without changing frozen drafts or existing target identities', () => {
   const f = presentationFixture(); const headers = f.decision.values[0].slice(0, 14); const labels = f.decision.values[1].slice(0, 14);
   const slotId = `slot.${createHash('sha256').update(JSON.stringify(['decision-slot-v1', 'staging', 1, f.config.decisionInput.resourceKey, 3, 'request.one', 2])).digest('hex')}`;

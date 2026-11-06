@@ -171,6 +171,35 @@ test('bounded GridData samples and provider-default enum/boolean/color normaliza
   assert.deepEqual(verifyPresentation(input), { ready: true, issues: [] });
 });
 
+test('Table-inherited header colors and RAW literal text normalization verify without accepting damaged styles or formats', () => {
+  const input = fixture(); repair(input);
+  for (const sheet of input.metadata.sheets.slice(0, 3)) {
+    for (const cell of sheet.data[0].rowData[1].values.slice(0, sheet.tables[0].range.endColumnIndex)) {
+      cell.effectiveFormat = copy(cell.userEnteredFormat);
+      delete cell.userEnteredFormat.backgroundColorStyle;
+      delete cell.userEnteredFormat.textFormat.foregroundColorStyle;
+    }
+    for (const row of sheet.data[0].rowData.slice(2)) for (const cell of row.values) {
+      if (cell.userEnteredFormat?.numberFormat?.type === 'TEXT') delete cell.userEnteredFormat.numberFormat;
+    }
+  }
+  const sample = input.metadata.sheets[0].data[0].rowData[2].values[0];
+  for (const value of [undefined, { stringValue: '=literal text' }, { boolValue: true }, { numberValue: 12 }]) {
+    sample.userEnteredValue = value;
+    assert.deepEqual(verifyPresentation(input), { ready: true, issues: [] });
+  }
+  const cases = [
+    altered => { altered.metadata.sheets[0].data[0].rowData[2].values[0].userEnteredValue = { formulaValue: '=1' }; },
+    altered => { altered.metadata.sheets[0].data[0].rowData[2].values[0].userEnteredFormat.numberFormat = { type: 'DATE', pattern: 'yyyy-mm-dd' }; },
+    altered => { altered.metadata.sheets[0].data[0].rowData[2].values[0].effectiveFormat = { numberFormat: { type: 'DATE', pattern: 'yyyy-mm-dd' } }; },
+    altered => { altered.metadata.sheets[0].data[0].rowData[2].values[0].userEnteredFormat.textFormat.fontFamily = 'Arial'; },
+    altered => { delete altered.metadata.sheets[0].data[0].rowData[1].values[0].effectiveFormat; },
+    altered => { altered.metadata.sheets[0].data[0].rowData[1].values[0].effectiveFormat.backgroundColorStyle = { rgbColor: { red: 1 } }; },
+    altered => { const col = altered.surfaces[2].headers.indexOf('base_version'); delete altered.metadata.sheets[2].data[0].rowData[2].values[col].userEnteredFormat.numberFormat; },
+  ];
+  for (const change of cases) { const altered = copy(input); change(altered); assert.equal(verifyPresentation(altered).ready, false); }
+});
+
 test('unsafe names, ownership collisions, merges, legend contents and bounds fail before returning mutations', () => {
   const cases = [
     input => { input.surfaces[0].headers[1] = input.surfaces[0].headers[0]; },

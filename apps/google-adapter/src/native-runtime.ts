@@ -470,7 +470,7 @@ export function createNativeStagingRuntime(services: NativeStagingServices): Sta
     const ranges = surfaces.flatMap(surface => [quotedRange(surface.title, surface.headers.length, 1, 3),
       quotedRange(surface.title, surface.headers.length, surface.capacityRows!, surface.capacityRows!)]);
     ranges.push(quotedRange(openNative(binding.config.legend).getName(), 2, 1, 6));
-    const gridFields = 'spreadsheetId,sheets(properties(sheetId),data(startRow,startColumn,rowData(values(userEnteredValue,userEnteredFormat,dataValidation,note)),rowMetadata,columnMetadata))';
+    const gridFields = 'spreadsheetId,sheets(properties(sheetId),data(startRow,startColumn,rowData(values(userEnteredValue,userEnteredFormat,effectiveFormat,dataValidation,note)),rowMetadata,columnMetadata))';
     const cells = api(`${sheetsUrl(spreadsheetId)}?${ranges.map(range => `ranges=${encodeURIComponent(range)}`).join('&')}&includeGridData=true&fields=${encodeURIComponent(gridFields)}`);
     if (cells.spreadsheetId !== spreadsheetId || !Array.isArray(cells.sheets)) fail('presentation_metadata', 'Presentation cell read-back is unavailable.');
     for (const raw of cells.sheets) {
