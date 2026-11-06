@@ -28,6 +28,8 @@ Data Legend and chart-source helpers may be hidden within their preview workbook
 
 Use the existing SHAMROCK layout, native Tables, Roboto text, green headers, row banding, semantic attendance colors and frozen navigation as the baseline. The attendance matrix retains familiar identity columns and event columns; it must not become the rehearsal's one-row-per-event/person transport table. Use wing → squadron → flight terminology throughout.
 
+Attendance uses compact 70-pixel event columns, 68-pixel percentage columns, 23-pixel data rows and 9-point body text. Event headers wrap at 8 points with a bounded height based on label length. As in production, Year/Flight/Squadron details are collapsed by default; saved Flight views continue to filter those fields. Explicit layout repair applies this baseline, while ordinary growth sizes only new rows and event columns and preserves existing user widths. Native colors, dropdown types, Tables, protected cells and data are untouched by sizing.
+
 ## Build and verification boundary
 
 Run `npm run build:v3` before using the reusable fixture generator, `scripts/lib/frontend-preview.mjs`; it imports the compiled shared Dashboard planner. It describes fictional content and Sheets API requests; it must not discover or mutate production resources. Provision only explicitly identified new preview workbooks under the project account. Keep their actual bindings and execution evidence in ignored local/provider configuration, outside Git. Rebuilding a preview must target its approved preview resources explicitly, preserve the native dropdown seed cells, and never reuse a production workbook identifier.

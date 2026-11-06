@@ -1,5 +1,6 @@
 import { calculateAttendancePercent } from '../../.build/v3/packages/domain/src/frontend-reporting.js';
 import { buildFrontendDashboard } from '../../.build/v3/apps/google-adapter/src/frontend-dashboard.js';
+import { buildAttendanceLayout } from '../../.build/v3/apps/google-adapter/src/frontend-layout.js';
 
 // Synthetic presentation fixtures only. No provider bindings, D1 commands or production records.
 // Baseline: src/config/schemas.ts, src/services/frontend-formatting.ts and src/services/excusals.ts.
@@ -124,6 +125,8 @@ export function buildFrontendPreview({ dashboardActions = [] } = {}) {
   table(main, ids.attendance, 'Attendance', ATTENDANCE, cadets.map((c, i) => [c.last, c.first, c.year, c.flight, c.squadron, ...percentages[i], ...marks[i]]), [115, 115, 100, 85, 85, 95, 95, 130, 130, 130, 130, 130, 130]);
   main.requests.push(height(ids.attendance, 1, 2, 56));
   main.requests.push(format(range(ids.attendance, 2, 32, 2, 13), { horizontalAlignment: 'CENTER' }), format(range(ids.attendance, 2, 32, 5, 7), { numberFormat: { type: 'PERCENT', pattern: '0.0%' } }));
+  main.requests.push(...buildAttendanceLayout({ sheetId: ids.attendance, headers: ATTENDANCE.machine,
+    labels: ATTENDANCE.display, eventHeaders: ATTENDANCE.machine.slice(7), dataEndRow: 32 }));
   const sources = legend(main, ids.legend, 'Data Legend', [
     { key: 'as_year_options', label: 'AS Year', values: YEARS },
     { key: 'flight_options', label: 'Flight', values: FLIGHTS },
