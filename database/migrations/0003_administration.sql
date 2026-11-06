@@ -37,13 +37,18 @@ CREATE TABLE event_details (
 CREATE INDEX event_details_term_order ON event_details(term_id,display_order,event_id);
 CREATE TABLE admin_grants (
   principal_id TEXT NOT NULL REFERENCES principals(principal_id),
-  capability TEXT NOT NULL CHECK (capability IN ('directory.manage','leadership.manage','events.manage','frontend.read','attendance.correct')),
+  capability TEXT NOT NULL CHECK (capability IN ('directory.manage','leadership.manage','events.manage','frontend.read','attendance.correct','notifications.manage')),
   scope_kind TEXT NOT NULL CHECK (scope_kind IN ('wing','flight')), scope_key TEXT NOT NULL,
   CHECK ((scope_kind='wing' AND scope_key='*') OR (scope_kind='flight' AND scope_key<>'*')),
   PRIMARY KEY (principal_id,capability,scope_kind,scope_key)
 );
+-- Shared command identity lets all operation families reference one refresh queue.
+CREATE TABLE command_registry (
+  command_id TEXT PRIMARY KEY, ledger TEXT NOT NULL CHECK (ledger IN ('admin','operation'))
+);
+INSERT INTO command_registry(command_id,ledger) SELECT command_id,'operation' FROM operation_commands;
 CREATE TABLE admin_commands (
-  command_id TEXT PRIMARY KEY, payload_hash TEXT NOT NULL, actor_id TEXT NOT NULL REFERENCES principals(principal_id),
+  command_id TEXT PRIMARY KEY REFERENCES command_registry(command_id), payload_hash TEXT NOT NULL, actor_id TEXT NOT NULL REFERENCES principals(principal_id),
   operation TEXT NOT NULL, target_id TEXT NOT NULL, capability TEXT NOT NULL,
   scopes_json TEXT NOT NULL, source_kind TEXT NOT NULL, source_resource TEXT NOT NULL,
   source_submission TEXT NOT NULL, source_revision INTEGER NOT NULL, accepted_at TEXT NOT NULL, receipt_json TEXT NOT NULL,
@@ -61,7 +66,7 @@ CREATE TABLE directory_membership_history (
   flight_id TEXT REFERENCES organizational_units(unit_id), active INTEGER NOT NULL CHECK (active IN (0,1)), accepted_at TEXT NOT NULL
 );
 CREATE TABLE admin_effects (
-  effect_id TEXT PRIMARY KEY, command_id TEXT NOT NULL REFERENCES admin_commands(command_id),
+  effect_id TEXT PRIMARY KEY, command_id TEXT NOT NULL REFERENCES command_registry(command_id),
   kind TEXT NOT NULL CHECK (kind IN ('frontend.refresh','forms.refresh')), state TEXT NOT NULL CHECK (state IN ('pending','leased','done')),
   created_at TEXT NOT NULL, worker_id TEXT, claim_token TEXT, lease_expires_at TEXT, completed_at TEXT
 );

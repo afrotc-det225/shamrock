@@ -1,3 +1,4 @@
+import { acceptAttendanceCorrection } from './corrections.js';
 import { acceptAdminCommand, adminEffect, frontendSnapshot, getAdminReceipt } from './admin.js';
 import { HttpError } from './http-error.js';
 import {
@@ -195,8 +196,8 @@ async function acceptCommand(env: Env, command: Command): Promise<Receipt> {
   const now = new Date().toISOString();
   const guard = guardParts(env, command, ctx);
   // Recheck membership inside the same atomic batch as the accepted mutation.
-  guard.sql += ` AND ${membership.sql} AND NOT EXISTS (SELECT 1 FROM admin_commands WHERE command_id=?)`;
-  guard.values.push(...membership.values, command.commandId);
+  guard.sql += ` AND ${membership.sql}`;
+  guard.values.push(...membership.values);
   const writes: D1PreparedStatement[] = [];
   let result: unknown;
   let targetId: string;
@@ -254,6 +255,7 @@ async function acceptCommand(env: Env, command: Command): Promise<Receipt> {
   })));
   const batch = [
     statement(env.DB, `INSERT INTO command_assertions(command_id,ok) SELECT ?,CASE WHEN ${guard.sql} THEN 1 ELSE 0 END`, command.commandId, ...guard.values),
+    statement(env.DB, `INSERT INTO command_registry VALUES(?,'operation')`, command.commandId),
     statement(env.DB, `INSERT INTO operation_commands VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
       command.commandId, hash, command.actor.principalId, command.operation, ctx.unitId, ctx.eventId, ctx.personId,
       command.source.kind, command.source.resourceKey, command.source.submissionId, command.source.revision, now, JSON.stringify(receipt)),
@@ -267,6 +269,8 @@ async function acceptCommand(env: Env, command: Command): Promise<Receipt> {
     statement(env.DB, `INSERT INTO outbox_jobs(job_id,command_id,kind,event_id,unit_id,created_at)
       SELECT json_extract(value,'$.jobId'),?,'attendance.projection',json_extract(value,'$.eventId'),?,? FROM json_each(?)`,
       command.commandId, ctx.unitId, now, JSON.stringify(scopes)),
+    statement(env.DB, `INSERT INTO admin_effects(effect_id,command_id,kind,state,created_at) VALUES(?,?,'frontend.refresh','pending',?)`,
+      crypto.randomUUID(), command.commandId, now),
     statement(env.DB, 'DELETE FROM command_assertions WHERE command_id=?', command.commandId),
   ];
   try { await env.DB.batch(batch); }
@@ -401,7 +405,12 @@ export default {
         throw new HttpError(400, 'INVALID_REQUEST', 'Use an authenticated JSON operation.');
       }
       const input = parseJson(body);
-      if (url.pathname === '/v1/admin/commands' && !url.search) return json(await acceptAdminCommand(env, input));
+      if (url.pathname === '/v1/admin/commands' && !url.search) {
+        if (input && typeof input === 'object' && 'operation' in input && input.operation === 'attendance.correct') {
+          return json(await acceptAttendanceCorrection(env, input));
+        }
+        return json(await acceptAdminCommand(env, input));
+      }
       if (url.pathname === '/v1/admin/snapshot' && !url.search) return json(await frontendSnapshot(env, input));
       for (const action of ['claim', 'project', 'ack'] as const) {
         if (url.pathname === `/v1/admin/effects/${action}` && !url.search) return json(await adminEffect(env, action, input));

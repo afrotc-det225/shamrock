@@ -40,7 +40,7 @@ function command(operation='directory.upsert',changes={}) {
   const defaults={
     'directory.upsert':{personId:'person-a',expectedVersion:0,flightId:'alpha',profile:profile()},
     'leadership.upsert':{contactId:'manual-cadre',expectedVersion:0,personId:null,profile:{lastName:'Example',firstName:'Cadre',rank:'Capt',role:'Cadre',email:'cadre@example.invalid',cellPhone:''},reportsTo:'',officePhone:'',officeLocation:'',active:true},
-    'event.upsert':{eventId:'event-one',expectedVersion:0,termId:'term-current',eventType:'llab',trainingWeek:1,displayOrder:1,label:'TW-1 LLAB',columnLabel:'LLAB TW-1',expectedGroup:'All Cadets',flightIds:['alpha','bravo'],status:'active',startAt:'2026-01-01T12:00:00.000Z',endAt:'2026-01-01T13:00:00.000Z',location:'Fictional field',notes:''},
+    'event.upsert':{eventId:'event-one',expectedVersion:0,termId:'term-current',eventType:'llab',trainingWeek:1,displayOrder:1,label:'TW-1 LLAB',columnLabel:'LLAB TW-1',expectedGroup:'All Cadets',flightIds:['alpha','bravo'],eligiblePersonIds:[],status:'active',startAt:'2026-01-01T12:00:00.000Z',endAt:'2026-01-01T13:00:00.000Z',location:'Fictional field',notes:''},
   };
   return {commandId:operation,contractVersion:1,environment:'local',generation:1,actor:{principalId:'admin',evidence:'authenticated-confirmation'},source:{kind:'test',resourceKey:'admin-console',submissionId:operation,revision:1},operation,payload:defaults[operation],...changes};
 }
@@ -167,4 +167,143 @@ test('command IDs cannot collide across the operational and administrative ledge
   admin.commandId='administrative-id';assert.equal((await f.send(admin)).status,200);
   operational.commandId='administrative-id';operational.source.submissionId='another-presence-source';operational.payload.reportId='another-report';operational.payload.rosterVersion=3;
   assert.equal((await f.send(operational,'/v1/commands')).status,409);assert.equal(await f.count('attendance_reports'),1);
+});
+
+async function correctionFixture(t) {
+  const f = await fixture(t);
+  assert.equal((await f.send(command())).status, 200);
+  const eventCommand = command('event.upsert');
+  eventCommand.payload.eligiblePersonIds = ['person-a'];
+  assert.equal((await f.send(eventCommand)).status, 200);
+  await f.db.batch([
+    f.db.prepare("INSERT INTO admin_grants VALUES('admin','attendance.correct','wing','*'),('flight-admin','attendance.correct','flight','alpha')"),
+    f.db.prepare("INSERT INTO access_grants VALUES('admin','attendance.report','alpha','unit'),('admin','excusal.submit','alpha','unit'),('admin','excusal.decide','alpha','unit')"),
+  ]);
+  const base = {contractVersion:1,environment:'local',generation:1,actor:{principalId:'admin',evidence:'authenticated-confirmation'},source:{kind:'test',resourceKey:'admin-console',submissionId:'correction-one',revision:1}};
+  const correction = { ...base, commandId:'correction-one',operation:'attendance.correct',payload:{personId:'person-a',eventId:'event-one',expectedBaseVersion:0,expectedEventVersion:1,code:'T',reason:'Fictional authorized correction.'}};
+  const attendance = {...base,commandId:'presence-one',source:{...base.source,submissionId:'presence-one'},operation:'attendance.report',payload:{reportId:'report-one',eventId:'event-one',unitId:'alpha',rosterVersion:2,coveredPersonIds:['person-a'],presentPersonIds:['person-a'],completeness:'complete'}};
+  return {...f,correction,attendance,eventCommand};
+}
+
+test('correction appends one causal audit and receipt; explicit clear retains original presence and can be replayed', async t => {
+  const f = await correctionFixture(t);
+  assert.equal((await f.send(f.attendance,'/v1/commands')).status,200);
+  f.correction.payload.expectedBaseVersion=1;
+  const result=await f.send(f.correction);
+  assert.equal(result.status,200,JSON.stringify(result.body));
+  assert.deepEqual(result.body.result,{personId:'person-a',eventId:'event-one',version:2,code:'T'});
+  assert.equal(await f.count('attendance_corrections'),1);assert.equal(await f.count('attendance_observations'),1);
+  assert.equal(await f.count('admin_commands'),2);assert.equal(await f.count('admin_audit_events'),2);
+  assert.equal(await f.count('operation_commands'),2);assert.equal(await f.count('audit_events'),2);
+  assert.deepEqual(await f.send(f.correction),result);
+  assert.deepEqual(await f.send(null,'/v1/admin/commands/correction-one?principalId=admin','GET'),result);
+  const clear=structuredClone(f.correction);clear.commandId='correction-clear';clear.source.submissionId='correction-clear';clear.payload.expectedBaseVersion=2;clear.payload.code=null;
+  assert.equal((await f.send(clear)).status,200);
+  const view=(await f.send(read(),'/v1/admin/snapshot')).body;
+  assert.deepEqual(view.attendanceVersions,[{personId:'person-a',eventId:'event-one',version:3}]);
+  assert.deepEqual(view.corrections.map(c=>[c.order,c.code]),[[2,'T'],[3,null]]);
+  assert.equal(view.observations[0].code,'P');assert.equal(view.events[0].eligiblePersonIds[0],'person-a');
+  assert.equal((await f.db.prepare('SELECT observed_code FROM attendance_current').first()).observed_code,'P');
+});
+
+test('correction base versions change on requests and decisions and never erase a newer authoritative change', async t => {
+  const f=await correctionFixture(t);
+  const submit={...f.attendance,commandId:'request-one',source:{...f.attendance.source,submissionId:'request-one'},operation:'excusal.submit',payload:{requestId:'request-one',eventId:'event-one',personId:'person-a',requestedOutcome:'E',reason:'Fictional reason.'}};
+  assert.equal((await f.send(submit,'/v1/commands')).status,200);
+  assert.equal((await f.send(f.correction)).status,409);
+  f.correction.payload.expectedBaseVersion=1;
+  const decision={...f.attendance,commandId:'decision-one',source:{...f.attendance.source,submissionId:'decision-one'},operation:'excusal.decide',payload:{requestId:'request-one',expectedVersion:1,decision:'Approved',reason:'Fictional decision.'}};
+  assert.equal((await f.send(decision,'/v1/commands')).status,200);
+  assert.equal((await f.send(f.correction)).status,409);
+  f.correction.payload.expectedBaseVersion=2;assert.equal((await f.send(f.correction)).status,200);
+  assert.equal((await f.send(read(),'/v1/admin/snapshot')).body.attendanceVersions[0].version,3);
+});
+
+test('event roster history survives Directory transfer, event edits preserve captured profiles, and old event versions reject corrections', async t => {
+  const f=await correctionFixture(t);
+  const move=revised(command());move.payload.flightId='bravo';move.payload.profile.lastName='New Name';
+  assert.equal((await f.send(move)).status,200);
+  const edit=revised(f.eventCommand);edit.payload.notes='Fictional updated location notes.';
+  assert.equal((await f.send(edit)).status,200);
+  const captured=(await f.db.prepare('SELECT version,flight_id,last_name FROM event_roster_members ORDER BY version').all()).results;
+  assert.deepEqual(captured,[{version:1,flight_id:'alpha',last_name:'Example'},{version:2,flight_id:'alpha',last_name:'Example'}]);
+  assert.equal((await f.send(f.correction)).status,409);
+  f.correction.payload.expectedEventVersion=2;f.correction.actor.principalId='flight-admin';
+  assert.equal((await f.send(f.correction)).status,200);
+  const snapshot=(await f.send(read(),'/v1/admin/snapshot')).body;
+  assert.equal(snapshot.people[0].flightId,'bravo');assert.deepEqual(snapshot.events[0].eligiblePersonIds,['person-a']);
+  assert.equal(snapshot.terms.find(t=>t.isCurrent).roster[0].lastName,'New Name');
+});
+
+test('event roster validation rejects unknown people and preserves an explicitly empty roster', async t => {
+  const f=await fixture(t);const eventCommand=command('event.upsert');eventCommand.payload.eligiblePersonIds=['not-a-person'];
+  assert.equal((await f.send(eventCommand)).status,409);assert.equal(await f.count('events'),0);
+  eventCommand.payload.eligiblePersonIds=[];assert.equal((await f.send(eventCommand)).status,200);
+  const snapshot=(await f.send(read(),'/v1/admin/snapshot')).body;assert.deepEqual(snapshot.events[0].eligiblePersonIds,[]);
+});
+
+test('correction authority revocation blocks replay and audit failure rolls back registry, receipt, evidence and effect', async t => {
+  const f=await correctionFixture(t);
+  await f.db.prepare("CREATE TRIGGER reject_correction_audit BEFORE INSERT ON audit_events BEGIN SELECT RAISE(ABORT,'fixture-correction-audit'); END").run();
+  assert.equal((await f.send(f.correction)).status,409);
+  for(const table of ['attendance_corrections','operation_commands','audit_events'])assert.equal(await f.count(table),0);
+  assert.equal(await f.count('command_registry'),2);
+  await f.db.prepare('DROP TRIGGER reject_correction_audit').run();
+  assert.equal((await f.send(f.correction)).status,200);
+  await f.db.prepare("DELETE FROM admin_grants WHERE capability='attendance.correct'").run();
+  assert.equal((await f.send(f.correction)).status,403);
+  assert.equal((await f.send(null,'/v1/admin/commands/correction-one?principalId=admin','GET')).status,404);
+});
+
+test('correction concurrent delivery commits once and stored source identity prevents duplicate edits', async t => {
+  const f=await correctionFixture(t);
+  const results=await Promise.all([f.send(f.correction),f.send(f.correction)]);
+  assert.deepEqual(results.map(r=>r.status),[200,200]);assert.deepEqual(results[0],results[1]);
+  const other=structuredClone(f.correction);other.commandId='different-id';other.payload.expectedBaseVersion=1;
+  assert.equal((await f.send(other)).status,409);
+  assert.equal(await f.count('attendance_corrections'),1);assert.equal(await f.count('audit_events'),1);
+});
+
+test('late correction grant revocation and a racing request both reject the stale mutation atomically', async t => {
+  const f = await correctionFixture(t);
+  let calls = 0;
+  const revoked = {
+    prepare: sql => f.db.prepare(sql),
+    batch: async statements => {
+      if (calls++ === 0) await f.db.prepare("DELETE FROM admin_grants WHERE capability='attendance.correct'").run();
+      return f.db.batch(statements);
+    },
+  };
+  assert.equal((await worker.fetch(nativeRequest(f.correction), {...f.env, DB:revoked})).status,409);
+  assert.equal(await f.count('attendance_corrections'),0);
+  await f.db.prepare("INSERT INTO admin_grants VALUES('admin','attendance.correct','wing','*')").run();
+  const request={...f.attendance,commandId:'racing-request',source:{...f.attendance.source,submissionId:'racing-request'},operation:'excusal.submit',payload:{requestId:'racing-request',eventId:'event-one',personId:'person-a',requestedOutcome:'E',reason:'Fictional concurrent request.'}};
+  calls=0;
+  const changed = {
+    prepare: sql => f.db.prepare(sql),
+    batch: async statements => {
+      if (calls++ === 0) assert.equal((await f.send(request,'/v1/commands')).status,200);
+      return f.db.batch(statements);
+    },
+  };
+  assert.equal((await worker.fetch(nativeRequest(f.correction), {...f.env, DB:changed})).status,409);
+  assert.equal(await f.count('attendance_corrections'),0);assert.equal(await f.count('excusal_requests'),1);
+  assert.equal(await f.count('command_registry'),3);
+});
+
+test('linked Leadership separates publication and command versions and hashes maximum-length person IDs', async t => {
+  const f = await fixture(t);
+  const c = command(); c.payload.personId='p'.repeat(128);
+  assert.equal((await f.send(c)).status,200);
+  let row=(await f.send(read(),'/v1/admin/snapshot')).body.leadership[0];
+  const originalId=row.contactId;
+  assert.match(originalId,/^cadet:[a-f0-9]{64}$/);
+  assert.deepEqual([row.profileVersion,row.contactVersion,row.publicationVersion],[1,0,1]);
+  const rename=revised(c);rename.payload.profile.firstName='Changed';assert.equal((await f.send(rename)).status,200);
+  row=(await f.send(read(),'/v1/admin/snapshot')).body.leadership[0];
+  assert.equal(row.contactId,originalId);assert.deepEqual([row.profileVersion,row.contactVersion,row.publicationVersion],[2,0,2]);
+  const contact=command('leadership.upsert',{payload:{contactId:originalId,personId:c.payload.personId,profile:null,expectedVersion:0,reportsTo:'Wing Commander',officePhone:'',officeLocation:'',active:true}});
+  assert.equal((await f.send(contact)).status,200);
+  row=(await f.send(read(),'/v1/admin/snapshot')).body.leadership[0];
+  assert.deepEqual([row.profileVersion,row.contactVersion,row.publicationVersion],[2,1,3]);
 });

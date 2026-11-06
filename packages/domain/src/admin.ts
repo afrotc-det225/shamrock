@@ -1,5 +1,5 @@
 /** Bounded administrative commands for the isolated backend. Stable identity is never an email. */
-import { DomainError, type ActorEvidence, type CommandSource, type Environment } from './index.js';
+import { DomainError, type ActorEvidence, type CommandSource, type Environment, type AttendanceCode } from './index.js';
 export const AS_YEARS = ['AS100', 'AS150', 'AS200', 'AS250', 'AS300', 'AS400', 'AS500', 'AS700', 'AS800', 'AS900', 'AF Civ'] as const;
 export const FLIGHT_PATH_STATUSES = ['Participating 1/4', 'Enrolled 2/4', 'Active 3/4', 'Ready 4/4', 'Inactive', 'Commissioned', 'Dropped'] as const;
 export const DIRECTORY_FIELDS = ['lastName', 'firstName', 'asYear', 'rank', 'role', 'university', 'email', 'phone', 'dorm', 'cipBroadArea', 'cipCode', 'afsc', 'homeTown', 'homeState', 'classYear', 'dateOfBirth', 'flightPathStatus', 'photoLink'] as const;
@@ -58,6 +58,7 @@ export interface EventUpsert {
   columnLabel: string;
   expectedGroup: string;
   flightIds: string[];
+  eligiblePersonIds: string[];
   status: 'active' | 'cancelled' | 'inactive' | 'archived';
   startAt: string | null;
   endAt: string | null;
@@ -94,7 +95,12 @@ export interface DirectoryRecord extends DirectoryProfile {
 }
 export interface LeadershipRecord extends LeadershipProfile {
   contactId: string;
-  version: number;
+  /** Command version for Leadership contact-owned fields. */
+  contactVersion: number;
+  /** Directory command version for linked identity, otherwise null. */
+  profileVersion: number | null;
+  /** Monotonic display token, never an expected command version. */
+  publicationVersion: number;
   personId: string | null;
   reportsTo: string;
   officePhone: string;
@@ -123,9 +129,11 @@ export interface FrontendSnapshot {
     label: string;
     sortOrder: number;
     isCurrent: boolean;
+    roster?: {personId:string;lastName:string;firstName:string;asYear:string;flightId:string|null;flightPathStatus:string;dateOfBirth:string|null}[];
   }[];
-  events: (Omit<EventUpsert, 'expectedVersion' | 'flightIds'> & {
+  events: (Omit<EventUpsert, 'expectedVersion' | 'flightIds' | 'eligiblePersonIds'> & {
     version: number;
+    eligiblePersonIds: string[] | null;
   })[];
   eventFlights: {
     eventId: string;
@@ -138,6 +146,9 @@ export interface FrontendSnapshot {
     order: number;
     code: 'P';
   }[];
+  corrections: {factId:string;personId:string;eventId:string;order:number;code:AttendanceCode|null}[];
+  /** Pairs with no facts are authoritatively version zero. */
+  attendanceVersions: {personId:string;eventId:string;version:number}[];
   requests: {
     requestId: string;
     personId: string;
@@ -147,6 +158,13 @@ export interface FrontendSnapshot {
     status: string;
     requestedOutcome: string;
     version: number;
+    reason: string;
+    submittedAt: string;
+    submittedBy: string;
+    updatedAt: string;
+    decidedAt: string | null;
+    decidedBy: string | null;
+    decisionReason: string | null;
   }[];
   /** Catalog/legacy records without profiles are explicit, never silently fabricated. */
   diagnostics: {
@@ -272,13 +290,34 @@ export function parseAdminCommand(value: unknown): AdminCommand {
     return { ...envelope, operation: c.operation, payload: { contactId: adminIdentifier(p.contactId, 'payload.contactId'), expectedVersion: integer(p.expectedVersion, 'payload.expectedVersion'), personId, profile: record, reportsTo: text(p.reportsTo, 'payload.reportsTo'), officePhone: text(p.officePhone, 'payload.officePhone'), officeLocation: text(p.officeLocation, 'payload.officeLocation'), active: bool(p.active, 'payload.active') } };
   }
   if (c.operation === 'event.upsert') {
-    const p = object(c.payload, 'payload', ['eventId', 'expectedVersion', 'termId', 'eventType', 'trainingWeek', 'displayOrder', 'label', 'columnLabel', 'expectedGroup', 'flightIds', 'status', 'startAt', 'endAt', 'location', 'notes']);
+    const p = object(c.payload, 'payload', ['eventId', 'expectedVersion', 'termId', 'eventType', 'trainingWeek', 'displayOrder', 'label', 'columnLabel', 'expectedGroup', 'flightIds', 'eligiblePersonIds', 'status', 'startAt', 'endAt', 'location', 'notes']);
     if (!Array.isArray(p.flightIds) || p.flightIds.length < 1 || p.flightIds.length > 50)
       return invalid('payload.flightIds', 'Choose one to fifty Flights.');
     const flightIds = p.flightIds.map((f, i) => adminIdentifier(f, `payload.flightIds.${i}`)).sort();
     if (new Set(flightIds).size !== flightIds.length)
       return invalid('payload.flightIds', 'Duplicate Flights are not allowed.');
-    const payload: EventUpsert = { eventId: adminIdentifier(p.eventId, 'payload.eventId'), expectedVersion: integer(p.expectedVersion, 'payload.expectedVersion'), termId: adminIdentifier(p.termId, 'payload.termId'), eventType: choice(p.eventType, ['mando', 'secondary', 'llab', 'other'] as const, 'payload.eventType'), trainingWeek: p.trainingWeek === null ? null : integer(p.trainingWeek, 'payload.trainingWeek', 1, 100), displayOrder: integer(p.displayOrder, 'payload.displayOrder', 0, 10000), label: text(p.label, 'payload.label', 240, true), columnLabel: text(p.columnLabel, 'payload.columnLabel', 240, true), expectedGroup: text(p.expectedGroup, 'payload.expectedGroup', 240, true), flightIds, status: choice(p.status, ['active', 'cancelled', 'inactive', 'archived'] as const, 'payload.status'), startAt: date(p.startAt, 'payload.startAt'), endAt: date(p.endAt, 'payload.endAt'), location: text(p.location, 'payload.location', 1000), notes: text(p.notes, 'payload.notes', 4000) };
+    if (!Array.isArray(p.eligiblePersonIds) || p.eligiblePersonIds.length > 500)
+      return invalid('payload.eligiblePersonIds', 'Choose at most 500 explicit event roster members.');
+    const eligiblePersonIds = p.eligiblePersonIds.map((person, i) => adminIdentifier(person, `payload.eligiblePersonIds.${i}`)).sort();
+    if (new Set(eligiblePersonIds).size !== eligiblePersonIds.length)
+      return invalid('payload.eligiblePersonIds', 'Duplicate event roster members are not allowed.');
+    const payload: EventUpsert = {
+      eventId: adminIdentifier(p.eventId, 'payload.eventId'),
+      expectedVersion: integer(p.expectedVersion, 'payload.expectedVersion'),
+      termId: adminIdentifier(p.termId, 'payload.termId'),
+      eventType: choice(p.eventType, ['mando', 'secondary', 'llab', 'other'] as const, 'payload.eventType'),
+      trainingWeek: p.trainingWeek === null ? null : integer(p.trainingWeek, 'payload.trainingWeek', 1, 100),
+      displayOrder: integer(p.displayOrder, 'payload.displayOrder', 0, 10000),
+      label: text(p.label, 'payload.label', 240, true),
+      columnLabel: text(p.columnLabel, 'payload.columnLabel', 240, true),
+      expectedGroup: text(p.expectedGroup, 'payload.expectedGroup', 240, true),
+      flightIds, eligiblePersonIds,
+      status: choice(p.status, ['active', 'cancelled', 'inactive', 'archived'] as const, 'payload.status'),
+      startAt: date(p.startAt, 'payload.startAt'),
+      endAt: date(p.endAt, 'payload.endAt'),
+      location: text(p.location, 'payload.location', 1000),
+      notes: text(p.notes, 'payload.notes', 4000),
+    };
     if ((payload.startAt === null) !== (payload.endAt === null) || (payload.startAt !== null && payload.endAt !== null && payload.endAt < payload.startAt))
       return invalid('payload.endAt', 'Provide an ordered start/end pair or leave both blank.');
     return { ...envelope, operation: c.operation, payload };

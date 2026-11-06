@@ -63,4 +63,35 @@ node --test tests/v3/admin.test.mjs
 npm run check
 ```
 
-The local suite exercises strict validation, two-Flight transfer authority, version conflicts, receipt replay, grant/source/principal revocation, concurrent delivery, audit rollback, retained inactive profiles, manual and Directory-linked Leadership, event cancellation, snapshots and leased refresh effects. Tests use fictional records and local D1. Hosted quotas, actual Google triggers, non-owner editing, historical eligibility, corrections, term transitions, notification delivery and complete frontend parity require separate integration evidence before production cutover.
+The local suite exercises strict validation, two-Flight transfer authority, version conflicts, receipt replay, grant/source/principal revocation, concurrent delivery, audit rollback, retained inactive profiles, manual and Directory-linked Leadership, event cancellation, snapshots and leased refresh effects. Tests use fictional records and local D1. Hosted quotas, actual Google triggers, non-owner editing, historical roster imports, term-transition orchestration, notification delivery and complete frontend parity require separate integration evidence before production cutover.
+
+## Corrections, event rosters and shared command identity
+
+The unreleased version 3 migration was normalized before any hosted application: `command_registry` owns globally unique command IDs, identifies their administrative/operational ledger, and is the foreign-key target for `admin_effects`. Version 3 backfills existing operational command IDs. All new handlers register their command atomically. A correction has one operational receipt and one operational audit record; it is not mirrored into the administrative ledger. As with every migration, the reviewed file hash must match the first applied release. Do not edit an already-applied migration to adopt this change.
+
+Migration `0004_corrections_and_rosters.sql` adds append-only attendance corrections and versioned event rosters. `attendance.correct` uses `/v1/admin/commands` with the same envelope and this payload:
+
+```ts
+{
+  personId, eventId,
+  expectedBaseVersion, expectedEventVersion,
+  code, // one established attendance code, or null for an explicit clear
+  reason
+}
+```
+
+`expectedBaseVersion` is the server-issued maximum committed operational audit sequence for that cadet/event pair, considering presence observations, excusal request/decision state and prior corrections. It is a causal version token, not a count of edits or a request-local version. The snapshot supplies `attendanceVersions`; a pair absent from that array has version zero by contract. `expectedEventVersion` is the displayed event's `version` and also identifies its frozen roster. A new request, decision, observation, correction or changed event version makes an older draft conflict. The caller must retain both versions from when the edit began; it must not replace them with current versions to force an old edit through.
+
+The actor needs an explicit `attendance.correct` grant for the event roster's captured Flight, or Wing authority. An editor's current Flight or role label does not supply this grant. The event must have a saved roster containing the target cadet. Historical cancelled/archived events may be corrected by an authorized actor; this does not reactivate the event. A clear is new evidence with `code: null`; it does not delete the original presence observation or the excusal request. The reporting policy decides the displayed result using the shared causal order.
+
+Every correction atomically saves its registry entry, operational receipt, audit, evidence and one `frontend.refresh` effect. Existing attendance and excusal handlers now also queue a `frontend.refresh` effect while retaining their prior projection jobs. The same snapshot/publisher can therefore observe Form submissions, approvals and spreadsheet corrections without waiting for a Directory change.
+
+`event.upsert` now requires `eligiblePersonIds`: zero to 500 explicit, unique stable IDs. An empty list means an explicitly empty roster; it does not mean unknown or all cadets. The initial capture requires reviewed Directory profiles and active membership in a selected Flight. Each accepted event version saves a roster revision. Retained members retain their captured names, AS year, Flight, Flight Path and DOB; editing event notes after a Directory transfer cannot silently rewrite historical membership. Newly added members are captured from their current Directory profiles. Removing a member never deletes their evidence; reporting can flag evidence outside the revised eligibility. Selecting who is eligible remains an explicit operational decision; this implementation does not infer it from today's Flight membership or an arbitrary `expectedGroup` label.
+
+Snapshot events now include `eligiblePersonIds`, and snapshot corrections include the same causal `order` as observations/requests. Legacy events without a capture have `eligiblePersonIds: null` and an `EVENTS_MISSING_ROSTER` diagnostic. Populate a reviewed roster rather than publishing an invented one.
+
+Directory commands also retain a profile snapshot in the term marked current at the time. Once the catalog advances, later Directory changes do not update the prior term. `terms[].roster` contains captured members, including inactive or commissioned people. For the current frontend matrix, use active current Directory profiles; for historical matrices, use the saved term roster. Missing historical imports remain explicit gaps; this mechanism does not recover past rosters from today's Directory.
+
+Additional snapshot bounds are 10,000 correction facts, 25,000 nonzero attendance-version pairs and 10,000 term-roster records. They are independent of the existing observation/request bounds. The local tests cover correction replay, explicit clear, original-presence preservation, request/decision races, stale event versions, old Flight authority, event-roster history, audit rollback and late grant revocation. Actual Google edit capture and publication require a separate staging rehearsal.
+
+Leadership snapshots distinguish `contactVersion` (the `leadership.upsert` command version), `profileVersion` (the linked Directory command version, or null for manual contacts), and `publicationVersion` (a monotonic display token). A linked display token is the sum of the two owning versions; it must never be submitted as an expected command version. Linked name/rank/role/email/phone remain Directory-owned and can be edited through Directory. A Directory change advances the displayed Leadership token even when its office/reporting details are unchanged. Synthetic linked contact IDs use a bounded SHA-256 identity, so a maximum-length person ID remains valid and stable in Sheets bindings.
