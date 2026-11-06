@@ -33,6 +33,7 @@ test('different flight/cohort cannot be joined by a matching name',()=>{
 test('native response linkage requires exact responder, timestamp, event and selected content, and never assumes a frozen roster',()=>{
   const s=snapshot(),result=reconcileImportEvidence(s,buildImportPlan(s));assert.equal(result.nativeProvenance.links.length,1);
   assert.equal(result.nativeProvenance.links[0].responseId,'native-one');assert.deepEqual(result.nativeProvenance.links[0].questionIds,['q1','q2']);
+  assert.equal(result.nativeProvenance.links[0].historicalHumanIdentityVerified,false);
   const changed=snapshot();changed.resources[2].responses[0].answers.q2.textAnswers.answers[0].value='Another fictional selection';const {snapshotSha256,...body}=changed;changed.snapshotSha256=importDigest(body);
   assert.equal(reconcileImportEvidence(changed,buildImportPlan(changed)).nativeProvenance.links.length,0);
 });

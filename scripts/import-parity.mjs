@@ -3,17 +3,18 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
-import { pathToFileURL } from 'node:url';
+import { pathToFileURL, fileURLToPath } from 'node:url';
 import { captureLegacySources } from './lib/import-capture.mjs';
 import { buildImportPlan, verifyImportAccounting, compareImportReadback, compareAttendanceSnapshots, proposeImportCrosswalk } from './lib/import-parity.mjs';
 import {reconcileImportEvidence} from './lib/import-reconciliation.mjs';
+import {buildStagingImportModel,createStagingImportPlan,stagingImportSummary} from './lib/import-staging.mjs';
 
 process.umask(0o077);
 const fail=code=>{throw new Error(code);};
 function args(argv) {
   const [command,...rest]=argv,out={command};
-  if(!['capture','plan','compare','report','crosswalk-template','reconcile'].includes(command))fail('IMPORT_CLI_COMMAND');
-  for(let i=0;i<rest.length;i+=2){const key=rest[i];if(!['--snapshot','--crosswalk','--plan','--readback','--attendance','--manifest','--reader','--private-dir'].includes(key)||!rest[i+1]||Object.hasOwn(out,key.slice(2)))fail('IMPORT_CLI_ARGUMENT');out[key.slice(2)]=rest[i+1];}
+  if(!['capture','plan','compare','report','crosswalk-template','reconcile','prepare-staging'].includes(command))fail('IMPORT_CLI_COMMAND');
+  for(let i=0;i<rest.length;i+=2){const key=rest[i];if(!['--snapshot','--crosswalk','--plan','--readback','--attendance','--manifest','--reader','--private-dir','--review','--reconciliation','--generation','--imported-at'].includes(key)||!rest[i+1]||Object.hasOwn(out,key.slice(2)))fail('IMPORT_CLI_ARGUMENT');out[key.slice(2)]=rest[i+1];}
   return out;
 }
 async function read(file) {
@@ -52,6 +53,15 @@ async function main() {
     console.log(JSON.stringify({accounting,summary:plan.summary},null,2));return;
   }
   const plan=await read(options.plan);
+  if(options.command==='prepare-staging') {
+    const sourceRoot=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
+    const owningFiles=['scripts/import-parity.mjs','scripts/lib/import-staging.mjs','scripts/lib/import-parity.mjs','scripts/lib/import-capture.mjs','scripts/lib/import-reconciliation.mjs','database/migrations/0008_legacy_import_evidence.sql','packages/domain/src/admin.ts','packages/domain/src/frontend-reporting.ts','apps/worker/src/admin.ts','apps/worker/src/corrections.ts'];
+    let sourceCommit;try{execFileSync('git',['ls-files','--error-unmatch',...owningFiles],{cwd:sourceRoot,stdio:'ignore'});execFileSync('git',['diff','--quiet','HEAD','--',...owningFiles],{cwd:sourceRoot,stdio:'ignore'});sourceCommit=execFileSync('git',['rev-parse','HEAD'],{cwd:sourceRoot,encoding:'utf8',stdio:['ignore','pipe','ignore']}).trim();}catch{fail('IMPORT_CLI_UNCOMMITTED_SOURCE');}
+    const snapshot=await read(options.snapshot),reconciliation=await read(options.reconciliation),review=await read(options.review);
+    const model=buildStagingImportModel(snapshot,plan,reconciliation,review),execution=createStagingImportPlan(snapshot,model,{generation:Number(options.generation),importedAt:options['imported-at']??new Date().toISOString(),sourceCommit});
+    await write(dir,'model.json',model);await write(dir,'execution.json',execution);await write(dir,'summary.json',stagingImportSummary(execution));
+    console.log(JSON.stringify(stagingImportSummary(execution),null,2));return;
+  }
   if(options.command==='reconcile') {
     const snapshot=await read(options.snapshot);verifyImportAccounting(snapshot,plan);
     const result=reconcileImportEvidence(snapshot,plan);

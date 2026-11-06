@@ -135,7 +135,7 @@ function matchNativeProvenance(snapshot,plan){
   for(const form of snapshot.resources.filter(r=>r.kind==='form'))for(const response of form.responses){
     const answers=Object.values(response.answers??{}).flatMap(a=>(a.textAnswers?.answers??[]).map(v=>v.value)).filter(v=>typeof v==='string');
     const times=[response.createTime,response.lastSubmittedTime].filter(Boolean).map(t=>Date.parse(t));
-    responses.push({formKey:form.key,formRole:form.role,responseId:response.responseId,email:norm(response.respondentEmail),times,answers,questionIds:Object.keys(response.answers??{})});
+    responses.push({formKey:form.key,formRole:form.role,responseId:response.responseId,email:norm(response.respondentEmail),times,answers,questionIds:Object.keys(response.answers??{}),emailCollectionModeAtCapture:form.metadata.settings?.emailCollectionType??'unknown'});
   }
   const index=new Map();for(const response of responses)for(const time of new Set(response.times))if(Number.isFinite(time)&&response.email)group(index,`${response.formRole}:${response.email}:${time}`,response);
   const links=[],unresolved=[];
@@ -144,7 +144,7 @@ function matchNativeProvenance(snapshot,plan){
     const candidates=(index.get(`${role}:${norm(row.email)}:${time}`)??[]).filter(r=>r.answers.includes(row.event));
     const cadets=role==='attendance'?String(row.cadets??'').split(';').map(s=>s.trim()).filter(Boolean):[];
     const exact=candidates.filter(r=>cadets.every(c=>r.answers.includes(c))&&(role!=='excusal'||!row.reason||r.answers.includes(row.reason)));
-    if(exact.length===1)links.push({occurrenceId:row.occurrenceId,formKey:exact[0].formKey,responseId:exact[0].responseId,questionIds:exact[0].questionIds,method:'exact-responder-time-event-and-selection-content',responseHistory:'current-native-response-state-only'});
+    if(exact.length===1)links.push({occurrenceId:row.occurrenceId,formKey:exact[0].formKey,responseId:exact[0].responseId,questionIds:exact[0].questionIds,method:'exact-responder-time-event-and-selection-content',responseHistory:'current-native-response-state-only',emailCollectionModeAtCapture:exact[0].emailCollectionModeAtCapture,historicalHumanIdentityVerified:false});
     else unresolved.push({occurrenceId:row.occurrenceId,kind:row.kind,code:exact.length>1?'ambiguous-native-response':'native-response-not-proven',generatedWorkflow:/^(excusal-|excusal-decision-|bulk-fill-|fill-)/.test(row.submission_id??'')});
   }
   return {links,unresolved,summary:{linked:links.length,unresolved:unresolved.length,generatedWorkflow:unresolved.filter(r=>r.generatedWorkflow).length,ambiguous:unresolved.filter(r=>r.code==='ambiguous-native-response').length}};
