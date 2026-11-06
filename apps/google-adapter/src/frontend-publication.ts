@@ -18,6 +18,8 @@ export interface FrontendColumn {
 }
 export interface FrontendPublicationRow {
   key: string;
+  /** An immutable input slot retains its identity when its record leaves the view. */
+  retired?: boolean;
   values: Record<string, FrontendValue>;
   /** Domain record versions for editable cells; zero is an explicit absent record. */
   versions: Record<string, number>;
@@ -66,6 +68,8 @@ export interface FrontendPublicationBaseline {
   revision: SnapshotRevision;
   /** Last verified values and their domain base versions, keyed rather than positional. */
   rows: FrontendPublicationRow[];
+  /** Explicit native-input binding. Physical rows/columns cannot be reassigned. */
+  slots?: { headers: string[]; keys: (string | null)[] };
 }
 export interface FrontendDraft {
   key: string;
@@ -246,6 +250,8 @@ export function planFrontendPublication(input: FrontendPublicationInput): Fronte
     if (!id(key) || seen.has(key) || !baseline.has(key)) fail('A row identity is duplicated, untracked or rebound.'); seen.add(key);
   }
   if (baseline.size !== seen.size) fail('Published keyed rows disappeared; explicit reconciliation is required.');
+  if (input.baseline.slots && (!same(input.baseline.slots.headers, current.headers)
+    || !same(input.baseline.slots.keys, readRows.map(row => blank(row[table.keyHeader]) ? null : row[table.keyHeader])))) fail('Immutable frontend row or column slots changed; reconcile structural edits before processing input.');
   const headers = [...current.headers, ...table.columns.map(c => c.header).filter(h => !current.headers.includes(h))];
   const labels = headers.map(h => columns.get(h)!.label);
   const drafts = new Map<string, FrontendDraft>();
@@ -276,7 +282,21 @@ export function planFrontendPublication(input: FrontendPublicationInput): Fronte
       for (const h of current.headers) if (dirty(row, base, h)) retainedDrafts.push(clone(drafts.get(cellKey(key, h)) ?? { key, header: h, value: row[h], baseVersion: base.versions[h], ...(h.startsWith('event:') ? { expectedEventVersion: base.eventVersions![h] } : {}), ...(base.commandBindings?.[h] ? { command: base.commandBindings[h] } : {}) }));
     } else {
       if (current.headers.some(h => !equal(row[h], base.values[h]))) fail('Automation-only values changed outside the published baseline.');
-      finalRows[index] = Object.fromEntries(headers.map(h => [h, null])); positions.delete(key);
+      if (input.baseline.slots) {
+        // Never bind a later cadet/request to coordinates retained by a delayed event.
+        finalRows[index] = Object.fromEntries(headers.map(h => [h, h === table.keyHeader ? key : null]));
+        const tombstone = clone(base); tombstone.retired = true; tombstone.values = clone(finalRows[index]);
+        tombstone.readonlyHeaders = [...headers]; tombstone.commandBindings = {};
+        for (const h of headers) if (!current.headers.includes(h) && columns.get(h)!.editable) {
+          tombstone.versions[h] = 0;
+          if (h.startsWith('event:')) {
+            const eventVersion = table.rows[0]?.eventVersions?.[h];
+            if (!integer(eventVersion, 1)) fail('A retired slot needs an explicit event version when its schema grows.');
+            tombstone.eventVersions ??= {}; tombstone.eventVersions[h] = eventVersion;
+          }
+        }
+        nextRows.set(key, tombstone);
+      } else { finalRows[index] = Object.fromEntries(headers.map(h => [h, null])); positions.delete(key); }
     }
   }
   const growthRows = new Set<number>();
@@ -289,7 +309,7 @@ export function planFrontendPublication(input: FrontendPublicationInput): Fronte
       positions.set(key, index); growthRows.add(index);
     }
     const base = baseline.get(key), local = existed ? readRows[index] : null;
-    const readonlyHeaders = [...new Set([...(base?.readonlyHeaders ?? []), ...(server.readonlyHeaders ?? [])])];
+    const readonlyHeaders = [...new Set([...(base?.retired ? [] : base?.readonlyHeaders ?? []), ...(server.readonlyHeaders ?? [])])];
     const next: FrontendPublicationRow = { key, values: {}, versions: {}, ...(table.kind === 'attendance' ? { eventVersions: {} } : {}),
       readonlyHeaders, commandBindings: Object.fromEntries(Object.entries(server.commandBindings ?? {}).filter(([h]) => !readonlyHeaders.includes(h))) };
     for (const header of headers) {
@@ -307,7 +327,7 @@ export function planFrontendPublication(input: FrontendPublicationInput): Fronte
         continue;
       }
       if (base && existingField) {
-        if (column.editable && (server.versions[header] < base.versions[header] || (server.versions[header] === base.versions[header] && !equal(serverValue, base.values[header])))) fail('Server field value/version is inconsistent with the last published base.');
+        if (column.editable && (server.versions[header] < base.versions[header] || (!base.retired && server.versions[header] === base.versions[header] && !equal(serverValue, base.values[header])))) fail('Server field value/version is inconsistent with the last published base.');
         if (header.startsWith('event:') && server.eventVersions![header] < base.eventVersions![header]) fail('Event catalog version is stale.');
         const changedLocally = !equal(local![header], base.values[header]);
         if (!canEdit && changedLocally) fail('Automation-only values changed outside the published baseline.');
@@ -409,7 +429,8 @@ export function planFrontendPublication(input: FrontendPublicationInput): Fronte
   if (!current.hiddenColumns.includes(keyColumn)) requests.push({ updateDimensionProperties: { range: { sheetId: current.sheetId, dimension: 'COLUMNS', startIndex: keyColumn, endIndex: keyColumn + 1 }, properties: { hiddenByUser: true }, fields: 'hiddenByUser' } });
   if (!current.machineRowHidden) requests.push({ updateDimensionProperties: { range: { sheetId: current.sheetId, dimension: 'ROWS', startIndex: 0, endIndex: 1 }, properties: { hiddenByUser: true }, fields: 'hiddenByUser' } });
   const batches = batchRequests(requests);
-  const nextBaseline = { generation: input.generation, revision: clone(input.revision), rows: [...nextRows.values()].map(clone) };
+  const nextBaseline: FrontendPublicationBaseline = { generation: input.generation, revision: clone(input.revision), rows: [...nextRows.values()].map(clone),
+    ...(input.baseline.slots ? { slots: { headers: [...headers], keys: finalRows.map(row => blank(row[table.keyHeader]) ? null : row[table.keyHeader] as string) } } : {}) };
   const expectedAfter: FrontendTableRead = { ...clone(current), headers, labels, rows: expectedRows, range,
     gridRowCount: Math.max(current.gridRowCount, endRow), gridColumnCount: Math.max(current.gridColumnCount, headers.length),
     hiddenColumns: [...new Set([...current.hiddenColumns, keyColumn])].sort((a, b) => a - b), machineRowHidden: true };

@@ -276,3 +276,36 @@ test('domain snapshot mapping keeps explicit unknown eligibility and requires re
   snapshot.people[0].active = false;
   assert.equal(buildFrontendReporting(snapshotToFrontendReportingInput(snapshot, '2027-01-12')).dashboard.totalCadets, 0);
 });
+
+test('immutable input slots reject physical sorting and never reuse retired identities', () => {
+  const input = fixture();
+  input.baseline.slots = { headers: [...input.current.headers], keys: ['cadet-b', 'cadet-a'] };
+  let plan = planFrontendPublication(input);
+  assert.deepEqual(plan.nextBaseline.slots.keys, ['cadet-b', 'cadet-a']);
+  const sorted = structuredClone(input); sorted.current.rows.reverse();
+  assert.throws(() => planFrontendPublication(sorted), /Immutable frontend/);
+  input.table.rows = [record('cadet-a'), record('cadet-c')];
+  plan = planFrontendPublication(input);
+  assert.deepEqual(plan.nextBaseline.slots.keys, ['cadet-b', 'cadet-a', 'cadet-c']);
+  const retired = plan.nextBaseline.rows.find(r => r.key === 'cadet-b');
+  assert.equal(retired.retired, true); assert.deepEqual(retired.readonlyHeaders, input.current.headers);
+  assert.equal(retired.values.person_id, 'cadet-b'); assert.equal(retired.values.first_name, null);
+  assert.equal(verifyFrontendPublicationReadback(plan, apply(input.current, plan.requests)), true);
+  const next = { ...input, current: plan.expectedAfter, baseline: plan.nextBaseline };
+  next.table = { ...input.table, rows: [record('cadet-a'), record('cadet-b', 'Commander', 2), record('cadet-c')] };
+  const returned = planFrontendPublication(next);
+  assert.deepEqual(returned.nextBaseline.slots.keys, ['cadet-b', 'cadet-a', 'cadet-c']);
+  assert.equal(returned.nextBaseline.rows.find(r => r.key === 'cadet-b').retired, undefined);
+  assert.equal(returned.nextBaseline.rows.find(r => r.key === 'cadet-b').readonlyHeaders.includes('role'), false);
+});
+
+test('immutable slot retirement retains outstanding drafts instead of silently clearing them', () => {
+  const input = fixture(); input.baseline.slots = { headers: [...input.current.headers], keys: ['cadet-b', 'cadet-a'] };
+  input.current.rows[0][1] = frontendLiteralCell('Commander');
+  input.table.rows = [record('cadet-a'), record('cadet-c')];
+  const plan = planFrontendPublication(input);
+  assert.deepEqual(plan.nextBaseline.slots.keys, ['cadet-b', 'cadet-a', 'cadet-c']);
+  assert.equal(plan.nextBaseline.rows.find(r => r.key === 'cadet-b').retired, undefined);
+  assert.equal(plan.retainedDrafts[0].key, 'cadet-b');
+  assert.ok(plan.diagnostics.some(d => d.code === 'retired-row-with-edit'));
+});
