@@ -89,6 +89,12 @@ Comparison limits were checked on 2026-11-05: [Workers Free](https://developers.
 
 The local emulator uses its own pinned workerd release and a supported compatibility date. Local success does not establish production CPU time, real Google quotas, actual D1 daily usage or account entitlements. The [staging runbook](D1_STAGING_RUNBOOK.md) describes committed release preparation, an atomic initial migration, API provisioning, the fictional cloud smoke and the separate live Google rehearsal. The Google consumer is configured only for the isolated staging resources; no production replacement has been deployed.
 
+## Operational terminology
+
+Use **Flight** for the prototype's current attendance reporting scope. Flights belong to squadrons within the wing. Operator-facing Sheets, Forms and instructions use the actual echelon—Flight, Squadron or Wing—not the generic label “Unit.” Squadron and wing rollups remain part of the full redesign; the current single-flight scope does not implement that hierarchy by itself.
+
+Existing `unit_id`, `unit_label`, `unitId` and related schema/API keys are internal compatibility names. They remain stable for saved commands, claims, projections and migration history; this presentation correction does not rewrite those identities or payloads.
+
 ## Implemented contract
 
 Only `local` and `staging` environments are accepted. Both application configuration and the SQL control row must agree on the environment and generation, and the control row must allow commands. Unknown actors, revoked grants, unregistered sources, stale roster versions and stale decision versions fail closed.
@@ -106,9 +112,9 @@ HTTP paths:
 
 All paths except health require a key ID, timestamp and HMAC-SHA256 signature over the HTTP method, path/query, timestamp and SHA-256 digest of the exact body. Replay tolerance is five minutes; command deduplication is independent of the signature timestamp. A fresh signature never gives an old payload a new command ID. Requests and responses must not be logged with personal data or signing material.
 
-Complete attendance reports currently assert the entire active unit roster at the referenced roster version; partial reports may cover a subset. The stored covered roster and selected members are explicit. Presence evidence is append-only in this slice. Corrections, including removing a mistaken `P`, require a later explicit correction operation. Excusal requests remain independent of observed attendance. No attendance credit, percentage, final absence or notification-recipient policy is guessed.
+Complete attendance reports currently assert the entire active flight roster at the referenced roster version; partial reports may cover a subset. The stored covered roster and selected members are explicit. Presence evidence is append-only in this slice. Corrections, including removing a mistaken `P`, require a later explicit correction operation. Excusal requests remain independent of observed attendance. No attendance credit, percentage, final absence or notification-recipient policy is guessed.
 
-This prototype requires exactly one active unit membership per person in an affected scope. Commands and projections reject ambiguous memberships. Membership movement, overlapping units, name changes and event/catalog changes need a reviewed revision and projection-job strategy before they can be supported. The current projection revision advances for the implemented commands; direct database edits are not a supported directory workflow.
+This prototype requires exactly one active flight membership per cadet in an affected scope. Commands and projections reject ambiguous memberships. Flight reassignment, overlapping flight memberships, name changes and event/catalog changes need a reviewed revision and projection-job strategy before they can be supported. The current projection revision advances for the implemented commands; direct database edits are not a supported directory workflow.
 
 Interactive reports have a 500-member domain limit and a 64 KiB Worker request limit. The Google journal additionally bounds payload characters and retained entries, so some large-ID reports can reach a lower limit. Oversized workflows need a designed batch protocol; input is never silently truncated. Attendance writes use SQL JSON input sets and bounded statements rather than a query per person. This addresses per-request query growth, but quota and CPU headroom still need measurement in staging.
 
@@ -116,7 +122,7 @@ Interactive reports have a 500-member domain limit and a 64 KiB Worker request l
 
 The Google journal persists a command before dispatch. A timeout retains the same command for retry with a fresh signature. Conflicts and authorization failures become visible states requiring attention. Journal capacity exhaustion does not delete unsent work. Only trusted script maintainers may edit the journal workbook. Terminal-row archival and retention remain future operator procedures.
 
-Projection jobs serialize by event/unit. An adapter must claim a job, fetch current D1 facts, write only the designated output cells, verify the published state and then acknowledge its claim. A receipt's `pendingEffects` flag describes the state at acceptance time; it is not a live indicator of whether the sheet has caught up.
+Projection jobs serialize by event/flight. An adapter must claim a job, fetch current D1 facts, write only the designated output cells, verify the published state and then acknowledge its claim. A receipt's `pendingEffects` flag describes the state at acceptance time; it is not a live indicator of whether the sheet has caught up.
 
 The current prototype deliberately does not reclaim an expired Google-publication lease automatically: an older Google request might still finish and overwrite newer output. A lost claim response or expired lease can therefore block that resource pending operator review. Normal real publication/read-back passed the narrow staging rehearsal; a safe recovery operation, visible backlog monitoring and live failure exercises are still needed before production. Do not clear leased rows or acknowledge uncertain output merely to make the queue look healthy.
 

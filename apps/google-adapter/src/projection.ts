@@ -29,11 +29,11 @@ export const PROJECTION_HEADERS = {
   cursors: ['event_id', 'unit_id', 'generation', 'projection_revision', 'snapshot_hash'],
 } as const;
 const DISPLAY_HEADERS: Record<ProjectionSheetKind, readonly string[]> = {
-  attendance: ['Event ID', 'Unit ID', 'Person ID', 'Event', 'Unit', 'Name', 'Observed attendance',
+  attendance: ['Event ID', 'Flight ID', 'Person ID', 'Event', 'Flight', 'Name', 'Observed attendance',
     'In current roster', 'Generation', 'Projection revision'],
-  decisions: ['Event ID', 'Unit ID', 'Person ID', 'Request ID', 'Name', 'Recorded status',
-    'Requested outcome', 'Approved outcome', 'Recorded version', 'Generation', 'Projection revision', 'Event', 'Unit'],
-  cursors: ['Event ID', 'Unit ID', 'Generation', 'Projection revision', 'Snapshot hash'],
+  decisions: ['Event ID', 'Flight ID', 'Person ID', 'Request ID', 'Name', 'Recorded status',
+    'Requested outcome', 'Approved outcome', 'Recorded version', 'Generation', 'Projection revision', 'Event', 'Flight'],
+  cursors: ['Event ID', 'Flight ID', 'Generation', 'Projection revision', 'Snapshot hash'],
 };
 const KINDS: ProjectionSheetKind[] = ['attendance', 'decisions', 'cursors'];
 const STATUSES = ['Submitted', 'Approved', 'Denied', 'Withdrawn', 'Superseded'] as const;
@@ -214,9 +214,9 @@ export function upgradeRecordedDecisionLabels(sheets: ProjectionSheets, options:
     if (labels.has(key) && !same(labels.get(key), pair)) fail('projection_conflict', 'Published attendance labels disagree for a recorded-output scope.');
     labels.set(key, pair);
   }
-  const additions: Cell[][] = [['event_label', 'unit_label'], ['Event', 'Unit'], ...decisions.rows.map(row => {
+  const additions: Cell[][] = [['event_label', 'unit_label'], ['Event', 'Flight'], ...decisions.rows.map(row => {
     const key = scopeKey(row), pair = labels.get(key), revision = published.get(key);
-    if (!pair || !revision || row.projection_revision !== revision) fail('projection_schema', 'A recorded request lacks consistent published event and unit labels.');
+    if (!pair || !revision || row.projection_revision !== revision) fail('projection_schema', 'A recorded request lacks consistent published event and flight labels.');
     return [...pair];
   })];
   const expected = decisions.sourceValues.map((row, index) => [...row, ...additions[index]]);

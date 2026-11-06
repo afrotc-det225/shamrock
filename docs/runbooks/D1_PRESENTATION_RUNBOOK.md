@@ -6,6 +6,8 @@ This procedure updates only the isolated fictional staging workbook and standalo
 
 Use current SHAMROCK as the visual baseline. The read-only production metadata inventory confirmed native Tables with `#356854` headers, white/`#F6F8F9` banding, unspecified column types and frozen display headers. No saved `filterViews` were returned for the current Main/Blue/Gold tabs; that does not establish the absence of temporary or other native table views. Preserve useful custom views during eventual migration rather than assuming a specific saved view exists.
 
+Use **Flight** for the current reporting scope. The detachment hierarchy is **wing → squadron → flight**; future squadron/wing summaries must name their own echelon. Operator-facing headers and instructions must not expose the generic “Unit” wording. Existing internal `unit_id` and `unit_label` keys stay stable so this label correction does not change saved identities, commands or projection cursors.
+
 The shared `apps/google-adapter/src/presentation.ts` planner manages:
 
 - Real native Tables, created minimally and then configured after reading Google's generated IDs. Subsequent repairs retain those IDs.
@@ -22,10 +24,14 @@ Only managed rules/views/formatting are repaired. Existing nonmanaged views, rul
 2. Run the standard checks, commit/push the isolated adapter changes and prepare the reviewed release using the [staging runbook](D1_STAGING_RUNBOOK.md). Never deploy uncommitted code or use the root production `.clasp.json`.
 3. In the existing staging operator workbook, explicitly create one empty hidden legend tab, with strict whole-tab protection for the automation owner. Keep the current decision input protection and editable column intact. Ensure the recorded-excusals output has at least 13 grid columns and expand the dynamic input grid to at least 16 columns if needed; do not replace its tab or clear its data.
 4. Add `SHAMROCK_V3_PRESENTATION_CONFIG` to the existing private configuration JSON using the [adapter configuration shape](../../apps/google-adapter/README.md#optional-spreadsheet-presentation). Do not add secrets to that file. Upload the committed Google artifact only to the staging script and verify both source files exactly.
-5. Run `shamrockV3StagingImportConfig`, then `shamrockV3StagingSetup` as the project account. Setup remains paused. It validates and upgrades a deployed 14-column dynamic input by appending `slot_origin_row` and `slot_context_hash`, preserving all original IDs/cells/payloads. Recorded-excusal output also gains Event and Unit labels in columns 12–13, derived from consistent same-generation attendance output and its published cursor; all original eleven columns remain intact. It then repairs presentation and validates the existing trigger manifest. A populated historical fixed-input tab is retained and not restyled or converted.
+5. Run `shamrockV3StagingImportConfig`, then `shamrockV3StagingSetup` as the project account. Setup remains paused. It validates and upgrades a deployed 14-column dynamic input by appending `slot_origin_row` and `slot_context_hash`, preserving all original IDs/cells/payloads. Recorded-excusal output also gains Event and Flight labels in columns 12–13, derived from consistent same-generation attendance output and its published cursor; all original eleven columns remain intact. It then repairs presentation and validates the existing trigger manifest. A populated historical fixed-input tab is retained and not restyled or converted.
 6. Run `shamrockV3StagingRepairPresentation` twice. Compare values/draft hashes, protected ranges, native Table IDs, managed-view identities and rule counts after each run. Inspect Google-rendered Sheets at ordinary zoom; styling alone is not proof that native Tables exist.
 
 Resource creation is an explicit reviewed provisioning step, not runtime discovery or fallback. The runtime never creates a workbook, tab or Form. There are no new scopes, dependencies, paid services or subscription changes.
+
+### Repair labels on existing staging Tables
+
+For the terminology-only correction, keep staging paused and repair the affected display headers and native Table column names through the Sheets API: **Unit → Flight** and **Unit ID → Flight ID**. Retain existing Table IDs, complete row values, hidden machine headers, protections, validation and saved views. Read back both display cells and native Table metadata, and compare data/protection snapshots before considering the repair complete. Deploy the matching committed adapter bundle so future presentation repairs preserve the new labels; no SQL/API key rename is needed.
 
 ## Verify interaction and publication
 

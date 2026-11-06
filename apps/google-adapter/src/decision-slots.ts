@@ -7,7 +7,7 @@ import { parseProjectionSnapshot, type ProjectionSnapshot } from './projection.j
 export const DECISION_HEADERS = ['slot_id', 'request_id', 'base_version', 'draft_decision', 'draft_id', 'draft_state', 'draft_json'] as const;
 const LEGACY_DYNAMIC_HEADERS = [...DECISION_HEADERS, 'event_id', 'unit_id', 'person_id', 'event_label', 'display_name', 'requested_outcome', 'recorded_status'] as const;
 export const DYNAMIC_DECISION_HEADERS = [...LEGACY_DYNAMIC_HEADERS, 'slot_origin_row', 'slot_context_hash'] as const;
-const DISPLAY_HEADERS = ['Slot ID', 'Request ID', 'Version being decided', 'Choose decision', 'Draft ID', 'Delivery status', 'Saved draft', 'Event ID', 'Unit ID', 'Person ID', 'Event', 'Name', 'Requested outcome', 'Status at this version', 'Original slot allocation', 'Protected context digest'];
+const DISPLAY_HEADERS = ['Slot ID', 'Request ID', 'Version being decided', 'Choose decision', 'Draft ID', 'Delivery status', 'Saved draft', 'Event ID', 'Flight ID', 'Person ID', 'Event', 'Name', 'Requested outcome', 'Status at this version', 'Original slot allocation', 'Protected context digest'];
 export interface DynamicSlotBinding { resourceKey: string; mode: 'projection'; maxSlots: number }
 export interface DynamicSlotContext { binding: DynamicSlotBinding; config: AdapterConfig; signer: Signer }
 export interface LocatedDecisionSlot extends DecisionSlot { row: number }

@@ -10,6 +10,10 @@ The production runtime is Apps Script V8. Local development compiles `src/**/*.t
 
 SHAMROCK is now an established operational system, not a greenfield scaffold. Treat the current checked-in source and docs as the supported baseline. Historical implementation notes and old compatibility paths are not requirements unless a task explicitly preserves them.
 
+## Operational Vocabulary
+
+Use the detachment's Air Force terminology: **wing → squadron → flight**. In user-facing labels, Forms, reports, instructions and messages, name the actual echelon—Flight, Squadron or Wing—instead of the generic label “Unit.” Preserve established role titles and attendance/decision terminology unless an operational requirement changes them.
+
 ## Operating Contract
 
 When you are dropped into this repo:
