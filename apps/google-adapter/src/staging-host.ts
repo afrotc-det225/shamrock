@@ -120,11 +120,14 @@ interface Context {
 interface FormEvent { source: { getId(): string }; response: SubmittedFormResponse; triggerUid?: string }
 interface DecisionEvent {
   source: { getId(): string };
-  range: { getSheet(): { getSheetId(): number }; getRow(): number; getColumn(): number; getNumRows(): number; getNumColumns(): number };
+  range: { getSheet(): { getSheetId(): number }; getRow(): number; getColumn(): number; getNumRows(): number; getNumColumns(): number;
+    getNote?(): string; setNote?(note: string): unknown };
   value?: string;
   user?: { getEmail(): string };
   triggerUid?: string;
 }
+const DECISION_LOCK_WAIT_MS = 25_000;
+const BUSY_EDIT_NOTE = '[SHAMROCK retry] A decision edit was not captured by this attempt because the adapter stayed busy. Check the delivery state before retrying. If the intended decision is still unrecorded, clear this input and select it again. Your input was retained.';
 
 function fail(code: string, message: string): never { throw new AdapterError(code, message); }
 function record(value: unknown, code = 'invalid_host_config'): Record<string, unknown> {
@@ -517,33 +520,65 @@ export function createStagingHost(runtime: StagingHostRuntime) {
     onDecisionEdit(event: DecisionEvent) {
       const ctx = ready(); if (!ctx) return { status: 'paused' };
       checkTriggerEvent(ctx, STAGING_HANDLERS.decision, event?.triggerUid);
+      // Native event evidence is frozen before any potentially blocking lock wait.
+      // Never replace it with the cell's later value or the trigger owner's identity.
+      const frozen = { sourceId: event.source.getId(), sheetId: event.range.getSheet().getSheetId(),
+        row: event.range.getRow(), column: event.range.getColumn(), rows: event.range.getNumRows(), columns: event.range.getNumColumns(),
+        value: event.value, actorEmail: googleEditActorEmail(event), triggerUid: event.triggerUid };
       const binding = ctx.config.decisionInput;
-      if (!binding || event.source.getId() !== binding.spreadsheetId) fail('wrong_source', 'This is not the configured decision workbook.');
-      if (event.range.getSheet().getSheetId() !== binding.sheetId) return { status: 'ignored' };
+      if (!binding || frozen.sourceId !== binding.spreadsheetId) fail('wrong_source', 'This is not the configured decision workbook.');
+      if (frozen.sheetId !== binding.sheetId) return { status: 'ignored' };
       const sheet = openDecisionInput(binding); const cols = decisionColumns(sheet, binding.mode === 'projection');
-      if (event.range.getColumn() > cols.draft_decision || event.range.getColumn() + event.range.getNumColumns() <= cols.draft_decision) return { status: 'ignored' };
-      if (event.range.getNumRows() !== 1 || event.range.getNumColumns() !== 1) fail('bulk_review_required', 'Keep the pasted input and review it as a frozen bulk draft.');
-      const result = withJournalLock(openJournal(ctx), runtime.lockService.getScriptLock(), journal => {
+      if (frozen.column > cols.draft_decision || frozen.column + frozen.columns <= cols.draft_decision) return { status: 'ignored' };
+      if (frozen.rows !== 1 || frozen.columns !== 1) fail('bulk_review_required', 'Keep the pasted input and review it as a frozen bulk draft.');
+      if (frozen.row < 3 || (binding.mode === 'projection' ? frozen.row > binding.maxSlots + 2 : !binding.slots.some(slot => slot.row === frozen.row))) {
+        fail('unknown_draft_slot', 'This row is outside the configured decision input area.');
+      }
+      function retryNote(show: boolean): 'shown' | 'cleared' | 'unavailable' | 'input-changed' {
+        try {
+          if (!event.range.getNote || !event.range.setNote) return 'unavailable';
+          // A timeout notice describes this attempt, never a later selection. Notes
+          // are presentation only; target/draft/status/journal cells need the lock.
+          if (show && (decisionColumns(sheet, binding!.mode === 'projection').draft_decision !== frozen.column
+            || sheet.getRange(frozen.row, frozen.column, 1, 1).getValues()[0][0] !== frozen.value)) return 'input-changed';
+          const current = event.range.getNote();
+          const clean = current.replace(`\n\n${BUSY_EDIT_NOTE}`, '').replace(BUSY_EDIT_NOTE, '');
+          const next = show ? `${clean}${clean ? '\n\n' : ''}${BUSY_EDIT_NOTE}` : clean;
+          if (next !== current) event.range.setNote(next);
+          return show ? 'shown' : 'cleared';
+        } catch { return 'unavailable'; }
+      }
+      let result;
+      try { result = withJournalLock(openJournal(ctx), runtime.lockService.getScriptLock(), journal => {
+        const currentContext = ready();
+        if (!currentContext) return { status: 'paused' };
+        if (currentContext.fingerprint !== ctx.fingerprint) fail('setup_required', 'Staging configuration changed while this edit waited; retain the input for review.');
+        checkTriggerEvent(currentContext, STAGING_HANDLERS.decision, frozen.triggerUid);
+        // Native lock acquisition invalidates cached metadata: ownership/sharing
+        // and protections may drift during the wait without a config edit.
+        openJournal(ctx);
+        openDecisionInput(binding);
         const currentCols = decisionColumns(sheet, binding.mode === 'projection');
-        if (currentCols.draft_decision !== event.range.getColumn()) fail('draft_target_changed', 'The decision columns moved after this edit.');
-        const slot = slotsFor(ctx, sheet, binding).find(s => s.row === event.range.getRow());
+        if (currentCols.draft_decision !== frozen.column) fail('draft_target_changed', 'The decision columns moved after this edit.');
+        const slot = slotsFor(ctx, sheet, binding).find(s => s.row === frozen.row);
         if (!slot) fail('unknown_draft_slot', 'This row has no reviewed immutable request binding.');
         const read = checkSlot(sheet, currentCols, slot);
-        if (read('draft_decision') !== event.value) fail('draft_input_changed', 'This delayed edit no longer matches the current input; no command was sent.');
+        if (read('draft_decision') !== frozen.value) fail('draft_input_changed', 'This delayed edit no longer matches the current input; no command was sent.');
         const prior = savedDraft(read, slot, binding);
         if (prior) {
           // A captured slot is never rebound, even if its outcome is terminal. A later
           // recorded version gets a fresh row; edits here retain the original payload.
-          if (prior.decision !== event.value || prior.status !== 'ready') {
+          if (prior.decision !== frozen.value || prior.status !== 'ready') {
             reconcileDecisionStates(ctx, journal);
             return { status: prior.status === 'ready' ? 'saved-draft-retained' : 'confirmation-required' };
           }
           enqueueCommand(decisionCommandFromDraft(prior, ctx.adapter), journal, ctx.signer);
+          reconcileDecisionStates(ctx, journal);
           return { status: 'queued' };
         }
         const candidate = captureDecisionDraft({ slot, draftId: runtime.utilities.getUuid(), resourceKey: binding.resourceKey,
-          decision: event.value ?? '', reason: 'Decision selected in the staging spreadsheet.', editedCellCount: 1,
-          eventUserEmail: googleEditActorEmail(event),
+          decision: frozen.value ?? '', reason: 'Decision selected in the staging spreadsheet.', editedCellCount: 1,
+          eventUserEmail: frozen.actorEmail,
         }, resolver(ctx));
         const draft = candidate;
         const body = JSON.stringify(draft);
@@ -553,9 +588,22 @@ export function createStagingHost(runtime: StagingHostRuntime) {
         if (read('draft_id') !== draft.draftId || read('draft_json') !== body) fail('draft_capture_failed', 'The draft could not be verified; no command was sent.');
         if (draft.status !== 'ready') return { status: 'confirmation-required' };
         enqueueCommand(decisionCommandFromDraft(draft, ctx.adapter), journal, ctx.signer);
+        reconcileDecisionStates(ctx, journal);
         return { status: 'queued' };
-      });
-      return result.status === 'queued' ? flushWith(ctx) : result;
+      }, {}, DECISION_LOCK_WAIT_MS); }
+      catch (error) {
+        if (error instanceof AdapterError && error.code === 'adapter_busy') return { status: 'attention-required', reason: 'decision-not-captured-adapter-busy', inputRetained: true, notice: retryNote(true) };
+        throw error;
+      }
+      if (result.status !== 'paused') retryNote(false);
+      if (result.status !== 'queued') return result;
+      try { return flushWith(ctx); }
+      catch (error) {
+        // The durable capture succeeded. A separate dispatcher/publisher winning
+        // the next lock must not relabel this edit as uncaptured or invent a retry.
+        if (error instanceof AdapterError && ['adapter_busy', 'projection_busy'].includes(error.code)) return { status: 'captured', delivery: 'deferred' };
+        throw error;
+      }
     },
   };
 }

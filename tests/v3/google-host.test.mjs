@@ -11,7 +11,7 @@ const cadetEmail = 'cadet@example.invalid';
 const code = expected => error => error.code === expected;
 const decisionHeaders = ['slot_id', 'request_id', 'base_version', 'draft_decision', 'draft_id', 'draft_state', 'draft_json'];
 class Sheet {
-  constructor(id, rows = []) { this.id = id; this.rows = structuredClone(rows); }
+  constructor(id, rows = []) { this.id = id; this.rows = structuredClone(rows); this.notes = new Map(); }
   getSheetId() { return this.id; }
   getLastRow() { return this.rows.length; }
   getLastColumn() { return Math.max(0, ...this.rows.map(row => row.length)); }
@@ -124,7 +124,8 @@ function fixture() {
     if (setCell) decisions.getRange(row, col, 1, 1).setValues([[value]]);
     return { source: { getId: () => config.decisionInput.spreadsheetId }, triggerUid: uid(H.decision), value,
       ...(user === null ? {} : { user: { getEmail: () => user } }),
-      range: { getSheet: () => decisions, getRow: () => row, getColumn: () => col, getNumRows: () => rows, getNumColumns: () => cols },
+      range: { getSheet: () => decisions, getRow: () => row, getColumn: () => col, getNumRows: () => rows, getNumColumns: () => cols,
+        getNote: () => decisions.notes.get(`${row}:${col}`) ?? '', setNote: note => decisions.notes.set(`${row}:${col}`, note) },
     };
   }
   return { host, runtime, state, properties, config, journal, decisions, books, forms, responses, lock, trigger, attendanceEvent, excusalEvent, editEvent,
@@ -396,4 +397,61 @@ test('500 protected dynamic slots use bounded bulk reads and one state-only reco
   reads = 0; writes.length = 0; f.host.flush();
   assert.ok(reads <= 8, `500-slot reconciliation used ${reads} range reads`); assert.deepEqual(writes, [[3, 6, 500, 1]]);
   assert.ok(f.decisions.rows.slice(2).every(row => row[5] === 'Committed: Approved' && row[3] === 'Approved' && row[2] === 1));
+});
+
+test('decision capture waits up to 25 seconds for a flush and keeps original event identity and position', () => {
+  const f = fixture(); f.activate(); const event = f.editEvent(); const waits = [];
+  const acquire = f.lock.tryLock.bind(f.lock); f.lock.held = true;
+  f.lock.tryLock = milliseconds => {
+    waits.push(milliseconds);
+    if (milliseconds === 25000) { f.lock.held = false; event.user.getEmail = () => 'changed@example.invalid'; event.range.getRow = () => 999; }
+    return acquire(milliseconds);
+  };
+  f.host.onDecisionEdit(event);
+  assert.equal(waits[0], 25000); assert.ok(waits.slice(1).every(value => value === 100));
+  assert.equal(f.state.commands.length, 1); assert.equal(f.state.commands[0].actor.principalId, 'principal.cadet');
+  assert.equal(f.state.commands[0].payload.requestId, 'request.one'); assert.equal(f.decisions.rows[2][5], 'Committed: Approved'); assert.equal(f.lock.held, false);
+});
+
+test('a later cell selection during contention is never substituted into the frozen event', () => {
+  const f = fixture(); f.activate(); const event = f.editEvent(); const acquire = f.lock.tryLock.bind(f.lock); f.lock.held = true;
+  f.lock.tryLock = milliseconds => { assert.equal(milliseconds, 25000); f.lock.held = false; f.decisions.rows[2][3] = 'Denied'; event.value = 'Denied'; return acquire(milliseconds); };
+  assert.throws(() => f.host.onDecisionEdit(event), code('draft_input_changed'));
+  assert.equal(f.state.commands.length, 0); assert.equal(f.decisions.rows[2][6], ''); assert.equal(f.decisions.rows[2][3], 'Denied'); assert.equal(f.lock.held, false);
+});
+
+test('contention timeout retains input and adds a neutral retry note without touching draft metadata', () => {
+  const f = fixture(); f.activate(); const event = f.editEvent(); const original = structuredClone(f.decisions.rows[2]);
+  f.decisions.notes.set('3:4', 'Reviewer note to preserve'); f.lock.held = true; const waits = [];
+  f.lock.tryLock = milliseconds => { waits.push(milliseconds); return false; };
+  assert.deepEqual(f.host.onDecisionEdit(event), { status: 'attention-required', reason: 'decision-not-captured-adapter-busy', inputRetained: true, notice: 'shown' });
+  assert.deepEqual(waits, [25000]); assert.deepEqual(f.decisions.rows[2], original); assert.equal(f.state.commands.length, 0); assert.equal(f.journal.rows.length, 1);
+  assert.match(f.decisions.notes.get('3:4'), /^Reviewer note to preserve\n\n\[SHAMROCK retry\]/); assert.match(f.decisions.notes.get('3:4'), /Check the delivery state/);
+  f.lock.held = false; f.lock.tryLock = function () { if (this.held) return false; this.held = true; return true; };
+  f.host.onDecisionEdit(event); assert.equal(f.decisions.rows[2][5], 'Committed: Approved'); assert.equal(f.decisions.notes.get('3:4'), 'Reviewer note to preserve');
+});
+
+test('timeout does not annotate a newer selection and a pause during waiting prevents capture', () => {
+  const f = fixture(); f.activate(); const event = f.editEvent();
+  f.lock.tryLock = milliseconds => { assert.equal(milliseconds, 25000); f.decisions.rows[2][3] = 'Denied'; return false; };
+  assert.equal(f.host.onDecisionEdit(event).notice, 'input-changed'); assert.equal(f.decisions.notes.size, 0); assert.equal(f.state.commands.length, 0);
+  const g = fixture(); g.activate(); const other = g.editEvent(); const acquire = g.lock.tryLock.bind(g.lock);
+  g.lock.tryLock = milliseconds => { assert.equal(milliseconds, 25000); g.host.pause(); return acquire(milliseconds); };
+  assert.deepEqual(g.host.onDecisionEdit(other), { status: 'paused' }); assert.equal(g.state.commands.length, 0); assert.equal(g.decisions.rows[2][6], ''); assert.equal(g.lock.held, false);
+});
+
+test('contention after successful capture leaves a queued durable payload for the scheduled dispatcher', () => {
+  const f = fixture(); f.activate(); const acquire = f.lock.tryLock.bind(f.lock);
+  f.lock.tryLock = milliseconds => milliseconds === 25000 ? acquire(milliseconds) : false;
+  assert.deepEqual(f.host.onDecisionEdit(f.editEvent()), { status: 'captured', delivery: 'deferred' });
+  assert.equal(f.decisions.rows[2][5], 'Queued: Approved'); assert.equal(f.journal.rows[1][3], 'pending'); assert.equal(f.state.commands.length, 0); assert.equal(f.decisions.notes.size, 0);
+  f.lock.tryLock = acquire; f.host.flush(); assert.equal(f.decisions.rows[2][5], 'Committed: Approved'); assert.equal(f.state.commands.length, 1);
+});
+
+test('protection or journal sharing lost during lock wait prevents any decision capture', () => {
+  for (const permission of ['decisionProtected', 'journalPrivate']) {
+    const f = fixture(); f.activate(); const event = f.editEvent(); const acquire = f.lock.tryLock.bind(f.lock);
+    f.lock.tryLock = milliseconds => { assert.equal(milliseconds, 25000); f.state[permission] = false; return acquire(milliseconds); };
+    assert.throws(() => f.host.onDecisionEdit(event), /rejected/); assert.equal(f.state.commands.length, 0); assert.equal(f.decisions.rows[2][6], ''); assert.equal(f.journal.rows.length, 1); assert.equal(f.lock.held, false);
+  }
 });

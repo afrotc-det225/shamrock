@@ -142,12 +142,16 @@ function sheetJournal(sheet: SheetPort, limits: JournalLimits): Journal {
 export function withJournalLock<T>(
   sheet: SheetPort, lock: ScriptLockPort, operation: (journal: Journal) => T,
   overrides: Partial<JournalLimits> = {},
+  waitMilliseconds = 100,
 ): T {
   const limits = { ...DEFAULT_LIMITS, ...overrides };
   if (Object.values(limits).some(value => !Number.isSafeInteger(value) || value < 1)) {
     throw new AdapterError('invalid_capacity', 'Journal capacity must use positive integer bounds.');
   }
-  if (!lock.tryLock(100)) throw new AdapterError('adapter_busy', 'The adapter is already processing saved input.');
+  if (!Number.isSafeInteger(waitMilliseconds) || waitMilliseconds < 0 || waitMilliseconds > 30_000) {
+    throw new AdapterError('invalid_lock_wait', 'Journal lock wait must be bounded to 30 seconds.');
+  }
+  if (!lock.tryLock(waitMilliseconds)) throw new AdapterError('adapter_busy', 'The adapter is already processing saved input.');
   try { return operation(sheetJournal(sheet, limits)); }
   finally { lock.releaseLock(); }
 }
