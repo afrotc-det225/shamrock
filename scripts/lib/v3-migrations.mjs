@@ -175,6 +175,21 @@ export function createMigrationPlan(input, commit, generation) {
   };
 }
 
+/** Initialize an explicitly empty isolated database at the current schema in one
+ * transaction. Existing databases must use the backed-up, versioned upgrade path. */
+export function createFreshDatabaseBatch(plan) {
+  assertPlan(plan);
+  const batch = [
+    ...plan.bootstrap.batch.slice(0, 2),
+    { sql: plan.migrations.length === 1 ? legacyLedgerSql : ledgerSql },
+    ...plan.migrations.flatMap(m => [...m.statements.map(sql => ({ sql })), ledgerInsert(m, plan.sourceCommit)]),
+    { sql: "INSERT INTO system_control(singleton,environment,generation,accepting_commands) VALUES(1,'staging',?,0)", params: [plan.generation] },
+    { sql: `DROP TABLE ${bootstrapGuard}` },
+  ];
+  if (batch.length > 128 || Buffer.byteLength(JSON.stringify(batch)) > 512 * 1024) throw new Error('Fresh schema exceeds its reviewed atomic bootstrap bound.');
+  return { environment: 'staging', generation: plan.generation, version: plan.version, sourceCommit: plan.sourceCommit, batch };
+}
+
 function assertPlan(plan) {
   if (plan?.formatVersion !== 2 || plan.environment !== 'staging' || !Number.isSafeInteger(plan.generation)
     || plan.generation < 1 || !commitPattern.test(plan.sourceCommit) || !Array.isArray(plan.migrations)

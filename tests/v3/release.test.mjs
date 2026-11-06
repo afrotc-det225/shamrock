@@ -8,7 +8,7 @@ import test from 'node:test';
 import { Miniflare, Log, LogLevel } from 'miniflare';
 import { classifyMigrationState, createMigrationPlan, createUpgradeBatch, migrationEvidenceHash,
   parseArguments, readMigrationSources, requireCleanCommit, resolveBuildPath, verifyRelease } from '../../scripts/prepare-v3-release.mjs';
-import { splitMigrationSql } from '../../scripts/lib/v3-migrations.mjs';
+import { createFreshDatabaseBatch, splitMigrationSql } from '../../scripts/lib/v3-migrations.mjs';
 import { parseMigrationArguments, prepareMigrationOperation } from '../../scripts/prepare-v3-migration.mjs';
 
 const sql = await readFile(new URL('../../database/migrations/0001_prototype.sql', import.meta.url), 'utf8');
@@ -336,4 +336,15 @@ test('all checked-in additive upgrades preserve existing receipts and leave stag
     assert.deepEqual((await db.prepare('PRAGMA foreign_key_check').all()).results, []);
   }
   assert.deepEqual(classifyMigrationState(all, ...await evidence(db)), { action: 'noop' });
+});
+
+
+test('fresh current-schema bootstrap is atomic, paused, and refuses every existing database',async t=>{
+ const latest=createMigrationPlan(sources,commit,1),fresh=createFreshDatabaseBatch(latest),db=await database(t);
+ assert(fresh.batch.length<=128);await apply(db,fresh.batch);
+ assert.deepEqual(classifyMigrationState(latest,...await evidence(db)),{action:'noop'});
+ assert.equal((await db.prepare('SELECT accepting_commands FROM system_control').first()).accepting_commands,0);
+ assert.equal((await db.prepare('PRAGMA foreign_key_check').all()).results.length,0);
+ await assert.rejects(apply(db,fresh.batch));assert.deepEqual(classifyMigrationState(latest,...await evidence(db)),{action:'noop'});
+ const old=await database(t);await apply(old);await assert.rejects(apply(old,fresh.batch));assert.deepEqual(classifyMigrationState(plan,...await evidence(old)),{action:'noop'});
 });

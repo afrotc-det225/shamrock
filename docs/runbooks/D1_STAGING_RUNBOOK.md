@@ -167,3 +167,10 @@ Store configuration, identity enrollment and immutable choice catalogs in Script
 Run `shamrockV3StagingSetup` manually as the automation account, granting the staging runtime consent. Setup verifies existing resources, initializes the journal and outputs and reconciles its versioned triggers. It remains paused. Confirm both the host and projection setup receipts before running `shamrockV3StagingResume`. The Worker also remains fenced until explicitly enabled for the rehearsal. Submit a real test response after setup, verify the D1 receipt and protected sheet output, test repeated delivery, and then pause both sides again. Record native identity, protection and publication evidence separately from mock-test results.
 
 Do not migrate production automation as part of this rehearsal. Use the [account handoff runbook](ACCOUNT_HANDOFF_RUNBOOK.md) for its existing resources, old-owner trigger inventory, controlled replacement and recovery.
+
+For a newly created, empty isolated database, `createFreshDatabaseBatch(plan)` in
+`scripts/lib/v3-migrations.mjs` installs the exact current schema and ordered ledger
+in one guarded transaction, leaving commands paused. Its explicit review bound is
+128 statements / 512 KiB. The transaction refuses any existing application object,
+including an older SHAMROCK database. It is only initial provisioning; existing
+staging databases still require the versioned backup/restore upgrade procedure.
