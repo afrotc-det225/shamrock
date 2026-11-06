@@ -72,3 +72,5 @@ Presentation shares the existing Google Sheets API and Apps Script quotas and ad
 ## Evidence record
 
 Record the deployed commit, local test count, actual API read-back, repeated-repair preservation, native interactions, publication results, final pause/fence and unchanged production source in the staging checkpoint and private operations handoff. Separate successful checks from remaining release gates.
+
+The optional trusted access policy distinguishes `permissionManagers` from ordinary Leadership and support editors. When supplied, Directory Role/Flight/Squadron/Flight Path and Leadership Role/Email accept only those named managers (plus the owner and automation identity). Ordinary contact fields retain their existing field grants. A closed publication fence must also clear `permissionManagers`; leaving it inherited from the open policy would leave privileged cells editable. This capability is local source until its role-policy migration and native host integration are explicitly enabled.

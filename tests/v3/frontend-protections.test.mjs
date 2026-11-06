@@ -252,3 +252,16 @@ test('keyed row policy relocation and removal revoke previous cell grants withou
   assert.equal(verifyFrontendProtections(input).ready, true);
   surface.readonlyCells = [{ rowIndex: 1, headers: ['role'] }]; assert.throws(() => planFrontendProtections(input), invalid);
 });
+
+test('trusted permission managers own privilege fields while ordinary Leadership retains harmless contact edits',()=>{
+ const input=fixture();input.access.permissionManagers=[people.wing];apply(input,planFrontendProtections(input).requests);
+ for(const [kind,fields] of [['directory',['role','flight','squadron','flight_path_status']],['leadership',['role','email']]])for(const field of fields){
+  assert.equal(nativeAllows(input,actor(input,kind,field,people.wing)),true,field);
+  for(const ordinary of [people.support,people.leadership,people.directory])assert.equal(nativeAllows(input,actor(input,kind,field,ordinary)),false,field);
+ }
+ assert.equal(nativeAllows(input,actor(input,'leadership','office_location',people.leadership)),true);
+ assert.equal(nativeAllows(input,actor(input,'directory','phone',people.directory)),true);
+ assert.deepEqual(verifyFrontendProtections(input),{ready:true,issues:[]});
+ input.access={...input.access,permissionManagers:[],supportEditors:[],directoryEditors:[],leadershipEditors:[],attendanceEditors:[],squadronCommanders:[]};apply(input,planFrontendProtections(input).requests);
+ assert.equal(nativeAllows(input,actor(input,'leadership','role',people.wing)),false);
+});

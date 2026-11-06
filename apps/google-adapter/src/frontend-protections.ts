@@ -24,6 +24,8 @@ export interface FrontendProtectionSurface {
 }
 export interface FrontendProtectionAccess {
   ownerEmail: string;
+  /** Present only for the trusted dynamic policy; privilege-bearing cells exclude ordinary support/editors. */
+  permissionManagers?: readonly string[];
   automationEmail: string;
   /** Global operational support: business input only, not IDs, headers or outputs. */
   supportEditors: readonly string[];
@@ -108,6 +110,7 @@ function normalizedAccess(access: FrontendProtectionAccess): FrontendProtectionA
   });
   if (new Set(assignments.map(value => value.squadronId)).size !== assignments.length) fail('A squadron commander assignment is ambiguous.');
   return { ownerEmail: email(access.ownerEmail), automationEmail: email(access.automationEmail),
+    ...(access.permissionManagers===undefined?{}:{permissionManagers:emails(access.permissionManagers)}),
     supportEditors: emails(access.supportEditors), directoryEditors: emails(access.directoryEditors),
     leadershipEditors: emails(access.leadershipEditors), attendanceEditors: emails(access.attendanceEditors), squadronCommanders: assignments };
 }
@@ -170,9 +173,15 @@ function permittedColumns(surface: FrontendProtectionSurface, access: FrontendPr
   }
   if (surface.kind === 'readonly' || surface.dataEndRow === 2) return [];
   const users = emails([...operational, ...access.supportEditors]);
-  if (!users.length) return [];
+  if (!users.length && !access.permissionManagers?.length) return [];
   const locked = surface.readonlyCells?.find(row => row.rowIndex === rowIndex)?.headers ?? [];
-  return surface.headers.flatMap((header, column) => fields.includes(header) && !locked.includes(header) ? [{ column, users }] : []);
+  return surface.headers.flatMap((header, column) => {
+    const privileged = access.permissionManagers !== undefined && (
+      surface.kind === 'directory' && ['role','flight','squadron','flight_path_status'].includes(header)
+      || surface.kind === 'leadership' && ['role','email'].includes(header));
+    const fieldUsers = privileged ? emails(access.permissionManagers!) : users;
+    return fields.includes(header) && !locked.includes(header) && fieldUsers.length ? [{column,users:fieldUsers}] : [];
+  });
 }
 function desired(input: FrontendProtectionInput, access: FrontendProtectionAccess): FrontendProtectionRequirement[] {
   const requirements: FrontendProtectionRequirement[] = [];
@@ -190,7 +199,7 @@ function desired(input: FrontendProtectionInput, access: FrontendProtectionAcces
     const blocks: { first: number; last: number; users: string[]; start: number; end: number }[] = [];
     for (const group of rowGroups) for (const entry of group.columns) {
       const previous = blocks.at(-1);
-      if (previous && previous.start === group.start && previous.end === group.end && previous.last + 1 === entry.column) previous.last = entry.column;
+      if (previous && previous.start === group.start && previous.end === group.end && previous.last + 1 === entry.column && JSON.stringify(previous.users) === JSON.stringify(entry.users)) previous.last = entry.column;
       else blocks.push({ first: entry.column, last: entry.column, users: entry.users, start: group.start, end: group.end });
     }
     const ranges = blocks.map(block => ({ sheetId: surface.sheetId, startRowIndex: block.start, endRowIndex: block.end,
