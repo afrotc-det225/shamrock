@@ -14,6 +14,7 @@ import { buildFrontendReporting } from '../../../packages/domain/src/frontend-re
 import { buildExcusalPublicationTables, planExcusalPublication, planDashboardPublication, verifyDashboardPublicationReadback, dashboardReadFingerprint,
   type DashboardPublicationPlan, type DashboardPublicationRead } from './frontend-supplemental.js';
 import type { DashboardAction } from './frontend-dashboard.js';
+import { createPrivateCheckpoint } from './private-checkpoint.js';
 import type { SnapshotRevision } from '../../../packages/domain/src/admin.js';
 
 export const FRONTEND_PROPERTIES = { config: 'SHAMROCK_V3_FRONTEND_CONFIG', claim: 'SHAMROCK_V3_FRONTEND_CLAIM', pause: 'SHAMROCK_V3_FRONTEND_PAUSED', resumeReceipt: 'SHAMROCK_V3_FRONTEND_RESUME_RECEIPT' } as const;
@@ -621,7 +622,6 @@ export function createNativeFrontendRuntime(services: NativeFrontendServices,
       } });
     }
     if (properties.getProperty(FRONTEND_PROPERTIES.pause) === 'true') return { status: 'disabled' as const };
-    let stateVersion: string | undefined;
     let publishedBaselines: FrontendPublicationState['baselines'] | undefined;
     let publishedSupplemental: FrontendSupplementalState | undefined;
     let metadataCache: Record<string, any> | undefined, cellsCache: Record<string, any> | undefined;
@@ -835,6 +835,14 @@ export function createNativeFrontendRuntime(services: NativeFrontendServices,
       if (supplemental) { const other = planFrontendProtections(excusalProtectionInput(closed)); if (other.requests.length) applyRequests(other.requests, supplemental.excusals.spreadsheetId); }
       assertPolicy(closed);
     };
+    const checkpoint = createPrivateCheckpoint<FrontendPublicationState>({
+      version() { const info = inspectFile(config.stateFileId, host.expectedAutomationEmail);
+        if (Number(info.size) > MAX_STATE_BYTES) fail('frontend_state', 'The private state file exceeds its bound.'); return String(info.version); },
+      read: () => api(`${driveUrl(config.stateFileId)}?alt=media`),
+      write(value) { const updated = api(`https://www.googleapis.com/upload/drive/v3/files/${encodeURIComponent(config.stateFileId)}?uploadType=media&fields=id,version`, value, true);
+        if (updated.id !== config.stateFileId || !updated.version) fail('frontend_state', 'Private state persistence was not acknowledged.'); },
+      validate: value => validState(value as FrontendPublicationState, host.generation), digest: value => signer.sha256(canonical(value)),
+    });
     const runtime: FrontendRefreshPorts = {
       config: { baseUrl: host.workerOrigin, keyId: host.keyId, environment: 'staging', generation: host.generation }, workerId: config.workerId, principalId: config.principalId,
       recovery: config.leaseRecovery,
@@ -857,27 +865,10 @@ export function createNativeFrontendRuntime(services: NativeFrontendServices,
         clear(claim) { const raw = properties.getProperty(FRONTEND_PROPERTIES.claim); if (!raw || !equal(JSON.parse(raw), claim)) fail('frontend_claim', 'The retained frontend claim changed.'); properties.deleteProperty(FRONTEND_PROPERTIES.claim); },
       },
       state: {
-        load() {
-          const info = inspectFile(config.stateFileId, host.expectedAutomationEmail);
-          if (Number(info.size) > MAX_STATE_BYTES) fail('frontend_state', 'The private state file exceeds its bound.');
-          const value = api(`${driveUrl(config.stateFileId)}?alt=media`);
-          const after = inspectFile(config.stateFileId, host.expectedAutomationEmail);
-          if (info.version !== after.version) fail('frontend_state', 'The private state changed while being read.');
-          stateVersion = String(after.version); const verified = validState(value as FrontendPublicationState, host.generation);
-          publishedBaselines = clone(verified.baselines); publishedSupplemental = verified.supplemental ? clone(verified.supplemental) : undefined; return verified;
-        },
-        save(value) {
-          validState(value, host.generation);
-          const current = inspectFile(config.stateFileId, host.expectedAutomationEmail);
-          if (!stateVersion || String(current.version) !== stateVersion) fail('frontend_state', 'The private state changed outside this publication.');
-          const updated = api(`https://www.googleapis.com/upload/drive/v3/files/${encodeURIComponent(config.stateFileId)}?uploadType=media&fields=id,version`, value, true);
-          if (updated.id !== config.stateFileId || !updated.version) fail('frontend_state', 'Private state persistence was not acknowledged.');
-          stateVersion = String(updated.version);
-          const reread = api(`${driveUrl(config.stateFileId)}?alt=media`);
-          if (signer.sha256(canonical(reread)) !== signer.sha256(canonical(value))) fail('frontend_state', 'Private state read-back does not match the saved checkpoint.');
-          publishedBaselines = clone(value.baselines);
-          publishedSupplemental = value.supplemental ? clone(value.supplemental) : undefined;
-        },
+        load() { const verified = checkpoint.load();
+          publishedBaselines = clone(verified.baselines); publishedSupplemental = verified.supplemental ? clone(verified.supplemental) : undefined; return verified; },
+        save(value) { checkpoint.save(value); publishedBaselines = clone(value.baselines);
+          publishedSupplemental = value.supplemental ? clone(value.supplemental) : undefined; },
       },
       buildModel: modelBuilder ?? (snapshot => {
         if (!services.Utilities.formatDate) fail('frontend_configuration', 'A detachment-local calendar date provider is required.');
