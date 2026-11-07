@@ -110,20 +110,19 @@ export function suggestAcademicProgression(person: DirectoryRecord): {
     return { asYear, rank: operationallyActive(person) ? ranks[asYear] ?? person.rank : person.rank, requiresReview: true };
 }
 function offsetDate(date: string, days: number): string { const d = new Date(date + 'T12:00:00Z'); d.setUTCDate(d.getUTCDate() + days); return d.toISOString().slice(0, 10); }
+let localTimeFormatter: Intl.DateTimeFormat | undefined;
 /** Resolve a local wall time and reject DST gaps/ambiguity instead of silently shifting an event. */
 function localInstant(date: string, hour: number, minute: number): string {
     const desired = `${date}T${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
-    const formatter = new Intl.DateTimeFormat('sv-SE', { timeZone: TRANSITION_TIME_ZONE, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' });
+    const formatter = localTimeFormatter ??= new Intl.DateTimeFormat('sv-SE', { timeZone: TRANSITION_TIME_ZONE, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' });
     const utc = Date.parse(desired + ':00Z');
     const candidates = [4, 5].map(offset => new Date(utc + offset * 3600000)).filter(d => formatter.format(d).replace(' ', 'T') === desired);
     if (candidates.length !== 1)
         return invalid('schedule', 'A scheduled local time is ambiguous or unavailable at a daylight-saving change.');
     return candidates[0].toISOString();
 }
-export function prepareTransition(plan: TransitionPlan, snapshot: FrontendSnapshot): {
-    people: DirectoryRecord[];
-    events: EventUpsert[];
-} {
+export interface PreparedTransitionRoster {people:DirectoryRecord[];flightIds:string[];eligiblePersonIds:string[];}
+export function prepareTransitionRoster(plan: TransitionPlan, snapshot: FrontendSnapshot): PreparedTransitionRoster {
     const current = snapshot.terms.filter(t => t.isCurrent);
     if (snapshot.diagnostics.length || current.length !== 1 || current[0].termId !== plan.sourceTermId
         || snapshot.terms.some(t => t.termId === plan.targetTerm.termId || t.sortOrder === plan.targetTerm.sortOrder)
@@ -139,8 +138,14 @@ export function prepareTransition(plan: TransitionPlan, snapshot: FrontendSnapsh
     if (!flights.length)
         return invalid('schedule', 'At least one operational Flight is required.');
     const eligible = people.filter(p => p.active && p.flightId && flights.includes(p.flightId)).map(p => p.personId);
+    return {people,flightIds:flights,eligiblePersonIds:eligible};
+}
+/** Bounded schedule calculation for one captured training week. */
+export function prepareTransitionWeek(plan:TransitionPlan,roster:PreparedTransitionRoster,week:number):EventUpsert[] {
+    if(!Number.isSafeInteger(week)||week<0||week>=plan.schedule.weeks) return invalid('schedule');
+    const {flightIds:flights,eligiblePersonIds:eligible}=roster;
     const events: EventUpsert[] = [];
-    for (let week = 0; week < plan.schedule.weeks; week++) {
+    {
         const trainingWeek = plan.schedule.firstTrainingWeek + week;
         const sunday = offsetDate(plan.schedule.firstSunday, week * 7);
         for (const type of ['mando', 'secondary', 'llab'] as const) {
@@ -149,9 +154,13 @@ export function prepareTransition(plan: TransitionPlan, snapshot: FrontendSnapsh
             const endAt = config ? new Date(Date.parse(startAt) + config.durationMinutes * 60000).toISOString() : localInstant(offsetDate(sunday, 6), 23, 59);
             const name = { mando: 'Mando PT', secondary: 'Secondary PT', llab: 'LLAB' }[type];
             events.push({ eventId: `${plan.targetTerm.termId}:tw${trainingWeek}:${type}`, expectedVersion: 0, termId: plan.targetTerm.termId,
-                eventType: type, trainingWeek, displayOrder: events.length + 1, label: `TW-${trainingWeek} ${name}`, columnLabel: `${name} TW-${trainingWeek}`,
+                eventType: type, trainingWeek, displayOrder: week * 3 + events.length + 1, label: `TW-${trainingWeek} ${name}`, columnLabel: `${name} TW-${trainingWeek}`,
                 expectedGroup: 'All Cadets', flightIds: flights, eligiblePersonIds: eligible, status: 'active', startAt, endAt, location: '', notes: '' });
         }
     }
-    return { people, events };
+    return events;
+}
+
+export function prepareTransition(plan:TransitionPlan,snapshot:FrontendSnapshot):{people:DirectoryRecord[];events:EventUpsert[]} {
+ const roster=prepareTransitionRoster(plan,snapshot);return {people:roster.people,events:Array.from({length:plan.schedule.weeks},(_,week)=>prepareTransitionWeek(plan,roster,week)).flat()};
 }

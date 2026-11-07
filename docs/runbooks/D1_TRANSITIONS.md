@@ -50,8 +50,7 @@ command fence atomically. No API grants its own transition permission.
 - `transition.accept`, `transition.cancel` or `transition.complete`, payload
   `{transitionId,expectedVersion,planHash}` from the reviewed status/receipt.
 
-The server stores the exact normalized plan hash and a coherent source snapshot
-hash. Cancellation is allowed before acceptance; it does not change people or
+The server stores the exact normalized plan hash and an immutable capture descriptor hash. The assembled snapshot hash is recorded separately after the native archive verifies all source pages and protected output. Existing whole-JSON snapshots keep their original hashes. Cancellation is allowed before acceptance; it does not change people or
 the current term. Changing an already frozen proposal requires cancellation and
 a new transition identity. Receipts are idempotent and recheck current authority.
 Global command registry and source uniqueness prevent cross-family collisions.
@@ -71,8 +70,7 @@ prepare a fresh proposal instead of applying stale people/event state.
 
 The private archive consumer claims
 `/v1/admin/transitions/archive/claim` with environment, generation, principal,
-worker and transition identity. It receives the immutable source snapshot and
-its hash with a bounded lease. A stable transition binding must identify the
+worker and transition identity. It receives an immutable capture descriptor and its hash with a bounded lease. The native consumer reads the descriptor’s frozen pages, verifies each hash and reconstructs the source snapshot before any archive write. Existing whole-JSON claims retain their earlier response shape. A stable transition binding must identify the
 same archive on retry. An expired archive claim may be renewed because every
 write is constrained to that same immutable snapshot; the archive provider must
 never overwrite a different hash or create duplicate files after an unknown
@@ -194,3 +192,21 @@ not treated as a conflicting content edit. Changed content still fails before
 overwrite. These are content/concurrency checks under the host's ScriptLock,
 not a claim that Drive offers atomic version compare-and-swap. The archive's
 separate multi-chunk verification still stops on provider revision drift.
+
+## Bounded preparation and frozen page transport
+
+Migration0012 adds an immutable preparation/page journal and transition binding. It does not rewrite earlier proposals, accepted transitions, archived snapshots or hashes.
+
+A new `transition.prepare` command must first complete its bounded capture. Send the same command envelope to `/v1/admin/transitions/prepare/begin`. The response contains `preparation: {commandId,state,sequence}` (or the already committed receipt on an authorized retry). Repeatedly POST `{environment,generation,principalId,commandId,expectedSequence}` to `/v1/admin/transitions/prepare/step`, using the returned sequence until state is `complete`; then submit the original envelope to `/v1/admin/transitions/commands`. The command and reviewed plan remain unchanged throughout.
+
+Each capture invocation freezes one frontend data page, or calculates one training week’s three events after the data pages are complete. It never reads the full attendance snapshot in one Worker invocation. Preparation, source revisions, the registered adapter and current transition authority are rechecked on every write. The final committed transition still requires no competing proposal, publication lease or active closeout. Capture itself creates no operational command, term, event, notice or publication effect. Immutable page receipts make a lost response resumable at the same sequence.
+
+A source change during capture invalidates that draft. Abandon an unconsumed draft through `/v1/admin/transitions/prepare/abandon` with environment, generation, principalId and commandId, review the new source, and use a new command identity. Abandonment retains captured evidence; it cannot erase a consumed transition. Four unfinished drafts per actor and32 total retained preparations bound accidental accumulation. There are at most512 data pages and5MiB of captured page content per preparation; weekly event material is separately bounded to20 pages of256KB. A capacity failure requires explicit retention review, never silent deletion of archived evidence.
+
+New archive claims return `snapshotTransport` with contract version `transition-snapshot-pages-v1`, `descriptorHash`, and initially `snapshotHash: null`. The descriptor binds the coherent frontend manifest, ordered page hashes and final verification. Read each page through `/v1/admin/transitions/archive/page` using the normal claim identity plus `sequence`. This is a read-only, lease-bound operation. The pure `assembleTransitionSnapshot` helper verifies the descriptor and every page, reconstructs the original frontend snapshot and computes `assembledSnapshotHash` over its exact JSON. A descriptor digest is **not** a historical snapshot digest.
+
+The native consumer retains the assembled snapshot and its hash before writes, checks that hash when resuming, and includes both `descriptorHash` and the actual `snapshotHash` in the protected/private/values-only archive ACK. The Worker verifies the descriptor binding and records the adapter-verified assembled hash separately; later retries must use the same hash. Previous whole-JSON archive claims and proofs retain their original behavior.
+
+Final acceptance uses the frozen Directory/term/flight policy catalog and prepared event pages. SQL consumes those prepared event rows directly inside the existing atomic acceptance transaction; the Worker does not deserialize and repeat all historical attendance or event roster IDs. Training schedule rules and daylight-saving validation remain the same. This preserves the old term, its attendance and requests, and creates the new term only after archive verification.
+
+Synthetic and private local real-data rehearsals validate this protocol. Hosted CPU, native chunk assembly and full archive readback must pass separately before claiming a real-data transition ready; local timings include SQLite work and are not a Cloudflare Free-tier CPU measurement.

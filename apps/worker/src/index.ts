@@ -1,3 +1,4 @@
+import { beginTransitionPreparation,stepTransitionPreparation,readTransitionArchivePage,abandonTransitionPreparation } from './transition-transport.js';
 import { adminEffectAvailability } from './effect-availability.js';
 import { permissionCommand, permissionRefresh, attestPermissionFence, recoverPermissionRefresh } from './permissions.js';
 import { effectiveAccessGrants } from './permission-grants.js';
@@ -446,6 +447,10 @@ export default {
       if (url.pathname === '/v1/admin/closeout/prepare' && !url.search) return json(await prepareCloseout(env, input));
       if (url.pathname === '/v1/admin/closeout/advance' && !url.search) return json(await advanceCloseout(env, input));
       if (url.pathname === '/v1/admin/closeout/status' && !url.search) return json(await closeoutStatus(env, input));
+      if (url.pathname === '/v1/admin/transitions/prepare/begin' && !url.search) return json(await beginTransitionPreparation(env,input));
+      if (url.pathname === '/v1/admin/transitions/prepare/step' && !url.search) return json(await stepTransitionPreparation(env,input));
+      if (url.pathname === '/v1/admin/transitions/prepare/abandon' && !url.search) return json(await abandonTransitionPreparation(env,input));
+      if (url.pathname === '/v1/admin/transitions/archive/page' && !url.search) return json(await readTransitionArchivePage(env,input));
       if (url.pathname === '/v1/admin/transitions/commands' && !url.search) return json(await transitionCommand(env, input));
       if (url.pathname === '/v1/admin/transitions/status' && !url.search) return json(await transitionStatus(env, input));
       for (const action of ['claim', 'ack'] as const) {
