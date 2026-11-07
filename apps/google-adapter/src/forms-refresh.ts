@@ -20,6 +20,8 @@ export interface FormsRefreshPorts {
   lock: { tryLock(milliseconds: number): boolean; releaseLock(): void };
   assertIsolation(): void;
   state: { load(): FormsState; save(state: FormsState): void };
+  /** Archive exact catalogs before reducing active history; preserve all pending plans. */
+  retainCatalog?(state:FormsState,incoming:FormEdition[]):Record<string,FormEdition>;
   effects: { claim(): FormsClaim | null; project(claim: FormsClaim): { effect: { effectId: string; kind: string }; snapshot: FrontendSnapshot }; ack(claim: FormsClaim): void };
   forms: { read(binding: ManagedFormBinding): NativeFormRead; setAccepting(binding: ManagedFormBinding, enabled: boolean): void;
     write(binding: ManagedFormBinding, requests: Record<string, unknown>[], requiredRevisionId: string): void;
@@ -53,7 +55,8 @@ export function consumeFormsRefresh(io: FormsRefreshPorts): { status: 'disabled'
         const reads = bindings.map(b => io.forms.read(b));
         const plans = bindings.map((binding, i) => planNativeFormPublication({ snapshot: projected.snapshot, binding, current: reads[i], signer: io.signer, previousEdition: state.editions[state.current[binding.key]] }));
         // Catalog history is frozen alongside the plans before a respondent can see a new token.
-        for (const plan of plans) state.editions = retainFormEdition(state.editions, plan.edition);
+        if(io.retainCatalog)state.editions=io.retainCatalog(state,plans.map(p=>p.edition));
+        else for (const plan of plans) state.editions = retainFormEdition(state.editions, plan.edition);
         state.pending = { plans, previouslyAccepting: Object.fromEntries(bindings.map((b, i) => [b.key, reads[i].acceptingResponses])) }; save();
       }
       const pending = state.pending;

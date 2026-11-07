@@ -1,4 +1,6 @@
 import type {ScheduledHints} from './scheduled-runtime.js';
+import {createNativeRetention,type NativeRetentionConfig} from './private-retention-native.js';
+import {createFormCatalogArchive,compactFormsIntake} from './forms-retention.js';
 /** Optional standalone Google host. Config and journals remain in automation-owned Drive JSON. */
 import { createPrivateCheckpoint } from './private-checkpoint.js';
 import type { PageContinuation } from './forms-layout.js';
@@ -19,6 +21,7 @@ export interface NativeFormsConfig {
   version: 1; environment: 'staging'; generation: number; enabled: boolean; intakeEnabled: boolean;
   resourceReview: 'EXISTING_FORMS_REVIEWED_FOR_STAGING'; principalId: string; workerId: string;
   stateFileId: string; intakeFileId: string; reviewResourceKey: string; principals: FormPrincipal[];
+  retention?:NativeRetentionConfig;
   controlRequest?: { requestId: string; sequence: number; action: 'setup' | 'resume-publication' | 'resume-intake' | 'pause'; stateSha256: string; intakeSha256: string };
   forms: (ManagedFormBinding & { allowedEditors: string[]; intake: FormIntakeBinding })[];
 }
@@ -80,6 +83,9 @@ export function createNativeFormsRuntime(services: NativeFormsServices) {
     for (const b of config.forms) if (!b.expectedTitle.includes('Staging') || b.intake.formId !== b.formId || b.intake.resourceKey !== b.resourceKey || b.intake.kind !== b.key) fail('forms_configuration', 'Native intake and publication must bind the same staging Forms.');
     const signer = createGoogleSigner(services.Utilities, props.getProperty(HOST_PROPERTIES.secret) ?? '');
     const adapter: AdapterConfig = { environment: 'staging', generation: config.generation, baseUrl: host.workerOrigin, keyId: host.keyId };
+    if(config.retention&&[config.retention.indexFileId,config.retention.archiveFolderId].some(id=>[config.stateFileId,config.intakeFileId,...config.forms.map(f=>f.formId)].includes(id)))fail('forms_configuration','Retention storage must be separate from live resources.');
+    const retention=config.retention?createNativeRetention(services,config.retention,owner,config.generation,signer):undefined;
+    const catalogArchive=retention?createFormCatalogArchive(retention,signer):undefined;
     const transport=createPagedFrontendTransport(createGoogleTransport(services.UrlFetchApp),adapter,signer,()=>Math.floor(now()/1000));
     const enabled = () => props.getProperty(FORMS_PROPERTIES.pause) !== 'true' && config.enabled;
     const intakeEnabled = () => props.getProperty(FORMS_PROPERTIES.intakePause) !== 'true' && config.intakeEnabled && props.getProperty(HOST_PROPERTIES.enabled) !== 'true';
@@ -150,8 +156,9 @@ export function createNativeFormsRuntime(services: NativeFormsServices) {
     function isolation() {
       for (const b of config.forms) { const info = file(b.formId, owner, b.allowedEditors); if (info.name !== b.expectedTitle || info.mimeType !== 'application/vnd.google-apps.form') fail('forms_isolation', 'The bound staging Form changed.'); }
       privateJson(config.stateFileId, owner); privateJson(config.intakeFileId, owner);
+      retention?.get('retention-health-v1');
     }
-    return { config, adapter, owner, signer, enabled, intakeEnabled, request, effect, storage, read, isolation, setSubmitContinuation };
+    return { config, adapter, owner, signer, enabled, intakeEnabled, request, effect, storage, read, isolation, setSubmitContinuation,retention,catalogArchive };
   }
   function paused(key: string) { props.setProperty(key, 'true'); if (props.getProperty(key) !== 'true') fail('forms_pause', 'The local pause did not persist.'); }
   function lock<T>(operation: () => T): T { const l = services.LockService.getScriptLock(); if (!l.tryLock(25_000)) fail('forms_busy', 'Form intake is busy; replay the retained native response.'); try { return operation(); } finally { l.releaseLock(); } }
@@ -188,6 +195,7 @@ export function createNativeFormsRuntime(services: NativeFormsServices) {
         : entry.commands.some(c => c.status === 'queued') ? 'queued' : entry.directory?.status === 'pending-review' ? 'pending-review' : 'committed';
       store.save(state);
     }
+    if(ctx.retention){const compacted=compactFormsIntake(state,ctx.retention);if(compacted.archived){store.save(compacted.state);state.entries=compacted.state.entries;}}
     markWork(FORMS_PROPERTIES.intakeWork,Object.values(state.entries).some(e=>e.commands.some(c=>c.status==='queued'))?'pending':idleMarker(ctx,ctx.config.intakeFileId));
     return { attempted: sent };
   }
@@ -232,6 +240,7 @@ export function createNativeFormsRuntime(services: NativeFormsServices) {
       markWork(FORMS_PROPERTIES.publicationWork);
       const result=consumeFormsRefresh({ config: ctx.adapter, enabled: ctx.enabled, intakeEnabled: ctx.intakeEnabled, now, signer: ctx.signer,
         bindings: ctx.config.forms, lock: services.LockService.getScriptLock(), assertIsolation: ctx.isolation, state: ctx.storage<FormsState>(ctx.config.stateFileId),
+        ...(ctx.catalogArchive?{retainCatalog:ctx.catalogArchive.retain}:{}),
         effects: { claim: () => ctx.effect('claim').effect, project: claim => ctx.effect('project', claim), ack: claim => { const result = ctx.effect('ack', claim); if (result.acknowledged !== true) fail('forms_effect', 'Form acknowledgement did not verify.'); } },
         forms: { read: ctx.read, setSubmitContinuation: ctx.setSubmitContinuation, setAccepting: (b, open) => { services.FormApp.openById(b.formId).setAcceptingResponses(open); },
           write: (b, requests, requiredRevisionId) => { api(`${forms(b.formId)}:batchUpdate`, { requests, writeControl: { requiredRevisionId } }); } },
@@ -296,15 +305,16 @@ export function createNativeFormsRuntime(services: NativeFormsServices) {
         const id = ctx.signer.sha256(formsCanonical([binding.formId, native.responseId, native.lastSubmittedTime]));
         const store = ctx.storage<IntakeState>(ctx.config.intakeFileId), journal = store.load();
         if (journal.version !== 1 || journal.environment !== 'staging' || journal.generation !== ctx.config.generation) fail('forms_state', 'The intake journal belongs to another generation.');
-        if (journal.entries[id]) {
-          if (journal.entries[id].sourceHash !== ctx.signer.sha256(formsCanonical(source))) fail('forms_revision', 'A native response changed without a new revision.');
-          if (journal.entries[id].status !== 'captured') return { status: journal.entries[id].status, intakeId: id };
+        const previous=journal.entries[id]??ctx.retention?.get(`form-intake.${id}`) as IntakeEntry|undefined;
+        if (previous) {
+          if (previous.sourceHash !== ctx.signer.sha256(formsCanonical(source))) fail('forms_revision', 'A native response changed without a new revision.');
+          if (previous.status !== 'captured') return { status: previous.status, intakeId: id };
         }
         const entry: IntakeEntry = journal.entries[id] ?? { id, source, formKey: key, sourceHash: ctx.signer.sha256(formsCanonical(source)), status: 'captured', commands: [] };
         markWork(FORMS_PROPERTIES.intakeWork);journal.entries[id] = entry; store.save(journal); // Preserve even invalid or unenrolled submissions before interpretation.
         try {
           const catalog = ctx.storage<FormsState>(ctx.config.stateFileId).load();
-          const input = { submission: source, binding: binding.intake, editions: catalog.editions, principals: [...ctx.config.principals.filter(p => p.personId || !journal.enrollments?.[p.email.toLowerCase()]), ...Object.entries(journal.enrollments ?? {}).filter(([email]) => !ctx.config.principals.some(p => p.personId && p.email.toLowerCase() === email)).map(([email, p]) => ({email, ...p}))], config: ctx.adapter, signer: ctx.signer };
+          const input = { submission: source, binding: binding.intake, editions: ctx.catalogArchive?ctx.catalogArchive.forSubmission(catalog,source,binding.intake):catalog.editions, principals: [...ctx.config.principals.filter(p => p.personId || !journal.enrollments?.[p.email.toLowerCase()]), ...Object.entries(journal.enrollments ?? {}).filter(([email]) => !ctx.config.principals.some(p => p.personId && p.email.toLowerCase() === email)).map(([email, p]) => ({email, ...p}))], config: ctx.adapter, signer: ctx.signer };
           if (key === 'directory') {
             entry.directory = directoryDraftFromManagedForm(input);
             if (entry.directory.submitted.photoLink) verifyDirectoryPhoto(String(entry.directory.submitted.photoLink), (fileId, key) => api(`${drive(fileId)}?fields=id,mimeType,trashed`, undefined, 'get', key ? {'X-Goog-Drive-Resource-Keys': `${fileId}/${key}`} : {}));

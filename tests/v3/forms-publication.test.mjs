@@ -82,6 +82,10 @@ function runtimeFixture(){
 test('durable three-Form publication freezes catalogs first and ACKs only all verified destinations',()=>{
  const{fx,io,books}=runtimeFixture();assert.deepEqual(consumeFormsRefresh(io),{status:'published',forms:3});assert.equal(fx.ack,1);assert.equal(Object.keys(fx.state.current).length,3);assert.equal(Object.keys(fx.state.editions).length,3);assert.equal(fx.state.pending,undefined);assert(Object.values(books).every(b=>b.acceptingResponses));assert(!fx.locked);
 });
+test('historical catalog archival must verify before new native choices or publication acknowledgement',()=>{
+ const{fx,io}=runtimeFixture();io.retainCatalog=()=>{throw Error('archive readback lost');};assert.throws(()=>consumeFormsRefresh(io),/archive readback lost/);assert.equal(fx.writes.length,0);assert.equal(fx.ack,0);assert(fx.state.claim);assert.equal(fx.state.pending,undefined);
+ let verified=false;io.retainCatalog=(state,incoming)=>{verified=true;return Object.fromEntries(incoming.map(e=>[e.editionId,e]));};const write=io.forms.write;io.forms.write=(...args)=>{assert(verified);return write(...args);};assert.equal(consumeFormsRefresh(io).status,'published');assert.equal(fx.ack,1);
+});
 
 test('partial and ambiguous Form writes retain all fences and retry only unfinished native work',()=>{
  for(const failAfter of[false,true]){const{fx,io,books}=runtimeFixture();fx.failKey='excusals';fx.failAfter=failAfter;assert.throws(()=>consumeFormsRefresh(io));assert.equal(fx.ack,0);assert(fx.state.pending);assert(Object.values(books).every(b=>!b.acceptingResponses));const saved=copy(fx.state.pending);fx.failKey=null;io.effects.project=()=>assert.fail('must use frozen plans');assert.equal(consumeFormsRefresh(io).status,'published');assert.equal(fx.writes.filter(k=>k==='attendance').length,1);assert.equal(fx.writes.filter(k=>k==='excusals').length,failAfter?1:2);assert.equal(fx.ack,1);assert.equal(saved.plans.length,3);}

@@ -27,6 +27,10 @@ test('a received receipt persists before baseline reconciliation, and recovery n
 test('an applied receipt marker survives a lost journal acknowledgement without rebasing or applying twice',()=>{
  const f=fixture(),io=f.open();retainCapturedInput(io,f.edit,[f.command]);f.fx.fail='journal-applied';assert.throws(()=>deliverFrontendInputs(io));assert.equal(f.fx.storedState.drafts.attendance.length,0);assert(f.fx.storedState.inputReceipts['input-one']);f.fx.fail='';assert.equal(deliverFrontendInputs(f.open()).committed,1);assert.equal(f.fx.sendCount,1);
 });
+test('an archived applied receipt still prevents baseline reapplication after restoring an older active journal',()=>{
+ const f=fixture(),io=f.open();retainCapturedInput(io,f.edit,[f.command]);f.fx.fail='journal-applied';assert.throws(()=>deliverFrontendInputs(io));const saved=f.fx.storedState.inputReceipts['input-one'];delete f.fx.storedState.inputReceipts['input-one'];f.fx.fail='';
+ const restored=f.open();restored.archivedReceiptHash=id=>id==='input-one'?saved:undefined;assert.equal(deliverFrontendInputs(restored).committed,1);assert.equal(f.fx.sendCount,1);assert.equal(f.fx.storedState.baselines.attendance.rows[0].versions['event:event'],9);
+});
 test('conflict, revoked authority and mismatched receipts retain the original draft',()=>{
  for(const status of [409,403,200]){const f=fixture(),io=f.open();retainCapturedInput(io,f.edit,[f.command]);f.fx.response.status=status;if(status===200)f.fx.response.body.result.personId='other';deliverFrontendInputs(io);assert.equal(f.fx.storedState.drafts.attendance.length,1);assert.equal(f.fx.storedState.baselines.attendance.rows[0].versions['event:event'],3);assert.equal(f.fx.storedJournal.entries['edit-one'].commands[0].status,status===409?'conflict':status===403?'rejected':'queued');}
 });

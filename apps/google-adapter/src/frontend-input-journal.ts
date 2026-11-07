@@ -5,11 +5,12 @@ import type {FrontendPublicationState} from './frontend-runtime.js';
 import {assertImmutableInputSlots,inputCanonical,nativeInputValue,reconcileInputReceipt,type CapturedFrontendEdit,type InputCommand,type InputSurface,type NativeEditEvidence} from './frontend-input.js';
 export interface InputDelivery {command:InputCommand;templateIndex:number;status:'queued'|'committed'|'conflict'|'rejected';attempted:boolean;receipt?:unknown;applied?:boolean}
 export interface InputJournalEntry {edit:CapturedFrontendEdit;commands:InputDelivery[];confirmation?:{responseId:string;submittedAt:string;email:string};issue?:string;superseded?:boolean;supersededApplied?:boolean;noteStatus?:string}
-export interface FrontendInputJournal {version:1;environment:'staging';generation:number;entries:Record<string,InputJournalEntry>;held?:Record<string,{event:unknown;issue:string}>}
+export interface FrontendInputJournal {version:1;environment:'staging';generation:number;entries:Record<string,InputJournalEntry>;held?:Record<string,{event:unknown;issue:string}>;supersededCounts?:Partial<Record<InputSurface,number>>}
 export interface InputJournalPorts {
   journal:FrontendInputJournal;state:FrontendPublicationState;
   saveJournal(journal:FrontendInputJournal):void;saveState(state:FrontendPublicationState):void;
   sha256(text:string):string;
+  archivedReceiptHash?(commandId:string):string|undefined;
   send(path:'/v1/commands'|'/v1/admin/commands',command:InputCommand):{status:number;body:unknown};
   /** Exact current values before a first attempt; a retained ambiguous attempt must retry its original command. */
   stillVisible(edit:CapturedFrontendEdit):boolean;
@@ -35,7 +36,7 @@ function ensureHolds(io:InputJournalPorts,entry:InputJournalEntry){
   const table=inputSurfaceState(io.state,entry.edit.surface);let changed=false;
   for(const draft of entry.edit.drafts){
     const marker=entry.commands.find(c=>entry.edit.templates[c.templateIndex].drafts.some(d=>d.key===draft.key&&d.header===draft.header));
-    if(marker && (marker.applied || io.state.inputReceipts?.[marker.command.commandId]))continue;
+    if(marker && (marker.applied || io.state.inputReceipts?.[marker.command.commandId] || io.archivedReceiptHash?.(marker.command.commandId)))continue;
     const row=table.baseline.rows.find(r=>r.key===draft.key);
     if(!row||row.versions[draft.header]!==draft.baseVersion||inputCanonical(row.commandBindings?.[draft.header])!==inputCanonical(draft.command)){
       fail('The original input base changed before its hold was persisted.');
@@ -67,7 +68,8 @@ export function supersedeUnattemptedInput(io:InputJournalPorts,surface:InputSurf
     if(!positions.some(p=>inputCanonical(nativeInputValue(current.rows[p.row-3]?.[p.column-1]))!==inputCanonical(p.draft.value)))continue;
     entry.superseded=true;entry.issue='replaced-before-dispatch';io.saveJournal(io.journal);cleanupSuperseded(io,entry);
   }
-  return Object.values(io.journal.entries).filter(e=>e.edit.surface===surface&&e.superseded).length;
+  const archived=io.journal.supersededCounts?.[surface]??0;if(!Number.isSafeInteger(archived)||archived<0)fail('The retained input capture sequence is invalid.');
+  return archived+Object.values(io.journal.entries).filter(e=>e.edit.surface===surface&&e.superseded).length;
 }
 export function deliverFrontendInputs(io:InputJournalPorts,limit=10):{attempted:number;committed:number}{
   if(!Number.isSafeInteger(limit)||limit<1||limit>25)fail('Input delivery exceeds its bounded batch.');
@@ -93,7 +95,7 @@ export function deliverFrontendInputs(io:InputJournalPorts,limit=10):{attempted:
       }
       if(delivery.status==='committed'&&!delivery.applied){
         const receiptHash=io.sha256(inputCanonical({command:delivery.command,receipt:delivery.receipt}));
-        const old=io.state.inputReceipts?.[delivery.command.commandId];
+        const old=io.state.inputReceipts?.[delivery.command.commandId]??io.archivedReceiptHash?.(delivery.command.commandId);
         if(old&&old!==receiptHash)fail('The applied receipt marker changed.');
         if(!old){const table=inputSurfaceState(io.state,entry.edit.surface);table.set(reconcileInputReceipt({...table,template:entry.edit.templates[delivery.templateIndex],command:delivery.command,receipt:delivery.receipt}));
           io.state.inputReceipts??={};io.state.inputReceipts[delivery.command.commandId]=receiptHash;io.saveState(io.state);}

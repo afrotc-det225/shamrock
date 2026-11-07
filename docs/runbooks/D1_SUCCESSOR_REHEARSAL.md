@@ -20,6 +20,8 @@ Keep underlying files in restricted operational storage. These aggregate finding
 
 The private inventory contains multiple historical manifests and backups. Do not select the newest-looking filename or assume an old successful artifact covers later code. The live source pin, migration ledger, state digests and gate settings must agree for the rehearsal.
 
+The current credential audit found the bridge items in a vault named **Private**. Their contents and storage were verified, but successor access to that vault was not demonstrated. Do not describe this as shared-vault custody. The user reports account passwords are also in 1Password; that does not prove another custodian can retrieve or recover them. No paid 1Password plan or team-vault change is authorized. A free provider-level handoff can instead grant and verify successor organizational access, create replacement scoped provider credentials, update the corresponding private runtime settings, rehearse both identities, and revoke the departing credential only after validation. Keep secrets out of repositories and chat; record the actual custody/rotation exercise privately.
+
 ## Successor exercise
 
 Use a clean checkout on a separate machine or clean worktree, plus approved organizational credential access. Do not copy the prior maintainer's home directory, hidden CLI credentials or `.env` files. The participant should perform these steps from the written instructions while the departing maintainer observes and records any missing information.
