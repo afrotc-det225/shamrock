@@ -55,7 +55,7 @@ Baselines and frozen plans can exceed Script Properties' practical size. Store t
 
 ## Initialization boundary
 
-`planFrontendInitialization` accepts an empty native Table by default. A populated Table requires an explicit reviewed fictional reset binding naming the local/staging environment, generation, exact sheet/Table identifiers and exact fresh read. It clears only values and file chips in that bounded target rectangle, rewrites the approved schema and stable IDs, and applies normal keyed publication. It does not interpret old names as identity evidence. A fictional-reset flag is host configuration, never an untrusted spreadsheet cell or a user-submitted command.
+`planFrontendInitialization` accepts an empty native Table by default. A populated Table requires an explicit reviewed fictional reset binding naming the local/staging environment, generation, exact sheet/Table identifiers and exact fresh read. It clears only values and file chips in that bounded target rectangle, rewrites the approved schema and stable IDs, and applies normal keyed publication. Hidden fields follow their machine headers during this reviewed reset; a former hidden identity position is explicitly unhidden when it becomes an event column. Normal refresh continues to preserve physical columns. It does not interpret old names as identity evidence. A fictional-reset flag is host configuration, never an untrusted spreadsheet cell or a user-submitted command.
 
 There is no production adoption shortcut. Migrating a populated operational Table requires a separate reviewed stable-ID mapping and preserved source evidence.
 

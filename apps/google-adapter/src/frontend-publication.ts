@@ -508,12 +508,18 @@ export function planFrontendInitialization(input: {
   const width = Math.max(current.headers.length, headers.length), rowCount = Math.max(1, current.rows.length);
   const virtual: FrontendTableRead = { ...clone(current), headers, labels, gridRowCount: Math.max(current.gridRowCount, rowCount + 2), gridColumnCount: Math.max(current.gridColumnCount, width),
     rows: Array.from({ length: rowCount }, () => headers.map(() => ({}))),
-    // A reviewed reset clears values, not physical visibility (for example, Attendance Year/Flight/Squadron).
-    hiddenColumns: current.hiddenColumns.filter(c => c < headers.length),
+    // A reviewed schema reset preserves hidden fields by header, never the old identity position.
+    hiddenColumns: [...new Set(current.hiddenColumns.map(c => headers.indexOf(current.headers[c])).filter(c => c >= 0))].sort((a, b) => a - b),
     range: { sheetId: current.sheetId, startRowIndex: 1, endRowIndex: rowCount + 2, startColumnIndex: 0, endColumnIndex: headers.length } };
   const plan = planFrontendPublication({ ...input, current: virtual, baseline: { generation: input.generation, revision: input.revision, rows: [] }, drafts: [] });
   const prefix: Record<string, unknown>[] = [];
   if (virtual.gridColumnCount !== current.gridColumnCount || virtual.gridRowCount !== current.gridRowCount) prefix.push({ updateSheetProperties: { properties: { sheetId: current.sheetId, gridProperties: { rowCount: virtual.gridRowCount, columnCount: virtual.gridColumnCount } }, fields: 'gridProperties.rowCount,gridProperties.columnCount' } });
+  // Former identity positions can now contain event columns; restore their visibility explicitly.
+  for (const column of new Set([...current.hiddenColumns, ...virtual.hiddenColumns])) {
+    if (current.hiddenColumns.includes(column) !== virtual.hiddenColumns.includes(column)) prefix.push({ updateDimensionProperties: {
+      range: { sheetId: current.sheetId, dimension: 'COLUMNS', startIndex: column, endIndex: column + 1 },
+      properties: { hiddenByUser: virtual.hiddenColumns.includes(column) }, fields: 'hiddenByUser' } });
+  }
   // Clearing explicitly includes chipRuns so an old file chip cannot survive a blank reset.
   prefix.push({ updateCells: { range: { sheetId: current.sheetId, startRowIndex: 0, endRowIndex: rowCount + 2, startColumnIndex: 0, endColumnIndex: width }, rows: [], fields: 'userEnteredValue,chipRuns' } });
   prefix.push({ updateCells: { range: { sheetId: current.sheetId, startRowIndex: 0, endRowIndex: 2, startColumnIndex: 0, endColumnIndex: headers.length }, rows: [headers, labels].map(row => ({ values: row.map(frontendLiteralCell) })), fields: 'userEnteredValue' } });

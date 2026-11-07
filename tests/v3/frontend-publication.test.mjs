@@ -45,7 +45,10 @@ function apply(current, requests) {
     if (r.updateDimensionProperties) {
       const x = r.updateDimensionProperties;
       if (x.range.dimension === 'ROWS' && x.range.startIndex === 0) result.machineRowHidden = x.properties.hiddenByUser;
-      if (x.range.dimension === 'COLUMNS' && x.properties.hiddenByUser) result.hiddenColumns = [...new Set([...result.hiddenColumns, x.range.startIndex])];
+      if (x.range.dimension === 'COLUMNS' && Object.hasOwn(x.properties, 'hiddenByUser')) {
+        for (let c = x.range.startIndex; c < x.range.endIndex; c++) result.hiddenColumns = x.properties.hiddenByUser
+          ? [...new Set([...result.hiddenColumns, c])] : result.hiddenColumns.filter(value => value !== c);
+      }
     }
   }
   const width = result.range.endColumnIndex, height = result.range.endRowIndex;
@@ -210,6 +213,16 @@ test('initialization requires empty data or an exact reviewed fictional reset, n
   const retained = planFrontendInitialization(hidden);
   assert.deepEqual(retained.expectedAfter.hiddenColumns, [2, 3, 4, 7]);
   assert.ok(verifyFrontendPublicationReadback(retained, apply(hidden.current, retained.requests)), 'reset retains reviewed pre-hidden physical columns');
+});
+
+test('reviewed schema reset moves hidden identity without hiding a replacement event', () => {
+  const input = attendanceInput(2, 6), previous = attendanceInput(2, 2);
+  input.current = previous.current;
+  input.reviewedFictionalReset = { environment: 'staging', generation: 1, sheetId: input.current.sheetId, tableId: input.current.tableId, expectedRead: frontendReadFingerprint(input.current) };
+  const plan = planFrontendInitialization(input), after = apply(input.current, plan.requests);
+  assert.equal(after.headers[3], 'event:event-2');
+  assert.deepEqual(after.hiddenColumns, [7]);
+  assert.ok(verifyFrontendPublicationReadback(plan, after));
 });
 
 test('500×128 refresh coalesces values into bounded requests and sub-megabyte batches', () => {
