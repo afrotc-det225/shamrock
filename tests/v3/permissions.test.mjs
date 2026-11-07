@@ -107,3 +107,16 @@ test('even unversioned role or Flight drift fails closed against retained source
  const f=await fixture(t);await f.enable();await f.db.prepare("UPDATE directory_profiles SET role='' WHERE person_id='cadet-person'").run();assert.deepEqual(await f.grants(),[]);
  await f.db.prepare("UPDATE directory_profiles SET role='Flight Commander',flight_id='bravo' WHERE person_id='cadet-person'").run();await f.db.prepare("UPDATE memberships SET unit_id='bravo' WHERE person_id='cadet-person'").run();assert.deepEqual(await f.grants(),[]);
 });
+
+test('paged snapshots and idle availability use current derived Leadership grants and revoke them immediately',async t=>{
+ const f=await fixture(t);await f.enable();
+ const page={...envelope('cadet'),section:'manifest',offset:0,revision:null};
+ assert.equal((await f.send(page,'/v1/admin/snapshot/page')).status,200);
+ assert.equal((await f.send(envelope('cadet'),'/v1/admin/effects/availability')).status,200);
+ const history={...envelope('cadet'),snapshotId:'absent',section:'manifest',offset:0,sourceSnapshotSha256:null};
+ assert.equal((await f.send(history,'/v1/admin/history/page')).status,404);
+ await f.db.prepare("UPDATE directory_profiles SET role='' WHERE person_id='cadet-person'").run();
+ assert.equal((await f.send(page,'/v1/admin/snapshot/page')).status,403);
+ assert.equal((await f.send(envelope('cadet'),'/v1/admin/effects/availability')).status,403);
+ assert.equal((await f.send(history,'/v1/admin/history/page')).status,403);
+});

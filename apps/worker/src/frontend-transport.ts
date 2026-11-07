@@ -1,3 +1,4 @@
+import { effectiveAdminGrants } from './permission-grants.js';
 import { DIRECTORY_FIELDS, type SnapshotRevision } from '../../../packages/domain/src/admin.js';
 import { FRONTEND_PAGE_MAX_BYTES, FRONTEND_PAGE_VERSION, FRONTEND_SECTIONS, FRONTEND_SECTION_BOUNDS, type FrontendPage, type FrontendPageManifest, type FrontendSection } from '../../../packages/domain/src/frontend-transport.js';
 import { HttpError } from './http-error.js';
@@ -36,7 +37,7 @@ export async function frontendSnapshotPage(env:Env,input:unknown,forEffect=false
   const section=req.section;if(typeof section!=='string'||!['manifest','verify',...FRONTEND_SECTIONS].includes(section)||!Number.isSafeInteger(req.offset)||Number(req.offset)<0)fail(400,'INVALID_PAGE_REQUEST');
   if(section==='manifest'?req.revision!==null||req.offset!==0:!req.revision||typeof req.revision!=='object'||Array.isArray(req.revision)||Object.keys(req.revision).sort().join(',')!=='administration,operations'||Object.values(req.revision).some(v=>!Number.isSafeInteger(v)||Number(v)<0))fail(400,'INVALID_PAGE_REQUEST');
   if(section==='verify'&&req.offset!==0||section!=='manifest'&&section!=='verify'&&Number(req.offset)>FRONTEND_SECTION_BOUNDS[section as FrontendSection])fail(400,'INVALID_PAGE_REQUEST');
-  const guard=`EXISTS(SELECT 1 FROM system_control WHERE singleton=1 AND environment=? AND generation=?${forEffect?' AND accepting_commands=1':''}) AND EXISTS(SELECT 1 FROM principals p JOIN admin_grants g ON g.principal_id=p.principal_id WHERE p.principal_id=? AND p.active=1 AND g.capability='frontend.read' AND g.scope_kind='wing' AND g.scope_key='*')`;
+  const guard=`EXISTS(SELECT 1 FROM system_control WHERE singleton=1 AND environment=? AND generation=?${forEffect?' AND accepting_commands=1':''}) AND EXISTS(SELECT 1 FROM principals p JOIN ${effectiveAdminGrants} g ON g.principal_id=p.principal_id WHERE p.principal_id=? AND p.active=1 AND g.capability='frontend.read' AND g.scope_kind='wing' AND g.scope_key='*')`;
   const statements=[stmt(env.DB,`SELECT (${guard}) AS allowed,NOT EXISTS(SELECT 1 FROM legacy_import_runs WHERE state<>'complete') AND NOT EXISTS(SELECT 1 FROM legacy_operational_adoptions WHERE state<>'complete') AS ready`,env.ENVIRONMENT,Number(env.GENERATION),String(req.principalId)),stmt(env.DB,revisionSql)];
   if(forEffect)statements.push(stmt(env.DB,`SELECT effect_id AS effectId,kind,claim_operations_revision AS operationsFloor,claim_administration_revision AS administrationFloor FROM admin_effects WHERE effect_id=? AND worker_id=? AND claim_token=? AND state='leased' AND lease_expires_at>?`,String(req.effectId),String(req.workerId),String(req.claimToken),new Date().toISOString()));
   const resultIndex=statements.length;

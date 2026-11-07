@@ -13,12 +13,14 @@ const FILE_LIMIT = 65_536;
 const FRONTEND_CONFIG_PROPERTY = 'SHAMROCK_V3_FRONTEND_CONFIG';
 const FRONTEND_PAUSE_PROPERTY = 'SHAMROCK_V3_FRONTEND_PAUSED';
 const INPUT_CONFIG_PROPERTY = 'SHAMROCK_V3_INPUT_CONFIG';
+const PERMISSION_CONFIG_PROPERTY = 'SHAMROCK_V3_PERMISSION_CONFIG';
+const PERMISSION_PAUSE_PROPERTY = 'SHAMROCK_V3_PERMISSION_PAUSED';
 const INPUT_PAUSE_PROPERTY = 'SHAMROCK_V3_INPUT_PAUSED';
 const FORMS_CONFIG_PROPERTY = 'SHAMROCK_V3_FORMS_CONFIG';
 const FORMS_PAUSE_PROPERTY = 'SHAMROCK_V3_FORMS_PAUSED';
 const FORM_INTAKE_PAUSE_PROPERTY = 'SHAMROCK_V3_FORM_INTAKE_PAUSED';
 const ALLOWED: readonly string[] = [HOST_PROPERTIES.config, HOST_PROPERTIES.principals, HOST_PROPERTIES.attendanceCatalog,
-  HOST_PROPERTIES.excusalCatalog, NATIVE_PROPERTIES.projectionConfig, NATIVE_PROPERTIES.presentationConfig, FRONTEND_CONFIG_PROPERTY, MAINTENANCE_PROPERTIES.config, FORMS_CONFIG_PROPERTY, INPUT_CONFIG_PROPERTY];
+  HOST_PROPERTIES.excusalCatalog, NATIVE_PROPERTIES.projectionConfig, NATIVE_PROPERTIES.presentationConfig, FRONTEND_CONFIG_PROPERTY, MAINTENANCE_PROPERTIES.config, FORMS_CONFIG_PROPERTY, INPUT_CONFIG_PROPERTY, PERMISSION_CONFIG_PROPERTY];
 const REQUIRED = [HOST_PROPERTIES.config, HOST_PROPERTIES.principals, HOST_PROPERTIES.attendanceCatalog, NATIVE_PROPERTIES.projectionConfig];
 type Json = Record<string, unknown>;
 export interface StagingConfigurationServices {
@@ -134,8 +136,9 @@ export function importStagingConfiguration(services: StagingConfigurationService
     properties.setProperty(FRONTEND_PAUSE_PROPERTY, 'true');
     properties.setProperty(MAINTENANCE_PROPERTIES.paused, 'true');
     properties.setProperty(INPUT_PAUSE_PROPERTY, 'true');
+    properties.setProperty(PERMISSION_PAUSE_PROPERTY, 'true');
     properties.setProperty(FORMS_PAUSE_PROPERTY, 'true'); properties.setProperty(FORM_INTAKE_PAUSE_PROPERTY, 'true');
-    if (properties.getProperty(HOST_PROPERTIES.enabled) !== 'false' || properties.getProperty(FRONTEND_PAUSE_PROPERTY) !== 'true' || properties.getProperty(INPUT_PAUSE_PROPERTY) !== 'true' || properties.getProperty(MAINTENANCE_PROPERTIES.paused) !== 'true' || properties.getProperty(FORMS_PAUSE_PROPERTY) !== 'true' || properties.getProperty(FORM_INTAKE_PAUSE_PROPERTY) !== 'true') throw new Error('Pause was not persisted.');
+    if (properties.getProperty(HOST_PROPERTIES.enabled) !== 'false' || properties.getProperty(FRONTEND_PAUSE_PROPERTY) !== 'true' || properties.getProperty(PERMISSION_PAUSE_PROPERTY) !== 'true' || properties.getProperty(INPUT_PAUSE_PROPERTY) !== 'true' || properties.getProperty(MAINTENANCE_PROPERTIES.paused) !== 'true' || properties.getProperty(FORMS_PAUSE_PROPERTY) !== 'true' || properties.getProperty(FORM_INTAKE_PAUSE_PROPERTY) !== 'true') throw new Error('Pause was not persisted.');
   } catch { return fail('configuration_write_failed', 'Processing could not be paused; configuration was not imported.'); }
   let executor = '';
   try { executor = email(services.Session.getEffectiveUser().getEmail()); } catch { /* fail closed below */ }
@@ -190,7 +193,7 @@ export function importStagingConfiguration(services: StagingConfigurationService
   for (const [key, value] of Object.entries(map)) {
     if (typeof value !== 'string') fail('configuration_invalid', 'Each imported property must contain a JSON string.');
     parsed[key] = json(value, key === FRONTEND_CONFIG_PROPERTY ? 16_000 : PROPERTY_LIMIT);
-    if (key !== FRONTEND_CONFIG_PROPERTY && key !== MAINTENANCE_PROPERTIES.config && key !== FORMS_CONFIG_PROPERTY && key !== INPUT_CONFIG_PROPERTY) pending[key] = value;
+    if (key !== FRONTEND_CONFIG_PROPERTY && key !== MAINTENANCE_PROPERTIES.config && key !== FORMS_CONFIG_PROPERTY && key !== INPUT_CONFIG_PROPERTY && key !== PERMISSION_CONFIG_PROPERTY) pending[key] = value;
   }
   const host = parseStagingHostConfig(parsed[HOST_PROPERTIES.config]); sameShape(parsed[HOST_PROPERTIES.config], host);
   if (host.expectedAutomationEmail !== executor) fail('configuration_identity', 'The proposed staging configuration belongs to a different automation account.');
@@ -202,6 +205,8 @@ export function importStagingConfiguration(services: StagingConfigurationService
     parseNativePresentationConfig(parsed[NATIVE_PROPERTIES.presentationConfig], host,
       parsed[NATIVE_PROPERTIES.projectionConfig] as unknown as NativeProjectionConfig);
   }
+  const permissions=parsed[PERMISSION_CONFIG_PROPERTY];
+  if(permissions){keys(permissions,['version','configFileId']);if(permissions.version!==1)fail('configuration_invalid','Unsupported permission configuration.');id(permissions.configFileId,512);if(permissions.configFileId===fileId)fail('configuration_invalid','Permission config needs a separate owner-only file.');}
   const input = parsed[INPUT_CONFIG_PROPERTY];
   if (input) { keys(input, ['version', 'configFileId']); if (input.version !== 1) fail('configuration_invalid', 'Unsupported native input configuration.'); id(input.configFileId, 512); if (input.configFileId === fileId) fail('configuration_invalid', 'Native input config needs a separate owner-only file.'); }
   const forms = parsed[FORMS_CONFIG_PROPERTY];
@@ -236,6 +241,8 @@ export function importStagingConfiguration(services: StagingConfigurationService
     properties.deleteProperty(MAINTENANCE_PROPERTIES.config);
     properties.deleteProperty(FORMS_CONFIG_PROPERTY);
     properties.deleteProperty(INPUT_CONFIG_PROPERTY);
+    properties.deleteProperty(PERMISSION_CONFIG_PROPERTY);
+    properties.deleteProperty('SHAMROCK_V3_PERMISSION_SETUP');
     properties.setProperties(pending, false);
     if (!pending[HOST_PROPERTIES.excusalCatalog]) properties.deleteProperty(HOST_PROPERTIES.excusalCatalog);
     if (!pending[NATIVE_PROPERTIES.presentationConfig]) properties.deleteProperty(NATIVE_PROPERTIES.presentationConfig);
@@ -245,7 +252,7 @@ export function importStagingConfiguration(services: StagingConfigurationService
       || properties.getProperty(HOST_PROPERTIES.enabled) !== 'false'
       || properties.getProperty(MAINTENANCE_PROPERTIES.paused) !== 'true' || properties.getProperty(MAINTENANCE_PROPERTIES.config) !== null
       || properties.getProperty(FRONTEND_PAUSE_PROPERTY) !== 'true' || properties.getProperty(FRONTEND_CONFIG_PROPERTY) !== null
-      || properties.getProperty(INPUT_PAUSE_PROPERTY) !== 'true' || properties.getProperty(INPUT_CONFIG_PROPERTY) !== null
+      || properties.getProperty(PERMISSION_PAUSE_PROPERTY) !== 'true' || properties.getProperty(INPUT_PAUSE_PROPERTY) !== 'true' || properties.getProperty(INPUT_CONFIG_PROPERTY) !== null
       || properties.getProperty(FORMS_PAUSE_PROPERTY) !== 'true' || properties.getProperty(FORM_INTAKE_PAUSE_PROPERTY) !== 'true' || properties.getProperty(FORMS_CONFIG_PROPERTY) !== null
       || properties.getProperty(HOST_PROPERTIES.setupReceipt) !== null || properties.getProperty(NATIVE_PROPERTIES.projectionReceipt) !== null
       || properties.getProperty(NATIVE_PROPERTIES.presentationReceipt) !== null) {

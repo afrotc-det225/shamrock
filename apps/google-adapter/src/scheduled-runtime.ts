@@ -1,3 +1,5 @@
+import { createNativePermissionRuntime } from './permissions-host.js';
+import { PERMISSION_FENCE_PROPERTY } from './permissions-refresh.js';
 /** One cheap five-minute poll; full reconciliation and slower maintenance have explicit cadences. */
 import {AdapterError} from './index.js';
 import {createGoogleSigner} from './apps-script.js';
@@ -36,12 +38,15 @@ export function runScheduledStaging(input:Services,nowSeconds=()=>Math.floor(Dat
   const shared={...services,scheduled};
   // Controls are still discovered every tick, including when all intake gates are paused.
   const forms=createNativeFormsRuntime(shared),nativeInput=createNativeFrontendInput(shared);
-  forms.applyControl();nativeInput.applyControl();
+  const permissions=createNativePermissionRuntime(shared);permissions.applyControl();
+  const permissionResult=permissions.refresh();
+  const accessFenced=props.getProperty(PERMISSION_FENCE_PROPERTY)!==null;
+  forms.applyControl();if(!accessFenced)nativeInput.applyControl();
   const intake=createNativeStagingHost(shared).flush();
   const formIntake=forms.flush();
-  const frontend=createNativeFrontendRuntime(shared).refresh();
+  const frontend=accessFenced?{status:'permissions-fenced'}:createNativeFrontendRuntime(shared).refresh();
   const published=forms.refresh();
-  const native=nativeInput.flush({force:(frontend as {status?:string}).status==='published-with-drafts'});
+  const native=accessFenced?{status:'permissions-fenced'}:nativeInput.flush({force:(frontend as {status?:string}).status==='published-with-drafts'});
   let maintenance:unknown={status:'not-due'};
   if(props.getProperty(SCHEDULE_PROPERTIES.maintenance)!==quarter){
     maintenance=createNativeMaintenanceRuntime(shared,nowSeconds).planNotifications();
@@ -49,5 +54,5 @@ export function runScheduledStaging(input:Services,nowSeconds=()=>Math.floor(Dat
   }
   // Never mark a failed/incomplete pass reconciled; the next tick retries it.
   if(reconcile)props.setProperty(SCHEDULE_PROPERTIES.reconciled,hour);
-  return Object.assign({},intake,{frontend,maintenance,formIntake,forms:published,nativeInput:native,reconciled:reconcile});
+  return Object.assign({},intake,{frontend,maintenance,formIntake,forms:published,nativeInput:native,permissions:permissionResult,reconciled:reconcile});
 }

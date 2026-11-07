@@ -50,7 +50,7 @@ const fail = (message: string): never => { throw new AdapterError('permission_pr
 const email = (v: string) => v.trim().toLowerCase();
 const unique = (v: string[]) => [...new Set(v.map(email))].sort();
 const closed = (access: FrontendProtectionAccess): FrontendProtectionAccess => ({ ...access, permissionManagers: [], supportEditors: [], directoryEditors: [], leadershipEditors: [], attendanceEditors: [], squadronCommanders: [] });
-function desiredMemberships(book: PermissionBook, policy: RolePermissionPolicy): Map<string, 'reader' | 'writer'> {
+export function desiredPermissionMemberships(book: PermissionBook, policy: RolePermissionPolicy): Map<string, 'reader' | 'writer'> {
     const access = permissionPolicyAccess(book.fixedAccess, { version: 1, policyHash: '', policy }), out = new Map<string, 'reader' | 'writer'>();
     const writers = book.kind === 'main' ? [...access.supportEditors, ...access.directoryEditors, ...access.permissionManagers!, ...access.leadershipEditors, ...access.attendanceEditors] : [...access.supportEditors, ...access.squadronCommanders.map(c => c.email)];
     const readers = [...book.fixedReaders, ...(book.kind === 'excusals' ? policy.google.excusalViewers : [])];
@@ -85,12 +85,12 @@ export function createNativePermissionProvider(config: {
         return permissions.filter(p => !p.deleted && p.role !== 'owner');
     }
     function revokeList(book: PermissionBook, policy: RolePermissionPolicy) {
-        const desired = desiredMemberships(book, policy);
+        const desired = desiredPermissionMemberships(book, policy);
         return read(book).filter(p => p.type !== 'user' || desired.get(email(p.emailAddress ?? '')) !== p.role);
     }
     function verify(policy: RolePermissionPolicy, exact: boolean) {
         for (const book of config.books) {
-            const desired = desiredMemberships(book, policy), actual = read(book);
+            const desired = desiredPermissionMemberships(book, policy), actual = read(book);
             if (actual.some(p => p.type !== 'user' || desired.get(email(p.emailAddress ?? '')) !== p.role))
                 fail('Unapproved native memberships remain.');
             if (exact && ([...desired].some(([address, role]) => actual.filter(p => email(p.emailAddress ?? '') === address && p.role === role).length !== 1)))
@@ -130,7 +130,7 @@ export function createNativePermissionProvider(config: {
             let remaining = limit;
             for (const book of config.books) {
                 const actual = read(book);
-                for (const [address, role] of desiredMemberships(book, policy))
+                for (const [address, role] of desiredPermissionMemberships(book, policy))
                     if (!actual.some(p => p.type === 'user' && email(p.emailAddress ?? '') === address && p.role === role)) {
                         if (!remaining--)
                             return false;

@@ -1,3 +1,4 @@
+import { effectiveAdminGrants } from './permission-grants.js';
 import { buildLegacyHistoryReport, LegacyHistoryError, type LegacyHistoryInput } from '../../../packages/domain/src/legacy-history.js';
 import { HISTORY_PAGE_VERSION,type HistoryPage,type HistoryPageBinding,type HistoryRowsPage } from '../../../packages/domain/src/legacy-history-transport.js';
 import { HttpError } from './http-error.js';
@@ -12,7 +13,7 @@ export async function legacyHistoryPage(env:Env,input:unknown):Promise<HistoryPa
   if(Object.keys(r).length!==keys.length||keys.some(k=>!Object.hasOwn(r,k))||!identifier(r.principalId)||!identifier(r.snapshotId)||!['manifest','rows','roster','verify'].includes(String(r.section))||!Number.isSafeInteger(r.offset)||Number(r.offset)<0||Number(r.offset)>500)fail(400,'INVALID_HISTORY_REQUEST');
   if(r.environment!==env.ENVIRONMENT||r.generation!==Number(env.GENERATION))fail(409,'WRONG_GENERATION');
   if(r.section==='manifest'?r.sourceSnapshotSha256!==null||r.offset!==0:typeof r.sourceSnapshotSha256!=='string'||!/^[a-f0-9]{64}$/.test(r.sourceSnapshotSha256))fail(400,'INVALID_HISTORY_REQUEST');if(r.section==='verify'&&r.offset!==0)fail(400,'INVALID_HISTORY_REQUEST');
-  const guard=`EXISTS(SELECT 1 FROM system_control WHERE singleton=1 AND environment=? AND generation=?) AND EXISTS(SELECT 1 FROM principals p JOIN admin_grants g ON g.principal_id=p.principal_id WHERE p.principal_id=? AND p.active=1 AND g.capability='frontend.read' AND g.scope_kind='wing' AND g.scope_key='*')`,auth=[env.ENVIRONMENT,Number(env.GENERATION),String(r.principalId)];
+  const guard=`EXISTS(SELECT 1 FROM system_control WHERE singleton=1 AND environment=? AND generation=?) AND EXISTS(SELECT 1 FROM principals p JOIN ${effectiveAdminGrants} g ON g.principal_id=p.principal_id WHERE p.principal_id=? AND p.active=1 AND g.capability='frontend.read' AND g.scope_kind='wing' AND g.scope_key='*')`,auth=[env.ENVIRONMENT,Number(env.GENERATION),String(r.principalId)];
   const source=`FROM legacy_matrix_snapshots m JOIN legacy_import_runs i ON i.import_run_id=m.import_run_id AND i.state='complete' WHERE m.matrix_snapshot_id=?`;
   const statements=[stmt(env.DB,`SELECT (${guard}) AS allowed`,...auth),stmt(env.DB,`SELECT m.matrix_snapshot_id AS snapshotId,i.snapshot_sha256 AS sourceSnapshotSha256,i.completed_at AS importedAt,
     CASE WHEN length(CAST(m.metadata_json AS BLOB))<=64000 THEN m.metadata_json END AS metadata,

@@ -1,3 +1,4 @@
+import { effectiveAdminGrants } from './permission-grants.js';
 /** Cheap, read-only queue discovery. Never returns records, claims work or builds a snapshot. */
 import {HttpError} from './http-error.js';
 export async function adminEffectAvailability(env:{DB:D1Database;ENVIRONMENT:string;GENERATION:string},input:unknown){
@@ -10,7 +11,7 @@ export async function adminEffectAvailability(env:{DB:D1Database;ENVIRONMENT:str
     EXISTS(SELECT 1 FROM admin_effects WHERE state='pending' AND kind='forms.refresh') AS formsPending,
     EXISTS(SELECT 1 FROM admin_effects WHERE state='leased' AND kind='forms.refresh') AS formsLeased
     FROM system_control WHERE singleton=1 AND environment=? AND generation=? AND EXISTS(
-      SELECT 1 FROM principals p JOIN admin_grants g ON g.principal_id=p.principal_id
+      SELECT 1 FROM principals p JOIN ${effectiveAdminGrants} g ON g.principal_id=p.principal_id
       WHERE p.principal_id=? AND p.active=1 AND g.capability='frontend.read' AND g.scope_kind='wing' AND g.scope_key='*')`)
     .bind(env.ENVIRONMENT,Number(env.GENERATION),value.principalId).first<Record<string,number>>();
   if(!result)throw new HttpError(403,'NOT_AUTHORIZED','Current Wing frontend read authority is required.');

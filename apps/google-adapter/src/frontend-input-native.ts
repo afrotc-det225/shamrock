@@ -1,3 +1,6 @@
+import { createPermissionContext } from './permissions-context.js';
+import { createNativePermissionRuntime } from './permissions-host.js';
+import { assertPermissionFenceClear } from './permissions-refresh.js';
 /** Optional native edit and verified-email confirmation host. No IO during module loading. */
 import {AdapterError,type Signer} from './index.js';
 import {createGoogleSigner,createGoogleTransport} from './apps-script.js';
@@ -88,7 +91,9 @@ export function createNativeFrontendInput(services:NativeInputServices,frontend=
   function pause(){properties.setProperty(INPUT_PROPERTIES.pause,'true');if(properties.getProperty(INPUT_PROPERTIES.pause)!=='true')fail('input_pause','The input pause did not persist.');return{status:'paused'};}
   function note(edit:NativeEditEvidence,text:string){if(!Number.isSafeInteger(edit.row)||!Number.isSafeInteger(edit.column)||edit.row<3||edit.column<1||edit.rows*edit.columns>250)return;
     api(`https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(edit.spreadsheetId)}:batchUpdate`,{requests:[{repeatCell:{range:{sheetId:edit.sheetId,startRowIndex:edit.row-1,endRowIndex:edit.row-1+edit.rows,startColumnIndex:edit.column-1,endColumnIndex:edit.column-1+edit.columns},cell:{note:text},fields:'note'}}]});}
+  function trustedPrincipals(ctx:NonNullable<ReturnType<typeof context>>){const applied=createPermissionContext(services).applied();if(applied)ctx.config.principals=applied.policy.accounts.filter(a=>a.active).map(a=>({email:a.email,principalId:a.principalId,...(a.personId?{personId:a.personId}:{})}));}
   function checkSession(ctx:NonNullable<ReturnType<typeof context>>,session:NativeFrontendInputSession){
+    trustedPrincipals(ctx);
     if(session.config.generation!==ctx.config.generation||session.automationEmail!==ctx.owner)fail('input_configuration','Input and frontend generations must agree.');
     for(const b of ctx.config.surfaces){const exc=b.surface==='blue'||b.surface==='gold',book=exc&&session.config.supplemental?.enabled?session.config.supplemental.excusals:session.config.main;
       const binding=(book.sheets as Record<string,{sheetId:number;tableId:string}>)[b.surface];if(book.spreadsheetId!==b.spreadsheetId||binding?.sheetId!==b.sheetId||binding.tableId!==b.tableId)fail('input_configuration','An input surface differs from the reviewed native publisher.');}
@@ -98,7 +103,7 @@ export function createNativeFrontendInput(services:NativeInputServices,frontend=
   const idleMarker=(ctx:NonNullable<ReturnType<typeof context>>)=>'idle:'+ctx.signer.sha256(inputCanonical([ctx.config.generation,ctx.config.journalFileId]));
   function finish(ctx:NonNullable<ReturnType<typeof context>>,io:InputJournalPorts){work(Object.values(io.journal.entries).some(e=>!e.superseded&&e.commands.some(c=>c.status==='queued'||c.status==='committed'&&!c.applied)||e.superseded&&!e.supersededApplied)?'pending':idleMarker(ctx));}
   function ports(ctx:NonNullable<ReturnType<typeof context>>,session:NativeFrontendInputSession):InputJournalPorts{
-    const store=ctx.journal(),journal=store.load();return{journal,state:session.state,saveJournal:value=>{work();store.save(value);},saveState:value=>session.save(value),sha256:text=>ctx.signer.sha256(text),send:(path,command)=>ctx.request(path,command),stillVisible(edit){
+    const store=ctx.journal(),journal=store.load();return{journal,state:session.state,saveJournal:value=>{work();store.save(value);},saveState:value=>session.save(value),sha256:text=>ctx.signer.sha256(text),send:(path,command)=>{const response=ctx.request(path,command);return response.status===409&&response.body?.error?.code==='PERMISSION_FENCE_REQUIRED'?createNativePermissionRuntime(services,frontend).submit(command,session) as ReturnType<typeof ctx.request>:response;},stillVisible(edit){
       const read=session.read(edit.surface),table=inputSurfaceState(session.state,edit.surface);assertImmutableInputSlots(table.baseline,read,edit.surface);return edit.drafts.every(d=>{const row=table.baseline.slots?.keys.indexOf(d.key),column=read.headers.indexOf(d.header);return row!==undefined&&row>=0&&column>=0&&inputCanonical(nativeInputValue(read.rows[row]?.[column]))===inputCanonical(d.value);});
     }};
   }
@@ -125,7 +130,7 @@ export function createNativeFrontendInput(services:NativeInputServices,frontend=
     }
     io.saveJournal(io.journal);
   }
-  function sessionRun(operation:(ctx:NonNullable<ReturnType<typeof context>>,session:NativeFrontendInputSession)=>unknown){const ctx=context();if(!ctx||!ctx.enabled())return{status:'paused'};
+  function sessionRun(operation:(ctx:NonNullable<ReturnType<typeof context>>,session:NativeFrontendInputSession)=>unknown){const ctx=context();if(!ctx||!ctx.enabled())return{status:'paused'};assertPermissionFenceClear(properties);
     return frontend.inputSession(session=>{if(!ctx.enabled()||services.scheduled&&!services.scheduled.availability(session.config.principalId).acceptingCommands)return{status:'paused'};checkSession(ctx,session);ctx.setupReceipt();return operation(ctx,session);});}
   return{
     applyControl(){const ctx=context(),request=ctx?.config.controlRequest;if(!ctx||!request)return{status:'none'};
@@ -192,8 +197,8 @@ export function createNativeFrontendInput(services:NativeInputServices,frontend=
       if(!entry.commands.length){entry.commands=commands.map((command,templateIndex)=>({command,templateIndex,status:'queued',attempted:false}));entry.confirmation={responseId,submittedAt:native.lastSubmittedTime,email:native.respondentEmail};io.saveJournal(io.journal);}
       deliverFrontendInputs(io);updateNote(ctx,entry,io);finish(ctx,io);return{status:status(entry),editId:reference};
     });},
-    reviewQueue(){const ctx=context();if(!ctx)fail('input_configuration','Input is not configured.');const email=services.Session.getActiveUser().getEmail().trim().toLowerCase(),actor=ctx.config.principals.find(p=>p.email.toLowerCase()===email);if(!actor)fail('confirmation_required','Authenticate as a current Wing reviewer.');const result=ctx.request('/v1/admin/snapshot',{environment:'staging',generation:ctx.config.generation,principalId:actor.principalId});if(result.status!==200)fail('confirmation_required','Current Wing frontend authority is required.');return ctx.journal().load();},
-    replayConfirmation(responseId:string){const ctx=context();if(!ctx||!ctx.enabled())return{status:'paused'};return this.confirm({source:{getId:()=>ctx.config.confirmation.formId},response:{getId:()=>responseId},triggerUid:ctx.setupReceipt().ids[ctx.config.confirmation.formId]});},
+    reviewQueue(){const ctx=context();if(!ctx)fail('input_configuration','Input is not configured.');trustedPrincipals(ctx);const email=services.Session.getActiveUser().getEmail().trim().toLowerCase(),actor=ctx.config.principals.find(p=>p.email.toLowerCase()===email);if(!actor)fail('confirmation_required','Authenticate as a current Wing reviewer.');const result=ctx.request('/v1/admin/snapshot',{environment:'staging',generation:ctx.config.generation,principalId:actor.principalId});if(result.status!==200)fail('confirmation_required','Current Wing frontend authority is required.');return ctx.journal().load();},
+    replayConfirmation(responseId:string){const ctx=context();if(!ctx||!ctx.enabled())return{status:'paused'};assertPermissionFenceClear(properties);return this.confirm({source:{getId:()=>ctx.config.confirmation.formId},response:{getId:()=>responseId},triggerUid:ctx.setupReceipt().ids[ctx.config.confirmation.formId]});},
     status(){const ctx=context();if(!ctx)return{status:'disabled'};const journal=ctx.journal().load();return{enabled:ctx.enabled(),held:Object.keys(journal.held??{}).length,counts:Object.values(journal.entries).reduce((out,e)=>{const s=status(e);out[s]=(out[s]??0)+1;return out;},{} as Record<string,number>)};},
   };
 }

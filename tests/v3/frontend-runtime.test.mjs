@@ -466,3 +466,10 @@ test('explicit input setup can verify a disabled publisher without enabling ordi
  assert.equal(runtime.refresh().status,'disabled');assert.equal(runtime.inputSession(()=>{called=true;}).status,'disabled');assert.equal(fetched,0);assert.equal(locked,0);
  assert.throws(()=>runtime.inputSession(()=>{called=true;},{allowPaused:true}),e=>e.code==='frontend_google_transport');assert.equal(called,false);assert.equal(fetched,1);assert.equal(locked,1);assert.equal(released,1);assert.equal(values.SHAMROCK_V3_FRONTEND_PAUSED,'true');
 });
+
+test('explicit setup recovers only an exactly closed native fence; ordinary input and mixed protections still fail',async()=>{
+ const {assertInputSessionPolicy}=await import('../../.build/v3/apps/google-adapter/src/frontend-runtime.js');let closed=0;
+ const exact={assertEditPolicy(){throw Error('not open');},assertFenced(){closed++;}};
+ assertInputSessionPolicy(exact,true);assert.equal(closed,1);assert.throws(()=>assertInputSessionPolicy(exact,false),/not open/);assert.equal(closed,1);
+ assert.throws(()=>assertInputSessionPolicy({assertEditPolicy(){throw Error('mixed');},assertFenced(){throw Error('not exactly fenced');}},true),/not exactly fenced/);
+});

@@ -17,3 +17,5 @@ export { createNativeFrontendInput, INPUT_PROPERTIES, INPUT_HANDLERS } from './f
 export { runScheduledStaging } from './scheduled-runtime.js';
 export { runPermissionRefresh, assertPermissionFenceClear, permissionPolicyAccess, PERMISSION_FENCE_PROPERTY } from './permissions-refresh.js';
 export { createNativePermissionProvider, createNativePermissionApi, resolveAppliedPermissionIdentity } from './permissions-native.js';
+
+export { createNativePermissionRuntime } from './permissions-host.js';

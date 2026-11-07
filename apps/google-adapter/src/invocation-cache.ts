@@ -19,7 +19,7 @@ export function createInvocationConfigFetch(fetcher:FetchPort,rootFileId:string|
     const text=response.getContentText();if(text.length>1_000_000)return response;
     const frozen={getResponseCode:()=>200,getContentText:()=>text};cache.set(key,frozen);
     if(media&&match[1]===rootFileId){
-      try{const root=JSON.parse(text);for(const property of ['SHAMROCK_V3_FORMS_CONFIG','SHAMROCK_V3_INPUT_CONFIG']){
+      try{const root=JSON.parse(text);for(const property of ['SHAMROCK_V3_FORMS_CONFIG','SHAMROCK_V3_INPUT_CONFIG','SHAMROCK_V3_PERMISSION_CONFIG']){
         const value=typeof root[property]==='string'?JSON.parse(root[property]):root[property];
         if(value?.version===1&&typeof value.configFileId==='string'&&/^[A-Za-z0-9_-]{1,512}$/.test(value.configFileId))ids.add(value.configFileId);
       }}catch{/* The owning configuration parser reports malformed content. */}

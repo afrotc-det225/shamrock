@@ -67,8 +67,8 @@ function fixture() {
 function assertOnlyPaused(f, expected) {
   const before = new Map(f.properties);
   assert.throws(() => f.run(), expected);
-  before.set(H.enabled, 'false'); before.set(F.paused, 'true'); before.set(M.paused, 'true'); before.set('SHAMROCK_V3_INPUT_PAUSED','true'); before.set('SHAMROCK_V3_FORMS_PAUSED','true'); before.set('SHAMROCK_V3_FORM_INTAKE_PAUSED','true'); assert.deepEqual(f.properties, before);
-  assert.deepEqual(f.state.mutations, [['set', H.enabled], ['set', F.paused], ['set', M.paused], ['set','SHAMROCK_V3_INPUT_PAUSED'], ['set','SHAMROCK_V3_FORMS_PAUSED'], ['set','SHAMROCK_V3_FORM_INTAKE_PAUSED']]);
+  before.set(H.enabled, 'false'); before.set(F.paused, 'true'); before.set(M.paused, 'true'); before.set('SHAMROCK_V3_INPUT_PAUSED','true'); before.set('SHAMROCK_V3_PERMISSION_PAUSED','true'); before.set('SHAMROCK_V3_FORMS_PAUSED','true'); before.set('SHAMROCK_V3_FORM_INTAKE_PAUSED','true'); assert.deepEqual(f.properties, before);
+  assert.deepEqual(f.state.mutations, [['set', H.enabled], ['set', F.paused], ['set', M.paused], ['set','SHAMROCK_V3_INPUT_PAUSED'], ['set','SHAMROCK_V3_PERMISSION_PAUSED'], ['set','SHAMROCK_V3_FORMS_PAUSED'], ['set','SHAMROCK_V3_FORM_INTAKE_PAUSED']]);
   assert.equal(f.state.secretReads, 0);
 }
 
@@ -210,7 +210,7 @@ test('a property provider failure is never reported as an atomic successful impo
 test('an unconfirmed pause stops before downloading or replacing any configuration', () => {
   const f = fixture(); const before = new Map(f.properties); f.state.discardPause = true;
   assert.throws(() => f.run(), code('configuration_write_failed'));
-  assert.deepEqual(f.properties, before); assert.equal(f.state.calls.length, 0); assert.equal(f.state.mutations.length, 6);
+  assert.deepEqual(f.properties, before); assert.equal(f.state.calls.length, 0); assert.equal(f.state.mutations.length, 7);
 });
 
 
@@ -218,4 +218,10 @@ test('optional maintenance configuration stays file-owned and imports pause it',
  const f=fixture();f.map[M.config]=JSON.stringify({version:1,environment:'staging',generation:1,enabled:true,
  resourceReview:'EXISTING_PRIVATE_MAINTENANCE_REVIEWED_FOR_STAGING',principalId:'automation',workerId:'maintenance-worker',sourceResource:'maintenance-source',stateFileId:'maintenance-state',archiveSpreadsheetId:'maintenance-archive',archiveExpectedTitle:'SHAMROCK staging archives'});
  f.properties.set(M.config,'stale-binding');assert.equal(f.run().propertyCount,5);assert.equal(f.properties.has(M.config),false);assert.equal(f.properties.get(M.paused),'true');
+});
+
+test('permission config remains file-owned and import pauses it without erasing its retained claim or control history',()=>{
+ const f=fixture();f.map.SHAMROCK_V3_PERMISSION_CONFIG=JSON.stringify({version:1,configFileId:'permission-config'});
+ f.properties.set('SHAMROCK_V3_PERMISSION_SETUP','old-setup');f.properties.set('SHAMROCK_V3_PERMISSION_CLAIM','retained-permission-claim');f.properties.set('SHAMROCK_V3_PERMISSION_CONTROL_RECEIPT','consumed-control');
+ assert.equal(f.run().status,'imported-paused');assert.equal(f.properties.get('SHAMROCK_V3_PERMISSION_PAUSED'),'true');assert.equal(f.properties.has('SHAMROCK_V3_PERMISSION_CONFIG'),false);assert.equal(f.properties.has('SHAMROCK_V3_PERMISSION_SETUP'),false);assert.equal(f.properties.get('SHAMROCK_V3_PERMISSION_CLAIM'),'retained-permission-claim');assert.equal(f.properties.get('SHAMROCK_V3_PERMISSION_CONTROL_RECEIPT'),'consumed-control');
 });

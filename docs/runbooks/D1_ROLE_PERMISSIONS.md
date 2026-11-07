@@ -1,6 +1,6 @@
 # Trusted Leadership permissions
 
-This is an opt-in isolated v3 capability. Migration 0011 creates no trusted accounts and starts disabled. It does not alter production sharing, triggers, code or data. Native provider ports and local tests are implemented; the private host configuration, scheduler/input integration and live turnover/revocation rehearsal must be completed before enabling it. No production permission parity is claimed from local tests.
+This is an opt-in isolated v3 capability. Migration 0011 creates no trusted accounts and starts disabled. It does not alter production sharing, triggers, code or data. The native host, scheduler, input and publisher integrations are implemented locally. Private account/resource provisioning and a live turnover/revocation rehearsal remain required before enablement. No production permission parity is claimed from local tests.
 
 ## Source policy and authority
 
@@ -46,20 +46,57 @@ Manager requirements are retained with administrative receipts, so role-changing
 
 ## Native integration and recovery
 
-`runPermissionRefresh` consumes durable owner-private state through explicit ports. Its idle path makes one signed claim request and no Google/private-file reads. It stores the exact frozen projection, fences both books, revokes obsolete memberships, adds current members, saves the authoritative identity/access map, checks the current revision, acknowledges and verifies native field protections before removing the fence. An interrupted provider write is reconciled from fresh readback, not replayed blindly. Membership work is bounded to 25 mutations per phase per invocation (configurable up to 50).
+`runPermissionRefresh` consumes durable owner-private state through explicit ports. Its pure consumer idle path makes one signed claim request and no Google/private-file reads. The native wrapper still verifies its configuration; invocation caching shares those config reads with other consumers, while applied state is loaded only for real work. It stores the exact frozen projection, fences both books, revokes obsolete memberships, adds current members, saves the authoritative identity/access map, checks the current revision, acknowledges and verifies native field protections before removing the fence. An interrupted provider write is reconciled from fresh readback, not replayed blindly. Membership work is bounded to 25 mutations per phase per invocation (configurable up to 50).
 
 `createNativePermissionProvider` supports exactly two explicitly bound isolated books, rejects forbidden production bindings, verifies their single expected owner, and manages complete paginated named Drive permissions. `createNativePermissionApi` performs public API calls with OAuth supplied by the runtime. Permission creation always sets `sendNotificationEmail=false`; no invitation emails are sent. Inherited unapproved permissions stop the workflow for folder-owner review. The existing keyed frontend host supplies current sheet/header/occupied-row mappings; the permission provider never writes business values, formatting, dropdowns or Table contents.
 
-The host must integrate these gates together before opting in:
+The native host integrates these gates; validate them together before opting in:
 
 1. A shared Script Lock and owner-private checkpoint with canonical-content concurrency checks, plus the local `SHAMROCK_V3_PERMISSION_FENCED` marker. Persist/read back the marker before any provider operation.
 2. Both native input handlers and the frontend publisher check `assertPermissionFenceClear`, including setup-only paths. Nothing may restore old static access during permission refresh.
-3. Publisher access resolves through `permissionPolicyAccess` using the latest durable applied policy. Input account lookup uses `resolveAppliedPermissionIdentity`; never fall back to stale derived identities in an old static registry.
+3. Publisher access resolves through `permissionPolicyAccess` using the latest durable applied policy. Native input replaces its registry with active accounts in the applied policy (also available through `resolveAppliedPermissionIdentity`); never fall back to stale derived identities in an old static registry.
 4. A privileged edit is frozen, fenced by the publisher, attested for its exact normalized command, then submitted under the actual human principal. Operator/AI API changes use the same process. Failed unaccepted edits keep the fence until the current unchanged policy is deliberately verified/restored.
 5. Closed native policies clear `permissionManagers` as well as every ordinary editor list. Privileged fields belong only to those managers plus owner/runtime; adjacent ranges with different editor sets must not be merged.
 6. Preserve the exact claim/checkpoint after a crash. On an expired lease, inspect the private checkpoint and actual memberships/protections, re-fence, use the explicit recovery route, update the checkpoint's expiry and resume. Never discard a claim or reopen stale access to clear an error.
 
 Private fixed Main viewers and support identities preserve the separately reviewed baseline; they are not inferred from whatever sharing happens to exist. Derived Excusals viewers and Squadron commanders are replaced from the current trusted policy.
+
+
+## Private native configuration and controls
+
+The root configuration may contain `SHAMROCK_V3_PERMISSION_CONFIG` as a JSON string with `{ "version": 1, "configFileId": "PRIVATE_PERMISSION_CONFIG_FILE" }`. The referenced owner-only JSON file has this shape; actual identities/resource IDs stay in private operations storage:
+
+```json
+{
+  "version": 1,
+  "environment": "staging",
+  "generation": 1,
+  "enabled": false,
+  "resourceReview": "NATIVE_PERMISSION_POLICY_REVIEWED_FOR_STAGING",
+  "workerId": "permission-publisher-worker",
+  "principalId": "permission-publisher",
+  "stateFileId": "PRIVATE_PERMISSION_STATE_FILE",
+  "mainReaders": [],
+  "excusalReaders": [],
+  "forbiddenSpreadsheetIds": ["PRODUCTION_MAIN_BOOK", "PRODUCTION_EXCUSALS_BOOK"]
+}
+```
+
+The separate owner-only initial state is `{ "version": 1, "environment": "staging", "generation": 1 }`. The native host reuses the exact frontend workbook/Table bindings and stable row policy; it does not create replacement workbooks. Main/Excusals fixed viewer lists preserve only the reviewed sharing baseline. Staging account bindings should contain only explicitly authorized test accounts, even when the Directory contains imported real records; importing a person is not consent to share a staging file with that person.
+
+Private `controlRequest` fields are `{requestId,sequence,action,stateSha256}`. `stateSha256` is SHA-256 of `permissionCanonical(state)`. Supported actions are `setup`, `resume`, `pause`, `command` and `recover`:
+
+- `setup` verifies the isolated resources, fingerprints the exact publisher/configuration/book baseline, and remains paused. It can inspect an explicitly paused frontend. No command or access grant is created.
+- `resume` requires `enabled=true` and the exact setup fingerprint, consumes the request once and clears only permission processing's pause. It cannot undo a later pause when replayed.
+- `pause` preserves pending claims and fences.
+- `command` adds `{commandFileId,commandSha256}` pointing to a separate owner-only reviewed command JSON. The hash uses canonical JSON for file review; the backend's command hash is generated separately from its required normalized body. The host rechecks a known receipt, prepares/readbacks the native fence if required, persists evidence, attests it under the publisher, then sends the original command under its actual manager identity. It stays paused afterward; submit a new reviewed resume control to publish the resulting policy. An ambiguous accepted-command response retries the same frozen control/receipt without requiring the pre-operation state to magically reappear.
+- `recover` adds `{recoveryId,previousExpiry}`. It verifies the exact retained claim, closes/readbacks native protections, calls the explicit lease-recovery route, updates the same token's saved expiry, and remains paused for a separate reviewed resume.
+
+The scheduled entry point consumes controls and runs permissions before spreadsheet publication/input. Ordinary input/publisher setup cannot bypass a permission fence. Explicit input setup may, however, recover an earlier **exactly closed** owner/runtime-only publication fence after a failed setup: it must verify either the full open field policy or that exact closed policy. A mixed, unknown or broadened protection state still fails. Permission repair sessions use the shared Script Lock and owner/resource isolation; they never write business cells.
+
+A privileged native edit that receives `PERMISSION_FENCE_REQUIRED` is prepared and attested automatically under the same native lock, then retried as its original human command. Unauthorized managers are rejected before any provider fence request. The handler leaves a newly set shared fence closed, rather than restoring the previous policy in its cleanup path. Routine input identity reads use only the current applied named-account map; the idle input timer does not read the permission checkpoint.
+
+Importing configuration pauses this module and invalidates its setup fingerprint without erasing consumed control history. Its owner-callable wrappers are `shamrockV3NativePermissionsControl`, `shamrockV3NativePermissionsRefresh` and `shamrockV3NativePermissionsPause`. Normal operation uses the existing timer and private controls, so no editor/browser run is required for each change. If a command is definitively rejected after fencing, preserve its evidence and review the unchanged current policy before deliberately restoring access; never clear the fence property by itself.
 
 ## Validation and bounds
 

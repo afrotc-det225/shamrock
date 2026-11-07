@@ -56,6 +56,7 @@ function shamrockV3StagingPauseBoth_(host) {
   try { shamrockV3StagingMaintenance_().pause(); } catch (error) { if (!failure) failure = error; }
   try { if (typeof SHAMROCKV3 !== 'undefined' && SHAMROCKV3.createNativeFormsRuntime) shamrockV3StagingForms_().pause(); } catch (error) { if (!failure) failure = error; }
   try { if (typeof SHAMROCKV3 !== 'undefined' && SHAMROCKV3.createNativeFrontendInput) shamrockV3NativeInput_().pause(); } catch (error) { if (!failure) failure = error; }
+  try { if(typeof SHAMROCKV3!== 'undefined' && SHAMROCKV3.createNativePermissionRuntime) shamrockV3NativePermissions_().pause(); } catch(error) { if(!failure)failure=error; }
   if (failure) throw failure;
   return result;
 }
@@ -111,3 +112,8 @@ function shamrockV3NativeFrontendConfirm(e) { return shamrockV3NativeInput_().co
 function shamrockV3NativeConfirmationReplay(responseId) { return shamrockV3NativeInput_().replayConfirmation(responseId); }
 
 function shamrockV3NativeInputReviewQueue() { return shamrockV3NativeInput_().reviewQueue(); }
+
+function shamrockV3NativePermissions_() { return SHAMROCKV3.createNativePermissionRuntime({PropertiesService: PropertiesService, Utilities: Utilities, UrlFetchApp: UrlFetchApp, ScriptApp: ScriptApp, Session: Session, LockService: LockService}); }
+function shamrockV3NativePermissionsRefresh() { return shamrockV3NativePermissions_().refresh(); }
+function shamrockV3NativePermissionsPause() { return shamrockV3NativePermissions_().pause(); }
+function shamrockV3NativePermissionsControl() { return shamrockV3NativePermissions_().applyControl(); }

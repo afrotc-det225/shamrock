@@ -1,3 +1,6 @@
+import { createPermissionContext } from './permissions-context.js';
+import { assertPermissionFenceClear, permissionPolicyAccess, PERMISSION_FENCE_PROPERTY } from './permissions-refresh.js';
+import { createNativePermissionApi, desiredPermissionMemberships } from './permissions-native.js';
 import type {ScheduledHints} from './scheduled-runtime.js';
 /** Optional staging-only frontend consumer. All IO is explicit; loading performs no work. */
 import { AdapterError, type AdapterConfig, type SignedRequest, type Signer, type Transport } from './index.js';
@@ -515,6 +518,10 @@ export interface NativeFrontendConfig {
       seeds: NativeFrontendConfig['seeds']; };
   };
 }
+/** Explicit setup may resume a previously verified closed fence; ordinary edits require the open field policy. */
+export function assertInputSessionPolicy(ports:{assertEditPolicy():void;assertFenced():void},allowPausedSetup:boolean):void {
+  try{ports.assertEditPolicy();}catch(error){if(!allowPausedSetup)throw error;ports.assertFenced();}
+}
 export interface NativeFrontendInputSession {
   config: NativeFrontendConfig; automationEmail: string; adapter: AdapterConfig;
   signer: Signer; transport: Transport; nowSeconds(): number;
@@ -522,12 +529,14 @@ export interface NativeFrontendInputSession {
   read(surface: 'directory'|'leadership'|'attendance'|'blue'|'gold'): FrontendTableRead;
   save(state: FrontendPublicationState): void;
   fence(): void; restore(): void;
+  /** Verified field mapping reused under the held native lock for permission fencing. */
+  protectionInput?(spreadsheetId:string):FrontendProtectionInput;
 }
 export interface NativeFrontendServices {
   scheduled?: ScheduledHints;
   PropertiesService: { getScriptProperties(): { getProperty(key: string): string | null; setProperty(key: string, value: string): unknown; deleteProperty(key: string): unknown } };
   Utilities: UtilitiesPort & { formatDate?(date: Date, timeZone: string, format: string): string };
-  UrlFetchApp: { fetch(url: string, options: { method: 'get' | 'post' | 'patch'; headers: Record<string, string>; payload?: string; contentType?: string;
+  UrlFetchApp: { fetch(url: string, options: { method: 'get' | 'post' | 'patch' | 'delete'; headers: Record<string, string>; payload?: string; contentType?: string;
     muteHttpExceptions: true; followRedirects: false; validateHttpsCertificates: true }): { getResponseCode(): number; getContentText(): string } };
   ScriptApp: { getOAuthToken(): string };
   Session: { getEffectiveUser(): { getEmail(): string } };
@@ -568,12 +577,12 @@ export function createNativeFrontendRuntime(services: NativeFrontendServices,
     return value.trim().toLowerCase();
   };
   const fileId = (value: unknown): string => { if (typeof value !== 'string' || !/^[A-Za-z0-9_-]{1,512}$/.test(value)) fail('frontend_configuration', 'A configured resource identity is invalid.'); return value; };
-  function inspectFile(file: string, owner: string, editors: readonly string[] = []): Record<string, any> {
+  function inspectFile(file: string, owner: string, editors: readonly string[] = [], managedSharing = false): Record<string, any> {
     const metadata = api(`${driveUrl(file)}?fields=${encodeURIComponent('id,name,mimeType,size,version,trashed,driveId,owners(emailAddress),permissions(type,role,emailAddress,deleted)')}`);
     if (metadata.id !== file || metadata.trashed || metadata.driveId || metadata.owners?.length !== 1 || email(metadata.owners[0].emailAddress) !== owner
-      || !Array.isArray(metadata.permissions) || metadata.permissions.length !== new Set([owner, ...editors]).size
+      || !managedSharing && (!Array.isArray(metadata.permissions) || metadata.permissions.length !== new Set([owner, ...editors]).size
       || metadata.permissions.some((p: any) => p.deleted || p.type !== 'user' || ![owner, ...editors].includes(email(p.emailAddress))
-        || p.role !== (email(p.emailAddress) === owner ? 'owner' : 'writer'))) fail('frontend_isolation', 'Frontend ownership and exact private sharing could not be verified.');
+        || p.role !== (email(p.emailAddress) === owner ? 'owner' : 'writer')))) fail('frontend_isolation', 'Frontend ownership and exact private sharing could not be verified.');
     return metadata;
   }
   function configuration(): { frontend: NativeFrontendConfig; host: ReturnType<typeof parseStagingHostConfig> } | undefined {
@@ -621,7 +630,7 @@ export function createNativeFrontendRuntime(services: NativeFrontendServices,
     }
     return { frontend: clone(f), host };
   }
-  function refresh(inputOperation?: (session: NativeFrontendInputSession) => unknown, allowPausedInput = false) {
+  function refresh(inputOperation?: (session: NativeFrontendInputSession) => unknown, allowPausedInput = false, permissionRepair = false) {
     const loaded = configuration();
     // Only explicit input setup/control may inspect a disabled publisher. Ordinary
     // refresh and edit delivery retain both independent publication gates.
@@ -643,6 +652,20 @@ export function createNativeFrontendRuntime(services: NativeFrontendServices,
       const available=services.scheduled.availability(config.principalId);
       if (!available.acceptingCommands) return {status:'disabled' as const};
       if (!services.scheduled.reconcile && !properties.getProperty(FRONTEND_PROPERTIES.claim) && !available.frontendPending && !available.frontendLeased) return {status:'idle' as const};
+    }
+    const permissionContext=createPermissionContext(services), permissionConfiguration=permissionContext.load();
+    if(!permissionRepair)assertPermissionFenceClear(properties);
+    const appliedPermissions=permissionRepair?undefined:permissionContext.applied();
+    if(appliedPermissions){config.access=permissionPolicyAccess(config.access,appliedPermissions);if(supplemental)supplemental.excusals.access=permissionPolicyAccess(supplemental.excusals.access,appliedPermissions);}
+    const nativePermissionApi=createNativePermissionApi(services,()=>fail('frontend_permissions','A permission repair session is required.'));
+    function inspectFrontendBook(bookId:string,editors:string[],kind:'main'|'excusals'){
+      const managed=permissionRepair||!!appliedPermissions,metadata=inspectFile(bookId,host.expectedAutomationEmail,editors,managed);
+      if(appliedPermissions&&permissionConfiguration){
+        const book={spreadsheetId:bookId,kind,fixedReaders:kind==='main'?permissionConfiguration.config.mainReaders:permissionConfiguration.config.excusalReaders,fixedAccess:kind==='main'?config.access:supplemental!.excusals.access};
+        const expected=desiredPermissionMemberships(book,appliedPermissions.policy),actual=nativePermissionApi.readPermissions(bookId).filter(p=>p.role!=='owner');
+        if(actual.length!==expected.size||actual.some(p=>p.deleted||p.type!=='user'||expected.get((p.emailAddress??'').toLowerCase())!==p.role))fail('frontend_permissions','Current named permission membership has not been applied.');
+      }
+      return metadata;
     }
     let publishedBaselines: FrontendPublicationState['baselines'] | undefined;
     let publishedSupplemental: FrontendSupplementalState | undefined;
@@ -853,6 +876,7 @@ export function createNativeFrontendRuntime(services: NativeFrontendServices,
       if (!verifyFrontendProtections(protectionInput(closed)).ready || (supplemental && !verifyFrontendProtections(excusalProtectionInput(closed)).ready)) fail('frontend_protection', 'The exact frontend edit protection policy is not verified across its configured books.');
     };
     const setPolicy = (closed: boolean) => {
+      if(!closed&&!permissionRepair)assertPermissionFenceClear(properties);
       const plan = planFrontendProtections(protectionInput(closed)); if (plan.requests.length) applyRequests(plan.requests);
       if (supplemental) { const other = planFrontendProtections(excusalProtectionInput(closed)); if (other.requests.length) applyRequests(other.requests, supplemental.excusals.spreadsheetId); }
       assertPolicy(closed);
@@ -872,10 +896,10 @@ export function createNativeFrontendRuntime(services: NativeFrontendServices,
       enabled: () => config.enabled && properties.getProperty(FRONTEND_PROPERTIES.pause) !== 'true',
       assertIsolation() {
         if (account() !== host.expectedAutomationEmail) fail('frontend_identity', 'Frontend execution identity changed.');
-        const book = inspectFile(config.main.spreadsheetId, host.expectedAutomationEmail, config.allowedFileEditors);
+        const book = inspectFrontendBook(config.main.spreadsheetId, config.allowedFileEditors, 'main');
         if (book.mimeType !== 'application/vnd.google-apps.spreadsheet' || book.name !== config.main.expectedTitle) fail('frontend_isolation', 'The frontend binding is not the reviewed native staging spreadsheet.');
         if (supplemental) {
-          const other = inspectFile(supplemental.excusals.spreadsheetId, host.expectedAutomationEmail, supplemental.excusals.allowedFileEditors);
+          const other = inspectFrontendBook(supplemental.excusals.spreadsheetId, supplemental.excusals.allowedFileEditors, 'excusals');
           if (other.mimeType !== 'application/vnd.google-apps.spreadsheet' || other.name !== supplemental.excusals.expectedTitle) fail('frontend_isolation', 'The Excusals binding is not the reviewed native staging spreadsheet.');
         }
         const state = inspectFile(config.stateFileId, host.expectedAutomationEmail);
@@ -933,18 +957,19 @@ export function createNativeFrontendRuntime(services: NativeFrontendServices,
         if (!runtime.enabled() && !allowPausedInput) return {status: 'disabled' as const};
         runtime.assertIsolation(); const state = runtime.state.load();
         if (runtime.claimStore.load() || state.pending) fail('frontend_input_fenced', 'Finish the retained publication before processing spreadsheet input.');
-        runtime.refreshReads?.(); runtime.assertEditPolicy();
+        runtime.refreshReads?.(); if(!permissionRepair)assertInputSessionPolicy(runtime,allowPausedInput);
         return inputOperation({config, automationEmail: host.expectedAutomationEmail, adapter: runtime.config, signer, transport: runtime.transport, nowSeconds: now, state,
+          ...{protectionInput:(bookId:string)=>{invalidateReads();if(bookId===config.main.spreadsheetId)return protectionInput(false);if(supplemental&&bookId===supplemental.excusals.spreadsheetId)return excusalProtectionInput(false);return fail('frontend_permissions','Unknown permission workbook.');}},
           read: surface => surface === 'blue' || surface === 'gold' ? runtime.supplemental?.readExcusal(surface) ?? fail('frontend_configuration', 'The squadron queue is not bound.') : runtime.readTable(surface),
           save: value => { runtime.state.save(value); if (!equal(runtime.state.load(), value)) fail('frontend_state', 'The input checkpoint did not persist.'); },
           fence: () => { runtime.fenceEdits(); runtime.assertFenced(); runtime.refreshReads?.(); },
-          restore: () => { runtime.restoreEditPolicy(); runtime.assertEditPolicy(); runtime.refreshReads?.(); },
+          restore: () => { if(properties.getProperty(PERMISSION_FENCE_PROPERTY)!==null){runtime.assertFenced();return;}runtime.restoreEditPolicy(); runtime.assertEditPolicy(); runtime.refreshReads?.(); },
         });
       } finally { runtime.lock.releaseLock(); }
     }
     return consumeFrontendRefresh(runtime);
   }
-  return { refresh: () => refresh(), inputSession: (operation: (session: NativeFrontendInputSession) => unknown, options: {allowPaused?: boolean} = {}) => refresh(operation, options.allowPaused === true),
+  return { refresh: () => refresh(), permissionSession:(operation:(session:NativeFrontendInputSession)=>unknown)=>refresh(operation,true,true), inputSession: (operation: (session: NativeFrontendInputSession) => unknown, options: {allowPaused?: boolean} = {}) => refresh(operation, options.allowPaused === true),
     pause() { pauseFrontend(); return { status: 'paused' as const }; },
     resume() {
       const configured = configuration(); if (!configured || !configured.frontend.enabled) fail('frontend_configuration', 'Enable only a reviewed staging frontend configuration.');

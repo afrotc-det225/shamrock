@@ -72,3 +72,8 @@ test('a changed, never-dispatched draft can be cleared or replaced without reusi
 test('idle scheduled input flush does not rewrite historical receipt notes',()=>{
  const f=fixture();f.runtime.setup();f.runtime.resume();f.fx.tables.attendance.rows[0][1]=cell('P');f.runtime.onEdit(f.edit());const count=f.fx.notes.length;f.runtime.flush();f.runtime.flush();assert.equal(f.fx.notes.length,count);assert.equal(f.fx.commands.length,1);
 });
+
+test('shared permission fence prevents native edit dispatch and leaves the input journal unchanged',()=>{
+ const f=fixture();f.runtime.setup();f.runtime.resume();f.props.SHAMROCK_V3_PERMISSION_FENCED='pending';const journal=copy(f.fx.journal);f.fx.tables.attendance.rows[0][1]=cell('P');
+ assert.throws(()=>f.runtime.onEdit(f.edit()),e=>e.code==='permission_refresh');assert.deepEqual(f.fx.journal,journal);assert.equal(f.fx.commands.length,0);
+});

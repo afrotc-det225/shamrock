@@ -127,6 +127,8 @@ export async function preparePermissionMutation(env: Env, c: AdminCommand, now: 
     }
     const assertion = sourceGuard(f);
     if (managerRequired) {
+        const manager = await stmt(env.DB, `SELECT (${permissionManagerSql}) AS allowed`, c.actor.principalId).first<{allowed:number}>();
+        if (!manager?.allowed) throw new HttpError(403, 'NOT_AUTHORIZED', 'Current permission-manager authority is required.');
         const fence = await stmt(env.DB, `SELECT (${fenceSql}) AS allowed`, c.commandId, payloadHash, f.version, now).first<{
             allowed: number;
         }>();
@@ -152,6 +154,10 @@ export async function prepareTransitionPermissions(env: Env, input: {
     if (!enabled?.enabled)
         return null;
     const f = await facts(env), assertion = sourceGuard(f);
+    const manager=await stmt(env.DB, `SELECT (${permissionManagerSql}) AS allowed`,input.principalId).first<{allowed:number}>();
+    if(!manager?.allowed)throw new HttpError(403,'NOT_AUTHORIZED','Current permission-manager authority is required.');
+    const fence=await stmt(env.DB,`SELECT (${fenceSql}) AS allowed`,input.commandId,input.payloadHash,f.version,input.now).first<{allowed:number}>();
+    if(!fence?.allowed)throw new HttpError(409,'PERMISSION_FENCE_REQUIRED','Verify the exact native access fence before accepting this transition.');
     assertion.sql += ` AND ${permissionManagerSql} AND ${fenceSql}`;
     assertion.values.push(input.principalId, input.commandId, input.payloadHash, f.version, input.now);
     f.people = f.people.map(p => input.people.find(n => n.personId === p.personId) ?? p);
