@@ -1,6 +1,8 @@
 import { adminEffectAvailability } from './effect-availability.js';
 import { permissionCommand, permissionRefresh, attestPermissionFence, recoverPermissionRefresh } from './permissions.js';
 import { effectiveAccessGrants } from './permission-grants.js';
+import { legacyHistoryPage } from './legacy-history-transport.js';
+import { frontendSnapshotPage } from './frontend-transport.js';
 import { prepareCloseout, advanceCloseout, closeoutStatus } from './closeout.js';
 import { listLegacyHistory, readLegacyHistory, listLegacyRequestHistory } from './legacy-history.js';
 import { recoverAdminEffect } from './effect-recovery.js';
@@ -464,8 +466,11 @@ export default {
       if (url.pathname === '/v1/admin/directory/review-authorize' && !url.search) return json(await authorizeDirectoryReview(env, input));
       if (url.pathname === '/v1/admin/history/list' && !url.search) return json(await listLegacyHistory(env, input));
       if (url.pathname === '/v1/admin/history/requests' && !url.search) return json(await listLegacyRequestHistory(env, input));
+      if (url.pathname === '/v1/admin/history/page' && !url.search) return json(await legacyHistoryPage(env, input));
       if (url.pathname === '/v1/admin/history/read' && !url.search) return json(await readLegacyHistory(env, input));
       if (url.pathname === '/v1/admin/effects/availability' && !url.search) return json(await adminEffectAvailability(env, input));
+      if (url.pathname === '/v1/admin/snapshot/page' && !url.search) return json(await frontendSnapshotPage(env, input));
+      if (url.pathname === '/v1/admin/effects/project/page' && !url.search) return json(await frontendSnapshotPage(env, input, true));
       if (url.pathname === '/v1/admin/snapshot' && !url.search) return json(await frontendSnapshot(env, input));
       if (url.pathname === '/v1/admin/effects/recover' && !url.search) return json(await recoverAdminEffect(env, input));
       for (const action of ['claim', 'project', 'ack'] as const) {

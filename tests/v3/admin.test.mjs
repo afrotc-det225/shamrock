@@ -587,3 +587,35 @@ test('enrollment is atomic under duplicate delivery and honors the mutation fenc
  const f=await fixture(t);await f.db.prepare("INSERT INTO adapter_sources VALUES('form','directory-form',1)").run();const c=enrollment();const results=await Promise.all([f.send(c),f.send(c)]);assert(results.every(r=>r.status===200),JSON.stringify(results));assert.equal(await f.count('people'),1);assert.equal(await f.count('admin_commands'),1);
  await f.db.prepare('UPDATE system_control SET accepting_commands=0').run();assert.equal((await f.send(enrollment('second@example.invalid',2))).status,403);assert.equal(await f.count('people'),1);
 });
+
+const {assembleFrontendSnapshotPages}=await import('../../.build/v3/packages/domain/src/frontend-transport.js');
+async function pagedSnapshot(f,extra={},path='/v1/admin/snapshot/page') {
+  const base=read(extra),first=await f.send({...base,section:'manifest',offset:0,revision:null},path);assert.equal(first.status,200,JSON.stringify(first.body));const manifest=first.body,pages=[];
+  for(const {section}of manifest.sections){let offset=0;do{const result=await f.send({...base,section,offset,revision:manifest.revision},path);assert.equal(result.status,200,JSON.stringify(result.body));assert.ok(Buffer.byteLength(JSON.stringify(result.body))<=128000);pages.push(result.body);offset=result.body.nextOffset;}while(offset!==null);}
+  const final=await f.send({...base,section:'verify',offset:0,revision:manifest.revision},path);assert.equal(final.status,200);return {snapshot:assembleFrontendSnapshotPages(manifest,pages,final.body),manifest,pages,verify:final.body};
+}
+test('bounded frontend pages reconstruct every legacy snapshot field and reject missing, duplicate or torn pages',async t=>{
+  const f=await fixture(t);assert.equal((await f.send(command())).status,200);assert.equal((await f.send(command('leadership.upsert'))).status,200);const event=command('event.upsert');event.payload.eligiblePersonIds=['person-a'];assert.equal((await f.send(event)).status,200);
+  await f.db.batch([f.db.prepare("INSERT INTO people SELECT 'person-'||printf('%03d',value),'Fictional Cadet' FROM json_each(?)").bind(JSON.stringify(Array.from({length:40},(_,i)=>i))),f.db.prepare(`INSERT INTO directory_profiles SELECT 'person-'||printf('%03d',j.value),d.version,d.flight_id,d.last_name,d.first_name,d.as_year,d.rank,d.role,d.university,'cadet-'||j.value||'@example.invalid',d.phone,d.dorm,d.cip_broad_area,d.cip_code,d.afsc,d.home_town,d.home_state,d.class_year,d.date_of_birth,d.flight_path_status,d.photo_link,d.updated_at FROM directory_profiles d,json_each(?) j WHERE d.person_id='person-a'`).bind(JSON.stringify(Array.from({length:40},(_,i)=>i)))]);
+  const full=(await f.send(read(),'/v1/admin/snapshot')).body,paged=await pagedSnapshot(f);assert.deepEqual(paged.snapshot,full);assert.equal(paged.pages.filter(p=>p.section==='people').length,2);assert.equal(paged.snapshot.leadership.length,42);
+  assert.throws(()=>assembleFrontendSnapshotPages(paged.manifest,paged.pages.slice(1),paged.verify),/INVALID_FRONTEND_PAGE_SEQUENCE/);
+  assert.throws(()=>assembleFrontendSnapshotPages(paged.manifest,[...paged.pages,paged.pages[0]],paged.verify),/INVALID_FRONTEND_PAGE_SEQUENCE/);
+  const torn=structuredClone(paged.pages);torn[0].revision.operations++;assert.throws(()=>assembleFrontendSnapshotPages(paged.manifest,torn,paged.verify),/INVALID_FRONTEND_PAGE_SEQUENCE/);
+});
+test('each page and final verification recheck revision, authority, environment and strict request fields',async t=>{
+  const f=await fixture(t);await f.send(command());const base=read(),manifest=(await f.send({...base,section:'manifest',offset:0,revision:null},'/v1/admin/snapshot/page')).body;
+  const input={...base,section:'people',offset:0,revision:manifest.revision};assert.equal((await f.send({...input,extra:true},'/v1/admin/snapshot/page')).status,400);assert.equal((await f.send({...input,generation:2},'/v1/admin/snapshot/page')).status,409);
+  await f.send(revised(command()));assert.equal((await f.send(input,'/v1/admin/snapshot/page')).body.error.code,'SNAPSHOT_CHANGED');assert.equal((await f.send({...input,section:'verify'},'/v1/admin/snapshot/page')).body.error.code,'SNAPSHOT_CHANGED');
+  await f.db.prepare("DELETE FROM admin_grants WHERE capability='frontend.read'").run();assert.equal((await f.send({...base,section:'manifest',offset:0,revision:null},'/v1/admin/snapshot/page')).status,403);
+});
+test('paged effect projection preserves claim floors and cannot verify after pause, lease expiry or stolen token',async t=>{
+  const f=await fixture(t);await f.send(command());const claim=(await f.send(effect({kind:'frontend.refresh'}),'/v1/admin/effects/claim')).body.effect;
+  const extra={workerId:'adapter-one',effectId:claim.effectId,claimToken:claim.claimToken},paged=await pagedSnapshot(f,extra,'/v1/admin/effects/project/page');assert.deepEqual(paged.manifest.effect,{effectId:claim.effectId,kind:'frontend.refresh'});
+  const input=read({...extra,section:'verify',offset:0,revision:paged.manifest.revision});assert.equal((await f.send({...input,claimToken:'stolen'},'/v1/admin/effects/project/page')).status,409);
+  await f.db.prepare('UPDATE system_control SET accepting_commands=0').run();assert.equal((await f.send(input,'/v1/admin/effects/project/page')).status,403);await f.db.prepare('UPDATE system_control SET accepting_commands=1').run();
+  await f.db.prepare("UPDATE admin_effects SET lease_expires_at='2000-01-01T00:00:00.000Z' WHERE effect_id=?").bind(claim.effectId).run();assert.equal((await f.send(input,'/v1/admin/effects/project/page')).status,409);
+});
+test('paused page reads reject an unfinished import instead of mixing unaudited intermediate rows',async t=>{
+ const f=await fixture(t);await f.db.prepare("INSERT INTO legacy_import_runs(import_run_id,snapshot_sha256,plan_sha256,reconciliation_sha256,review_reference,environment,generation,state,expected_occurrences,expected_profiles,expected_events,expected_baselines,expected_batches,manifest_json,started_at) VALUES('run','snapshot','plan','reconcile','fixture','staging',1,'loading',1,1,1,1,1,'{}','2026-01-01T00:00:00Z')").run();await f.db.prepare('UPDATE system_control SET accepting_commands=0').run();
+ const response=await f.send(read({section:'manifest',offset:0,revision:null}),'/v1/admin/snapshot/page');assert.equal(response.status,409);assert.equal(response.body.error.code,'SNAPSHOT_IMPORT_ACTIVE');
+});
