@@ -72,3 +72,5 @@ node --test tests/v3/frontend-reporting.test.mjs
 ```
 
 The fictional suite covers every attendance code, mean-versus-pooled percentages, typed LLAB classification, stable identity, explicit clear/replay, approvals and later corrections, denial/withdrawal, conflicts, eligibility, historical rosters, scoped views, birthdays, retired events, permutation stability and capacity rejection. Rendering, real account permissions, live concurrent edits and production cutover remain separate release gates.
+
+Historical transport calculates at most four saved rows per request. The smaller page bounds repeated formula interpretation and response serialization on Workers Free; clients retain the original snapshot binding and assemble every page before publication. Hosted CPU measurements and Google request budgets remain separate release checks.
