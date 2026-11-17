@@ -83,7 +83,8 @@ export function restoreBackupSql(sql, plan, file = ':memory:') {
                 return constants.SQLITE_DENY;
             if (action === constants.SQLITE_PRAGMA && !['defer_foreign_keys', 'foreign_keys'].includes(a))
                 return constants.SQLITE_DENY;
-            if (action === constants.SQLITE_FUNCTION && !['length', 'lower', 'json_valid', 'json_type', 'json_extract'].includes(String(b ?? a).toLowerCase()))
+            // Native D1 dumps encode multiline strings with replace(...,char(10)).
+            if (action === constants.SQLITE_FUNCTION && !['length', 'lower', 'json_valid', 'json_type', 'json_extract', 'replace', 'char'].includes(String(b ?? a).toLowerCase()))
                 return constants.SQLITE_DENY;
             if ([constants.SQLITE_CREATE_TABLE, constants.SQLITE_CREATE_INDEX].includes(action) && !names.has(a) && !String(a).startsWith('sqlite_'))
                 return constants.SQLITE_DENY;

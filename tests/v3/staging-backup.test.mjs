@@ -86,6 +86,18 @@ test('restore authorizer rejects external files, writable schema, temporary shad
     for (const sql of ["ATTACH DATABASE '/tmp/forbidden-shamrock.db' AS external;", 'PRAGMA writable_schema=ON;', 'CREATE TEMP TABLE people(x TEXT);', 'CREATE TABLE people(person_id TEXT PRIMARY KEY,display_name TEXT); CREATE TRIGGER dangerous AFTER INSERT ON people BEGIN DELETE FROM people; END;'])
         assert.throws(() => restoreBackupSql(sql, plan), /BACKUP_RESTORE_REJECTED/);
 });
+test('native D1 multiline encoding restores exact text without allowing executable functions', async (t) => {
+    const f = fixture();
+    t.after(() => f.db.close());
+    const sql = dump(f.db) + "INSERT INTO people VALUES('multiline',replace('First\\nSecond','\\n',char(10)));\n";
+    f.db.prepare('INSERT INTO people VALUES(?,?)').run('multiline', 'First\nSecond');
+    const result = await captureStagingBackup({ query: f.query, exportSql: async () => '', download: async () => sql }, f.plan);
+    assert.equal(result.proof.tables.find(t => t.table === 'people').rows, 2);
+    const restored = restoreBackupSql(sql, f.plan);
+    t.after(() => restored.close());
+    assert.equal(restored.prepare("SELECT display_name FROM people WHERE person_id='multiline'").get().display_name, 'First\nSecond');
+    assert.throws(() => restoreBackupSql(dump(f.db) + "INSERT INTO people VALUES('bad',load_extension('untrusted'));", f.plan), /BACKUP_RESTORE_REJECTED/);
+});
 const owner = 'owner@example.invalid', folder = { id: 'folder', mimeType: 'application/vnd.google-apps.folder', owners: [{ emailAddress: owner }], trashed: false }, acl = [{ type: 'user', role: 'owner', emailAddress: owner }];
 function driveFixture() {
     let state, file, allocated = 0, uploads = 0, lose = false, body = '';

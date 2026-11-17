@@ -4,6 +4,11 @@
 
 The runner uses Node's built-in SQLite support and the repository's migration verifier. It supports every exact known migration prefix through the current checked-in migration directory; schema versions are not hardcoded. Unknown schema, unpaused control, a mismatched generation, integrity errors or foreign-key failures stop capture.
 
+Native D1 exports may encode multiline text with SQLite `replace` and `char`.
+The isolated restore allows those pure text functions and preserves the exact
+resulting bytes; filesystem access, extension loading and executable schema remain
+rejected by the restore authorizer.
+
 For connected-plugin access without a separate local Cloudflare token, use the [hosted restore rehearsal](D1_HOSTED_RESTORE.md) and its offline native-export verifier.
 
 ## Private setup
