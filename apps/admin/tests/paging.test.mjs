@@ -178,11 +178,95 @@ test("hosted scoped preflight uses trusted identity and saved versions; writes u
   assert.equal(calls.at(-1).body, command);
 });
 
-test('full page is withheld if panel access is revoked while old Sheets read still succeeds',async()=>{
- const host=Object.create(HostedBackend.prototype),revision={operations:1,administration:1,access:'a'.repeat(64)};
- let checks=0;
- host.identity=()=>({environment:'staging',generation:1,principalId:'actor'});
- host.panelManifest=async()=>({revision,access:{capabilities:{fullSnapshot:++checks===1}}});
- host.post=async()=>({private:'must not escape'});
- await assert.rejects(host.page({surface:'full',section:'people',offset:0,revision,accessRevision:revision}),{code:'SNAPSHOT_CHANGED'});
+test("full page is withheld if panel access is revoked while old Sheets read still succeeds", async () => {
+  const host = Object.create(HostedBackend.prototype),
+    revision = { operations: 1, administration: 1, access: "a".repeat(64) };
+  let checks = 0;
+  host.identity = () => ({
+    environment: "staging",
+    generation: 1,
+    principalId: "actor",
+  });
+  host.panelManifest = async () => ({
+    revision,
+    access: { capabilities: { fullSnapshot: ++checks === 1 } },
+  });
+  host.post = async () => ({ private: "must not escape" });
+  await assert.rejects(
+    host.page({
+      surface: "full",
+      section: "people",
+      offset: 0,
+      revision,
+      accessRevision: revision,
+    }),
+    { code: "SNAPSHOT_CHANGED" },
+  );
+});
+
+test("scoped hosted command pipeline rejects out-of-scope targets and revocation, preserving exact retries", async (t) => {
+  const local = await createLocalBackend();
+  t.after(() => local.dispose());
+  await local.db
+    .prepare(
+      "DELETE FROM admin_grants WHERE principal_id='panel-owner' AND capability='frontend.read'",
+    )
+    .run();
+  await local.db
+    .prepare(
+      "INSERT INTO admin_grants VALUES('panel-owner','frontend.read','flight','alpha')",
+    )
+    .run();
+  await local.db
+    .prepare(
+      "DELETE FROM access_grants WHERE principal_id='panel-owner' AND unit_id='bravo'",
+    )
+    .run();
+  const host = proxy(local.backend);
+  local.backend.previewContext = (...args) => host.previewContext(...args);
+  local.backend.authorizeOperation = (...args) =>
+    host.authorizeOperation(...args);
+  local.backend.submit = (command) => host.submit(command);
+  const service = new AdminService(local.backend);
+  t.after(() => service.close());
+  const payload = {
+    requestId: "request-demo",
+    expectedVersion: 1,
+    decision: "Denied",
+    reason: "Fictional scoped rehearsal",
+  };
+  await assert.rejects(
+    service.propose("attendance.correct", {
+      personId: "cadet-3",
+      eventId: "veterans",
+      expectedBaseVersion: 0,
+      expectedEventVersion: 1,
+      code: "P",
+      reason: "Outside Flight",
+    }),
+    { status: 403 },
+  );
+  const proposal = await service.propose("excusal.decide", payload);
+  await local.db
+    .prepare(
+      "DELETE FROM access_grants WHERE principal_id='panel-owner' AND capability='excusal.decide'",
+    )
+    .run();
+  await assert.rejects(service.apply(proposal.id, true), { status: 403 });
+  await local.db
+    .prepare(
+      "INSERT INTO access_grants VALUES('panel-owner','excusal.decide','alpha','unit')",
+    )
+    .run();
+  const receipt = await service.apply(proposal.id, true);
+  assert.equal(receipt.state, "complete");
+  assert.equal(JSON.stringify(receipt).includes("submittedBy"), false);
+  assert.equal(JSON.stringify(receipt).includes("decidedBy"), false);
+  assert.deepEqual(await service.apply(proposal.id, true), receipt);
+  await local.db
+    .prepare(
+      "DELETE FROM access_grants WHERE principal_id='panel-owner' AND capability='excusal.decide'",
+    )
+    .run();
+  await assert.rejects(service.apply(proposal.id, true), { status: 403 });
 });
