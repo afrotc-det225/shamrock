@@ -1,6 +1,6 @@
 /** Read-only historical projections retain source formulas and effective values; they are not new observations. */
 export const LEGACY_HISTORY_VERSION = 'legacy-source-report-v1' as const;
-export type LegacyPolicy = 'legacy-shamrock-credit-v1' | 'legacy-pre-v2-ur-counted' | 'legacy-pre-v2-ur-neutral' | 'unavailable';
+export type LegacyPolicy = 'legacy-shamrock-credit-v1' | 'legacy-pre-v2-ur-counted' | 'legacy-pre-v2-ur-neutral' | 'predecessor-fall-2025-retained-formula' | 'unavailable';
 export interface LegacyColumn { columnIndex:number;header:string;snapshotEventId:string;eventId:string|null }
 export interface LegacyRange { startColumnIndex:number;endColumnIndex:number }
 export interface LegacyCredit {
@@ -17,14 +17,14 @@ export interface LegacyStoredRow {
 }
 export interface LegacyHistoryInput {
   snapshotId:string;sourceSnapshotSha256:string;importedAt:string;
-  metadata:{sourceTitle:string;periodLabel:string|null;isCurrent:boolean;authority:string;companionDirectoryFound:boolean;columns:LegacyColumn[]};
+  metadata:{sourceTitle:string;periodLabel:string|null;isCurrent:boolean;authority:string;companionDirectoryFound:boolean;columns:LegacyColumn[];sourceFormat?:string;sourceIdentityColumns?:(number|null)[];dataStartRowIndex?:number};
   sourceRoster:LegacyRosterRow[];
   rows:{row:LegacyStoredRow;sourceLabels:string[]}[];
 }
 export interface LegacyHistoryDiagnostic { code:'unresolved-identity'|'unknown-code'|'formula-unavailable'|'saved-percentage-mismatch'|'formula-excludes-event-columns';rowId:string;metric?:'overall'|'llab';eventId?:string }
 export interface LegacyHistoryReport {
   contractVersion:typeof LEGACY_HISTORY_VERSION;snapshotId:string;sourceSnapshotSha256:string;importedAt:string;
-  title:string;periodLabel:string|null;isCurrentCapture:boolean;authority:string;readOnly:true;eventEligibility:'not-reconstructed';
+  title:string;periodLabel:string|null;isCurrentCapture:boolean;authority:string;readOnly:true;eventEligibility:'not-reconstructed';sourceDataStartRowIndex?:1|2;
   eventColumns:(LegacyColumn&{machineHeader:string})[];
   sourceRoster:{personId:string|null;directoryOccurrenceId:string;lastName:string;firstName:string;asYear:string;flight:string;squadron:string;flightPathStatus:string}[];
   rows:{rowId:string;personId:string|null;identityStatus:'resolved'|'unresolved';lastName:string;firstName:string;asYear:string;flight:string;squadron:string;overall:LegacyCredit;llab:LegacyCredit;cells:{eventId:string;canonicalEventId:string|null;code:string|number|boolean|null}[]}[];
@@ -38,7 +38,8 @@ function text(value:unknown,max=512):asserts value is string {check(typeof value
 function primitive(value:unknown):asserts value is string|number|boolean|null {check(value===null||typeof value==='boolean'||typeof value==='number'&&Number.isFinite(value)||typeof value==='string'&&value.length<=512);}
 const currentCredit=['P','T','E','ES','MED'],currentTotal=['P','T','A','U','E','ES','MED'];
 const oldCredit=['P*','E','ES*','MU*','MRS*'],oldTotal=['P*','E','ES*','T*','U','UR','MU*','MRS*'];
-const policies=[{id:'legacy-shamrock-credit-v1' as const,credit:currentCredit,total:currentTotal},{id:'legacy-pre-v2-ur-counted' as const,credit:oldCredit,total:oldTotal},{id:'legacy-pre-v2-ur-neutral' as const,credit:oldCredit,total:oldTotal.filter(x=>x!=='UR')}];
+const predecessorCredit=['P*','E','ES*','ER*','ED*','T*','MU*','MRS*'],predecessorTotal=['P*','E','ES*','ER*','ED*','T*','UR*','U','MU*','MRS*'];
+const policies=[{id:'predecessor-fall-2025-retained-formula' as const,credit:predecessorCredit,total:predecessorTotal},{id:'legacy-shamrock-credit-v1' as const,credit:currentCredit,total:currentTotal},{id:'legacy-pre-v2-ur-counted' as const,credit:oldCredit,total:oldTotal},{id:'legacy-pre-v2-ur-neutral' as const,credit:oldCredit,total:oldTotal.filter(x=>x!=='UR')}];
 const colNumber=(label:string)=>[...label].reduce((n,c)=>n*26+c.charCodeAt(0)-64,0);
 function canonicalFormula(start:string,end:string,credit:string[],total:string[],llab:boolean):string {
   const summary=llab?'G':'F';return `=ARRAYFORMULA(IF(ROW(${summary}$3:${summary})<3,"",BYROW($${start}$3:$${end},LAMBDA(r,LET(`+
@@ -55,7 +56,14 @@ interface CompiledLegacyFormula {
 function compileLegacyFormula(columns:readonly LegacyColumn[],formula:string|null,metric:'overall'|'llab'):CompiledLegacyFormula {
   check(formula===null||typeof formula==='string'&&formula.length<=10000);
   const match=/BYROW\(\$([A-Z]{1,3})\$3:\$([A-Z]{1,3}),LAMBDA\(r,/.exec(formula??'');
-  const range=match?{startColumnIndex:colNumber(match[1])-1,endColumnIndex:colNumber(match[2])}:null;
+  const normalized=(formula??'').replace(/\s/g,''),original=/^=ARRAYFORMULA\(BYROW\(H2:INDEX\(([A-Z]{1,3}):\1,MATCH\(2,1\/\(A:A<>""\)\)\),/.exec(normalized);
+  const range=match?{startColumnIndex:colNumber(match[1])-1,endColumnIndex:colNumber(match[2])}:original?{startColumnIndex:7,endColumnIndex:colNumber(original[1])}:null;
+  let policy:typeof policies[number]|undefined;
+  if(original&&range&&range.endColumnIndex>7&&range.endColumnIndex<=16384){
+    const count=(patterns:string[])=>metric==='llab'?`SUM(COUNTIFS(H$1:${original[1]}$1,"*LLAB*",r,{"${patterns.join('","')}"}))`:`SUM(COUNTIF(r,{"${patterns.join('","')}"}))`;
+    const expected=`=ARRAYFORMULA(BYROW(H2:INDEX(${original[1]}:${original[1]},MATCH(2,1/(A:A<>""))),LAMBDA(r,IF(${count(predecessorTotal)}=0,1,${count(predecessorCredit)}/${count(predecessorTotal)}))))`;
+    if(normalized===expected)policy=policies[0];
+  }else if(match&&range&&range.startColumnIndex>=7&&range.endColumnIndex>range.startColumnIndex&&range.endColumnIndex<=16384)policy=policies.slice(1).find(p=>formula===canonicalFormula(match[1],match[2],p.credit,p.total,metric==='llab'));
   const selectedIndexes:number[]=[],coveredEventIds:string[]=[],excludedEventIds:string[]=[];
   for(let index=0;index<columns.length;index++){
     const column=columns[index];
@@ -63,7 +71,6 @@ function compileLegacyFormula(columns:readonly LegacyColumn[],formula:string|nul
     if(column.columnIndex<range.startColumnIndex||column.columnIndex>=range.endColumnIndex)excludedEventIds.push(column.snapshotEventId);
     else if(metric==='overall'||/llab/i.test(column.header)){selectedIndexes.push(index);coveredEventIds.push(column.snapshotEventId);}
   }
-  const policy=match&&range&&range.startColumnIndex>=7&&range.endColumnIndex>range.startColumnIndex&&range.endColumnIndex<=16384?policies.find(p=>formula===canonicalFormula(match[1],match[2],p.credit,p.total,metric==='llab')):undefined;
   return {sourceFormula:formula,sourceRange:range,selectedIndexes,coveredEventIds,excludedEventIds,policy};
 }
 const compiledPatterns=new Map(policies.map(policy=>[policy,{
@@ -88,10 +95,16 @@ export function calculateLegacySavedCredit(columns:readonly LegacyColumn[],codes
   check(columns.length===codes.length&&columns.length<=128);
   return applyLegacyFormula(compileLegacyFormula(columns,formula,metric),codes.map(code=>String(code??'').toUpperCase()),stored);
 }
+/** The predecessor format is explicit: its email column never becomes a displayed identity label. */
+export function legacySourceDataStartRow(metadata:Pick<LegacyHistoryInput['metadata'],'sourceFormat'|'sourceIdentityColumns'|'dataStartRowIndex'>):number {
+  if(metadata.sourceFormat===undefined){check(metadata.sourceIdentityColumns===undefined&&metadata.dataStartRowIndex===undefined);return 2;}
+  check(metadata.sourceFormat==='predecessor-human-headers-v1'&&JSON.stringify(metadata.sourceIdentityColumns)===JSON.stringify([1,2,0,4,null])&&metadata.dataStartRowIndex===1);
+  return 1;
+}
 /** A source occurrence is the row key, so an unresolved identity is retained instead of merged or dropped. */
 export function buildLegacyHistoryReport(input:LegacyHistoryInput):LegacyHistoryReport {
   check(input&&typeof input==='object');id(input.snapshotId);check(/^[a-f0-9]{64}$/.test(input.sourceSnapshotSha256));check(typeof input.importedAt==='string'&&Number.isFinite(Date.parse(input.importedAt)));
-  const {metadata:m}=input;check(m&&typeof m==='object');text(m.sourceTitle);if(m.periodLabel!==null)text(m.periodLabel);check(typeof m.isCurrent==='boolean');text(m.authority);
+  const {metadata:m}=input;check(m&&typeof m==='object');legacySourceDataStartRow(m);text(m.sourceTitle);if(m.periodLabel!==null)text(m.periodLabel);check(typeof m.isCurrent==='boolean');text(m.authority);
   check(Array.isArray(m.columns)&&m.columns.length<=128&&Array.isArray(input.rows)&&input.rows.length<=500&&input.rows.length*m.columns.length<=64000&&Array.isArray(input.sourceRoster)&&input.sourceRoster.length<=500,'LEGACY_HISTORY_CAPACITY');
   const columns=m.columns,seenColumns=new Set<number>(),seenEvents=new Set<string>();for(const c of columns){check(Number.isSafeInteger(c.columnIndex)&&c.columnIndex>=7&&c.columnIndex<16384&&!seenColumns.has(c.columnIndex));seenColumns.add(c.columnIndex);id(c.snapshotEventId);check(!seenEvents.has(c.snapshotEventId));seenEvents.add(c.snapshotEventId);if(c.eventId!==null)id(c.eventId);text(c.header);}
   check(columns.every((c,i)=>i===0||c.columnIndex>columns[i-1].columnIndex));
@@ -111,7 +124,7 @@ export function buildLegacyHistoryReport(input:LegacyHistoryInput):LegacyHistory
     for(const [metric,credit]of [['overall',overall],['llab',llab]] as const){if(credit.matches===null)diagnostics.push({code:'formula-unavailable',rowId:r.occurrenceId,metric});else if(!credit.matches)diagnostics.push({code:'saved-percentage-mismatch',rowId:r.occurrenceId,metric});if(credit.excludedEventIds.length)diagnostics.push({code:'formula-excludes-event-columns',rowId:r.occurrenceId,metric});}
     return {rowId:r.occurrenceId,personId:r.personId,identityStatus:r.personId===null?'unresolved' as const:'resolved' as const,lastName:sourceLabels[0],firstName:sourceLabels[1],asYear:sourceLabels[2],flight:sourceLabels[3],squadron:sourceLabels[4],overall,llab,cells:columns.map((c,i)=>({eventId:c.snapshotEventId,canonicalEventId:c.eventId,code:codes[i]}))};
   });
-  return {contractVersion:LEGACY_HISTORY_VERSION,snapshotId:input.snapshotId,sourceSnapshotSha256:input.sourceSnapshotSha256,importedAt:input.importedAt,title:m.sourceTitle,periodLabel:m.periodLabel,isCurrentCapture:m.isCurrent,authority:m.authority,readOnly:true,eventEligibility:'not-reconstructed',eventColumns:columns.map(c=>({...c,machineHeader:`event:${c.snapshotEventId}`})),sourceRoster:roster,rows,
+  return {...(legacySourceDataStartRow(m)===1?{sourceDataStartRowIndex:1 as const}:{}),contractVersion:LEGACY_HISTORY_VERSION,snapshotId:input.snapshotId,sourceSnapshotSha256:input.sourceSnapshotSha256,importedAt:input.importedAt,title:m.sourceTitle,periodLabel:m.periodLabel,isCurrentCapture:m.isCurrent,authority:m.authority,readOnly:true,eventEligibility:'not-reconstructed',eventColumns:columns.map(c=>({...c,machineHeader:`event:${c.snapshotEventId}`})),sourceRoster:roster,rows,
     summary:summarizeLegacyHistoryRows(rows),diagnostics};
 }
 /** Shared whole-report/page assembly reduction; saved source percentages remain authoritative. */

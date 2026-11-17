@@ -1,3 +1,5 @@
+import { legacySourceLabelSql } from './legacy-history-source.js';
+import { legacySourceDataStartRow } from '../../../packages/domain/src/legacy-history.js';
 import { effectiveAdminGrants } from './permission-grants.js';
 import { HttpError } from './http-error.js';
 import { AS_YEAR_DISPLAY_ORDER } from '../../../packages/domain/src/cadet-display-order.js';
@@ -5,7 +7,7 @@ import { buildRetainedHistorySummary, parseRetainedHistorySelections, RETAINED_H
   type RetainedHistorySummaryResponse, type RetainedSummaryBin } from '../../../packages/domain/src/retained-history-summary.js';
 interface Env { DB: D1Database; ENVIRONMENT: string; GENERATION: string }
 const fail = (status: number, code: string): never => { throw new HttpError(status, code, 'The reviewed historical comparison is unavailable.'); };
-const label = `CAST(COALESCE(json_extract(o.raw_json,'$[2].effectiveValue.stringValue'),json_extract(o.raw_json,'$[2].effectiveValue.numberValue'),json_extract(o.raw_json,'$[2].userEnteredValue.stringValue'),json_extract(o.raw_json,'$[2].userEnteredValue.numberValue'),'') AS TEXT)`;
+const label = legacySourceLabelSql(2);
 // Match ECMAScript whitespace for captured AS-year labels, including tabs and NBSP.
 const whitespace = [9,10,11,12,13,32,160,5760,8192,8193,8194,8195,8196,8197,8198,8199,8200,8201,8202,8232,8233,8239,8287,12288,65279];
 const trimYear = `trim(${label},char(${whitespace.join(',')}))`;
@@ -22,7 +24,7 @@ export const retainedHistoryAggregateSql = `WITH saved AS (
    OR COALESCE(json_type(r.payload_json,'$.personId'),'missing') NOT IN('text','null')
    OR json_type(r.payload_json,'$.identityLabels[2]') IS NOT 'text'
    OR lower(${trimYear}) IS NOT json_extract(r.payload_json,'$.identityLabels[2]')
-   OR json_type(o.locator_json,'$.rowIndex') IS NOT 'integer' OR CAST(json_extract(o.locator_json,'$.rowIndex') AS INTEGER)<2 THEN 1 ELSE 0 END AS invalidSource
+   OR json_type(o.locator_json,'$.rowIndex') IS NOT 'integer' OR CAST(json_extract(o.locator_json,'$.rowIndex') AS INTEGER)<CASE WHEN json_extract(m.metadata_json,'$.sourceFormat')='predecessor-human-headers-v1' THEN 1 ELSE 2 END THEN 1 ELSE 0 END AS invalidSource
  FROM legacy_matrix_snapshot_rows r JOIN legacy_matrix_snapshots m ON m.matrix_snapshot_id=r.matrix_snapshot_id
  LEFT JOIN legacy_source_occurrences o ON o.import_run_id=m.import_run_id AND o.occurrence_id=r.source_occurrence_id
  WHERE r.matrix_snapshot_id=? ORDER BY r.source_occurrence_id LIMIT 501
@@ -50,7 +52,7 @@ export async function retainedHistorySummary(env: Env, input: unknown): Promise<
     AND g.capability='frontend.read' AND g.scope_kind='wing' AND g.scope_key='*')) AS allowed`).bind(env.ENVIRONMENT, Number(env.GENERATION), req.principalId)];
   for (const selection of selections) statements.push(
     env.DB.prepare(`SELECT i.snapshot_sha256 AS sourceSnapshotSha256,json_extract(m.metadata_json,'$.periodLabel') AS periodLabel,
-      json_extract(m.metadata_json,'$.isCurrent') AS isCurrentCapture,
+      json_extract(m.metadata_json,'$.isCurrent') AS isCurrentCapture,m.metadata_json AS metadata,
       (SELECT COUNT(*) FROM legacy_matrix_snapshot_rows r WHERE r.matrix_snapshot_id=m.matrix_snapshot_id) AS rowCount
       FROM legacy_matrix_snapshots m JOIN legacy_import_runs i ON i.import_run_id=m.import_run_id AND i.state='complete'
       WHERE m.matrix_snapshot_id=? AND length(CAST(m.metadata_json AS BLOB))<=64000`).bind(selection.snapshotId),
@@ -61,7 +63,7 @@ export async function retainedHistorySummary(env: Env, input: unknown): Promise<
     const metadata = results[1 + i * 2].results[0];
     if (!metadata) fail(404, 'NOT_FOUND');
     if (metadata.sourceSnapshotSha256 !== selection.sourceSnapshotSha256 || metadata.periodLabel !== selection.expectedPeriodLabel || metadata.isCurrentCapture !== 0) fail(409, 'HISTORY_SELECTION_CHANGED');
-    try { return buildRetainedHistorySummary(selection, Number(metadata.rowCount), results[2 + i * 2].results as unknown as RetainedSummaryBin[]); }
+    try { legacySourceDataStartRow(JSON.parse(String(metadata.metadata))); return buildRetainedHistorySummary(selection, Number(metadata.rowCount), results[2 + i * 2].results as unknown as RetainedSummaryBin[]); }
     catch { return fail(409, 'INVALID_LEGACY_HISTORY'); }
   });
   const response: RetainedHistorySummaryResponse = { contractVersion: RETAINED_HISTORY_SUMMARY_VERSION, environment: env.ENVIRONMENT as 'local' | 'staging', generation: Number(env.GENERATION), summaries };

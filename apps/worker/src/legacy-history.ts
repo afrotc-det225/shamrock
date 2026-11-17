@@ -1,3 +1,4 @@
+import { legacySourceLabelSql } from './legacy-history-source.js';
 import { effectiveAdminGrants } from './permission-grants.js';
 import { buildLegacyHistoryReport, LegacyHistoryError, type LegacyHistoryInput, type LegacyHistoryReport } from '../../../packages/domain/src/legacy-history.js';
 import { HttpError } from './http-error.js';
@@ -41,7 +42,7 @@ export async function readLegacyHistory(env:Env,input:unknown):Promise<LegacyHis
   const rowsBound=`(SELECT COUNT(*) FROM legacy_matrix_snapshot_rows b WHERE b.matrix_snapshot_id=m.matrix_snapshot_id)<=500
     AND (SELECT COALESCE(SUM(length(CAST(b.payload_json AS BLOB))),0) FROM legacy_matrix_snapshot_rows b WHERE b.matrix_snapshot_id=m.matrix_snapshot_id)<=4000000`;
   // Captured matrix identity occupies the five fixed columns; domain validation checks every label against the retained tuple.
-  const label=(index:number)=>`substr(CAST(COALESCE(json_extract(o.raw_json,'$[${index}].effectiveValue.stringValue'),json_extract(o.raw_json,'$[${index}].effectiveValue.numberValue'),json_extract(o.raw_json,'$[${index}].userEnteredValue.stringValue'),json_extract(o.raw_json,'$[${index}].userEnteredValue.numberValue'),'') AS TEXT),1,513)`;
+  const label=legacySourceLabelSql;
   const results=await env.DB.batch<Record<string,unknown>>([
     stmt(env.DB,`SELECT (${g.sql}) AS allowed`,...g.params),
     stmt(env.DB,`SELECT m.matrix_snapshot_id AS snapshotId,i.snapshot_sha256 AS sourceSnapshotSha256,i.completed_at AS importedAt,
@@ -71,7 +72,7 @@ export async function listLegacyRequestHistory(env:Env,input:unknown):Promise<un
   const req=request(env,input,false),g=guard(env,req.principalId);
   const results=await env.DB.batch<Record<string,unknown>>([
     stmt(env.DB,`SELECT (${g.sql}) AS allowed`,...g.params),
-    stmt(env.DB,`SELECT r.source_occurrence_id AS sourceOccurrenceId,r.disposition,r.target_id AS operationalRequestId,
+    stmt(env.DB,`WITH ranked AS(SELECT r.*,ROW_NUMBER() OVER(PARTITION BY COALESCE(r.target_id,json_extract(r.evidence_json,'$.record.request_id'),r.source_occurrence_id) ORDER BY a.completed_at DESC,a.adoption_id DESC) AS source_rank FROM legacy_operational_adoption_rows r JOIN legacy_operational_adoptions a ON a.adoption_id=r.adoption_id AND a.state='complete' WHERE r.kind='excusal') SELECT r.source_occurrence_id AS sourceOccurrenceId,r.disposition,r.target_id AS operationalRequestId,
       json_extract(r.evidence_json,'$.record.request_id') AS sourceRequestId,json_extract(r.evidence_json,'$.record.status') AS sourceStatus,
       json_extract(r.evidence_json,'$.record.event') AS eventLabel,json_extract(r.evidence_json,'$.record.submittedAt') AS submittedAt,
       json_extract(r.evidence_json,'$.record.last_name') AS lastName,json_extract(r.evidence_json,'$.record.first_name') AS firstName,
@@ -79,8 +80,7 @@ export async function listLegacyRequestHistory(env:Env,input:unknown):Promise<un
       json_extract(r.evidence_json,'$.record.requested_outcome') AS requestedOutcome,json_extract(r.evidence_json,'$.record.reason') AS reason,
       json_extract(r.evidence_json,'$.personId') AS subjectPersonId,json_extract(r.evidence_json,'$.retirement.reason') AS retirementReason,
       json_extract(r.evidence_json,'$.issues') AS issuesJson
-      FROM legacy_operational_adoption_rows r JOIN legacy_operational_adoptions a ON a.adoption_id=r.adoption_id AND a.state='complete'
-      WHERE r.kind='excusal' AND (${g.sql}) ORDER BY r.source_occurrence_id LIMIT 1501`,...g.params),
+      FROM ranked r WHERE r.source_rank=1 AND (${g.sql}) ORDER BY r.source_occurrence_id LIMIT 1501`,...g.params),
   ]);
   if(results[0].results[0]?.allowed!==1)fail(403,'NOT_AUTHORIZED');if(results[1].results.length>1500)fail(409,'LEGACY_HISTORY_CAPACITY');
   const rows=results[1].results.map(({issuesJson,...row})=>({...row,issues:JSON.parse(String(issuesJson)),historicalActorVerified:false}));

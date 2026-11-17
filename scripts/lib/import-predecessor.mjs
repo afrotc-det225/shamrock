@@ -1,0 +1,38 @@
+/** Explicit adapter for the retained pre-SHAMROCK Attendance workbook; raw capture is never rewritten. */
+import {importDigest} from './import-capture.mjs';
+import {importCellValue,normalizeLegacyDate} from './import-parity.mjs';
+const check=(ok,code)=>{if(!ok)throw Error(code);},norm=v=>String(v??'').trim().toLowerCase();
+const stable=(kind,value)=>`${kind}:legacy:${importDigest(value).slice(0,32)}`;
+const occurrence=(r,s,rowIndex)=>`occ_${importDigest({resourceKey:r.key,providerId:r.providerId,sheetId:s.metadata.properties.sheetId,type:'sheet-row',rowIndex})}`;
+const value=cell=>importCellValue(cell),text=cell=>String(value(cell)??'').trim();
+/** Recognizes this retained formula exactly; no guessed mapping to current attendance credit. */
+export function comparePredecessorCredit(codes,formula,stored){
+ const f=String(formula??'').replace(/\s/g,''),arrays=[...f.matchAll(/\{((?:"[A-Z/*]+",?)+)\}/g)].map(m=>[...m[1].matchAll(/"([A-Z/*]+)"/g)].map(x=>x[1]));
+ const total=['P*','E','ES*','ER*','ED*','T*','UR*','U','MU*','MRS*'],credit=['P*','E','ES*','ER*','ED*','T*','MU*','MRS*'];
+ const range=/^=ARRAYFORMULA\(BYROW\(([A-Z]{1,3})2:INDEX\(([A-Z]{1,3}):\2,MATCH\(2,1\/\(A:A<>""\)\)\),/.exec(f);
+ const count=patterns=>f.includes('COUNTIFS(')?`SUM(COUNTIFS(${range?.[1]}$1:${range?.[2]}$1,"*LLAB*",r,{"${patterns.join('","')}"}))`:`SUM(COUNTIF(r,{"${patterns.join('","')}"}))`;
+ const exact=range?`=ARRAYFORMULA(BYROW(${range[1]}2:INDEX(${range[2]}:${range[2]},MATCH(2,1/(A:A<>""))),LAMBDA(r,IF(${count(total)}=0,1,${count(credit)}/${count(total)}))))`:null;
+ if(f!==exact||arrays.length!==3||JSON.stringify(arrays)!==JSON.stringify([total,credit,total]))return {policy:'unavailable',stored,calculated:null,matches:null};
+ const matches=(code,patterns)=>patterns.some(p=>p.endsWith('*')?code.startsWith(p.slice(0,-1)):code===p);let numerator=0,denominator=0;
+ for(const raw of codes){const code=String(raw??'').toUpperCase();if(matches(code,credit))numerator++;if(matches(code,total))denominator++;}
+ const calculated=denominator?numerator/denominator:1;return {policy:'predecessor-fall-2025-retained-formula',creditPatterns:credit,totalPatterns:total,zeroDenominatorResult:1,numerator,denominator,stored,calculated,matches:typeof stored==='number'&&Math.abs(stored-calculated)<1e-9};
+}
+export function extractPredecessorAttendance(snapshot,{resourceKey,sheetId,periodLabel,currentPeople=[]}){
+ check(snapshot.consistent===true&&/^(Fall|Spring|Summer) 20\d{2}$/.test(periodLabel),'PREDECESSOR_CONTEXT');
+ const resource=snapshot.resources.find(r=>r.key===resourceKey&&r.kind==='workbook'),sheet=resource?.sheets.find(s=>s.metadata.properties.sheetId===sheetId);check(sheet,'PREDECESSOR_SOURCE');
+ const headers=sheet.rows[0].map(text),expected=['Year','Last Name','First Name','University Email Address','Flight','Total','LLAB'];check(JSON.stringify(headers.slice(0,7))===JSON.stringify(expected)&&headers.slice(7).every(h=>/^TW-\d+(?:\.\d+)? (Mando|Secondary|LLAB)$/.test(h)),'PREDECESSOR_HEADERS');
+ const people=new Map();for(const p of currentPeople){const email=norm(p.email??p.profile?.email);if(email){const items=people.get(email)??[];items.push(p);people.set(email,items);}}
+ const directories=[];for(const r of snapshot.resources.filter(r=>r.kind==='workbook'))for(const s of r.sheets){const headerIndex=s.rows.findIndex(row=>['Last Name','First Name','University Email Address','Six Digit CIP Code'].every(h=>row.map(text).includes(h)));if(headerIndex<0)continue;const h=s.rows[headerIndex].map(text);for(let i=headerIndex+1;i<s.rows.length;i++){const cells=s.rows[i],get=name=>value(cells[h.indexOf(name)]),last=get('Last Name'),first=get('First Name');if(!last&&!first)continue;directories.push({email:norm(get('University Email Address')),occurrenceId:occurrence(r,s,i),lastName:String(last??''),firstName:String(first??''),asYear:String(get('Year')??''),flight:String(get('Flight')??''),squadron:String(get('Squadron')??''),status:String(get('Flight Path Status')??''),dateOfBirth:normalizeLegacyDate(cells[h.indexOf('DOB')],{dateOnly:true})});}}
+ const periodId=stable('snapshot-period',[resource.key,periodLabel]),columns=headers.slice(7).map((header,index)=>({columnIndex:index+7,header,snapshotEventId:stable('snapshot-event',[resource.key,sheetId,index+7]),eventId:null}));
+ const overallFormula=sheet.rows[1]?.[5]?.userEnteredValue?.formulaValue??null,llabFormula=sheet.rows[1]?.[6]?.userEnteredValue?.formulaValue??null;
+ const sourceRoster=[],rows=[],issues=[];for(let i=1;i<sheet.rows.length;i++){const cells=sheet.rows[i],last=text(cells[1]),first=text(cells[2]),email=norm(value(cells[3]));if(!last&&!first)continue;
+   const name=[norm(last),norm(first)],anchors=people.get(email)??[],matching=anchors.filter(p=>JSON.stringify([norm(p.last_name??p.profile?.lastName),norm(p.first_name??p.profile?.firstName)])===JSON.stringify(name));
+   const directory=directories.filter(d=>d.email===email&&JSON.stringify([norm(d.lastName),norm(d.firstName)])===JSON.stringify(name)),validEmail=/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email),personId=validEmail&&anchors.length<=1&&(anchors.length===0||matching.length===1)?matching[0]?.person_id??matching[0]?.personId??stable('historical-person',email):null;
+   const entry={occurrenceId:occurrence(resource,sheet,i),personId,personEvidence:personId?{method:'retained-attendance-email-and-name-anchor',anchorKind:matching.length?'unique-current-email':'historical-email-anchor',directoryOccurrenceId:directory.length===1?directory[0].occurrenceId:null}:null,periodId,identityLabels:[...name,norm(value(cells[0])),norm(value(cells[4])),''],events:columns.map(c=>({...c,code:value(cells[c.columnIndex])||null})),historyCompleteness:'matrix-snapshot-only',importAs:'legacy-effective-cell-snapshot',eligiblePersonIds:null,overall:value(cells[5]),llab:value(cells[6])};
+   entry.credit={overall:comparePredecessorCredit(entry.events.map(e=>e.code),overallFormula,entry.overall),llab:comparePredecessorCredit(entry.events.filter(e=>/LLAB/.test(e.header)).map(e=>e.code),llabFormula,entry.llab)};
+   entry.formulaCoverage={overall:{startColumnIndex:7,endColumnIndex:headers.length},llab:{startColumnIndex:7,endColumnIndex:headers.length},excludedEventColumns:[]};entry.creditFormulaEvidence={overall:overallFormula,llab:llabFormula,arrayAnchorRowIndex:1};rows.push(entry);
+   if(!personId)issues.push({occurrenceId:entry.occurrenceId,code:'predecessor-email-identity-unresolved'});
+   sourceRoster.push({personId,directoryOccurrenceId:directory.length===1?directory[0].occurrenceId:entry.occurrenceId,profile:{last_name:last,first_name:first,as_year:value(cells[0]),flight:value(cells[4]),squadron:directory.length===1?directory[0].squadron:'',flight_path_status:directory.length===1?directory[0].status:''},dateOfBirth:directory.length===1?directory[0].dateOfBirth:null,identityEvidence:'retained-attendance-email-and-name-anchor',eventEligibility:'not-reconstructable-from-term-roster'});
+ }
+ check(rows.length>0&&rows.length<=500,'PREDECESSOR_ROWS');return {matrix:{resourceKey,sheetId,sourceTitle:sheet.metadata.properties.title,periodId,periodLabel,termCandidateId:stable('term',periodLabel),isCurrent:false,authority:'retained-source-copy',companionDirectoryFound:directories.length>0,sourceFormat:'predecessor-human-headers-v1',sourceIdentityColumns:[1,2,0,4,null],dataStartRowIndex:1,sourceRoster,columns,rows},issues,summary:{rows:rows.length,resolved:rows.filter(r=>r.personId).length,verifiedCredit:rows.filter(r=>r.credit.overall.matches===true&&r.credit.llab.matches===true).length,changedCredit:rows.filter(r=>r.credit.overall.matches===false||r.credit.llab.matches===false).length,directoryRows:directories.length}};
+}

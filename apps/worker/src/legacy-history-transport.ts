@@ -1,5 +1,6 @@
+import { legacySourceLabelSql } from './legacy-history-source.js';
 import { effectiveAdminGrants } from './permission-grants.js';
-import { buildLegacyHistoryReport, LegacyHistoryError, type LegacyHistoryInput } from '../../../packages/domain/src/legacy-history.js';
+import { buildLegacyHistoryReport, LegacyHistoryError, legacySourceDataStartRow, type LegacyHistoryInput } from '../../../packages/domain/src/legacy-history.js';
 import { HISTORY_PAGE_VERSION,type HistoryPage,type HistoryPageBinding,type HistoryRowsPage } from '../../../packages/domain/src/legacy-history-transport.js';
 import { HttpError } from './http-error.js';
 interface Env {DB:D1Database;ENVIRONMENT:string;GENERATION:string}
@@ -18,7 +19,7 @@ export async function legacyHistoryPage(env:Env,input:unknown):Promise<HistoryPa
   const statements=[stmt(env.DB,`SELECT (${guard}) AS allowed`,...auth),stmt(env.DB,`SELECT m.matrix_snapshot_id AS snapshotId,i.snapshot_sha256 AS sourceSnapshotSha256,i.completed_at AS importedAt,
     CASE WHEN length(CAST(m.metadata_json AS BLOB))<=64000 THEN m.metadata_json END AS metadata,
     json_array_length(m.roster_json) AS rosterCount,(SELECT COUNT(*) FROM legacy_matrix_snapshot_rows r WHERE r.matrix_snapshot_id=m.matrix_snapshot_id) AS rowCount ${source}`,String(r.snapshotId))];
-  const label=(index:number)=>`substr(CAST(COALESCE(json_extract(o.raw_json,'$[${index}].effectiveValue.stringValue'),json_extract(o.raw_json,'$[${index}].effectiveValue.numberValue'),json_extract(o.raw_json,'$[${index}].userEnteredValue.stringValue'),json_extract(o.raw_json,'$[${index}].userEnteredValue.numberValue'),'') AS TEXT),1,513)`;
+  const label=legacySourceLabelSql;
   // The coherent metadata row already supplies the total count; no extra lookahead
   // payload is needed. Bound the database response as well as the calculated page.
   if(r.section==='rows')statements.push(stmt(env.DB,`SELECT r.source_occurrence_id AS rowId,r.person_id AS personId,CASE WHEN length(CAST(r.payload_json AS BLOB))<=128000 THEN r.payload_json END AS payload,CAST(json_extract(o.locator_json,'$.rowIndex') AS INTEGER) AS sourceRowIndex,json_array(${[0,1,2,3,4].map(label).join(',')}) AS labels FROM legacy_matrix_snapshot_rows r JOIN legacy_matrix_snapshots m ON m.matrix_snapshot_id=r.matrix_snapshot_id JOIN legacy_source_occurrences o ON o.import_run_id=m.import_run_id AND o.occurrence_id=r.source_occurrence_id WHERE r.matrix_snapshot_id=? ORDER BY r.source_occurrence_id
@@ -41,7 +42,7 @@ export async function legacyHistoryPage(env:Env,input:unknown):Promise<HistoryPa
     // Validate shared metadata and construct report columns once for this bounded
     // page. Keep each row's original source position and only its own diagnostics.
     const report=buildLegacyHistoryReport({...base,rows:values.map(value=>{
-      if(typeof value.payload!=='string')fail(409,'LEGACY_HISTORY_CAPACITY');const row=JSON.parse(String(value.payload));if(row.occurrenceId!==value.rowId||row.personId!==value.personId||!Number.isSafeInteger(value.sourceRowIndex)||Number(value.sourceRowIndex)<2)throw new LegacyHistoryError('INVALID_LEGACY_HISTORY');
+      if(typeof value.payload!=='string')fail(409,'LEGACY_HISTORY_CAPACITY');const row=JSON.parse(String(value.payload));if(row.occurrenceId!==value.rowId||row.personId!==value.personId||!Number.isSafeInteger(value.sourceRowIndex)||Number(value.sourceRowIndex)<legacySourceDataStartRow(base.metadata))throw new LegacyHistoryError('INVALID_LEGACY_HISTORY');
       return {row,sourceLabels:JSON.parse(String(value.labels)).map(String)};
     })});
     const diagnostics=new Map(report.rows.map(row=>[row.rowId,[] as typeof report.diagnostics]));

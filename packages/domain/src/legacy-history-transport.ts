@@ -15,6 +15,6 @@ export function assembleLegacyHistoryPages(manifest:HistoryPageManifest,pages:(H
   const raw:HistoryRowsPage['rows']=[],roster:LegacyHistoryReport['sourceRoster']=[];let i=0;
   for(const section of ['roster','rows'] as const){const count=section==='rows'?manifest.rowCount:manifest.rosterCount;let offset=0;do{const page=pages[i++];check(bound(page)&&page.section===section&&page.offset===offset&&Array.isArray(page.rows)&&page.rows.length<=64&&offset+page.rows.length<=count);offset+=page.rows.length;check(page.rows.length>0||count===0);check(page.nextOffset===(offset<count?offset:null));if(page.section==='rows')raw.push(...page.rows);else roster.push(...page.rows);}while(offset<count);}
   check(i===pages.length&&new Set(raw.map(r=>r.row.rowId)).size===raw.length&&new Set(raw.map(r=>r.sourceRowIndex)).size===raw.length&&new Set(roster.map(r=>r.directoryOccurrenceId)).size===roster.length);
-  check(raw.every(r=>Number.isSafeInteger(r.sourceRowIndex)&&r.sourceRowIndex>=2));raw.sort((a,b)=>a.sourceRowIndex-b.sourceRowIndex||(a.row.rowId<b.row.rowId?-1:1));
+  const firstRow=manifest.report.sourceDataStartRowIndex??2;check(firstRow===1||firstRow===2);check(raw.every(r=>Number.isSafeInteger(r.sourceRowIndex)&&r.sourceRowIndex>=firstRow));raw.sort((a,b)=>a.sourceRowIndex-b.sourceRowIndex||(a.row.rowId<b.row.rowId?-1:1));
   const rows=raw.map(r=>r.row);return {...manifest.report,rows,sourceRoster:roster,summary:summarizeLegacyHistoryRows(rows),diagnostics:raw.flatMap(r=>r.diagnostics)};
 }

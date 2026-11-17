@@ -108,3 +108,11 @@ test('consumer refuses cross-bin contributor and weighted-mean inconsistency', (
   const mean = structuredClone(summary); mean.overall.percentage = .2;
   assert.throws(() => validateRetainedHistorySummary(mean, selection));
 });
+
+test('predecessor summary reads its explicit AS-year column and accepts the original first data row',async t=>{
+ const f=await database(t),metadata={periodLabel:selection.expectedPeriodLabel,isCurrent:false,columns:[],sourceFormat:'predecessor-human-headers-v1',sourceIdentityColumns:[1,2,0,4,null],dataStartRowIndex:1};
+ await f.db.prepare('UPDATE legacy_matrix_snapshots SET metadata_json=?').bind(JSON.stringify(metadata)).run();
+ for(const r of (await f.db.prepare('SELECT occurrence_id,raw_json,locator_json FROM legacy_source_occurrences').all()).results){const raw=JSON.parse(r.raw_json),converted=[raw[2],raw[0],raw[1],{effectiveValue:{stringValue:'typed@example.invalid'}},raw[3]],locator=JSON.parse(r.locator_json);locator.rowIndex--;await f.db.prepare('UPDATE legacy_source_occurrences SET raw_json=?,locator_json=? WHERE occurrence_id=?').bind(JSON.stringify(converted),JSON.stringify(locator),r.occurrence_id).run();}
+ const result=await retainedHistorySummary(f.env,f.request);assert.equal(result.summaries[0].attendanceByYear.find(r=>r.asYear==='AS100').rows,2);assert.ok(!JSON.stringify(result).includes('typed@example.invalid'));
+ metadata.sourceIdentityColumns=[1,2,3,4,null];await f.db.prepare('UPDATE legacy_matrix_snapshots SET metadata_json=?').bind(JSON.stringify(metadata)).run();await assert.rejects(retainedHistorySummary(f.env,f.request),e=>e.code==='INVALID_LEGACY_HISTORY');
+});

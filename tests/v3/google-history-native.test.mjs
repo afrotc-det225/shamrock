@@ -126,3 +126,9 @@ test('native-only host supports separate private historical publication without 
  const f=fixture(),host=JSON.parse(f.properties.SHAMROCK_V3_HOST_CONFIG);delete host.journal;delete host.attendance;host.mode='native-only';f.properties.SHAMROCK_V3_HOST_CONFIG=JSON.stringify(host);
  f.enable();assert.equal(f.finish().completed,1);assert.ok(f.sheets.some(sheet=>sheet.tables.length===1));
 });
+
+test('an explicit predecessor first data row publishes without changing native output header positions',()=>{
+ const report=source(1,'predecessor-source'),originalPage=report.page;report.manifest.report.sourceDataStartRowIndex=1;report.page=offset=>{const page=originalPage(offset);return {...page,rows:page.rows.map(entry=>({...entry,sourceRowIndex:1}))};};
+ const f=fixture({reports:[report]});f.enable();assert.equal(f.finish().completed,1);const sheet=f.sheets.find(s=>s.properties.sheetId!==0);assert.equal(sheet.cells[2][0].userEnteredValue.stringValue,'=literal source name');
+ const invalid=source(1,'missing-layout'),old=invalid.page;invalid.page=offset=>{const p=old(offset);return {...p,rows:p.rows.map(r=>({...r,sourceRowIndex:1}))};};const g=fixture({reports:[invalid]});g.enable();assert.throws(()=>g.runtime.run(),/row page/);
+});

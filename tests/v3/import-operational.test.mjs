@@ -106,3 +106,12 @@ test('migration preserves genuine request actors, versions, decisions and pendin
 test('old denied request state cannot replay a closeout change over saved baseline A',()=>{
  const cell={effectiveCode:'A',needsReview:false,eligible:true};assert.equal(closeoutCode({cell,latestAttendanceOrder:0,requests:[{status:'Denied',order:0,legacyStateOnly:true}]}),null);assert.equal(closeoutCode({cell:{...cell,effectiveCode:'D'},latestAttendanceOrder:0,requests:[]}), 'U');
 });
+
+test('request history presents the latest adopted source while preserving previous evidence',async t=>{
+ const f=await database(t);await apply(f.db,f.plan.load);await apply(f.db,f.plan.finish);
+ const old=await f.db.prepare('SELECT * FROM legacy_operational_adoptions WHERE adoption_id=?').bind(f.plan.adoptionId).first(),rows=(await f.db.prepare("SELECT * FROM legacy_operational_adoption_rows WHERE adoption_id=? AND kind='excusal'").bind(f.plan.adoptionId).all()).results;
+ const later={...old,adoption_id:'fictional-later-adoption',state:'complete',expected_rows:rows.length,expected_contacts:0,completed_at:'2026-11-07T12:00:00.000Z'},columns=Object.keys(later);
+ await f.db.prepare(`INSERT INTO legacy_operational_adoptions(${columns.join(',')}) VALUES(${columns.map(()=>'?').join(',')})`).bind(...columns.map(k=>later[k])).run();
+ for(const row of rows){const evidence=JSON.parse(row.evidence_json);evidence.record.reason='Newer retained source reason';const next={...row,adoption_id:later.adoption_id,evidence_json:JSON.stringify(evidence)},keys=Object.keys(next);await f.db.prepare(`INSERT INTO legacy_operational_adoption_rows(${keys.join(',')}) VALUES(${keys.map(()=>'?').join(',')})`).bind(...keys.map(k=>next[k])).run();}
+ const result=await listLegacyRequestHistory(f.env,{environment:'staging',generation:1,principalId:'reader'});assert.equal(result.rows.length,rows.length);assert.ok(result.rows.every(r=>r.reason==='Newer retained source reason'));assert.equal((await f.db.prepare("SELECT COUNT(*) AS n FROM legacy_operational_adoption_rows WHERE kind='excusal'").first()).n,rows.length*2);
+});
