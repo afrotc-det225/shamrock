@@ -4,13 +4,15 @@ import { archivedInputEntry, archivedInputReceipt, compactInputJournal } from '.
 import { createPermissionContext } from './permissions-context.js';
 import { createNativePermissionRuntime } from './permissions-host.js';
 import { assertPermissionFenceClear } from './permissions-refresh.js';
+import { INPUT_REORDER_PROPERTY, runPausedNativeReorder, type NativeInputSetupReceipt, type NativeReorderRequest } from './frontend-reorder-native.js';
+import type { FrontendTableRead } from './frontend-publication.js';
 /** Optional native edit and verified-email confirmation host. No IO during module loading. */
 import {AdapterError,type Signer} from './index.js';
 import {createGoogleSigner,createGoogleTransport} from './apps-script.js';
 import {createPagedFrontendTransport} from './frontend-page-client.js';
 import {HOST_PROPERTIES,parseStagingHostConfig} from './staging-host.js';
 import {CONFIG_FILE_ID_PROPERTY} from './staging-config.js';
-import {createNativeFrontendRuntime,type NativeFrontendInputSession,type NativeFrontendServices} from './frontend-runtime.js';
+import {FRONTEND_PROPERTIES,createNativeFrontendRuntime,type NativeFrontendInputSession,type NativeFrontendServices} from './frontend-runtime.js';
 import {assertImmutableInputSlots,bindImmutableInputSlots,captureFrontendEdit,commandsForCapturedEdit,inputCanonical,nativeInputValue,type InputPrincipal,type InputSurfaceBinding,type NativeEditEvidence,type CapturedFrontendEdit} from './frontend-input.js';
 import {deliverFrontendInputs,inputSurfaceState,retainCapturedInput,supersedeUnattemptedInput,type FrontendInputJournal,type InputJournalPorts,type InputJournalEntry} from './frontend-input-journal.js';
 
@@ -22,7 +24,7 @@ export interface NativeInputConfig {
   /** Kept outside confirmation binding so responder review does not rebind physical slots. */
   confirmationResponderAccess?:NativeResponderAccess;
   journalFileId:string;principals:InputPrincipal[];surfaces:InputSurfaceBinding[];
-  controlRequest?:{requestId:string;sequence:number;action:'setup'|'resume'|'pause';frontendSha256:string;journalSha256:string};
+  controlRequest?:{requestId:string;sequence:number;action:'setup'|'resume'|'pause';frontendSha256:string;journalSha256:string}|NativeReorderRequest;
   providerReview?:{reviewId:string;bindingsSha256:string;filterViewCoordinatesVerified:true;protectedSortDenied:true};
   confirmation:{formId:string;expectedTitle:string;allowedEditors:string[];reference:{itemId:string;questionId:string};summary:{itemId:string;questionId:string};action:{itemId:string;questionId:string}};
 }
@@ -96,7 +98,7 @@ export function createNativeFrontendInput(services:NativeInputServices,frontend=
       }
       return read;
     }
-    function setupReceipt(){const setup=JSON.parse(properties.getProperty(INPUT_PROPERTIES.setup)??'null');if(!setup||setup.fingerprint!==fingerprint)fail('input_setup','Verify the native input triggers before processing edits.');return setup;}
+    function setupReceipt(){if(properties.getProperty(INPUT_REORDER_PROPERTY)!==null)fail('input_reorder','Finish the retained paused row maintenance before processing edits.');const setup=JSON.parse(properties.getProperty(INPUT_PROPERTIES.setup)??'null');if(!setup||setup.fingerprint!==fingerprint)fail('input_setup','Verify the native input triggers before processing edits.');return setup;}
     return{host,owner,config,signer,fingerprint,enabled,request,journal,confirmationRead,setupReceipt,retention};
   }
   function pause(){properties.setProperty(INPUT_PROPERTIES.pause,'true');if(properties.getProperty(INPUT_PROPERTIES.pause)!=='true')fail('input_pause','The input pause did not persist.');return{status:'paused'};}
@@ -143,21 +145,78 @@ export function createNativeFrontendInput(services:NativeInputServices,frontend=
   }
   function sessionRun(operation:(ctx:NonNullable<ReturnType<typeof context>>,session:NativeFrontendInputSession)=>unknown){const ctx=context();if(!ctx||!ctx.enabled())return{status:'paused'};assertPermissionFenceClear(properties);
     return frontend.inputSession(session=>{if(!ctx.enabled()||services.scheduled&&!services.scheduled.availability(session.config.principalId).acceptingCommands)return{status:'paused'};checkSession(ctx,session);ctx.setupReceipt();return operation(ctx,session);});}
+  function reorder(ctx:NonNullable<ReturnType<typeof context>>,session:NativeFrontendInputSession,request:NativeReorderRequest){
+    const books=[...new Set(ctx.config.surfaces.map(s=>s.spreadsheetId))];
+    const reserved=[ctx.config.journalFileId,ctx.config.confirmation.formId,session.config.stateFileId,...books,properties.getProperty(CONFIG_FILE_ID_PROPERTY),ctx.config.retention?.indexFileId,ctx.config.retention?.archiveFolderId];
+    if(!/^[A-Za-z0-9_-]{1,512}$/.test(request.recoveryFileId)||reserved.includes(request.recoveryFileId))fail('input_reorder','Use a separate owner-private recovery JSON file.');
+    let previous:string|undefined;
+    const readSetup=()=>{const raw=properties.getProperty(INPUT_PROPERTIES.setup);return raw?JSON.parse(raw) as NativeInputSetupReceipt:undefined;};
+    const writeProperty=(key:string,value:string|null)=>{if(value===null)properties.deleteProperty(key);else properties.setProperty(key,value);if(properties.getProperty(key)!==value)fail('input_reorder','A native maintenance fence or receipt did not persist.');};
+    const edits=():{id:string;bookId:string}[]=>services.ScriptApp.getProjectTriggers().filter((t:any)=>t.getHandlerFunction()===INPUT_HANDLERS.edit).map((t:any)=>{
+      if(t.getEventType()!==services.ScriptApp.EventType.ON_EDIT||t.getTriggerSource()!==services.ScriptApp.TriggerSource.SPREADSHEETS)fail('input_reorder','Unexpected native edit trigger type.');
+      return{id:String(t.getUniqueId()),bookId:String(t.getTriggerSourceId())};
+    });
+    const column=(index:number)=>{let result='';for(let n=index+1;n>0;n=Math.floor((n-1)/26))result=String.fromCharCode(65+(n-1)%26)+result;return result;};
+    function read(surface:'directory'|'leadership'|'attendance'|'blue'|'gold'):FrontendTableRead{
+      if(surface!=='directory'&&surface!=='leadership')return session.read(surface);
+      const binding=ctx.config.surfaces.find(s=>s.surface===surface)!,base=session.read(surface);
+      const url=`https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(binding.spreadsheetId)}`;
+      const metadata=api(`${url}?fields=${encodeURIComponent('spreadsheetId,namedRanges,sheets(properties,tables,filterViews,merges,charts,conditionalFormats,bandedRanges)')}`);
+      const sheet=metadata.sheets?.find((s:any)=>s.properties?.sheetId===binding.sheetId),table=sheet?.tables?.find((t:any)=>t.tableId===binding.tableId);
+      if(!sheet||sheet.tables?.length!==1||!table||table.range.startRowIndex!==1||(table.range.startColumnIndex??0)!==0||table.range.endRowIndex!==base.rows.length+2
+        ||table.range.endColumnIndex!==base.headers.length||!Number.isSafeInteger(sheet.properties.gridProperties?.columnCount)||sheet.properties.gridProperties.columnCount>512)fail('input_reorder','The exact bounded native Table changed.');
+      const width=sheet.properties.gridProperties.columnCount,range=`'${String(sheet.properties.title).replace(/'/g,"''")}'!A1:${column(width-1)}${table.range.endRowIndex}`;
+      const cells=api(`${url}?ranges=${encodeURIComponent(range)}&includeGridData=true&fields=${encodeURIComponent('sheets(properties(sheetId),data(startRow,startColumn,rowData(values(userEnteredValue,userEnteredFormat,note,dataValidation,textFormatRuns,chipRuns)),rowMetadata(pixelSize,hiddenByUser),columnMetadata(pixelSize,hiddenByUser)))')}`);
+      const data=cells.sheets?.find((s:any)=>s.properties?.sheetId===binding.sheetId)?.data?.[0];
+      if(!data||(data.startRow??0)!==0||(data.startColumn??0)!==0)fail('input_reorder','Native maintenance cell readback has invalid bounds.');
+      const row=(index:number)=>Array.from({length:width},(_,c)=>data.rowData?.[index]?.values?.[c]??{});
+      const rows=Array.from({length:table.range.endRowIndex-2},(_,index)=>{const full=row(index+2),values=full.slice(0,base.headers.length);
+        // Private evidence only. These annotations are never sent as CellData writes.
+        values[0]={...values[0],maintenanceRowMetadata:data.rowMetadata?.[index+2]??{},maintenanceOutsideCells:full.slice(base.headers.length)};return values;});
+      return{...base,rows,headers:row(0).slice(0,base.headers.length).map((c:any)=>c.userEnteredValue?.stringValue??''),labels:row(1).slice(0,base.headers.length).map((c:any)=>c.userEnteredValue?.stringValue??''),
+        maintenanceMetadata:{sheet,namedRanges:metadata.namedRanges??[],headers:[row(0),row(1)],headerRowMetadata:[data.rowMetadata?.[0]??{},data.rowMetadata?.[1]??{}],columnMetadata:data.columnMetadata??[]}} as FrontendTableRead;
+    }
+    return runPausedNativeReorder({generation:ctx.config.generation,fingerprint:ctx.fingerprint,mainId:session.config.main.spreadsheetId,bookIds:books,confirmationId:ctx.config.confirmation.formId,
+      state:session.state,journal:ctx.journal().load(),sha256:text=>ctx.signer.sha256(text),
+      assertPaused(){
+        if(ctx.config.enabled!==false||session.config.enabled!==false||properties.getProperty(INPUT_PROPERTIES.pause)!=='true'||properties.getProperty(FRONTEND_PROPERTIES.pause)!=='true')fail('input_reorder','Disable both private configuration gates and pause native input and publication before row maintenance.');
+        const result=ctx.request('/v1/admin/effects/availability',{environment:'staging',generation:ctx.config.generation,principalId:session.config.principalId});
+        if(result.status!==200||!result.body||Object.keys(result.body).sort().join(',')!=='acceptingCommands,formsLeased,formsPending,frontendLeased,frontendPending'||Object.values(result.body).some(v=>typeof v!=='boolean')
+          ||result.body.acceptingCommands!==false||result.body.frontendLeased!==false||result.body.formsLeased!==false)fail('input_reorder','Verify the signed backend is paused with no leased publications.');
+      },fence:()=>session.fence(),read,saveState:value=>session.save(value),
+      recovery:{load(){const value=privateRead(request.recoveryFileId,ctx.owner);previous=inputCanonical(value);return value;},save(value){
+        const text=inputCanonical(value);if(bytes(text)>5*1024*1024||previous===undefined||inputCanonical(privateRead(request.recoveryFileId,ctx.owner))!==previous)fail('input_reorder','The bounded private recovery checkpoint changed outside the held lock.');
+        api(`https://www.googleapis.com/upload/drive/v3/files/${encodeURIComponent(request.recoveryFileId)}?uploadType=media&fields=id`,value,'patch');if(inputCanonical(privateRead(request.recoveryFileId,ctx.owner))!==text)fail('input_reorder','The private recovery checkpoint did not persist.');previous=text;
+      }},active:{read:()=>properties.getProperty(INPUT_REORDER_PROPERTY),write:value=>writeProperty(INPUT_REORDER_PROPERTY,value)},
+      setup:{read:readSetup,write:value=>writeProperty(INPUT_PROPERTIES.setup,value?inputCanonical(value):null)},listEdits:edits,
+      deleteEdit(id){const matches=services.ScriptApp.getProjectTriggers().filter((t:any)=>t.getHandlerFunction()===INPUT_HANDLERS.edit&&t.getUniqueId()===id);if(matches.length!==1)fail('input_reorder','The exact native edit trigger to retire is unavailable.');services.ScriptApp.deleteTrigger(matches[0]);if(edits().some(t=>t.id===id))fail('input_reorder','The retired native edit trigger is still installed.');},
+      createEdit(bookId){if(!books.includes(bookId))fail('input_reorder','Unknown native input workbook.');return String(services.ScriptApp.newTrigger(INPUT_HANDLERS.edit).forSpreadsheet(bookId).onEdit().create().getUniqueId());},
+      assertConfirmation(receipt){const form=ctx.confirmationRead(),triggers=services.ScriptApp.getProjectTriggers().filter((t:any)=>t.getHandlerFunction()===INPUT_HANDLERS.confirmation);
+        if(triggers.length!==1||triggers[0].getTriggerSourceId()!==ctx.config.confirmation.formId||triggers[0].getUniqueId()!==receipt.ids[ctx.config.confirmation.formId]
+          ||triggers[0].getEventType()!==services.ScriptApp.EventType.ON_FORM_SUBMIT||triggers[0].getTriggerSource()!==services.ScriptApp.TriggerSource.FORMS
+          ||ctx.signer.sha256(inputCanonical({items:form.items,settings:form.settings}))!==receipt.confirmationShape)fail('input_reorder','The untouched confirmation Form or trigger changed.');
+      },writeRows(requests){if(requests.length)api(`https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(session.config.main.spreadsheetId)}:batchUpdate`,{requests});},
+    },request);
+  }
   return{
     applyControl(){const ctx=context(),request=ctx?.config.controlRequest;if(!ctx||!request)return{status:'none'};
-      if(!/^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/.test(request.requestId)||!Number.isSafeInteger(request.sequence)||request.sequence<1||!['setup','resume','pause'].includes(request.action)
-        ||![request.frontendSha256,request.journalSha256].every(h=>/^[a-f0-9]{64}$/.test(h))||Object.keys(request).sort().join(',')!=='action,frontendSha256,journalSha256,requestId,sequence')fail('input_control','Use an exact reviewed private input control request.');
+      const reordering=request.action==='reorder'||request.action==='continue-reorder';
+      if(!/^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/.test(request.requestId)||!Number.isSafeInteger(request.sequence)||request.sequence<1||!['setup','resume','pause','reorder','continue-reorder'].includes(request.action)
+        ||![request.frontendSha256,request.journalSha256,...(reordering?[(request as NativeReorderRequest).recoverySha256]:[])].every(h=>/^[a-f0-9]{64}$/.test(h))||Object.keys(request).sort().join(',')!==(reordering?'action,frontendSha256,journalSha256,recoveryFileId,recoverySha256,requestId,sequence':'action,frontendSha256,journalSha256,requestId,sequence'))fail('input_control','Use an exact reviewed private input control request.');
       const prior=properties.getProperty(INPUT_PROPERTIES.controlReceipt);if(prior===inputCanonical(request))return{status:'already-consumed'};
       if(prior){const p=JSON.parse(prior);if(p.sequence>=request.sequence||p.requestId===request.requestId)fail('input_control','A consumed input control request cannot be reused.');}
-      let consumed=false;frontend.inputSession(session=>{checkSession(ctx,session);
+      let consumed=false,reorderResult:ReturnType<typeof reorder>|undefined;frontend.inputSession(session=>{checkSession(ctx,session);
         if(ctx.signer.sha256(inputCanonical(session.state))!==request.frontendSha256||ctx.signer.sha256(inputCanonical(ctx.journal().load()))!==request.journalSha256)fail('input_control','The private input checkpoints changed after review.');
+        if(!reordering&&request.action!=='pause'&&properties.getProperty(INPUT_REORDER_PROPERTY)!==null)fail('input_reorder','Finish the retained physical maintenance before setup or resume.');
         pause();properties.setProperty(INPUT_PROPERTIES.controlReceipt,inputCanonical(request));if(properties.getProperty(INPUT_PROPERTIES.controlReceipt)!==inputCanonical(request))fail('input_control','Input control consumption did not persist.');consumed=true;
+        if(reordering)reorderResult=reorder(ctx,session,request as NativeReorderRequest);
       },{allowPaused:true});
       if(!consumed)return{status:'waiting-frontend'};
+      if(reorderResult)return reorderResult;
       if(request.action==='setup')return this.setup();if(request.action==='resume')return this.resume();return this.pause();
     },
     pause,
-    setup(){pause();work();const ctx=context();if(!ctx)fail('input_configuration','Configure the isolated input resources first.');let verified=false;frontend.inputSession(session=>{
+    setup(){if(properties.getProperty(INPUT_REORDER_PROPERTY)!==null)fail('input_reorder','Continue the retained physical maintenance before setup.');pause();work();const ctx=context();if(!ctx)fail('input_configuration','Configure the isolated input resources first.');let verified=false;frontend.inputSession(session=>{
         checkSession(ctx,session);
         if(ctx.config.surfaces.some(b=>inputSurfaceState(session.state,b.surface).drafts.length))fail('input_slots','Resolve all frozen frontend drafts before establishing input slots.');
         session.fence();try{

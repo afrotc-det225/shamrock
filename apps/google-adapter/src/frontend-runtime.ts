@@ -1,4 +1,5 @@
 import { createPermissionContext } from './permissions-context.js';
+import { INPUT_REORDER_PROPERTY } from './frontend-reorder-native.js';
 import { assertPermissionFenceClear, permissionPolicyAccess, PERMISSION_FENCE_PROPERTY } from './permissions-refresh.js';
 import { createNativePermissionApi, desiredPermissionMemberships } from './permissions-native.js';
 import type {ScheduledHints} from './scheduled-runtime.js';
@@ -675,6 +676,7 @@ export function createNativeFrontendRuntime(services: NativeFrontendServices,
   }
   function refresh(inputOperation?: (session: NativeFrontendInputSession) => unknown, allowPausedInput = false, permissionRepair = false) {
     const loaded = configuration();
+    if (!inputOperation && properties.getProperty(INPUT_REORDER_PROPERTY) !== null) return { status: 'maintenance-paused' as const };
     // Only explicit input setup/control may inspect a disabled publisher. Ordinary
     // refresh and edit delivery retain both independent publication gates.
     if (!loaded || !loaded.frontend.enabled && !(inputOperation && allowPausedInput)) return { status: 'disabled' as const };

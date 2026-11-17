@@ -248,6 +248,12 @@ test('native host is disabled without touching Google or requiring optional fron
   assert.deepEqual(native.refresh(), { status: 'disabled' }); assert.equal(calls, 0);
 });
 
+test('retained native row maintenance blocks ordinary publication without provider work or clearing pauses', () => {
+  const native = createNativeFrontendRuntime({ PropertiesService: { getScriptProperties: () => ({ getProperty: key => key === 'SHAMROCK_V3_INPUT_REORDER' ? 'retained' : null,
+    setProperty() { throw Error('must not change gates'); }, deleteProperty() { throw Error('must not clear gates'); } }) } });
+  assert.deepEqual(native.refresh(), { status: 'maintenance-paused' });
+});
+
 test('native pause never reports success when the property provider does not retain the override', () => {
   const native = createNativeFrontendRuntime({ PropertiesService: { getScriptProperties: () => ({ getProperty: () => null, setProperty() {}, deleteProperty() {} }) } });
   assert.throws(() => native.pause(), e => e.code === 'frontend_state');

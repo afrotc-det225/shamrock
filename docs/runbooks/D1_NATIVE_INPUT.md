@@ -1,10 +1,10 @@
 # Native spreadsheet input in staging
 
-The optional input runtime connects the existing Main Directory, Leadership and Attendance Tables and the Blue/Gold excusal decision Tables to validated D1 commands. It retains their native styling, validation and spreadsheet workflow. It changes only private checkpoints, installed staging triggers and input-cell notes; publication remains responsible for recorded business values. This implementation has local provider-port coverage. It does not establish live Google editor identity, FilterView coordinate behavior, complete feature parity or permission to change production.
+The optional input runtime connects the existing Main Directory, Leadership and Attendance Tables and the Blue/Gold excusal decision Tables to validated D1 commands. It retains their native styling, validation and spreadsheet workflow. Ordinary input changes private checkpoints, installed staging triggers and input-cell notes; publication remains responsible for recorded business values. A separate paused maintenance control can reorder whole Directory/Leadership rows with guarded physical rebinding. This implementation has local provider-port coverage. It does not establish live Google editor identity, FilterView coordinate behavior, complete feature parity or permission to change production.
 
 ## Edit evidence and stable targets
 
-Setup closes both workbooks with the publisher's exact native protection fence, compares every current Table value with its verified published baseline, and binds immutable physical headers and row keys in the private checkpoint. All published records must be present and no draft or active publication may remain. Setup never rearranges cells. The publisher thereafter appends identities and retains read-only tombstones; it cannot reuse a row or column for another identity. An existing completed publication marker is historical evidence, not an active lease.
+Setup closes both workbooks with the publisher's exact native protection fence, compares every current Table value with its verified published baseline, and binds immutable physical headers and row keys in the private checkpoint. All published records must be present and no draft or active publication may remain. Setup never rearranges cells. The publisher thereafter appends identities and retains read-only tombstones; it cannot reuse a row or column for another identity. Explicit paused maintenance below is the only supported physical reorder path. An existing completed publication marker is historical evidence, not an active lease.
 
 Google returns an empty native cell for a published empty string. Input setup and edit comparison treat those two blank representations alike while preserving the original baseline. Whitespace, nonblank values, formulas and native chips retain their distinct checks; this normalization does not discard an unsent change.
 
@@ -88,6 +88,93 @@ Explicit input setup/control may inspect a configured but disabled frontend unde
 Optional `providerReview` is `{ "reviewId": "PRIVATE_EVIDENCE_REFERENCE", "bindingsSha256": "SHA256_OF_CANONICAL_SURFACES", "filterViewCoordinatesVerified": true, "protectedSortDenied": true }`. Omit it until actual native tests pass. Ordinary direct dropdown editing remains the goal, not universal confirmation.
 
 Operator entry points are `shamrockV3NativeInputSetup`, `shamrockV3NativeInputResume`, `shamrockV3NativeInputPause`, `shamrockV3NativeInputFlush`, `shamrockV3NativeInputStatus`, `shamrockV3NativeInputReviewQueue`, and `shamrockV3NativeConfirmationReplay(responseId)`. The installed handlers are `shamrockV3NativeFrontendEdit` and `shamrockV3NativeFrontendConfirm`. The review queue requires an authenticated active user mapped to current Wing frontend authority. Global staging pause attempts this gate as well as existing gates. Config import pauses input and leaves the optional config file-owned.
+
+## Explicit paused Directory and Leadership reorder
+
+Normal publication retains physical slots even when a cadet's display order changes.
+An owner-reviewed `reorder` control can put existing Directory and Leadership rows
+in the supported seniority/name and Leadership role order. Attendance, Blue and
+Gold stay in their existing slots. This is a staging maintenance operation, not a
+cadet-facing sort action or a production cutover.
+
+Before proposing the control, verify both input and frontend private configs have
+`enabled:false`, both durable pause flags are true, D1 refuses commands and has no
+leased Forms/frontend publication, all five Tables have zero drafts, and the input
+journal has no held, unconfirmed, queued, rejected, conflicted or uncertain work.
+The host rechecks these conditions under the shared ScriptLock. A settled journal
+entry must be fully committed/applied or fully superseded/applied. Preserve the
+existing native setup receipt and three exact input triggers.
+
+Create a separate owner-only JSON recovery file containing exactly
+`{ "version": 1, "environment": "staging", "generation": 1, "status": "empty" }`,
+using the current generation. Keep it separate from configuration, journals,
+checkpoints, Forms, workbooks and retention storage. Submit a monotonically newer
+private input control:
+
+```json
+{
+  "requestId": "REVIEWED_ROW_MAINTENANCE",
+  "sequence": 2,
+  "action": "reorder",
+  "frontendSha256": "SHA256_OF_CANONICAL_CURRENT_FRONTEND_STATE",
+  "journalSha256": "SHA256_OF_CANONICAL_CURRENT_INPUT_JOURNAL",
+  "recoveryFileId": "PRIVATE_EMPTY_RECOVERY_FILE",
+  "recoverySha256": "SHA256_OF_CANONICAL_RECOVERY_FILE"
+}
+```
+
+The host closes and verifies both protection policies, compares native rows to
+their recorded values, and saves the reviewed cells/checkpoint hashes privately.
+It retains `SHAMROCK_V3_INPUT_REORDER`, invalidates the setup receipt, deletes both
+old native edit triggers and installs two fresh IDs. The confirmation Form,
+questions and trigger remain unchanged. The retained marker blocks ordinary
+publication and direct setup/resume until maintenance completes. A delayed event
+from either retired trigger fails before snapshot access, journal capture or
+command delivery after the new receipt is installed.
+
+Directory and Leadership move in one Main workbook batch using whole-row
+[`moveDimension`](https://developers.google.com/workspace/sheets/api/reference/rest/v4/spreadsheets/request#MoveDimensionRequest)
+requests wholly inside their Table bodies. No header, business value, validation
+rule or chip is reconstructed. The frozen readback includes public user-entered
+values, native chips, notes, formats, validation, text runs, row heights/visibility,
+cells outside each Table, header/column metadata, Table identities, filter views,
+merges, charts, conditional rules, banding and named ranges. Exact readback must
+match the reviewed row permutation; Attendance/Blue/Gold reads must be unchanged.
+Only Directory/Leadership `slots.keys` change in the frontend checkpoint. Keyed
+values, versions, command bindings, retired records, receipts and drafts are
+retained. Both workbooks finish under the exact closed policy, with new edit IDs
+in the setup receipt and all gates still paused/disabled.
+
+The provider must first pass a disposable native-Table rehearsal for these row
+movements, including colored chips and notes, varied row heights, filters and
+objects/format ranges. Local port tests do not prove Google accepts movement
+inside native Tables or preserves their complete presentation. An unexpected
+provider adjustment fails closed and requires review rather than weakening the
+readback comparison.
+
+If execution is interrupted, retain the consumed control receipt, recovery file,
+pause flags and maintenance marker. Read the current frontend/journal/recovery
+files and exact trigger inventory, then submit a new request ID and higher
+sequence with `action:"continue-reorder"`, the same recovery file, and current
+hashes. The original operation ID stays in the checkpoint. Recovery compares
+complete before/after states; it does not blindly replay a row move after a lost
+response. Partial/unexplained rows, changed metadata, changed journals, changed
+unrelated checkpoint fields or extra native edit triggers stop recovery. A sole
+fresh native edit trigger with the exact handler, source and event type can be
+recognized after interruption between creation and saving its ID. After final
+verification, the recovery file retains a `complete` receipt; it is not emptied.
+Direct setup cannot bypass an incomplete operation. Never delete the marker or
+rebind slots manually to make a failed operation appear complete.
+
+If failure occurred before the first recovery checkpoint was saved, the file is
+still exactly `empty`, the original setup/triggers remain intact and there is no
+maintenance marker. Recheck those facts and submit a fresh `reorder` request with
+a higher sequence, rather than treating an empty file as a recovery checkpoint.
+
+After completion, keep staging paused for review. A later explicit native setup
+may restore the reviewed operational field grants without reordering or rotating
+the fresh IDs; it still leaves input paused. Resume and Form publication remain
+separate controls.
 
 ## Capacity and release evidence
 
