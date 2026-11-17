@@ -127,3 +127,37 @@ test('operational CSV creation and interrupted bulk correction run through actua
  current=await captureOperationalSnapshot(identity,request);assert.equal(planBulkAttendance(current,{...context,batchId:'verified-no-op'},spec).changes.length,0);assert((await db.prepare("SELECT COUNT(*) n FROM admin_effects WHERE kind='frontend.refresh'").first()).n>=2);
  const revoked=planBulkAttendance(current,{...context,batchId:'revoked'}, {...spec,code:'T'});await db.prepare("DELETE FROM admin_grants WHERE capability='attendance.correct'").run();let rejected;const blocked=await executeOperationalPlan(revoked,{approvedHash:revoked.planHash,state:{load:()=>rejected,save:v=>rejected=copy(v)},request});assert.equal(blocked.status,'needs-review');assert.equal(rejected.entries[0].status,'rejected');assert.equal((await db.prepare('SELECT COUNT(*) n FROM attendance_corrections').first()).n,2);
 });
+
+import {FRONTEND_SECTIONS,FRONTEND_PAGE_VERSION} from '../../.build/v3/packages/domain/src/frontend-transport.js';
+function captureFixture(mutate=body=>body){
+ const source=snapshot();source.people[0].role='Flight Commander';source.leadership[0].active=false;
+ const contacts=[{...source.leadership[0],version:1},{...source.leadership[0],contactId:'linked',personId:'person-a',version:3,active:false,lastName:'Stale stored name',role:'Stale role',email:'stale@example.invalid'}].map(({contactVersion,profileVersion,publicationVersion,...c})=>c);
+ const people=source.people.map(p=>({...p,active:!['Inactive','Commissioned','Dropped'].includes(p.flightPathStatus)})),currentPeople=people.filter(p=>p.active),data={people:currentPeople.map(p=>({...p,virtualContactId:'cadet:'+createHash('sha256').update(p.personId).digest('hex')})),contacts:contacts.filter(c=>c.personId!==null),flights:source.flights,squadrons:source.squadrons,terms:source.terms.map(t=>({...t,isCurrent:Number(t.isCurrent)})),events:source.events.map(({eligiblePersonIds,...e})=>({...e,hasRoster:1})),eventRosters:source.events.flatMap(e=>e.eligiblePersonIds.map(personId=>({eventId:e.eventId,personId}))),eventFlights:source.eventFlights,observations:source.observations,requests:source.requests,corrections:source.corrections,termRosters:[],legacyBaselines:[]},calls=[];
+ const request=async(_path,b)=>{calls.push(b);const common={contractVersion:FRONTEND_PAGE_VERSION,section:b.section,revision:source.revision,scope:{termId:'current',currentTermId:'current'}};let value;
+  if(b.section==='manifest')value={...common,environment:'local',generation:1,sections:FRONTEND_SECTIONS.map(section=>({section,count:data[section].length})),diagnostics:[]};
+  else if(b.section==='verify')value={...common,verified:true};
+  else if(['directory-catalog','contacts-catalog'].includes(b.section)){const records=b.section==='directory-catalog'?people:contacts;value={contractVersion:FRONTEND_PAGE_VERSION,section:b.section,revision:source.revision,rows:records.slice(b.offset,b.offset+2),nextOffset:b.offset+2<records.length?b.offset+2:null};}
+  else value={...common,offset:b.offset,rows:data[b.section],nextOffset:null};
+  return {status:200,body:mutate(value,b,calls)};
+ };
+ return {identity:{environment:'local',generation:1,principalId:'operator'},request,calls};
+}
+test('operational capture retains inactive profiles/contacts and resolves linked identity from the Directory',async()=>{
+ const f=captureFixture(),s=await captureOperationalSnapshot(f.identity,f.request);assert.equal(s.people.length,4);assert.equal(s.people.filter(p=>!p.active).length,1);assert.equal(s.leadership.length,2);assert(s.leadership.every(c=>!c.active));
+ const linked=s.leadership.find(c=>c.personId==='person-a');assert.equal(linked.lastName,s.people[0].lastName);assert.equal(linked.role,'Alpha Flight Commander');assert.equal(linked.contactVersion,3);assert.equal(linked.publicationVersion,4);assert.equal(linked.email,s.people[0].email);
+ assert.equal(f.calls.at(-1).section,'verify');assert.deepEqual(s.captureScope,{termId:'current',currentTermId:'current',directory:'lifetime',contacts:'lifetime'});
+ for(const kind of ['directory','leadership'])assert.equal(planOperationalCsvImport(s,exportOperationalCsv(s,kind),kind,context,{mode:'update'}).changes.length,0);
+});
+test('operational capture rejects torn catalogs, missing linked profiles and late revision changes before returning data',async()=>{
+ for(const change of [(p,b)=>b.section==='directory-catalog'?{...p,revision:{operations:999,administration:5}}:p,
+  (p,b)=>b.section==='contacts-catalog'?{...p,rows:p.rows.map(c=>c.personId?{...c,personId:'missing'}:c)}:p,
+  (p,b)=>b.section==='verify'?{...p,revision:{operations:999,administration:5}}:p,
+  (p,b)=>b.section==='directory-catalog'?{...p,nextOffset:b.offset}:p]){
+  const f=captureFixture(change);await assert.rejects(captureOperationalSnapshot(f.identity,f.request),/ADMIN_CAPTURE_/);
+ }
+});
+test('historical captures export the selected frozen matrix and require a fresh current capture before writes',()=>{
+ const s=snapshot();s.terms.unshift({termId:'prior',label:'Prior',sortOrder:0,isCurrent:false,roster:[{personId:'person-inactive',lastName:'Former',firstName:'Cadet',asYear:'AS100',flightId:'alpha',flightPathStatus:'Active 3/4',dateOfBirth:null}]});s.events=[{...s.events[0],eventId:'historic',termId:'prior',eligiblePersonIds:['person-inactive']}];s.observations=[];s.requests=[];s.eventFlights=[{eventId:'historic',flightId:'alpha'}];s.corrections=[{factId:'old',personId:'person-inactive',eventId:'historic',order:1,code:'A'}];s.attendanceVersions=[{personId:'person-inactive',eventId:'historic',version:1}];s.captureScope={termId:'prior',currentTermId:'current',directory:'lifetime',contacts:'lifetime'};
+ const rows=readOperationalCsv(exportOperationalCsv(s,'attendance',{asOfDate:context.asOfDate}),'attendance');assert.equal(rows.length,1);assert.equal(rows[0].person_id,'person-inactive');assert.equal(rows[0].code,'A');assert.equal(rows[0].event_id,'historic');
+ assert.throws(()=>planOperationalCsvImport(s,exportOperationalCsv(s,'directory'),'directory',context,{mode:'update'}),/ADMIN_HISTORICAL_CAPTURE_READ_ONLY/);
+});

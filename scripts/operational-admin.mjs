@@ -11,7 +11,7 @@ import {exportCanonicalLegend,planCanonicalLegend} from './lib/operational-legen
 process.umask(0o077);
 const fail=code=>{throw Error(code);},root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
 const HELP=`SHAMROCK operational administration (staging only)
-  capture --config PRIVATE_CONFIG --private-dir PRIVATE_DIRECTORY
+  capture --config PRIVATE_CONFIG --private-dir PRIVATE_DIRECTORY [--term TERM_ID]
   export --snapshot PRIVATE_SNAPSHOT --category CATEGORY --private-dir PRIVATE_DIRECTORY [--as-of YYYY-MM-DD]
   plan-import --config PRIVATE_CONFIG --snapshot PRIVATE_SNAPSHOT --csv CSV --category CATEGORY --spec PRIVATE_SPEC --private-dir PRIVATE_DIRECTORY
   plan-bulk --config PRIVATE_CONFIG --snapshot PRIVATE_SNAPSHOT --spec PRIVATE_SPEC --private-dir PRIVATE_DIRECTORY
@@ -25,7 +25,7 @@ Build with npm run build:v3 first. No command changes production. Apply commits 
 function args(argv){
  if(!argv.length||argv[0]==='--help'||argv[0]==='help')return {command:'help'};
  const [command,...rest]=argv,out={command};if(!['capture','export','plan-import','plan-bulk','apply','report','export-legend','plan-legend','recover-lock'].includes(command))fail('ADMIN_CLI_COMMAND');
- for(let i=0;i<rest.length;i+=2){if(!['--config','--private-dir','--snapshot','--category','--as-of','--csv','--spec','--plan','--review-sha','--max-commands','--forms-config'].includes(rest[i])||!rest[i+1]||Object.hasOwn(out,rest[i].slice(2)))fail('ADMIN_CLI_ARGUMENT');out[rest[i].slice(2)]=rest[i+1];}return out;
+ for(let i=0;i<rest.length;i+=2){if(!['--config','--private-dir','--snapshot','--category','--as-of','--csv','--spec','--plan','--review-sha','--max-commands','--forms-config','--term'].includes(rest[i])||!rest[i+1]||Object.hasOwn(out,rest[i].slice(2)))fail('ADMIN_CLI_ARGUMENT');out[rest[i].slice(2)]=rest[i+1];}return out;
 }
 export async function readPrivateOperationalFile(file,{json=true}={}){
  if(!file)fail('ADMIN_CLI_INPUT_REQUIRED');const info=await fs.lstat(file);
@@ -83,9 +83,9 @@ async function main(){
   console.log(JSON.stringify({status:'reviewable-configuration-change',planHash:result.plan.planHash,changedLists:result.plan.changes.length,privateConfigChanges:result.plan.privateConfigChanges.length,providerWrites:0}));return;
  }
  if(opts.command==='capture'){
-  const config=configuration(await readPrivateOperationalFile(opts.config)),snapshot=await captureOperationalSnapshot({environment:config.environment,generation:config.generation,principalId:config.principalId},signedClient(config));
+  const config=configuration(await readPrivateOperationalFile(opts.config)),snapshot=await captureOperationalSnapshot({environment:config.environment,generation:config.generation,principalId:config.principalId},signedClient(config),{termId:opts.term??null});
   await writeNew(dir,'snapshot.json',{formatVersion:1,targetFingerprint:fingerprint(config),capturedAt:new Date().toISOString(),snapshotHash:operationalHash(snapshot),snapshot});
-  console.log(JSON.stringify({status:'captured',people:snapshot.people.length,events:snapshot.events.length,revision:snapshot.revision,providerWrites:0}));return;
+  console.log(JSON.stringify({status:'captured',people:snapshot.people.length,events:snapshot.events.length,scope:snapshot.captureScope,revision:snapshot.revision,providerWrites:0}));return;
  }
  if(opts.command==='export'){
   const saved=await savedSnapshot(opts.snapshot),csv=exportOperationalCsv(saved.snapshot,opts.category,{asOfDate:opts['as-of']});await writeNew(dir,'export.csv',csv,false);console.log(JSON.stringify({status:'exported',category:opts.category,bytes:Buffer.byteLength(csv),providerWrites:0}));return;

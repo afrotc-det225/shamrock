@@ -52,6 +52,10 @@ the plan reason. Everything outside the explicit scope stays unchanged. Attendan
 replacement is not supported: select the exact cells and use explicit blank
 corrections when clearing is intended. No mode deletes history.
 
+Ordinary capture reads current-semester attendance/events/excusals, then separately reads the complete Directory and explicit Leadership contact catalogs at that same revision. Inactive/unreferenced alumni and inactive contacts remain in exports and can be reactivated with a reviewed profile/contact update. Linked Leadership display identity and role are rebuilt from Directory and current Flight/Squadron labels; `expected_version` remains the contact's own edit version. The exported `active` contact flag is its saved enabled flag; an inactive Directory profile still cannot appear as active cadet Leadership. Final verification follows both catalogs, so a concurrent change discards the entire incomplete capture.
+
+Use `capture --config ... --private-dir ... --term TERM_ID` for a retained native semester. Its Attendance CSV uses that selected semester's frozen roster and facts, including alumni; it does not substitute the current matrix or current AS year. Historical captures are read-only planning inputs: capture the current semester again before creating any write plan. All captures preserve the existing512-page/16MiB budget; the ordinary native frontend keeps its separate, unchanged limits. Legacy source-workbook reports continue through the historical-report interfaces, not the native term selector.
+
 ## Private configuration and planning
 
 Store working files in a private directory (mode 0700) outside Git or beneath an

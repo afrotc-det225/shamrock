@@ -1,11 +1,11 @@
 /** Operational CSV/bulk planning uses ordinary audited commands, never direct SQL or log replacement. */
 import {createHash} from 'node:crypto';
-import {parseAdminCommand,DIRECTORY_FIELDS,operationallyActive} from '../../.build/v3/packages/domain/src/admin.js';
+import {parseAdminCommand,DIRECTORY_FIELDS,operationallyActive,directoryLeadershipRole} from '../../.build/v3/packages/domain/src/admin.js';
 import {parseAttendanceCorrection} from '../../.build/v3/packages/domain/src/corrections.js';
 import {parseCommand,ATTENDANCE_CODES} from '../../.build/v3/packages/domain/src/index.js';
 import {buildFrontendReporting} from '../../.build/v3/packages/domain/src/frontend-reporting.js';
 import {snapshotToFrontendReportingInput} from '../../.build/v3/apps/google-adapter/src/frontend-publication.js';
-import {assembleFrontendSnapshotPages,FRONTEND_SECTIONS} from '../../.build/v3/packages/domain/src/frontend-transport.js';
+import {assembleFrontendSnapshotPages,FRONTEND_SECTIONS,FRONTEND_PAGE_VERSION,FRONTEND_PAGE_MAX_BYTES} from '../../.build/v3/packages/domain/src/frontend-transport.js';
 import {category,readOperationalCsv,writeOperationalCsv} from './operational-csv.mjs';
 import {selectRecords} from './operational-selectors.mjs';
 export const operationalCanonical=v=>JSON.stringify(v,(_k,x)=>x&&typeof x==='object'&&!Array.isArray(x)?Object.fromEntries(Object.keys(x).sort().map(k=>[k,x[k]])):x);
@@ -24,11 +24,12 @@ function verifySnapshot(snapshot){
  for(const key of ['people','leadership','events','eventFlights','flights','squadrons','terms','attendanceVersions','requests','observations','corrections','diagnostics'])check(Array.isArray(snapshot[key]),'ADMIN_SNAPSHOT');
  check(!snapshot.diagnostics.some(d=>d.count>0),'ADMIN_SNAPSHOT_DIAGNOSTICS');
  check(snapshot.terms.filter(t=>t.isCurrent).length===1,'ADMIN_CURRENT_TERM');
+ if(snapshot.captureScope){const scope=snapshot.captureScope;check(Object.keys(scope).sort().join(',')==='contacts,currentTermId,directory,termId'&&scope.contacts==='lifetime'&&scope.directory==='lifetime'&&snapshot.terms.some(t=>t.termId===scope.termId)&&snapshot.terms.find(t=>t.isCurrent).termId===scope.currentTermId,'ADMIN_CAPTURE_SCOPE');}
  for(const [key,id] of [['people','personId'],['leadership','contactId'],['events','eventId'],['flights','flightId'],['squadrons','squadronId'],['terms','termId'],['requests','requestId']])check(snapshot[key].every(r=>identifier(r[id]))&&new Set(snapshot[key].map(r=>r[id])).size===snapshot[key].length,'ADMIN_SNAPSHOT_IDENTITIES');
 }
 function reporting(snapshot,asOfDate){check(validDate(asOfDate),'ADMIN_AS_OF_DATE');return buildFrontendReporting(snapshotToFrontendReportingInput(snapshot,asOfDate));}
 function attendanceRows(snapshot,asOfDate){
- const result=reporting(snapshot,asOfDate),matrix=result.matrices.find(m=>m.termId===result.currentTermId),versions=new Map(snapshot.attendanceVersions.map(v=>[pair(v.personId,v.eventId),v.version])),events=new Map(snapshot.events.map(e=>[e.eventId,e]));
+ const result=reporting(snapshot,asOfDate),matrix=result.matrices.find(m=>m.termId===(snapshot.captureScope?.termId??result.currentTermId)),versions=new Map(snapshot.attendanceVersions.map(v=>[pair(v.personId,v.eventId),v.version])),events=new Map(snapshot.events.map(e=>[e.eventId,e]));
  return matrix.rows.flatMap(row=>row.cells.map(cell=>({person_id:row.personId,event_id:cell.eventId,expected_base_version:versions.get(pair(row.personId,cell.eventId))??0,expected_event_version:events.get(cell.eventId).version,code:cell.effectiveCode??'',reason:'',eligible:cell.eligible,needsReview:cell.needsReview})));
 }
 function directoryPayload(p){return {personId:p.personId,expectedVersion:p.version,flightId:p.flightId,profile:Object.fromEntries(DIRECTORY_FIELDS.map(key=>[key,p[key]]))};}
@@ -45,7 +46,7 @@ export function exportOperationalCsv(snapshot,kind,{asOfDate,legend}={}){
  return writeOperationalCsv(kind,rows);
 }
 function planBase(snapshot,context,kind){
- verifySnapshot(snapshot);check(context&&['batchId','principalId','resourceKey'].every(key=>identifier(context[key]))&&['sheet','test'].includes(context.sourceKind)&&validDate(context.asOfDate)&&typeof context.reason==='string'&&context.reason.trim()===context.reason&&context.reason.length>0&&context.reason.length<=4000,'ADMIN_PLAN_CONTEXT');
+ verifySnapshot(snapshot);check(!snapshot.captureScope||snapshot.captureScope.termId===snapshot.captureScope.currentTermId,'ADMIN_HISTORICAL_CAPTURE_READ_ONLY');check(context&&['batchId','principalId','resourceKey'].every(key=>identifier(context[key]))&&['sheet','test'].includes(context.sourceKind)&&validDate(context.asOfDate)&&typeof context.reason==='string'&&context.reason.trim()===context.reason&&context.reason.length>0&&context.reason.length<=4000,'ADMIN_PLAN_CONTEXT');
  check(context.sourceKind!=='test'||snapshot.environment==='local','ADMIN_STAGING_SOURCE');
  return {formatVersion:1,kind,batchId:context.batchId,environment:snapshot.environment,generation:snapshot.generation,principalId:context.principalId,resourceKey:context.resourceKey,sourceKind:context.sourceKind,...(context.targetFingerprint?{targetFingerprint:context.targetFingerprint}:{}),...(context.sourceCommit?{sourceCommit:context.sourceCommit}:{}),asOfDate:context.asOfDate,reason:context.reason,snapshotHash:operationalHash(snapshot),sourceRevision:clone(snapshot.revision),changes:[]};
 }
@@ -154,11 +155,41 @@ export async function executeOperationalPlan(plan,{approvedHash,state,request,ma
  }
  const committed=journal.entries.filter(e=>e.status==='committed').length;return {status:committed===plan.changes.length?'committed-awaiting-publication':'continuing',attempted,committed};
 }
-/** Coherent read-only capture: every page retains the same authoritative revision. */
-export async function captureOperationalSnapshot(identity,request){
- check(['local','staging'].includes(identity.environment)&&Number.isSafeInteger(identity.generation)&&identifier(identity.principalId),'ADMIN_CAPTURE_IDENTITY');
- const get=async(section,offset,revision)=>{const response=await request('/v1/admin/snapshot/page',{...identity,section,offset,revision});check(response.status===200,'ADMIN_CAPTURE_RETRY');return response.body;};
- const manifest=await get('manifest',0,null),pages=[];let totalBytes=0;
- for(const section of FRONTEND_SECTIONS){let offset=0;do{const page=await get(section,offset,manifest.revision);check(page.section===section&&page.offset===offset&&Array.isArray(page.rows),'ADMIN_CAPTURE_PAGE');totalBytes+=Buffer.byteLength(JSON.stringify(page));check(pages.length<512&&totalBytes<=16*1024*1024,'ADMIN_CAPTURE_SIZE');pages.push(page);if(page.nextOffset===null)break;check(Number.isSafeInteger(page.nextOffset)&&page.nextOffset>offset,'ADMIN_CAPTURE_CURSOR');offset=page.nextOffset;}while(true);}
- const verify=await get('verify',0,manifest.revision),snapshot=assembleFrontendSnapshotPages(manifest,pages,verify);verifySnapshot(snapshot);return snapshot;
+/** Complete operational catalogs keep inactive profiles editable without expanding native publications. */
+function mergeOperationalCatalogs(snapshot,people,contacts){
+ check(people.every(p=>identifier(p.personId)&&Number.isSafeInteger(p.version)&&p.version>0&&p.active===operationallyActive(p))&&new Set(people.map(p=>p.personId)).size===people.length,'ADMIN_CAPTURE_DIRECTORY');
+ check(contacts.every(c=>identifier(c.contactId)&&Number.isSafeInteger(c.version)&&c.version>0&&typeof c.active==='boolean'&&(c.personId===null||identifier(c.personId)))&&new Set(contacts.map(c=>c.contactId)).size===contacts.length,'ADMIN_CAPTURE_CONTACTS');
+ const peopleById=new Map(people.map(p=>[p.personId,p])),linked=new Map(),flights=new Map(snapshot.flights.map(f=>[f.flightId,f])),squadrons=new Map(snapshot.squadrons.map(s=>[s.squadronId,s]));
+ for(const person of snapshot.people)check(same(peopleById.get(person.personId),person),'ADMIN_CAPTURE_DIRECTORY_CHANGED');
+ const leadership=contacts.map(({version,...contact})=>{
+  if(contact.personId===null)return {...contact,contactVersion:version,profileVersion:null,publicationVersion:version};
+  const person=peopleById.get(contact.personId);check(person&&!linked.has(contact.personId),'ADMIN_CAPTURE_LINKED_PERSON');linked.set(contact.personId,contact);
+  const flight=flights.get(person.flightId),role=directoryLeadershipRole(person.role,flight?.label??'',squadrons.get(flight?.squadronId)?.label??'')??'';
+  return {...contact,lastName:person.lastName,firstName:person.firstName,rank:person.rank,role,email:person.email,cellPhone:person.phone,contactVersion:version,profileVersion:person.version,publicationVersion:person.version+version};
+ });
+ for(const person of people){
+  if(!person.active||linked.has(person.personId))continue;
+  const flight=flights.get(person.flightId),role=directoryLeadershipRole(person.role,flight?.label??'',squadrons.get(flight?.squadronId)?.label??'');if(!role)continue;
+  leadership.push({contactId:'cadet:'+createHash('sha256').update(person.personId).digest('hex'),personId:person.personId,lastName:person.lastName,firstName:person.firstName,rank:person.rank,role,email:person.email,cellPhone:person.phone,reportsTo:'',officePhone:'',officeLocation:'',active:true,contactVersion:0,profileVersion:person.version,publicationVersion:person.version});
+ }
+ check(new Set(leadership.map(c=>c.contactId)).size===leadership.length,'ADMIN_CAPTURE_CONTACT_IDENTITIES');
+ return {...snapshot,people,leadership};
+}
+/** Coherent read-only capture: every data/catalog page and final verify retain one revision. */
+export async function captureOperationalSnapshot(identity,request,{termId=null}={}){
+ check(['local','staging'].includes(identity.environment)&&Number.isSafeInteger(identity.generation)&&identifier(identity.principalId)&&(termId===null||identifier(termId)),'ADMIN_CAPTURE_IDENTITY');
+ let pageCount=0,totalBytes=0;
+ const get=async(section,offset,revision,catalog=false)=>{
+  const response=await request('/v1/admin/snapshot/page',{...identity,...(!catalog&&termId!==null?{termId}:{}),section,offset,revision});check(response.status===200,'ADMIN_CAPTURE_RETRY');
+  const page=response.body,size=Buffer.byteLength(JSON.stringify(page));check(++pageCount<=512&&size<=FRONTEND_PAGE_MAX_BYTES&&(totalBytes+=size)<=16*1024*1024,'ADMIN_CAPTURE_SIZE');
+  check(page.contractVersion===FRONTEND_PAGE_VERSION&&page.section===section&&(revision===null||same(page.revision,revision)),'ADMIN_CAPTURE_REVISION');return page;
+ };
+ const manifest=await get('manifest',0,null),pages=[];
+ for(const section of FRONTEND_SECTIONS){let offset=0;do{const page=await get(section,offset,manifest.revision);check(page.offset===offset&&Array.isArray(page.rows),'ADMIN_CAPTURE_PAGE');pages.push(page);if(page.nextOffset===null)break;check(Number.isSafeInteger(page.nextOffset)&&page.nextOffset>offset,'ADMIN_CAPTURE_CURSOR');offset=page.nextOffset;}while(true);}
+ const catalog=async section=>{const rows=[];let offset=0;do{const page=await get(section,offset,manifest.revision,true);check(Array.isArray(page.rows)&&page.rows.length<=32,'ADMIN_CAPTURE_CATALOG');rows.push(...page.rows);if(page.nextOffset===null)break;check(page.rows.length>0&&page.nextOffset===offset+page.rows.length,'ADMIN_CAPTURE_CURSOR');offset=page.nextOffset;}while(true);return rows;};
+ const people=await catalog('directory-catalog'),contacts=await catalog('contacts-catalog'),verify=await get('verify',0,manifest.revision);
+ const scoped=assembleFrontendSnapshotPages(manifest,pages,verify),snapshot=mergeOperationalCatalogs(scoped,people,contacts),current=scoped.terms.find(t=>t.isCurrent);
+ check(current&&manifest.scope?.currentTermId===current.termId&&manifest.scope.termId===(termId??current.termId),'ADMIN_CAPTURE_SCOPE');
+ snapshot.captureScope={termId:manifest.scope.termId,currentTermId:current.termId,directory:'lifetime',contacts:'lifetime'};
+ verifySnapshot(snapshot);return snapshot;
 }
