@@ -87,3 +87,28 @@ See [native input](D1_NATIVE_INPUT.md), [managed Forms](D1_MANAGED_FORMS.md),
 [staging runbook](D1_STAGING_RUNBOOK.md) for their separate acceptance evidence.
 Local tests establish bootstrap/routing isolation, not live OAuth, ordinary-user
 editor identity, FilterView coordinates, protection enforcement or production readiness.
+
+## Adopting existing staging protection guards
+
+A verified populated baseline can still retain an older initialization guard.
+Native input setup requires the exact managed protection policy across both
+workbooks; owner-only sharing and an equivalent-looking whole-sheet guard do not
+substitute for that policy. Inspect the guard IDs, ranges, descriptions, editors
+and unprotected ranges before setup. If the reviewed guards are the original
+initialization guards, use the existing protection planner's explicit adoption
+input for only those IDs. Simulate the plan, apply its bounded metadata updates,
+and verify the exact closed policy and an empty second repair plan. Never delete
+all guards, reopen editable holes or weaken the assertion to clear setup.
+
+Read every populated Table back against the retained baseline and compare native
+validation, styles, dimensions, Tables, filters and charts before and after the
+adoption. Preserve the pending setup control when failure occurred before its
+receipt was consumed; a later scheduled retry can finish the same reviewed setup.
+
+In the November 17 UTC real-data staging rehearsal, explicit adoption of 15
+existing owner-only guards preserved all compared values and presentation. The
+next scheduled setup completed and bound 562 physical rows across Directory,
+Leadership, Attendance, Blue and Gold. The owner's live Triggers page confirmed
+seven triggers, and Executions confirmed the successful scheduled run. All four
+Forms remained unpublished and closed. This establishes paused setup, not native
+submission, decision, non-owner access or production acceptance.

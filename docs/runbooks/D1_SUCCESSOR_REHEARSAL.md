@@ -20,7 +20,7 @@ Keep underlying files in restricted operational storage. These aggregate finding
 
 The private inventory contains multiple historical manifests and backups. Do not select the newest-looking filename or assume an old successful artifact covers later code. The live source pin, migration ledger, state digests and gate settings must agree for the rehearsal.
 
-The current credential audit found the bridge items in a vault named **Private**. Their contents and storage were verified, but successor access to that vault was not demonstrated. Do not describe this as shared-vault custody. The user reports account passwords are also in 1Password; that does not prove another custodian can retrieve or recover them. No paid 1Password plan or team-vault change is authorized. A free provider-level handoff can instead grant and verify successor organizational access, create replacement scoped provider credentials, update the corresponding private runtime settings, rehearse both identities, and revoke the departing credential only after validation. Keep secrets out of repositories and chat; record the actual custody/rotation exercise privately.
+The November 6 credential audit found the bridge items in a vault named **Private**. Their contents and storage were verified, but successor access to that vault was not demonstrated. The November 17 setup copied and verified the two staging bridge credentials and administrator OAuth credentials in the project vault, preserving the earlier items. That still does not establish a second custodian's access or recovery. The user reports account passwords are also in 1Password; a saved password does not prove another custodian can retrieve or recover it. No paid plan change is authorized. A free provider-level handoff can instead grant and verify successor organizational access, create replacement scoped provider credentials, update the corresponding private runtime settings, rehearse both identities, and revoke the departing credential only after validation. Keep secrets out of repositories and chat; record the actual custody/rotation exercise privately.
 
 ## Additional evidence — November 17, 2026 UTC
 
@@ -28,12 +28,21 @@ The [schema 15 hosted restore](D1_HOSTED_RESTORE.md#completed-schema-15-rehearsa
 
 The separate hosted administrator session database was installed from committed schema through the guarded setup helper. All six tables and six indexes matched independent schema readback, with a matching installation marker, clean integrity and foreign keys. The existing active fictional operator retained its grants; a distinct test adapter source and one verified Google-subject binding were added. Backend commands remained paused. These are installation/bootstrap results. Live browser OAuth sign-in, hosted administrator mutation/receipt tests and native spreadsheet propagation are separate acceptance checks.
 
+Subsequent hosted testing verified Google sign-in and sign-out, a fictional event
+rename and audited restoration, exact retry without a duplicate write, and stale
+version rejection. Fictional administrator commands were then left enabled for
+the user's panel review; its Google consumers and Forms remained paused/closed.
+The real-data database remained fenced. These are distinct gates: the dashboard
+being usable does not establish that a Google publication occurred. Authenticated
+administrator CPU remained above the Free target in the measured release and is
+an open acceptance item.
+
 ## Successor exercise
 
 Use a clean checkout on a separate machine or clean worktree, plus approved organizational credential access. Do not copy the prior maintainer's home directory, hidden CLI credentials or `.env` files. The participant should perform these steps from the written instructions while the departing maintainer observes and records any missing information.
 
 1. **Establish access.** Independently reach the GitHub organization and public/private operations repositories, the project Google account and its recovery factors, Cloudflare account, and shared password vault. Confirm a second authorized custodian can recover access. Account membership and a saved password alone do not establish recovery custody.
-2. **Rebuild without credentials.** Read `AGENTS.md`, install the pinned dependencies with `npm ci`, run `npm run check`, `npm run demo:v3` and `npm run capacity:v3`. Explain which artifacts belong to current production versus isolated staging. No provider login is needed for these fictional tests. Never use `npm run push` for the D1 prototype.
+2. **Rebuild without credentials.** Read `AGENTS.md`, install the pinned dependencies with `npm ci`, run `npm run check`, `npm run demo:v3` and `npm run capacity:v3`, then perform the separate administrator build below. Explain which artifacts belong to current production versus isolated staging. No provider login is needed for these fictional tests. Never use `npm run push` for the D1 prototype.
 3. **Identify the deployment.** Locate provider-owned private configuration, state/journals, expected owners, triggers, migration ledger, deployed artifact manifest and last backup. Match them using read-only checks. Record logical resource names in the public handoff; retain actual IDs, account addresses and hashes privately. Verify that Apps Script authorization is under the project automation account and that the actual Cloud project/API scopes match the release.
 4. **Explain and verify all gates.** Identify D1 accepting-commands, native frontend publication, managed Form publication, Form intake, native input, maintenance planning and mail delivery controls. Confirm production bindings are excluded. Pause staging using supported controls and verify native Form open states, pending leases, both workbook protection policies and private checkpoints. A boolean return is not enough; pause does not automatically mean every Form was closed or every running execution drained.
 5. **Perform one fictional workflow.** In a separate approved staging fixture, submit attendance, submit an excusal, decide it from the correct Squadron sheet, change a permitted Directory/Leadership field and observe the matching recorded outcome. Use a non-owner account. Verify no extra backend result on duplicate delivery. Exercise a missing-editor confirmation without supplying a typed email as identity. Restore approved intake gates afterward.
@@ -43,6 +52,41 @@ Use a clean checkout on a separate machine or clean worktree, plus approved orga
 9. **Measure and close.** Run the [free-tier forecast](D1_FREE_TIER_FORECAST.md) against observed usage. Review recipient counts and mail suppression without sending test messages to operational recipients. Return staging to its documented pause/closed state, retain the evidence and list any unresolved discrepancy.
 
 ## Passing record and remaining gates
+
+### Administrator build from a clean checkout
+
+The root checks do not install or build the administrator package. After the root
+steps above, run its separate pinned installation and checks:
+
+```sh
+npm ci --prefix apps/admin
+node apps/admin/build-domain.mjs
+npm run build --prefix apps/admin
+npm test --prefix apps/admin
+node apps/admin/build-hosted.mjs --release
+```
+
+The domain build uses the root dependencies and tracked migrations. The frontend
+build produces the static assets; the hosted build creates the Worker and a
+source/schema/assets manifest, rejecting dirty relevant source. Generate these
+artifacts on the clean checkout instead of copying a previous maintainer's
+`.build` or `dist` directory. These commands do not deploy.
+
+For rendered fictional validation, install the matching test browser or use the
+documented existing Chromium executable override:
+
+```sh
+npm exec --prefix apps/admin -- playwright install chromium
+npm run test:browser --prefix apps/admin
+```
+
+The browser test starts its own disposable local backend. Interactive review uses
+`npm start --prefix apps/admin`, bound to loopback only. Hosted Google sign-in,
+actual roles and Google Sheets convergence remain separate provider checks; do
+not publish the automatically authenticated local server. See the
+[hosted administrator runbook](../../apps/admin/hosted/README.md).
+
+### Recorded acceptance
 
 The private exercise record should name the participant/reviewer, dates, source and artifact pins, actual access checks, commands run, results, failures, recovery evidence and final gates. Record a task as **performed**, **simulated locally**, **read-only reviewed**, or **not yet demonstrated**. Do not turn a prepared checklist into a completed rehearsal.
 
