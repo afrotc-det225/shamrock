@@ -3,7 +3,7 @@ import { effectiveAdminGrants } from './permission-grants.js';
 import { adminIdentifier, type FrontendSnapshot } from '../../../packages/domain/src/admin.js';
 import { buildFrontendReporting, REPORTING_POLICY_VERSION } from '../../../packages/domain/src/frontend-reporting.js';
 import { NOTICE_POLICY, advanceDelivery, noticeLocalClock, planExcusalNotice, planScheduledNotices, type FlightNoticeContact, type NoticeRecipient, type NotificationIntent, } from '../../../packages/domain/src/notifications.js';
-import { frontendSnapshot } from './admin.js';
+import { readNotificationContext } from './reporting-context.js';
 import { HttpError } from './http-error.js';
 type Value = string | number | null;
 interface NotificationEnv {
@@ -95,7 +95,7 @@ export function flightNoticeContacts(snapshot: FrontendSnapshot): FlightNoticeCo
     commander: recipient(snapshot, [`${f.label} Flight Commander`, `Cadet ${f.label} Flight Commander`]),
     deputy: recipient(snapshot, [`${f.label} Deputy Flight Commander`, `Deputy ${f.label} Flight Commander`, `Cadet ${f.label} Deputy Flight Commander`]) }));
 }
-function planFromSnapshot(snapshot: FrontendSnapshot, recipe: PlanCommand['payload']): NotificationIntent[] {
+export function planFromSnapshot(snapshot: FrontendSnapshot, recipe: PlanCommand['payload']): NotificationIntent[] {
   if (snapshot.diagnostics.length)
     throw new HttpError(409, 'NOTIFICATION_SNAPSHOT_INCOMPLETE', 'Resolve the roster/catalog diagnostics before planning notices.');
   const clock = noticeLocalClock(recipe.asOf);
@@ -140,7 +140,7 @@ function planFromSnapshot(snapshot: FrontendSnapshot, recipe: PlanCommand['paylo
   }))));
   return planScheduledNotices({ now: recipe.asOf, mode: 'staging', events, flights, attendance });
 }
-function messageHash(intent: NotificationIntent): Promise<string> {
+export function messageHash(intent: NotificationIntent): Promise<string> {
   return hash(JSON.stringify({ to: intent.to, cc: intent.cc, replyTo: intent.replyTo ?? null, subject: intent.subject, body: intent.body }));
 }
 interface NotificationTask { task_id: string; request_id: string; request_version: number; request_json: string; state: string; created_at: string }
@@ -170,7 +170,7 @@ export async function planNotifications(env: NotificationEnv, input: unknown, ta
   }>();
   if (authorized?.allowed !== 1)
     throw new HttpError(403, 'NOT_AUTHORIZED', 'Current notification authority is required.');
-  const snapshot = await frontendSnapshot(env, { environment: env.ENVIRONMENT, generation: Number(env.GENERATION), principalId: command.actor.principalId });
+  const snapshot = await readNotificationContext(env,command.actor.principalId,command.payload);
   const frozenSnapshot = task ? { ...snapshot, requests: snapshot.requests.filter(request => request.requestId !== task.request_id).concat({ ...JSON.parse(task.request_json), order: 0 }) } : snapshot;
   const intents = planFromSnapshot(frozenSnapshot, command.payload);
   if (intents.length > 100)
@@ -304,7 +304,7 @@ export async function claimLocalNotification(env: NotificationEnv, input: {
   }>();
   if (!candidate)
     return { attempted: false };
-  const snapshot = await frontendSnapshot(env, { environment: 'local', generation: Number(env.GENERATION), principalId: input.principalId });
+  const snapshot = await readNotificationContext(env, input.principalId, JSON.parse(candidate.recipe) as PlanCommand['payload']);
   const intent = planFromSnapshot(snapshot, JSON.parse(candidate.recipe) as PlanCommand['payload']).find(item => item.key === candidate.noticeKey);
   if (!intent || await messageHash(intent) !== candidate.payloadHash || !intent.to.length) {
     await env.DB.batch([

@@ -96,3 +96,12 @@ test('preserved import baselines P/T/R remain unchanged, D becomes U, and an exp
  assert.deepEqual((await f.db.prepare('SELECT * FROM legacy_attendance_baselines ORDER BY baseline_id').all()).results,original);assert.equal(await f.count('attendance_observations'),0);
  const done=await f.advance(step.body);assert.equal(done.body.state,'complete');assert.equal(await f.count('notification_attempts'),0);
 });
+
+const {readCloseoutPreparationContext,readCloseoutStepContext}=await import('../../.build/v3/apps/worker/src/reporting-context.js');
+test('closeout preparation omits facts and each step reads only its exact subject scope',async t=>{
+ const f=await fixture(t,55);await f.correct(f.people[0],'P');await f.correct(f.people[54],'T');
+ const prep=await readCloseoutPreparationContext(f.env,'admin',f.asOf);assert.equal(prep.corrections.length,0);assert.equal(prep.requests.length,0);assert.equal(prep.legacyBaselines.length,0);
+ const p=await f.prepare();assert.equal(p.status,200);const items=(await f.db.prepare("SELECT event_id,person_id FROM closeout_items WHERE closeout_id=? ORDER BY event_id,person_id LIMIT 50").bind(p.body.closeoutId).all()).results;
+ const scope=await readCloseoutStepContext(f.env,'admin',p.body.closeoutId,items);assert.equal(scope.people.length,50);assert.equal(scope.corrections.length,1);assert.equal(scope.corrections[0].personId,f.people[0]);assert.equal(scope.events[0].eligiblePersonIds.length,50);
+ const final=await readCloseoutStepContext(f.env,'admin',p.body.closeoutId,[]);assert.equal(final.people.length,55);assert.equal(final.corrections.length,2);
+});

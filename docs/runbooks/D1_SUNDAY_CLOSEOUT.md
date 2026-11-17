@@ -59,7 +59,7 @@ Each signed POST starts with:
 | `/v1/admin/closeout/advance` | `closeoutId`, `expectedVersion` | Processes at most fifty frozen cells or completes the final notification step. Repeating a completed version returns its recorded receipt. |
 
 A run progresses through `processing → notifying → complete` or `needs-review`.
-Preparation is deduplicated by environment, generation, policy and week. Each
+Preparation is deduplicated by environment, generation, policy and week. It freezes the operational subjects from the explicit due event rosters directly, without reading attendance facts or constructing a blank matrix. Each processing step loads facts for at most fifty retained subjects and their events; final notice calculation loads only the retained closeout event set. Catalog selection and scoped facts must share the same audit revision. Each
 step and each changed person/event cell has a bounded deterministic command ID.
 The shared command registry prevents collisions with other command families.
 
@@ -115,7 +115,7 @@ finalization is active.
 
 A run freezes at most 25,000 cells and 1.5 MB of roster metadata. Each advance
 handles at most fifty cells using set-based SQL. The local fifty-cell regression
-measured 38 prepared statements, including authorization, snapshot reads and the
+measured 41 prepared statements, including authorization, snapshot reads and the
 atomic batch, below D1 Free's fifty-query invocation limit. This is not a hosted
 CPU, daily row-quota or multi-year storage guarantee. Notification content is
 bounded to one megabyte and the existing configured ledger capacity.

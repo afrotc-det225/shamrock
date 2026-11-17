@@ -1,3 +1,4 @@
+import { frontendAttendanceVersions } from '../../../packages/domain/src/frontend-transport.js';
 import { preparePermissionMutation, permissionManagerSql } from './permissions.js';
 import { effectiveAdminGrants } from './permission-grants.js';
 import { attendanceVersionsSql, correctionReceipt } from './corrections.js';
@@ -287,40 +288,50 @@ export async function authorizeDirectoryReview(env: AdminEnv, input: unknown): P
   if (row?.allowed !== 1) throw new HttpError(403, 'NOT_AUTHORIZED', 'Directory review requires current Wing Directory authority.');
   return { authorized: true };
 }
-export async function frontendSnapshot(env: AdminEnv, input: unknown): Promise<FrontendSnapshot> {
+/** Internal policy slice only; never use this partial context as a frontend publication. */
+export interface FrontendReadScope { eventIds:string[]; personIds?:string[]; requestId?:string; includeAttendanceFacts?:boolean; expectedRevision:FrontendSnapshot['revision']; }
+export async function frontendSnapshot(env: AdminEnv, input: unknown, scope?:FrontendReadScope): Promise<FrontendSnapshot> {
   const req = readInput(input, env);
   const guard = readerGuard(env, req.principalId);
+  if(scope && (scope.eventIds.length>200 || new Set(scope.eventIds).size!==scope.eventIds.length || scope.personIds && (scope.personIds.length>50 || new Set(scope.personIds).size!==scope.personIds.length))) throw new HttpError(409,'CONTEXT_TOO_LARGE','Use a bounded reporting scope.');
+  scope?.eventIds.forEach(id=>adminIdentifier(id));scope?.personIds?.forEach(id=>adminIdentifier(id));if(scope?.requestId)adminIdentifier(scope.requestId);
+  const eventFilter=(event:string,person?:string)=>scope?`${event} IN(SELECT value FROM json_each(?))${person&&scope.personIds?` AND ${person} IN(SELECT value FROM json_each(?))`:''}`:'1';
+  const eventParams=(person=false):Value[]=>scope?[JSON.stringify(scope.eventIds),...(person&&scope.personIds?[JSON.stringify(scope.personIds)]:[])]:[];
+  const personFilter=(person:string)=>scope?.personIds?`${person} IN(SELECT value FROM json_each(?))`:'1';
+  const personParams:Value[]=scope?.personIds?[JSON.stringify(scope.personIds)]:[];
+  const facts=scope?.includeAttendanceFacts===false?'0':'1';
   const bounds = [0, 0, 500, 200, 50, 20, 20, 200, 10000, 10000, 5000, 0, 10000, 25000, 10000, 25000];
   const results = await env.DB.batch<Record<string, unknown>>([
     stmt(env.DB, `SELECT (${guard.sql}) AS allowed`, ...guard.values),
     stmt(env.DB, `SELECT (SELECT COALESCE(MAX(audit_id),0) FROM audit_events) AS operations,(SELECT COALESCE(MAX(audit_id),0) FROM admin_audit_events) AS administration`),
-    stmt(env.DB, `${profileProjection} ORDER BY d.person_id LIMIT 501`),
+    stmt(env.DB, `${profileProjection} WHERE ${personFilter("d.person_id")} ORDER BY d.person_id LIMIT 501`,...personParams),
     stmt(env.DB, `SELECT contact_id AS contactId,version,person_id AS personId,last_name AS lastName,first_name AS firstName,rank,role,email,cell_phone AS cellPhone,reports_to AS reportsTo,office_phone AS officePhone,office_location AS officeLocation,active FROM leadership_contacts c WHERE NOT EXISTS(SELECT 1 FROM legacy_operational_adoption_rows r JOIN legacy_operational_adoptions a ON a.adoption_id=r.adoption_id WHERE r.kind='leadership' AND r.target_id=c.contact_id AND a.state<>'complete') ORDER BY contact_id LIMIT 201`),
     stmt(env.DB, `SELECT u.unit_id AS flightId,u.label,h.squadron_id AS squadronId,u.roster_version AS rosterVersion FROM organizational_units u LEFT JOIN flight_hierarchy h ON h.unit_id=u.unit_id ORDER BY u.unit_id LIMIT 51`),
     stmt(env.DB, 'SELECT squadron_id AS squadronId,label FROM squadrons ORDER BY squadron_id LIMIT 21'),
-    stmt(env.DB, 'SELECT term_id AS termId,label,sort_order AS sortOrder,is_current AS isCurrent FROM terms ORDER BY sort_order LIMIT 21'),
+    stmt(env.DB, `SELECT term_id AS termId,label,sort_order AS sortOrder,is_current AS isCurrent FROM terms ${scope?`WHERE is_current=1 OR term_id IN(SELECT term_id FROM event_details WHERE ${eventFilter('event_id')})`:''} ORDER BY sort_order LIMIT 21`,...eventParams()),
     stmt(env.DB, `SELECT e.event_id AS eventId,d.version,d.term_id AS termId,d.event_type AS eventType,d.training_week AS trainingWeek,d.display_order AS displayOrder,e.label,d.column_label AS columnLabel,d.expected_group AS expectedGroup,d.status,d.start_at AS startAt,d.end_at AS endAt,d.location,d.notes,
       CASE WHEN EXISTS(SELECT 1 FROM event_roster_versions v WHERE v.event_id=e.event_id AND v.version=d.version) THEN
-        (SELECT json_group_array(person_id) FROM (SELECT person_id FROM event_roster_members m WHERE m.event_id=e.event_id AND m.version=d.version ORDER BY person_id))
-      ELSE NULL END AS eligibleJson FROM events e JOIN event_details d ON d.event_id=e.event_id ORDER BY d.display_order,e.event_id LIMIT 201`),
-    stmt(env.DB, 'SELECT event_id AS eventId,unit_id AS flightId FROM event_units ORDER BY event_id,unit_id LIMIT 10001'),
-    stmt(env.DB, `SELECT 'observation:'||o.observation_id AS factId,o.person_id AS personId,o.event_id AS eventId,a.audit_id AS 'order',o.code FROM attendance_observations o JOIN attendance_reports r ON r.report_id=o.report_id JOIN audit_events a ON a.command_id=r.command_id ORDER BY o.observation_id LIMIT 10001`),
+        (SELECT json_group_array(person_id) FROM (SELECT person_id FROM event_roster_members m WHERE m.event_id=e.event_id AND m.version=d.version AND ${personFilter("person_id")} ORDER BY person_id))
+      ELSE NULL END AS eligibleJson FROM events e JOIN event_details d ON d.event_id=e.event_id WHERE ${eventFilter("e.event_id")} ORDER BY d.display_order,e.event_id LIMIT 201`,...personParams,...eventParams()),
+    stmt(env.DB, `SELECT event_id AS eventId,unit_id AS flightId FROM event_units WHERE ${eventFilter('event_id')} ORDER BY event_id,unit_id LIMIT 10001`,...eventParams()),
+    stmt(env.DB, `SELECT 'observation:'||o.observation_id AS factId,o.person_id AS personId,o.event_id AS eventId,a.audit_id AS 'order',o.code FROM attendance_observations o JOIN attendance_reports r ON r.report_id=o.report_id JOIN audit_events a ON a.command_id=r.command_id WHERE ${facts} AND ${eventFilter("o.event_id","o.person_id")} ORDER BY o.observation_id LIMIT 10001`,...eventParams(true)),
     stmt(env.DB, `SELECT r.request_id AS requestId,r.person_id AS personId,r.event_id AS eventId,r.unit_id AS flightId,COALESCE(a.audit_id,0) AS 'order',(r.origin='legacy' AND r.last_command_id IS NULL) AS legacyStateOnly,r.status,r.requested_outcome AS requestedOutcome,r.version,r.reason,r.submitted_at AS submittedAt,r.submitted_by AS submittedBy,
-      r.updated_at AS updatedAt,r.decided_at AS decidedAt,r.decided_by AS decidedBy,r.decision_reason AS decisionReason FROM excusal_records r LEFT JOIN audit_events a ON a.command_id=r.last_command_id WHERE r.origin='native' OR EXISTS(SELECT 1 FROM legacy_operational_adoptions l WHERE l.adoption_id=r.legacy_adoption_id AND l.state='complete') ORDER BY r.request_id LIMIT 5001`),
+      r.updated_at AS updatedAt,r.decided_at AS decidedAt,r.decided_by AS decidedBy,r.decision_reason AS decisionReason FROM excusal_records r LEFT JOIN audit_events a ON a.command_id=r.last_command_id WHERE (r.origin='native' OR EXISTS(SELECT 1 FROM legacy_operational_adoptions l WHERE l.adoption_id=r.legacy_adoption_id AND l.state='complete')) AND ${scope?.includeAttendanceFacts===false&&!scope.requestId?'0':'1'} AND ${eventFilter('r.event_id','r.person_id')}${scope?.requestId?' AND r.request_id=?':''} ORDER BY r.request_id LIMIT 5001`,...eventParams(true),...(scope?.requestId?[scope.requestId]:[])),
     stmt(env.DB, `SELECT (SELECT COUNT(*) FROM people p WHERE NOT EXISTS(SELECT 1 FROM directory_profiles d WHERE d.person_id=p.person_id)) AS peopleMissingProfiles,
    (SELECT COUNT(*) FROM events e WHERE NOT EXISTS(SELECT 1 FROM event_details d WHERE d.event_id=e.event_id)) AS eventsMissingDetails`),
     stmt(env.DB, `SELECT 'correction:'||c.correction_id AS factId,c.person_id AS personId,c.event_id AS eventId,a.audit_id AS 'order',c.code
-      FROM attendance_corrections c JOIN audit_events a ON a.command_id=c.command_id ORDER BY a.audit_id LIMIT 10001`),
-    stmt(env.DB, attendanceVersionsSql),
+      FROM attendance_corrections c JOIN audit_events a ON a.command_id=c.command_id WHERE ${facts} AND ${eventFilter("c.event_id","c.person_id")} ORDER BY a.audit_id LIMIT 10001`,...eventParams(true)),
+    stmt(env.DB, scope?"SELECT NULL AS personId WHERE 0":attendanceVersionsSql),
     stmt(env.DB, `SELECT term_id AS termId,person_id AS personId,last_name AS lastName,first_name AS firstName,as_year AS asYear,
       flight_id AS flightId,flight_path_status AS flightPathStatus,date_of_birth AS dateOfBirth
-      FROM term_roster_snapshots ORDER BY term_id,person_id LIMIT 10001`),
+      FROM term_roster_snapshots WHERE ${personFilter("person_id")}${scope?` AND term_id IN(SELECT term_id FROM event_details WHERE ${eventFilter("event_id")})`:""} ORDER BY term_id,person_id LIMIT 10001`,...personParams,...eventParams()),
     stmt(env.DB, `SELECT b.baseline_id AS baselineId,b.person_id AS personId,b.event_id AS eventId,b.code
       FROM legacy_attendance_baselines b JOIN legacy_import_runs i ON i.import_run_id=b.import_run_id AND i.state='complete'
-      ORDER BY b.person_id,b.event_id LIMIT 25001`),
+      WHERE ${facts} AND ${eventFilter("b.event_id","b.person_id")} ORDER BY b.person_id,b.event_id LIMIT 25001`,...eventParams(true)),
   ]);
   if (results[0].results[0]?.allowed !== 1)
     throw new HttpError(403, 'NOT_AUTHORIZED', 'A current Wing frontend read grant is required.');
+  if(scope && (results[1].results[0].operations!==scope.expectedRevision.operations || results[1].results[0].administration!==scope.expectedRevision.administration)) throw new HttpError(409,'SNAPSHOT_CHANGED','The reporting scope changed before its coherent read.');
   if (results.some((r, i) => bounds[i] > 0 && r.results.length > bounds[i]))
     throw new HttpError(409, 'SNAPSHOT_TOO_LARGE', 'This snapshot exceeds its reviewed bounds. Use a reviewed term-scoped export.');
   const people = (results[2].results as unknown as DirectoryRecord[]).map(p => ({ ...p, active: operationallyActive(p) }));
@@ -365,7 +376,7 @@ export async function frontendSnapshot(env: AdminEnv, input: unknown): Promise<F
     { code: 'FLIGHTS_MISSING_SQUADRON', count: flights.filter(f => f.squadronId === null).length },
     { code: 'EVENTS_MISSING_ROSTER', count: events.filter(event => event.eligiblePersonIds === null).length }].filter(d => d.count > 0);
   return { contractVersion: 1, environment: req.environment as 'local' | 'staging', generation: req.generation, revision: results[1].results[0] as unknown as FrontendSnapshot['revision'], people, leadership, flights, squadrons,
-    terms: results[6].results.map(t => ({ ...t, isCurrent: !!t.isCurrent, ...(rosters.has(String(t.termId)) ? {roster:rosters.get(String(t.termId))} : {}) })) as unknown as FrontendSnapshot['terms'], events, corrections: results[12].results as unknown as FrontendSnapshot['corrections'], attendanceVersions: results[13].results as unknown as FrontendSnapshot['attendanceVersions'], eventFlights: results[8].results as unknown as FrontendSnapshot['eventFlights'], observations: results[9].results as unknown as FrontendSnapshot['observations'], requests: results[10].results.map(r=>({...r,legacyStateOnly:r.legacyStateOnly===1})) as unknown as FrontendSnapshot['requests'], legacyBaselines:results[15].results as unknown as FrontendSnapshot['legacyBaselines'], diagnostics };
+    terms: results[6].results.map(t => ({ ...t, isCurrent: !!t.isCurrent, ...(rosters.has(String(t.termId)) ? {roster:rosters.get(String(t.termId))} : {}) })) as unknown as FrontendSnapshot['terms'], events, corrections: results[12].results as unknown as FrontendSnapshot['corrections'], attendanceVersions: scope?frontendAttendanceVersions([...results[9].results,...results[10].results,...results[12].results,...results[15].results]):results[13].results as unknown as FrontendSnapshot['attendanceVersions'], eventFlights: results[8].results as unknown as FrontendSnapshot['eventFlights'], observations: results[9].results as unknown as FrontendSnapshot['observations'], requests: results[10].results.map(r=>({...r,legacyStateOnly:r.legacyStateOnly===1})) as unknown as FrontendSnapshot['requests'], legacyBaselines:results[15].results as unknown as FrontendSnapshot['legacyBaselines'], diagnostics };
 }
 export async function getAdminReceipt(env: AdminEnv, url: URL): Promise<unknown> {
   const id = adminIdentifier(url.pathname.slice('/v1/admin/commands/'.length));

@@ -4,7 +4,7 @@ import { adminIdentifier, type FrontendSnapshot } from '../../../packages/domain
 import { buildFrontendReporting, REPORTING_POLICY_VERSION, type FrontendReportingInput } from '../../../packages/domain/src/frontend-reporting.js';
 import { CLOSEOUT_POLICY, closeoutWindow, closeoutCode, closeoutNotices } from '../../../packages/domain/src/closeout.js';
 import { noticeLocalClock } from '../../../packages/domain/src/notifications.js';
-import { frontendSnapshot } from './admin.js';
+import { readCloseoutPreparationContext,readCloseoutStepContext } from './reporting-context.js';
 import { flightNoticeContacts } from './notifications.js';
 import { HttpError } from './http-error.js';
 interface Env {
@@ -113,8 +113,10 @@ export async function prepareCloseout(env: Env, input: unknown, clock = () => ne
     const existing = await runRow(env, id);
     if (existing)
         return { closeoutId: id, version: existing.version, state: existing.state };
-    const snapshot = await frontendSnapshot(env, { environment: env.ENVIRONMENT, generation: Number(env.GENERATION), principalId: r.principalId });
-    const current = report(snapshot, r.asOf), events = snapshot.events.filter(e => e.termId === current.termId && e.status === 'active' && e.startAt && noticeLocalClock(e.startAt).date >= window.start && noticeLocalClock(e.startAt).date < window.end);
+    const snapshot = await readCloseoutPreparationContext(env,r.principalId,r.asOf);
+    const terms = snapshot.terms.filter(t => t.isCurrent);
+    if (terms.length !== 1 || snapshot.diagnostics.length) throw new HttpError(409, 'CLOSEOUT_SNAPSHOT', 'Review the current term and roster diagnostics first.');
+    const termId = terms[0].termId, events = snapshot.events.filter(e => e.termId === termId && e.status === 'active' && e.startAt && noticeLocalClock(e.startAt).date >= window.start && noticeLocalClock(e.startAt).date < window.end);
     if (events.some(e => e.eligiblePersonIds === null))
         throw new HttpError(409, 'CLOSEOUT_ROSTER', 'Every closeout event requires an explicit roster.');
     const eventIds = new Set(events.map(e => e.eventId));
@@ -123,8 +125,10 @@ export async function prepareCloseout(env: Env, input: unknown, clock = () => ne
         personId: string;
         flightId: string;
     }>();
-    const flights = new Map(rosters.results.map(m => [JSON.stringify([m.eventId, m.personId]), m.flightId]));
-    const items = current.matrix.rows.flatMap(p => p.cells.filter(c => eventIds.has(c.eventId) && c.eligible === true).map(c => ({ personId: p.personId, eventId: c.eventId, eventVersion: events.find(e => e.eventId === c.eventId)!.version, flightId: flights.get(JSON.stringify([c.eventId, p.personId])) })));
+    const activePeople = new Set(snapshot.people.filter(p => p.active).map(p => p.personId)), eventsById = new Map(events.map(e => [e.eventId, e]));
+    // Freeze eligible operational subjects directly; no blank attendance matrix is calculated during preparation.
+    const items = rosters.results.filter(row => activePeople.has(row.personId)).map(row => ({ personId: row.personId, eventId: row.eventId,
+      eventVersion: eventsById.get(row.eventId)!.version, flightId: row.flightId }));
     if (items.length > 25000 || items.some(i => !i.flightId))
         throw new HttpError(409, 'CLOSEOUT_ROSTER', 'The closeout roster is incomplete or exceeds the bounded run.');
     const serialized = JSON.stringify(items);
@@ -135,7 +139,7 @@ export async function prepareCloseout(env: Env, input: unknown, clock = () => ne
         await env.DB.batch([
             stmt(env.DB, `INSERT INTO command_assertions VALUES(?,(${auth.sql}) AND (SELECT COALESCE(MAX(audit_id),0) FROM audit_events)=? AND (SELECT COALESCE(MAX(audit_id),0) FROM admin_audit_events)=?)`, commandId, ...auth.values, snapshot.revision.operations, snapshot.revision.administration),
             ...commandWrites(env, r, commandId, 'attendance.closeout.prepare', id, await hash(JSON.stringify({ asOf: r.asOf, revision: snapshot.revision })), now),
-            stmt(env.DB, `INSERT INTO attendance_closeouts VALUES(?,?,?,?,?,?,?,?,1,?,?,?,?,?,?)`, id, env.ENVIRONMENT, Number(env.GENERATION), CLOSEOUT_POLICY.version, r.asOf, window.start, window.end, current.termId, result.state, r.sourceKind, r.sourceResource, commandId, now, now),
+            stmt(env.DB, `INSERT INTO attendance_closeouts VALUES(?,?,?,?,?,?,?,?,1,?,?,?,?,?,?)`, id, env.ENVIRONMENT, Number(env.GENERATION), CLOSEOUT_POLICY.version, r.asOf, window.start, window.end, termId, result.state, r.sourceKind, r.sourceResource, commandId, now, now),
             stmt(env.DB, `INSERT INTO closeout_items(closeout_id,event_id,person_id,event_version,flight_id,state) SELECT ?,json_extract(value,'$.eventId'),json_extract(value,'$.personId'),json_extract(value,'$.eventVersion'),json_extract(value,'$.flightId'),'pending' FROM json_each(?)`, id, serialized),
             audit(env, r, commandId, 'attendance.closeout.prepare', id, now, { policyVersion: CLOSEOUT_POLICY.version, window, revision: snapshot.revision, items: items.length }),
             stmt(env.DB, 'UPDATE admin_commands SET receipt_json=? WHERE command_id=?', JSON.stringify(result), commandId), stmt(env.DB, 'DELETE FROM command_assertions WHERE command_id=?', commandId),
@@ -171,12 +175,13 @@ export async function advanceCloseout(env: Env, input: unknown) {
     }
     if (run.version !== version || !['processing', 'notifying'].includes(run.state))
         throw new HttpError(409, 'CLOSEOUT_CONFLICT', 'Reload the current closeout progress.');
-    const snapshot = await frontendSnapshot(env, { environment: env.ENVIRONMENT, generation: Number(env.GENERATION), principalId: r.principalId });
+    const items = (await stmt(env.DB, "SELECT * FROM closeout_items WHERE closeout_id=? AND state='pending' ORDER BY event_id,person_id LIMIT ?", id, SIZE).all<Item>()).results;
+    const snapshot = await readCloseoutStepContext(env,r.principalId,id,items);
     const current = report(snapshot, run.as_of);
     if (current.termId !== run.term_id)
         throw new HttpError(409, 'CLOSEOUT_TERM', 'Finish or review the retained closeout before a term transition.');
     const now = new Date().toISOString(), commandId = 'closeout-step-' + await hash(JSON.stringify([id, version]));
-    const items = (await stmt(env.DB, "SELECT * FROM closeout_items WHERE closeout_id=? AND state='pending' ORDER BY event_id,person_id LIMIT ?", id, SIZE).all<Item>()).results;
+
     const cells = new Map(current.matrix.rows.flatMap(p => p.cells.map(c => [JSON.stringify([c.eventId, p.personId]), c] as const))), pairVersions = new Map(snapshot.attendanceVersions.map(v => [JSON.stringify([v.eventId, v.personId]), v.version]));
     const rows = await Promise.all(items.map(async (item) => {
         const key = JSON.stringify([item.event_id, item.person_id]), cell = cells.get(key), event = snapshot.events.find(e => e.eventId === item.event_id);

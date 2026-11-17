@@ -48,14 +48,19 @@ export function assembleFrontendSnapshotPages(manifest:FrontendPageManifest,page
   const eligible=new Map<string,string[]>();for(const r of data.eventRosters){const ids=eligible.get(String(r.eventId))??[];ids.push(String(r.personId));eligible.set(String(r.eventId),ids);}
   const events=data.events.map(({hasRoster,...event})=>({...event,eligiblePersonIds:hasRoster===1?eligible.get(String(event.eventId))??[]:null})) as FrontendSnapshot['events'];
   const requests=data.requests.map(r=>({...r,legacyStateOnly:r.legacyStateOnly===1})) as unknown as FrontendSnapshot['requests'];
+  const attendanceVersions=frontendAttendanceVersions([...data.observations,...data.requests,...data.corrections,...data.legacyBaselines]);
+  const diagnostics=[...manifest.diagnostics,{code:'FLIGHTS_MISSING_SQUADRON',count:flights.filter(f=>f.squadronId===null).length},{code:'EVENTS_MISSING_ROSTER',count:events.filter(e=>e.eligiblePersonIds===null).length}].filter(d=>d.count>0);
+  return {contractVersion:1,environment:manifest.environment,generation:manifest.generation,revision:manifest.revision,people,leadership,flights,squadrons,
+    terms:data.terms.map(t=>({...t,isCurrent:!!t.isCurrent,...(rosters.has(String(t.termId))?{roster:rosters.get(String(t.termId))}:{})})) as FrontendSnapshot['terms'],events,eventFlights:data.eventFlights as FrontendSnapshot['eventFlights'],observations:data.observations as FrontendSnapshot['observations'],requests,corrections:data.corrections as FrontendSnapshot['corrections'],legacyBaselines:data.legacyBaselines as NonNullable<FrontendSnapshot['legacyBaselines']>,attendanceVersions,diagnostics};
+}
+
+/** Shared causal pair-version reduction for complete scoped facts. */
+export function frontendAttendanceVersions(rows:readonly Record<string,unknown>[]):FrontendSnapshot['attendanceVersions'] {
   const versions=new Map<string,{personId:string;eventId:string;version:number}>();
-  for(const row of [...data.observations,...data.requests,...data.corrections,...data.legacyBaselines]){
+  for(const row of rows){
     const personId=String(row.personId),eventId=String(row.eventId),version=typeof row.order==='number'?row.order:0,key=JSON.stringify([personId,eventId]);
     check(Number.isSafeInteger(version)&&version>=0);const previous=versions.get(key);if(!previous||previous.version<version)versions.set(key,{personId,eventId,version});
   }
   check(versions.size<=25000);const compare=(a:string,b:string)=>a<b?-1:a>b?1:0;
-  const attendanceVersions=[...versions.values()].sort((a,b)=>compare(a.personId,b.personId)||compare(a.eventId,b.eventId));
-  const diagnostics=[...manifest.diagnostics,{code:'FLIGHTS_MISSING_SQUADRON',count:flights.filter(f=>f.squadronId===null).length},{code:'EVENTS_MISSING_ROSTER',count:events.filter(e=>e.eligiblePersonIds===null).length}].filter(d=>d.count>0);
-  return {contractVersion:1,environment:manifest.environment,generation:manifest.generation,revision:manifest.revision,people,leadership,flights,squadrons,
-    terms:data.terms.map(t=>({...t,isCurrent:!!t.isCurrent,...(rosters.has(String(t.termId))?{roster:rosters.get(String(t.termId))}:{})})) as FrontendSnapshot['terms'],events,eventFlights:data.eventFlights as FrontendSnapshot['eventFlights'],observations:data.observations as FrontendSnapshot['observations'],requests,corrections:data.corrections as FrontendSnapshot['corrections'],legacyBaselines:data.legacyBaselines as NonNullable<FrontendSnapshot['legacyBaselines']>,attendanceVersions,diagnostics};
+  return [...versions.values()].sort((a,b)=>compare(a.personId,b.personId)||compare(a.eventId,b.eventId));
 }

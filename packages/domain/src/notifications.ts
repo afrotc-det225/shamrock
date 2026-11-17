@@ -43,8 +43,9 @@ function instant(value: string): Date {
   if (result.toISOString() !== (value.length === 20 ? value.slice(0, -1) + '.000Z' : value)) throw Error('Notification timestamp is not a real calendar instant.');
   return result;
 }
+let localClockFormatter: Intl.DateTimeFormat | undefined;
 export function noticeLocalClock(value: string) {
-  const parts = new Intl.DateTimeFormat('en-CA', { timeZone: NOTICE_POLICY.timeZone, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', hourCycle: 'h23' }).formatToParts(instant(value));
+  const parts = (localClockFormatter ??= new Intl.DateTimeFormat('en-CA', { timeZone: NOTICE_POLICY.timeZone, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', hourCycle: 'h23' })).formatToParts(instant(value));
   const get = (key: string) => parts.find(p => p.type === key)!.value;
   const date = `${get('year')}-${get('month')}-${get('day')}`;
   return { date, hour: Number(get('hour')), weekday: new Date(date + 'T12:00:00Z').getUTCDay() };

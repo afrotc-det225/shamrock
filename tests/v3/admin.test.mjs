@@ -619,3 +619,36 @@ test('paused page reads reject an unfinished import instead of mixing unaudited 
  const f=await fixture(t);await f.db.prepare("INSERT INTO legacy_import_runs(import_run_id,snapshot_sha256,plan_sha256,reconciliation_sha256,review_reference,environment,generation,state,expected_occurrences,expected_profiles,expected_events,expected_baselines,expected_batches,manifest_json,started_at) VALUES('run','snapshot','plan','reconcile','fixture','staging',1,'loading',1,1,1,1,1,'{}','2026-01-01T00:00:00Z')").run();await f.db.prepare('UPDATE system_control SET accepting_commands=0').run();
  const response=await f.send(read({section:'manifest',offset:0,revision:null}),'/v1/admin/snapshot/page');assert.equal(response.status,409);assert.equal(response.body.error.code,'SNAPSHOT_IMPORT_ACTIVE');
 });
+
+const {readNotificationContext}=await import('../../.build/v3/apps/worker/src/reporting-context.js');
+const {frontendSnapshot}=await import('../../.build/v3/apps/worker/src/admin.js');
+const {planFromSnapshot}=await import('../../.build/v3/apps/worker/src/notifications.js');
+test('notification contexts exclude unrelated historical facts while preserving exact due message routing and content',async t=>{
+  const f=await notificationFixture(t);
+  for(const [eventId,startAt]of [['old-event','2025-12-01T12:00:00.000Z'],['future-event','2026-06-01T12:00:00.000Z']]){
+    const c=command('event.upsert');c.commandId=eventId;c.source.submissionId=eventId;c.payload={...c.payload,eventId,startAt,endAt:startAt,eligiblePersonIds:['person-a']};
+    assert.equal((await f.send(c)).status,200);
+    const correction=structuredClone(f.correction);correction.commandId='mark-'+eventId;correction.source.submissionId=correction.commandId;correction.payload.eventId=eventId;
+    assert.equal((await f.send(correction)).status,200);
+  }
+  const currentCorrection=structuredClone(f.correction);currentCorrection.commandId='mark-current';currentCorrection.source.submissionId=currentCorrection.commandId;
+  assert.equal((await f.send(currentCorrection)).status,200);
+  const full=await frontendSnapshot(f.env,read()),scoped=await readNotificationContext(f.env,'admin',f.plan.payload);
+  assert.equal(full.events.length,3);assert.equal(full.corrections.length,3);
+  assert.deepEqual(scoped.events.map(e=>e.eventId),['event-one']);assert.deepEqual(scoped.corrections.map(e=>e.eventId),['event-one']);
+  assert.deepEqual(planFromSnapshot(scoped,f.plan.payload),planFromSnapshot(full,f.plan.payload));
+  const weekly={...f.plan.payload,asOf:'2026-01-04T22:00:00.000Z'};
+  assert.deepEqual(planFromSnapshot(await readNotificationContext(f.env,'admin',weekly),weekly),planFromSnapshot(full,weekly));
+  const request={...f.attendance,commandId:'scope-request',source:{...f.attendance.source,submissionId:'scope-request'},operation:'excusal.submit',payload:{requestId:'scope-request',eventId:'event-one',personId:'person-a',requestedOutcome:'E',reason:'Fictional reason'}};
+  assert.equal((await f.send(request,'/v1/commands')).status,200);
+  const excusal={kind:'excusal',asOf:'2026-01-01T10:00:00.000Z',requestId:'scope-request'},one=await readNotificationContext(f.env,'admin',excusal);
+  assert.equal(one.requests.length,1);assert.equal(one.corrections.length,0);assert.equal(one.observations.length,0);assert.equal(one.legacyBaselines.length,0);
+  assert.deepEqual(planFromSnapshot(one,excusal),planFromSnapshot(await frontendSnapshot(f.env,read()),excusal));
+});
+test('scoped reads reject a changed audit revision or revoked reader between catalog selection and facts',async t=>{
+  const f=await notificationFixture(t);let batches=0;
+  const DB={prepare:sql=>f.db.prepare(sql),batch:async statements=>{const result=await f.db.batch(statements);if(++batches===1){const c=command('leadership.upsert');c.commandId='routing-race';c.source.submissionId=c.commandId;assert.equal((await f.send(c)).status,200);}return result;}};
+  await assert.rejects(readNotificationContext({...f.env,DB},'admin',f.plan.payload),{code:'SNAPSHOT_CHANGED'});
+  batches=0;const denied={prepare:sql=>f.db.prepare(sql),batch:async statements=>{const result=await f.db.batch(statements);if(++batches===1)await f.db.prepare("DELETE FROM admin_grants WHERE principal_id='admin' AND capability='frontend.read'").run();return result;}};
+  await assert.rejects(readNotificationContext({...f.env,DB:denied},'admin',f.plan.payload),{code:'NOT_AUTHORIZED'});
+});
