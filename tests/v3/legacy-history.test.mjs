@@ -61,3 +61,25 @@ test('history page binding, authorization and source consistency fail closed bef
  const {db,env,request}=await database(t),base={...request,snapshotId:'archive-one',section:'rows',offset:0,sourceSnapshotSha256:'b'.repeat(64)};await assert.rejects(legacyHistoryPage(env,base),e=>e.code==='SNAPSHOT_CHANGED');base.sourceSnapshotSha256='a'.repeat(64);
  await db.prepare("UPDATE legacy_matrix_snapshot_rows SET person_id='tampered'").run();await assert.rejects(legacyHistoryPage(env,base),e=>e.code==='INVALID_LEGACY_HISTORY');await db.prepare("UPDATE principals SET active=0 WHERE principal_id='reader'").run();await assert.rejects(legacyHistoryPage(env,{...base,section:'verify'}),e=>e.code==='NOT_AUTHORIZED');
 });
+test('one page retains separate row diagnostics, complex formula evidence and source indexes; empty pages remain exact',async t=>{
+ const {db,env,request}=await database(t),f=fixture(),writes=[];
+ for(let i=0;i<4;i++){
+  const value=structuredClone(f.rows[0]);value.row.occurrenceId=`mixed-${i}`;
+  if(i===0)value.row.events[0].code='RETAINED-UNKNOWN';
+  if(i===1)value.row.overall=.123;
+  if(i===2){value.row.creditFormulaEvidence.overall=formula(['P*','E','ES*','MU*','MRS*'],['P*','E','ES*','T*','U','UR','MU*','MRS*']);value.row.events[1].code='UR';}
+  if(i===3){value.row.creditFormulaEvidence.overall='=LET(saved,"'+ 'x'.repeat(8500)+'",saved)';value.row.creditFormulaEvidence.llab=null;}
+  writes.push(db.prepare("INSERT INTO legacy_source_occurrences VALUES('run-one',?,'fingerprint','matrix','evidence-only',?,?,NULL,'{}')").bind(value.row.occurrenceId,JSON.stringify({rowIndex:6-i}),JSON.stringify(value.sourceLabels.map(v=>({effectiveValue:{stringValue:v}})))));
+  writes.push(db.prepare("INSERT INTO legacy_matrix_snapshot_rows VALUES('archive-one',?,NULL,?)").bind(value.row.occurrenceId,JSON.stringify(value.row)));
+ }
+ await db.batch(writes);
+ const base={...request,snapshotId:'archive-one',section:'rows',offset:0,sourceSnapshotSha256:'a'.repeat(64)},page=await legacyHistoryPage(env,base);
+ const full=await readLegacyHistory(env,{...request,snapshotId:'archive-one'});
+ assert.equal(page.rows.length,4);assert.deepEqual(page.rows.map(r=>r.sourceRowIndex),[6,5,4,3]);assert.equal(page.nextOffset,4);
+ for(const entry of page.rows){assert.deepEqual(entry.row,full.rows.find(row=>row.rowId===entry.row.rowId));assert.deepEqual(entry.diagnostics,full.diagnostics.filter(d=>d.rowId===entry.row.rowId));assert.ok(entry.diagnostics.every(d=>d.rowId===entry.row.rowId));}
+ assert.ok(page.rows[0].diagnostics.some(d=>d.code==='unknown-code'));assert.ok(page.rows[1].diagnostics.some(d=>d.code==='saved-percentage-mismatch'));assert.equal(page.rows[2].row.overall.policyVersion,'legacy-pre-v2-ur-counted');assert.equal(page.rows[3].row.overall.sourceFormula,'=LET(saved,"'+'x'.repeat(8500)+'",saved)');assert.equal(page.rows[3].row.llab.sourceFormula,null);
+ assert.deepEqual((await pagedHistory(env,request)).report,full);
+ await db.prepare("DELETE FROM legacy_matrix_snapshot_rows WHERE matrix_snapshot_id='archive-one'").run();
+ const empty=await legacyHistoryPage(env,base);assert.deepEqual(empty.rows,[]);assert.equal(empty.nextOffset,null);
+ const allEmpty=await pagedHistory(env,request);assert.equal(allEmpty.report.rows.length,0);assert.deepEqual(allEmpty.report,await readLegacyHistory(env,{...request,snapshotId:'archive-one'}));
+});

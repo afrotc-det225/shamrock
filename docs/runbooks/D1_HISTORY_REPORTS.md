@@ -21,6 +21,13 @@ A read is bounded to 500 rows, 128 event columns and 64,000 cells. Stored row pa
 
 Run `npm run build:v3 && node --test tests/v3/legacy-history.test.mjs`, then the repository checks before release. Synthetic tests cover historical policy differences, exact range exclusions, unresolved rows, changed/manual formulas, retained unknown codes, authenticated routing, revoked/insufficient grants, incomplete imports, generation binding and capacity limits. Real-data validation belongs only in ignored restricted local evidence; successful local reproduction does not establish hosted endpoint or Google presentation readiness.
 
+The paged Worker reader calculates at most four retained rows per request and
+builds their shared report metadata once. Diagnostics remain attached to their
+exact source row, and source indexes, literal formulas/codes, the 128 KB page
+budget and continuation offsets are unchanged. This avoids rebuilding discarded
+report columns four times; it does not relax authentication, source bindings or
+capacity checks. Hosted CPU and quota measurements remain release-specific.
+
 ## Bounded native History workbook
 
 `createNativeHistoryRuntime` is exported by the isolated staging bundle. It creates read-only report tabs inside a separately provisioned private workbook and exposes `setup()`, `resume(bindingHash)`, `run()` and `pause()`. It does not create files, install triggers, change the operational Main workbook or send mail. The Main Dashboard can link to this workbook after the reports finish verification; no technical recovery tabs are added to Main.

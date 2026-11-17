@@ -34,10 +34,18 @@ export async function legacyHistoryPage(env:Env,input:unknown):Promise<HistoryPa
       for(const row of report.sourceRoster){const size=new TextEncoder().encode(JSON.stringify(row)).length+1;if(bytes+size>128000){if(!rows.length)fail(409,'LEGACY_HISTORY_CAPACITY');break;}bytes+=size;rows.push(row);}
       if(!rows.length&&Number(r.offset)<Number(meta.rosterCount))fail(409,'INVALID_LEGACY_HISTORY');return {...binding,section:'roster',offset:Number(r.offset),nextOffset:Number(r.offset)+rows.length<Number(meta.rosterCount)?Number(r.offset)+rows.length:null,rows};
     }
-    const rows:HistoryRowsPage['rows']=[];let bytes=1000;
-    for(const value of sourceRows.slice(0,4)){
+    const values=sourceRows.slice(0,4);
+    // Validate shared metadata and construct report columns once for this bounded
+    // page. Keep each row's original source position and only its own diagnostics.
+    const report=buildLegacyHistoryReport({...base,rows:values.map(value=>{
       if(typeof value.payload!=='string')fail(409,'LEGACY_HISTORY_CAPACITY');const row=JSON.parse(String(value.payload));if(row.occurrenceId!==value.rowId||row.personId!==value.personId||!Number.isSafeInteger(value.sourceRowIndex)||Number(value.sourceRowIndex)<2)throw new LegacyHistoryError('INVALID_LEGACY_HISTORY');
-      const report=buildLegacyHistoryReport({...base,rows:[{row,sourceLabels:JSON.parse(String(value.labels)).map(String)}]}),entry={sourceRowIndex:Number(value.sourceRowIndex),row:report.rows[0],diagnostics:report.diagnostics};
+      return {row,sourceLabels:JSON.parse(String(value.labels)).map(String)};
+    })});
+    const diagnostics=new Map(report.rows.map(row=>[row.rowId,[] as typeof report.diagnostics]));
+    for(const diagnostic of report.diagnostics)diagnostics.get(diagnostic.rowId)!.push(diagnostic);
+    const rows:HistoryRowsPage['rows']=[];let bytes=1000;
+    for(const [index,value] of values.entries()){
+      const row=report.rows[index],entry={sourceRowIndex:Number(value.sourceRowIndex),row,diagnostics:diagnostics.get(row.rowId)!};
       const size=new TextEncoder().encode(JSON.stringify(entry)).length+1;if(bytes+size>128000){if(!rows.length)fail(409,'LEGACY_HISTORY_CAPACITY');break;}bytes+=size;rows.push(entry);
     }
     if(!rows.length&&Number(r.offset)<Number(meta.rowCount))fail(409,'INVALID_LEGACY_HISTORY');return {...binding,section:'rows',offset:Number(r.offset),nextOffset:Number(r.offset)+rows.length<Number(meta.rowCount)?Number(r.offset)+rows.length:null,rows};
