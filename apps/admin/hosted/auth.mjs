@@ -32,7 +32,7 @@ const redirect = (location, cookies = []) => {
   for (const value of cookies) headers.append("Set-Cookie", value);
   return new Response(null, { status: 303, headers });
 };
-export async function verifyGoogleToken(token, clientId, nonce, jwks = keys) {
+export async function verifyGoogleIdentity(token, clientId, nonce, jwks = keys) {
   const { payload } = await jwtVerify(token, jwks, {
     issuer: ["https://accounts.google.com", "accounts.google.com"],
     audience: clientId,
@@ -54,7 +54,41 @@ export async function verifyGoogleToken(token, clientId, nonce, jwks = keys) {
       "Google sign-in could not be verified.",
       401,
     );
-  return payload.sub;
+  const email = typeof payload.email === "string" ? payload.email : "";
+  // Only the signed, verified claim may match a privately reviewed invitation.
+  // Missing email does not invalidate an already-bound Google subject.
+  const emailHash = email.length <= 254 && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)
+    ? await sha(email.toLowerCase()) : null;
+  return { subject: payload.sub, emailHash };
+}
+export async function verifyGoogleToken(token, clientId, nonce, jwks = keys) {
+  return (await verifyGoogleIdentity(token, clientId, nonce, jwks)).subject;
+}
+async function resolveLoginBinding(env, identity, now) {
+  const existing = await env.PANEL_DB.prepare(
+    "SELECT principal_id FROM identity_bindings WHERE google_sub=? AND active=1",
+  ).bind(identity.subject).first();
+  if (existing || !identity.emailHash) return existing;
+  // The two writes and readback share one D1 transaction. An invitation never
+  // replaces a subject binding, reactivates one, or adds a login to a bound principal.
+  const results = await env.PANEL_DB.batch([
+    env.PANEL_DB.prepare(`INSERT INTO identity_bindings(google_sub,principal_id,active)
+      SELECT ?,i.principal_id,1 FROM login_invitations i
+      WHERE i.email_sha256=? AND i.created<=? AND i.expires>? AND i.consumed_subject IS NULL
+      AND NOT EXISTS(SELECT 1 FROM identity_bindings b WHERE b.google_sub=? OR b.principal_id=i.principal_id)
+      AND (SELECT COUNT(*) FROM identity_bindings)<2000
+      ON CONFLICT(google_sub) DO NOTHING`)
+      .bind(identity.subject,identity.emailHash,now,now,identity.subject),
+    env.PANEL_DB.prepare(`UPDATE login_invitations SET consumed_subject=?,consumed_at=?
+      WHERE email_sha256=? AND created<=? AND expires>? AND consumed_subject IS NULL
+      AND EXISTS(SELECT 1 FROM identity_bindings b WHERE b.google_sub=? AND b.principal_id=login_invitations.principal_id AND b.active=1)`)
+      .bind(identity.subject,now,identity.emailHash,now,now,identity.subject),
+    env.PANEL_DB.prepare(`SELECT b.principal_id FROM identity_bindings b JOIN login_invitations i
+      ON i.principal_id=b.principal_id AND i.consumed_subject=b.google_sub
+      WHERE b.google_sub=? AND b.active=1 AND i.email_sha256=?`)
+      .bind(identity.subject,identity.emailHash),
+  ]);
+  return results[2].results[0] || null;
 }
 export async function session(request, env) {
   const token = cookie(request, "__Host-shamrock");
@@ -93,7 +127,7 @@ export async function csrfCheck(request, env, bodySession) {
 export async function authRoute(
   request,
   env,
-  { fetcher = fetch, verify = verifyGoogleToken } = {},
+  { fetcher = fetch, verify = verifyGoogleIdentity } = {},
 ) {
   const url = new URL(request.url),
     now = Date.now();
@@ -210,9 +244,9 @@ export async function authRoute(
         401,
       );
     const tokens = await boundedJson(response, 32768);
-    let subject;
+    let identity;
     try {
-      subject = await verify(
+      identity = await verify(
         tokens.id_token,
         env.GOOGLE_CLIENT_ID,
         saved.nonce,
@@ -224,11 +258,7 @@ export async function authRoute(
         401,
       );
     }
-    const binding = await env.PANEL_DB.prepare(
-      "SELECT principal_id FROM identity_bindings WHERE google_sub=? AND active=1",
-    )
-      .bind(subject)
-      .first();
+    const binding = await resolveLoginBinding(env, identity, Date.now());
     if (!binding)
       throw new PanelError(
         "ACCESS_NOT_GRANTED",
@@ -236,7 +266,8 @@ export async function authRoute(
         403,
       );
     const token = random(),
-      csrf = random();
+      csrf = random(),
+      subject = identity.subject;
     const savedSession = await env.PANEL_DB.prepare(
       "INSERT INTO sessions SELECT ?,?,?,? WHERE (SELECT COUNT(*) FROM sessions)<2000 AND (SELECT COUNT(*) FROM sessions WHERE google_sub=?)<20",
     )

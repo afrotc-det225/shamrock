@@ -7,6 +7,7 @@ import { Miniflare, Log, LogLevel } from "miniflare";
 import { generateKeyPair, exportJWK, createLocalJWKSet, SignJWT } from "jose";
 import {
   verifyGoogleToken,
+  verifyGoogleIdentity,
   authRoute,
   sha,
   random,
@@ -105,6 +106,7 @@ async function fixture(t, backendScript, viewAsEnabled = false) {
   );
   await execute(splitMigrationSql(await readFile(new URL("../hosted/migrations/0002_view_as.sql", import.meta.url), "utf8")).map(sql => ({sql})));
   await execute(splitMigrationSql(await readFile(new URL("../hosted/migrations/0003_preview_intents.sql", import.meta.url), "utf8")).map(sql => ({sql})));
+  await execute(splitMigrationSql(await readFile(new URL("../hosted/migrations/0004_login_invitations.sql", import.meta.url), "utf8")).map(sql => ({sql})));
   const run = async (sql, ...values) => (await execute([{ sql, values }]))[0];
   const db = {
     prepare: (sql) => ({
@@ -191,7 +193,7 @@ test("OAuth state is browser-bound, single-use and PKCE-protected; only subject 
     verify: async (_token, client, nonce) => {
       assert.equal(client, "test-client");
       assert.equal(nonce, auth.searchParams.get("nonce"));
-      return "verified-sub";
+      return {subject:"verified-sub",emailHash:null};
     },
   };
   const callback =
@@ -233,6 +235,87 @@ test("OAuth state is browser-bound, single-use and PKCE-protected; only subject 
     session(new Request(origin, { headers: { cookie: sessionCookie } }), env),
   );
 });
+
+async function invitationLogin(f) {
+  const pair=await generateKeyPair('RS256'),jwk=await exportJWK(pair.publicKey);
+  jwk.kid='invitation-test';
+  const jwks=createLocalJWKSet({keys:[jwk]});
+  const env={PANEL_DB:f.db,APP_ORIGIN:origin,GOOGLE_CLIENT_ID:'test-client',GOOGLE_CLIENT_SECRET:'test-secret'};
+  return async (subject,email,extra={})=>{
+    const start=await authRoute(new Request(origin+'/auth/login'),env);
+    const auth=new URL(start.headers.get('location'));
+    const browser=start.headers.getSetCookie().find(value=>value.startsWith('__Host-shamrock-auth=')).split(';')[0];
+    const token=await new SignJWT({sub:subject,email,email_verified:true,nonce:auth.searchParams.get('nonce'),...extra})
+      .setProtectedHeader({alg:'RS256',kid:'invitation-test'}).setIssuer('https://accounts.google.com')
+      .setAudience('test-client').setIssuedAt().setExpirationTime('5m').sign(pair.privateKey);
+    return authRoute(new Request(origin+'/auth/callback?state='+auth.searchParams.get('state')+'&code=fictional-code',
+      {headers:{cookie:browser}}),env,{fetcher:async()=>Response.json({id_token:token}),
+      verify:(value,client,nonce)=>verifyGoogleIdentity(value,client,nonce,jwks)});
+  };
+}
+const invite = async (f,email,principal='invited-flight-reader',expires=Date.now()+60000) => {
+  const hash=await sha(email.toLowerCase());
+  await f.run('INSERT INTO login_invitations(email_sha256,principal_id,created,expires) VALUES(?,?,?,?)',hash,principal,Date.now()-120000,expires);
+  return hash;
+};
+test('invitation schema bounds expiry and requires complete consumption evidence',async t=>{
+  const f=await fixture(t),now=Date.now(),hash=await sha('bounded@example.invalid');
+  await assert.rejects(()=>f.run('INSERT INTO login_invitations(email_sha256,principal_id,created,expires) VALUES(?,?,?,?)',hash,'bounded-principal',now,now+86400001));
+  await invite(f,'bounded@example.invalid','bounded-principal');
+  await assert.rejects(()=>f.run('UPDATE login_invitations SET consumed_at=? WHERE email_sha256=?',now,hash));
+  await assert.rejects(()=>f.run('UPDATE login_invitations SET consumed_subject=? WHERE email_sha256=?','incomplete-sub',hash));
+  assert.equal((await f.run('SELECT consumed_subject FROM login_invitations WHERE email_sha256=?',hash)).results[0].consumed_subject,null);
+});
+test('reviewed invitation binds only a signed verified email and actual Google subject',async t=>{
+  const f=await fixture(t),login=await invitationLogin(f),hash=await invite(f,'invited@example.invalid');
+  const result=await login('verified-invite-sub','Invited@Example.Invalid');
+  assert.equal(result.status,303);
+  const binding=(await f.run('SELECT * FROM identity_bindings')).results;
+  assert.deepEqual(binding,[{google_sub:'verified-invite-sub',principal_id:'invited-flight-reader',active:1}]);
+  const saved=(await f.run('SELECT * FROM login_invitations WHERE email_sha256=?',hash)).results[0];
+  assert.equal(saved.consumed_subject,'verified-invite-sub');assert(saved.consumed_at>=saved.created);
+  assert.equal((await f.run('SELECT COUNT(*) AS n FROM sessions WHERE google_sub=?','verified-invite-sub')).results[0].n,1);
+  const again=await login('verified-invite-sub','invited@example.invalid');assert.equal(again.status,303,'later login uses the established subject');
+});
+test('wrong, unverified, missing, expired and already consumed invitations fail closed',async t=>{
+  const f=await fixture(t),login=await invitationLogin(f),hash=await invite(f,'invited@example.invalid');
+  await assert.rejects(()=>login('unknown-sub','other@example.invalid'),e=>e.code==='ACCESS_NOT_GRANTED');
+  await assert.rejects(()=>login('unverified-sub','invited@example.invalid',{email_verified:false}),e=>e.code==='INVALID_IDENTITY');
+  await assert.rejects(()=>login('missing-sub',undefined),e=>e.code==='ACCESS_NOT_GRANTED');
+  assert.equal((await f.run('SELECT consumed_subject FROM login_invitations WHERE email_sha256=?',hash)).results[0].consumed_subject,null);
+  await invite(f,'expired@example.invalid','expired-principal',Date.now()-1000);
+  await assert.rejects(()=>login('expired-sub','expired@example.invalid'),e=>e.code==='ACCESS_NOT_GRANTED');
+  await login('first-sub','invited@example.invalid');
+  await assert.rejects(()=>login('second-sub','invited@example.invalid'),e=>e.code==='ACCESS_NOT_GRANTED');
+  assert.equal((await f.run('SELECT COUNT(*) AS n FROM identity_bindings')).results[0].n,1);
+});
+test('invitations cannot rebind existing subjects or add logins to an already bound principal',async t=>{
+  const f=await fixture(t),login=await invitationLogin(f);
+  await f.run("INSERT INTO identity_bindings VALUES('existing-sub','existing-principal',1)");
+  await f.run("INSERT INTO identity_bindings VALUES('disabled-sub','disabled-principal',0)");
+  const hash=await invite(f,'new@example.invalid');
+  assert.equal((await login('existing-sub','new@example.invalid')).status,303);
+  assert.equal((await f.run("SELECT principal_id FROM identity_bindings WHERE google_sub='existing-sub'")).results[0].principal_id,'existing-principal');
+  assert.equal((await f.run('SELECT consumed_subject FROM login_invitations WHERE email_sha256=?',hash)).results[0].consumed_subject,null);
+  await assert.rejects(()=>login('disabled-sub','new@example.invalid'),e=>e.code==='ACCESS_NOT_GRANTED');
+  await invite(f,'another@example.invalid','existing-principal');
+  await assert.rejects(()=>login('other-sub','another@example.invalid'),e=>e.code==='ACCESS_NOT_GRANTED');
+  assert.equal((await f.run('SELECT COUNT(*) AS n FROM identity_bindings')).results[0].n,2);
+});
+test('concurrent invitation claims admit one subject and transaction failure retains the invitation',async t=>{
+  const f=await fixture(t),login=await invitationLogin(f);
+  await invite(f,'race@example.invalid');
+  const outcomes=await Promise.allSettled([login('racer-one','race@example.invalid'),login('racer-two','race@example.invalid')]);
+  assert.equal(outcomes.filter(value=>value.status==='fulfilled'&&value.value.status===303).length,1);
+  assert.equal(outcomes.filter(value=>value.status==='rejected'&&value.reason.code==='ACCESS_NOT_GRANTED').length,1);
+  assert.equal((await f.run('SELECT COUNT(*) AS n FROM identity_bindings')).results[0].n,1);
+  const hash=await invite(f,'rollback@example.invalid','rollback-principal');
+  await f.run("CREATE TRIGGER fixture_reject_invite BEFORE UPDATE ON login_invitations WHEN NEW.principal_id='rollback-principal' BEGIN SELECT RAISE(ABORT,'fictional interrupted consume'); END");
+  await assert.rejects(()=>login('rollback-sub','rollback@example.invalid'));
+  assert.equal((await f.run("SELECT COUNT(*) AS n FROM identity_bindings WHERE google_sub='rollback-sub'")).results[0].n,0);
+  assert.equal((await f.run('SELECT consumed_subject FROM login_invitations WHERE email_sha256=?',hash)).results[0].consumed_subject,null);
+});
+
 test("hosted runtime refuses anonymous sessions, spoofed identity, cross-origin writes and wrong host", async (t) => {
   const f = await fixture(t),
     send = (path, init = {}) => f.mf.dispatchFetch(origin + path, init);

@@ -1,8 +1,8 @@
 # Administrator panel: hosted staging
 
 This Worker serves the same administrator interface with verified Google sign-in,
-separate D1 session/proposal persistence, and a service binding to the **fictional
-staging** backend. It cannot select a production environment. The production
+separate D1 session/proposal persistence, and a service binding to an explicitly
+reviewed fictional or private real-data staging backend. It cannot select a production environment. The production
 Apps Script system is unaffected. Do not deploy `local-fixture.ts` or the Node
 owner-local server.
 
@@ -46,8 +46,10 @@ paid model, custom domain or GitHub subscription is required.
 7. Map the operator's **verified Google subject** to the reviewed existing D1
    principal in `identity_bindings`. Obtain the subject through a verified Google
    identity flow; never infer it from a submitted email. The same operational
-   principal must be active and hold the required backend grants. There is no
-   automatic enrollment or public grant endpoint.
+   principal must be active and hold the required backend grants. For a reviewed
+   new staging login, the one-time invitation below obtains the subject during
+   that account holder's actual hosted sign-in. There is no public enrollment or
+   grant endpoint.
 8. Deploy only the separate administrator staging Worker and verify the checks
    below. Preserve the original production resources and command gates. Resume
    only the fictional staging mutation gate when the coordinated test requires it.
@@ -56,6 +58,43 @@ The target hosted compatibility date is November 16, 2026. The locally installed
 workerd currently supports an older date; emulator tests use the existing July 1
 baseline. Those tests are not evidence for the hosted compatibility date. Verify
 the actual deployed Worker through the hosted acceptance checks.
+
+For the private real-data preview, set `STAGING_DATASET=real` and
+`BACKEND_SERVICE_NAME` to the reviewed isolated service ending in `-real-parity`.
+Its exact HTTPS origin must be that service's first hostname label under the
+account's `workers.dev` subdomain, without a port or path. Verify the actual
+`BACKEND` service binding matches this name, then bind the matching bridge key,
+generation and verified administrator principal. These are private deployment
+settings, never browser inputs. The fictional default retains its separate
+staging backend. Do not rebind an existing Google subject based on a supplied
+email, merge fictional receipts into real history, or enable operational intake
+merely to view records. Record the data capture date and import comparison in the
+private release evidence; a real dataset flag does not establish currentness.
+
+### One-time reviewed staging login
+
+Apply `migrations/0004_login_invitations.sql` to the separate panel session database
+after its earlier migrations, and record the exact schema hash in the private
+release evidence. Leave the base `schema.sql` hash unchanged. An operator may
+privately insert a `login_invitations` row only for an explicitly reviewed account
+and an existing, appropriately scoped operational principal. Store the SHA-256 of
+the account email lowercased without whitespace, the principal, and integer
+`created`/`expires` milliseconds; expiry must be no more than 24 hours after creation.
+Leave both consumption fields null. Keep the invitation count below 2,000, remove
+expired unused invitations during reviewed maintenance, and retain consumed rows
+as private enrollment evidence. No UI or API creates invitations.
+
+The account holder uses the normal hosted Google login with only `openid email`
+consent. After signature, issuer, audience, nonce, PKCE and verified-email checks,
+the callback hashes Google's signed email claim and atomically creates the subject
+binding and consumes the matching unexpired invitation. No subject is inferred
+from email. An existing subject is never replaced or reactivated, and a principal
+that already has a login binding cannot acquire another through this mechanism.
+Wrong, missing, unverified, expired or previously consumed invitations do not grant
+access. Concurrent claims admit one subject; a failed consume rolls back its new
+binding. Normal later sign-ins use the established subject, independently of the
+invitation's expiry. This step does not create backend roles or prove native
+Google Sheet/Form access.
 
 ## Identity and request protections
 
