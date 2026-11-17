@@ -127,6 +127,8 @@ The owner-private frontend configuration can contain `leaseRecovery: {recoveryId
 
 To resume without manipulating Script Properties in the editor, write a new owner-private `resumeRequest: {requestId, sequence, stateSha256}` alongside `enabled:true`. The sequence must strictly increase. The adapter verifies the exact private state digest under its script lock and durably consumes that request before clearing the pause override. Reusing it cannot clear a later failure/manual pause; a new reviewed request is required. This does not enable Forms or the D1 command gate, and it cannot grant missing Google OAuth consent. If persistence or pause clearing is interrupted, inspect the retained receipt and use a higher sequence after reviewing the checkpoint.
 
+Configuration import accepts and validates these existing recovery fields without consuming them or enabling publication. This permits a paused host-address update, such as a Workers subdomain rename, while preserving the reviewed checkpoint, claim and control history. Import resets host setup receipts; verify the new origin and repeat setup before resuming the affected runtime.
+
 Recovery must retain the private evidence and use the same frozen request on an ambiguous HTTP response. A new recovery ID is needed only for a later explicitly reviewed expiry. The previous scope-failure rehearsal demonstrated why Google authorization, command fences, native fences, private checkpoint writes and lease state are separate checks.
 
 Drive checkpoint versions may advance for provider metadata after a media upload. The

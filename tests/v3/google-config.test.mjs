@@ -107,6 +107,9 @@ test('optional frontend bindings stay in the private file and imports pause both
   assert.equal(f.properties.get('SHAMROCK_V3_FRONTEND_CLAIM'), 'retained-frontend-claim'); assert.equal(f.state.secretReads, 0);
   const bad = fixture(); bad.map[F.config] = f.map[F.config].replace('"generation":1', '"generation":2');
   assertOnlyPaused(bad, code('configuration_invalid'));
+  const controls=JSON.parse(f.map[F.config]);controls.resumeRequest={requestId:'review-resume',sequence:3,stateSha256:'a'.repeat(64)};controls.leaseRecovery={recoveryId:'review-lease',checkpointSha256:'b'.repeat(64),previousExpiry:'2026-01-01T00:00:00.000Z'};
+  const reviewed=fixture();reviewed.map[F.config]=JSON.stringify(controls);assert.equal(reviewed.run().status,'imported-paused');assert.equal(reviewed.properties.has(F.config),false);assert.equal(reviewed.properties.get(F.paused),'true');
+  for(const change of [c=>c.resumeRequest.sequence=0,c=>c.resumeRequest.stateSha256='wrong',c=>c.resumeRequest.enabled=true,c=>c.leaseRecovery.previousExpiry='invalid',c=>c.leaseRecovery.checkpointSha256='wrong']){const invalid=fixture(),c=structuredClone(controls);change(c);invalid.map[F.config]=JSON.stringify(c);assertOnlyPaused(invalid,code('configuration_invalid'));}
 });
 
 test('optional excusal catalog is removed only after a valid import without that source', () => {

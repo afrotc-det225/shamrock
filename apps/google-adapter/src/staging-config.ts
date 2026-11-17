@@ -216,7 +216,9 @@ export function importStagingConfiguration(services: StagingConfigurationService
   if (forms) { keys(forms, ['version', 'configFileId']); if (forms.version !== 1) fail('configuration_invalid', 'Unsupported managed Forms configuration.'); id(forms.configFileId, 512); if (forms.configFileId === fileId) fail('configuration_invalid', 'Managed Forms config needs a separate owner-only file.'); }
   const frontend = parsed[FRONTEND_CONFIG_PROPERTY];
   if (frontend) {
-    keys(frontend, ['version', 'environment', 'generation', 'enabled', 'resourceReview', 'workerId', 'principalId', 'stateFileId', 'main', 'allowedFileEditors', 'access', 'seeds'], ['supplemental']);
+    keys(frontend, ['version', 'environment', 'generation', 'enabled', 'resourceReview', 'workerId', 'principalId', 'stateFileId', 'main', 'allowedFileEditors', 'access', 'seeds'], ['supplemental','resumeRequest','leaseRecovery']);
+    if(frontend.resumeRequest){const r=object(frontend.resumeRequest);keys(r,['requestId','sequence','stateSha256']);id(r.requestId);integer(r.sequence);if(typeof r.stateSha256!=='string'||!/^[a-f0-9]{64}$/.test(r.stateSha256))fail('configuration_invalid','Frontend resume requires a reviewed state digest.');}
+    if(frontend.leaseRecovery){const r=object(frontend.leaseRecovery);keys(r,['recoveryId','checkpointSha256','previousExpiry']);id(r.recoveryId);if(typeof r.checkpointSha256!=='string'||!/^[a-f0-9]{64}$/.test(r.checkpointSha256)||typeof r.previousExpiry!=='string'||!Number.isFinite(Date.parse(r.previousExpiry)))fail('configuration_invalid','Frontend lease recovery requires a reviewed checkpoint and expiry.');}
     if (frontend.version !== 1 || frontend.environment !== 'staging' || frontend.generation !== host.generation || typeof frontend.enabled !== 'boolean'
       || frontend.resourceReview !== 'EXISTING_FICTIONAL_FRONTEND_REVIEWED_FOR_STAGING') fail('configuration_invalid', 'Frontend configuration must match the reviewed staging generation.');
     id(frontend.workerId); id(frontend.principalId); id(frontend.stateFileId, 512);
