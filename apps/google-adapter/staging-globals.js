@@ -117,3 +117,6 @@ function shamrockV3NativePermissions_() { return SHAMROCKV3.createNativePermissi
 function shamrockV3NativePermissionsRefresh() { return shamrockV3NativePermissions_().refresh(); }
 function shamrockV3NativePermissionsPause() { return shamrockV3NativePermissions_().pause(); }
 function shamrockV3NativePermissionsControl() { return shamrockV3NativePermissions_().applyControl(); }
+
+function shamrockV3ManagedPendingReplayQueue() { return shamrockV3StagingForms_().pendingReplayQueue(); }
+function shamrockV3ManagedReviewReplay(input) { return shamrockV3StagingForms_().reviewReplay(input); }

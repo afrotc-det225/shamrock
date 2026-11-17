@@ -22,14 +22,17 @@ export interface NativeFormsConfig {
   resourceReview: 'EXISTING_FORMS_REVIEWED_FOR_STAGING'; principalId: string; workerId: string;
   stateFileId: string; intakeFileId: string; reviewResourceKey: string; principals: FormPrincipal[];
   retention?:NativeRetentionConfig;
-  controlRequest?: { requestId: string; sequence: number; action: 'setup' | 'resume-publication' | 'resume-intake' | 'pause'; stateSha256: string; intakeSha256: string };
+  controlRequest?: { requestId: string; sequence: number; action: 'setup' | 'resume-publication' | 'resume-intake' | 'pause' | 'review-replay'; stateSha256: string; intakeSha256: string; replay?: FormReplayReview };
   forms: (ManagedFormBinding & { allowedEditors: string[]; intake: FormIntakeBinding })[];
 }
+export interface FormReplayReview { intakeId: string; reviewId: string; sourceHash: string; entryHash: string; bindingHash: string; principalHash: string; reason: string }
+type ReplayReviewer = { kind: 'active-account'; principalId: string; email: string } | { kind: 'private-control'; principalId: string; requestId: string; sequence: number };
+interface FormReplayReceipt { request: FormReplayReview; requestHash: string; reviewedBy: ReplayReviewer; reviewedAt: string; previousIssue: string | null; result: 'queued' | 'pending-review'; issue?: string; commandHashes: string[] }
 type CommandEntry = { command: any; path: '/v1/commands' | '/v1/admin/commands'; status: 'queued' | 'committed' | 'conflict' | 'rejected'; receipt?: unknown };
 interface IntakeEntry {
   id: string; source: VerifiedFormSubmission; formKey: string; sourceHash: string;
   status: 'captured' | 'queued' | 'pending-review' | 'committed' | 'conflict' | 'rejected';
-  commands: CommandEntry[]; directory?: DirectorySubmissionDraft; issue?: string;
+  commands: CommandEntry[]; directory?: DirectorySubmissionDraft; issue?: string; reviews?: FormReplayReceipt[];
 }
 interface IntakeState { version: 1; environment: 'staging'; generation: number; entries: Record<string, IntakeEntry>; enrollments?: Record<string, {principalId: string; personId: string}> }
 export interface NativeFormsServices {
@@ -71,10 +74,11 @@ export function createNativeFormsRuntime(services: NativeFormsServices) {
     const rawHost = props.getProperty(HOST_PROPERTIES.config); if (!rawHost) return undefined;
     const host = parseStagingHostConfig(JSON.parse(rawHost)), owner = services.Session.getEffectiveUser().getEmail().trim().toLowerCase();
     if (owner !== host.expectedAutomationEmail) fail('forms_identity', 'Use the configured SHAMROCK staging automation account.');
-    let raw = props.getProperty(FORMS_PROPERTIES.config);
-    if (!raw) { const id = props.getProperty(CONFIG_FILE_ID_PROPERTY); if (id) raw = privateJson(id, owner).value[FORMS_PROPERTIES.config]; }
+    let raw = props.getProperty(FORMS_PROPERTIES.config), configurationFileId: string | undefined;
+    if (!raw) { const id = props.getProperty(CONFIG_FILE_ID_PROPERTY); if (id) { raw = privateJson(id, owner).value[FORMS_PROPERTIES.config]; configurationFileId = id; } }
     if (!raw) return undefined;
     const document = typeof raw === 'string' ? JSON.parse(raw) : raw;
+    if (document?.configFileId) configurationFileId = document.configFileId;
     const config = (document?.configFileId ? privateJson(document.configFileId, owner).value : document) as NativeFormsConfig;
     if (config.version !== 1 || config.environment !== 'staging' || config.generation !== host.generation || config.resourceReview !== 'EXISTING_FORMS_REVIEWED_FOR_STAGING'
       || typeof config.enabled !== 'boolean' || typeof config.intakeEnabled !== 'boolean' || !Array.isArray(config.forms) || config.forms.length !== 3
@@ -158,7 +162,7 @@ export function createNativeFormsRuntime(services: NativeFormsServices) {
       privateJson(config.stateFileId, owner); privateJson(config.intakeFileId, owner);
       retention?.get('retention-health-v1');
     }
-    return { config, adapter, owner, signer, enabled, intakeEnabled, request, effect, storage, read, isolation, setSubmitContinuation,retention,catalogArchive };
+    return { config, configurationFileId, adapter, owner, signer, enabled, intakeEnabled, request, effect, storage, read, isolation, setSubmitContinuation,retention,catalogArchive };
   }
   function paused(key: string) { props.setProperty(key, 'true'); if (props.getProperty(key) !== 'true') fail('forms_pause', 'The local pause did not persist.'); }
   function lock<T>(operation: () => T): T { const l = services.LockService.getScriptLock(); if (!l.tryLock(25_000)) fail('forms_busy', 'Form intake is busy; replay the retained native response.'); try { return operation(); } finally { l.releaseLock(); } }
@@ -169,6 +173,84 @@ export function createNativeFormsRuntime(services: NativeFormsServices) {
     const result = ctx.request('/v1/admin/directory/review-authorize', { environment: 'staging', generation: ctx.config.generation, principalId: actor.principalId });
     if (result.status !== 200 || result.body.authorized !== true) fail('confirmation_required', 'Current Wing Directory authority is required.');
     return actor;
+  }
+  type FormsContext = NonNullable<ReturnType<typeof context>>;
+  function activeOwner(ctx: FormsContext): ReplayReviewer {
+    const email = services.Session.getActiveUser().getEmail().trim().toLowerCase();
+    if (!email || email !== ctx.owner) fail('confirmation_required', 'The active SHAMROCK automation account must review this retained response.');
+    return {kind:'active-account', principalId:ctx.config.principalId, email};
+  }
+  function readNativeSubmission(ctx: FormsContext, binding: NativeFormsConfig['forms'][number], responseId: string): VerifiedFormSubmission {
+    const metadata = ctx.read(binding);
+    if (metadata.settings.emailCollectionType !== 'VERIFIED') fail('forms_identity', 'The Form no longer collects verified Google identity.');
+    const native = api(`${forms(binding.formId)}/responses/${encodeURIComponent(responseId)}`);
+    if (native.responseId !== responseId) fail('forms_identity', 'Native response identity changed.');
+    const answers: Record<string, string | string[]> = {};
+    for (const [id, answer] of Object.entries(native.answers ?? {}) as [string, any][]) {
+      if (answer.questionId !== id || !Array.isArray(answer.textAnswers?.answers)) fail('forms_answer', 'Unsupported native response answer type.');
+      const values = answer.textAnswers.answers.map((a: any) => a.value);
+      if (values.some((v: any) => typeof v !== 'string')) fail('forms_answer', 'Invalid native answer value.');
+      const item = metadata.items.find(i => i.questionItem?.question?.questionId === id);
+      answers[id] = item?.questionItem?.question?.choiceQuestion?.type === 'CHECKBOX' ? values : values.length === 1 ? values[0] : fail('forms_answer', 'Ambiguous scalar response.');
+    }
+    return { formId: binding.formId, responseId: native.responseId, lastSubmittedTime: native.lastSubmittedTime,
+      respondentEmail: native.respondentEmail ?? '', verifiedResponder: typeof native.respondentEmail === 'string' && !!native.respondentEmail, answers };
+  }
+  function principals(ctx: FormsContext, journal: IntakeState): FormPrincipal[] {
+    return [...ctx.config.principals.filter(p => p.personId || !journal.enrollments?.[p.email.toLowerCase()]),
+      ...Object.entries(journal.enrollments ?? {}).filter(([email]) => !ctx.config.principals.some(p => p.personId && p.email.toLowerCase() === email)).map(([email,p]) => ({email,...p}))];
+  }
+  function interpretation(ctx: FormsContext, journal: IntakeState, binding: NativeFormsConfig['forms'][number], source: VerifiedFormSubmission) {
+    const catalog = ctx.storage<FormsState>(ctx.config.stateFileId).load();
+    return { submission:source, binding:binding.intake, editions:ctx.catalogArchive ? ctx.catalogArchive.forSubmission(catalog,source,binding.intake) : catalog.editions,
+      principals:principals(ctx,journal), config:ctx.adapter, signer:ctx.signer };
+  }
+  function reviewHashes(ctx: FormsContext, journal: IntakeState, entry: IntakeEntry, binding: NativeFormsConfig['forms'][number]) {
+    return { entryHash:ctx.signer.sha256(formsCanonical(entry)), bindingHash:ctx.signer.sha256(formsCanonical(binding.intake)),
+      principalHash:ctx.signer.sha256(formsCanonical(principals(ctx,journal).filter(p => p.email.toLowerCase() === entry.source.respondentEmail.toLowerCase()))) };
+  }
+  function validateReview(input: FormReplayReview): void {
+    if (!input || Object.keys(input).sort().join(',') !== 'bindingHash,entryHash,intakeId,principalHash,reason,reviewId,sourceHash'
+      || !/^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/.test(input.reviewId)
+      || ![input.intakeId,input.sourceHash,input.entryHash,input.bindingHash,input.principalHash].every(v => typeof v === 'string' && /^[a-f0-9]{64}$/.test(v))
+      || typeof input.reason !== 'string' || input.reason.trim().length < 1 || input.reason.length > 500)
+      fail('forms_review', 'Use an exact reviewed response, source, entry, binding and principal fingerprint with a short reason.');
+  }
+  function reviewPending(ctx: FormsContext, input: FormReplayReview, reviewedBy: ReplayReviewer) {
+    validateReview(input);
+    return lock(() => {
+      ctx.isolation(); const store = ctx.storage<IntakeState>(ctx.config.intakeFileId), journal = store.load();
+      if (journal.version !== 1 || journal.environment !== 'staging' || journal.generation !== ctx.config.generation) fail('forms_state', 'The intake journal belongs to another generation.');
+      const entry = journal.entries[input.intakeId] ?? ctx.retention?.get(`form-intake.${input.intakeId}`) as IntakeEntry | undefined;
+      const requestHash = ctx.signer.sha256(formsCanonical(input));
+      if (!entry) fail('forms_review', 'The retained response is unavailable.');
+      const prior = entry.reviews?.find(r => r.request.reviewId === input.reviewId);
+      if (prior) {
+        if (prior.requestHash !== requestHash) fail('forms_review', 'A review identity cannot be reused with changed instructions.');
+        return {status:entry.status,intakeId:entry.id,reviewId:input.reviewId,replayed:true};
+      }
+      const binding = ctx.config.forms.find(b => b.key === entry.formKey);
+      if (!binding || binding.key === 'directory' || entry.status !== 'pending-review' || entry.commands.length !== 0 || entry.id !== input.intakeId || !journal.entries[input.intakeId])
+        fail('forms_review', 'Only unresolved Attendance or Excusal responses with no prepared commands can be reviewed for replay.');
+      if ((entry.reviews?.length ?? 0) >= 32) fail('forms_capacity', 'This response has reached its reviewed retry bound; preserve its history for maintainer investigation.');
+      const hashes = reviewHashes(ctx,journal,entry,binding);
+      if (input.sourceHash !== entry.sourceHash || entry.sourceHash !== ctx.signer.sha256(formsCanonical(entry.source))
+        || input.entryHash !== hashes.entryHash || input.bindingHash !== hashes.bindingHash || input.principalHash !== hashes.principalHash)
+        fail('forms_revision', 'The retained response or reviewed interpretation changed.');
+      if (ctx.signer.sha256(formsCanonical(readNativeSubmission(ctx,binding,entry.source.responseId))) !== entry.sourceHash)
+        fail('forms_revision', 'The native response changed; preserve this history and capture its new revision separately.');
+      const receipt: FormReplayReceipt = {request:clone(input),requestHash,reviewedBy,reviewedAt:new Date(now()).toISOString(),previousIssue:entry.issue ?? null,result:'pending-review',commandHashes:[]};
+      try {
+        const commands = commandsFromManagedForm(interpretation(ctx,journal,binding,entry.source));
+        receipt.commandHashes = commands.map(command => ctx.signer.sha256(formsCanonical(command)));
+        entry.commands = commands.map(command => ({command,path:'/v1/commands',status:'queued'}));
+        entry.status = 'queued'; delete entry.issue; receipt.result = 'queued';
+      } catch (error) { entry.issue = error instanceof AdapterError ? error.code : 'forms_review'; receipt.issue = entry.issue; }
+      entry.reviews ??= []; entry.reviews.push(receipt);
+      // Queue only. The normal paused/registered consumer delivers these original-responder commands.
+      markWork(FORMS_PROPERTIES.intakeWork); store.save(journal);
+      return {status:entry.status,intakeId:entry.id,reviewId:input.reviewId,replayed:false};
+    });
   }
   const idleMarker=(ctx:NonNullable<ReturnType<typeof context>>,fileId:string)=>'idle:'+ctx.signer.sha256(formsCanonical([ctx.config.generation,fileId]));
   function markWork(key:string,value='pending'){props.setProperty(key,value);if(props.getProperty(key)!==value)fail('forms_state','The private work marker did not persist.');}
@@ -204,9 +286,10 @@ export function createNativeFormsRuntime(services: NativeFormsServices) {
       const ctx = context(), request = ctx?.config.controlRequest;
       if (!ctx || !request) return { status: 'none' };
       if (!/^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/.test(request.requestId) || !Number.isSafeInteger(request.sequence) || request.sequence < 1
-        || !['setup', 'resume-publication', 'resume-intake', 'pause'].includes(request.action)
+        || !['setup', 'resume-publication', 'resume-intake', 'pause', 'review-replay'].includes(request.action)
         || ![request.stateSha256, request.intakeSha256].every(h => /^[a-f0-9]{64}$/.test(h))
-        || Object.keys(request).sort().join(',') !== 'action,intakeSha256,requestId,sequence,stateSha256') fail('forms_control', 'Use an exact reviewed Form control request.');
+        || Object.keys(request).sort().join(',') !== (request.action === 'review-replay' ? 'action,intakeSha256,replay,requestId,sequence,stateSha256' : 'action,intakeSha256,requestId,sequence,stateSha256')) fail('forms_control', 'Use an exact reviewed Form control request.');
+      if (request.action === 'review-replay') { if (!ctx.configurationFileId) fail('forms_control', 'Background replay requires an owner-only file-owned review request.'); validateReview(request.replay!); }
       const consume = lock(() => {
         const raw = props.getProperty(FORMS_PROPERTIES.controlReceipt);
         if (raw === formsCanonical(request)) return false;
@@ -215,7 +298,7 @@ export function createNativeFormsRuntime(services: NativeFormsServices) {
         if (ctx.signer.sha256(formsCanonical(ctx.storage<FormsState>(ctx.config.stateFileId).load())) !== request.stateSha256
           || ctx.signer.sha256(formsCanonical(ctx.storage<IntakeState>(ctx.config.intakeFileId).load())) !== request.intakeSha256) fail('forms_control', 'Private Form checkpoints changed after review.');
         if (request.action === 'resume-publication') paused(FORMS_PROPERTIES.pause);
-        else { paused(FORMS_PROPERTIES.intakePause); if (request.action !== 'resume-intake') paused(FORMS_PROPERTIES.pause); }
+        else if (request.action !== 'review-replay') { paused(FORMS_PROPERTIES.intakePause); if (request.action !== 'resume-intake') paused(FORMS_PROPERTIES.pause); }
         props.setProperty(FORMS_PROPERTIES.controlReceipt, formsCanonical(request));
         if (props.getProperty(FORMS_PROPERTIES.controlReceipt) !== formsCanonical(request)) fail('forms_control', 'Control consumption did not persist.');
         return true;
@@ -223,6 +306,7 @@ export function createNativeFormsRuntime(services: NativeFormsServices) {
       if (!consume) return { status: 'already-consumed' };
       // Each operation reacquires the shared lock; failure retains its pause. A new
       // reviewed sequence is required after an interrupted control operation.
+      if (request.action === 'review-replay') return reviewPending(ctx,request.replay!,{kind:'private-control',principalId:ctx.config.principalId,requestId:request.requestId,sequence:request.sequence});
       if (request.action === 'setup') return this.setup();
       if (request.action === 'resume-publication') return this.resumePublication();
       if (request.action === 'resume-intake') return this.resumeIntake();
@@ -290,19 +374,8 @@ export function createNativeFormsRuntime(services: NativeFormsServices) {
         ctx.isolation(); const binding = ctx.config.forms.find(b => b.key === key); if (!binding || event.source.getId() !== binding.formId) fail('forms_identity', 'Unexpected native Form source.');
         const setup = JSON.parse(props.getProperty(FORMS_PROPERTIES.setup) ?? 'null');
         if (!setup || setup.bindings !== ctx.signer.sha256(formsCanonical(ctx.config.forms)) || setup.ids[key] !== event.triggerUid) fail('forms_setup', 'Managed Form trigger setup must be verified.');
-        const metadata = ctx.read(binding); if (metadata.settings.emailCollectionType !== 'VERIFIED') fail('forms_identity', 'The Form no longer collects verified Google identity.');
-        const native = api(`${forms(binding.formId)}/responses/${encodeURIComponent(event.response.getId())}`);
-        if (native.responseId !== event.response.getId()) fail('forms_identity', 'Native response identity changed.');
-        const answers: Record<string, string | string[]> = {};
-        for (const [id, answer] of Object.entries(native.answers ?? {}) as [string, any][]) {
-          if (answer.questionId !== id || !Array.isArray(answer.textAnswers?.answers)) fail('forms_answer', 'Unsupported native response answer type.');
-          const values = answer.textAnswers.answers.map((a: any) => a.value); if (values.some((v: any) => typeof v !== 'string')) fail('forms_answer', 'Invalid native answer value.');
-          const item = metadata.items.find(i => i.questionItem?.question?.questionId === id);
-          answers[id] = item?.questionItem?.question?.choiceQuestion?.type === 'CHECKBOX' ? values : values.length === 1 ? values[0] : fail('forms_answer', 'Ambiguous scalar response.');
-        }
-        const source: VerifiedFormSubmission = { formId: binding.formId, responseId: native.responseId, lastSubmittedTime: native.lastSubmittedTime,
-          respondentEmail: native.respondentEmail ?? '', verifiedResponder: typeof native.respondentEmail === 'string' && !!native.respondentEmail, answers };
-        const id = ctx.signer.sha256(formsCanonical([binding.formId, native.responseId, native.lastSubmittedTime]));
+        const source = readNativeSubmission(ctx, binding, event.response.getId());
+        const id = ctx.signer.sha256(formsCanonical([binding.formId, source.responseId, source.lastSubmittedTime]));
         const store = ctx.storage<IntakeState>(ctx.config.intakeFileId), journal = store.load();
         if (journal.version !== 1 || journal.environment !== 'staging' || journal.generation !== ctx.config.generation) fail('forms_state', 'The intake journal belongs to another generation.');
         const previous=journal.entries[id]??ctx.retention?.get(`form-intake.${id}`) as IntakeEntry|undefined;
@@ -313,8 +386,7 @@ export function createNativeFormsRuntime(services: NativeFormsServices) {
         const entry: IntakeEntry = journal.entries[id] ?? { id, source, formKey: key, sourceHash: ctx.signer.sha256(formsCanonical(source)), status: 'captured', commands: [] };
         markWork(FORMS_PROPERTIES.intakeWork);journal.entries[id] = entry; store.save(journal); // Preserve even invalid or unenrolled submissions before interpretation.
         try {
-          const catalog = ctx.storage<FormsState>(ctx.config.stateFileId).load();
-          const input = { submission: source, binding: binding.intake, editions: ctx.catalogArchive?ctx.catalogArchive.forSubmission(catalog,source,binding.intake):catalog.editions, principals: [...ctx.config.principals.filter(p => p.personId || !journal.enrollments?.[p.email.toLowerCase()]), ...Object.entries(journal.enrollments ?? {}).filter(([email]) => !ctx.config.principals.some(p => p.personId && p.email.toLowerCase() === email)).map(([email, p]) => ({email, ...p}))], config: ctx.adapter, signer: ctx.signer };
+          const input = interpretation(ctx, journal, binding, source);
           if (key === 'directory') {
             entry.directory = directoryDraftFromManagedForm(input);
             if (entry.directory.submitted.photoLink) verifyDirectoryPhoto(String(entry.directory.submitted.photoLink), (fileId, key) => api(`${drive(fileId)}?fields=id,mimeType,trashed`, undefined, 'get', key ? {'X-Goog-Drive-Resource-Keys': `${fileId}/${key}`} : {}));
@@ -322,7 +394,8 @@ export function createNativeFormsRuntime(services: NativeFormsServices) {
             entry.status = entry.directory.status === 'pending-review' ? 'pending-review' : entry.commands.length ? 'queued' : 'committed';
           } else { entry.commands = commandsFromManagedForm(input).map(command => ({ command, path: '/v1/commands', status: 'queued' })); entry.status = 'queued'; }
         } catch (error) { entry.status = 'pending-review'; entry.issue = error instanceof AdapterError ? error.code : 'forms_review'; }
-        store.save(journal); flushIntakes(ctx); return { status: store.load().entries[id].status, intakeId: id };
+        store.save(journal); flushIntakes(ctx); const saved = store.load().entries[id] ?? ctx.retention?.get(`form-intake.${id}`) as IntakeEntry | undefined;
+        if (!saved) fail('forms_state', 'The committed intake receipt is unavailable.'); return { status:saved.status, intakeId:id };
       });
     },
     replay(key: ManagedFormBinding['key'], responseId: string) {
@@ -330,6 +403,19 @@ export function createNativeFormsRuntime(services: NativeFormsServices) {
       const binding = ctx.config.forms.find(b => b.key === key), setup = JSON.parse(props.getProperty(FORMS_PROPERTIES.setup) ?? 'null');
       if (!binding || !setup?.ids?.[key]) fail('forms_setup', 'Verified managed trigger setup is required.');
       return this.submit(key, {source: {getId: () => binding.formId}, response: {getId: () => responseId}, triggerUid: setup.ids[key]});
+    },
+    reviewReplay(input: FormReplayReview) {
+      const ctx = context(); if (!ctx) fail('forms_configuration', 'Managed Forms are not configured.');
+      return reviewPending(ctx,input,activeOwner(ctx));
+    },
+    pendingReplayQueue() {
+      const ctx = context(); if (!ctx) fail('forms_configuration', 'Managed Forms are not configured.'); activeOwner(ctx);
+      return lock(() => { ctx.isolation(); const journal = ctx.storage<IntakeState>(ctx.config.intakeFileId).load();
+        return Object.values(journal.entries).filter(e => e.formKey !== 'directory' && e.status === 'pending-review' && e.commands.length === 0).map(entry => {
+          const binding = ctx.config.forms.find(b => b.key === entry.formKey); if (!binding) fail('forms_binding', 'A retained response has no reviewed Form binding.');
+          return {...clone(entry),...reviewHashes(ctx,journal,entry,binding)};
+        });
+      });
     },
     reviewDirectory(input: { intakeId: string; reviewId: string; personId: string; expectedVersion: number; flightId: string | null; profile: DirectoryProfile }) {
       const ctx = context(); if (!ctx) fail('forms_configuration', 'Managed Forms are not configured.');

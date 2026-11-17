@@ -134,13 +134,59 @@ Partial or ambiguous publication retains the frozen plan and closes all affected
 
 Queued command dispatch retries the saved command after an ambiguous response. Conflicts/rejections remain visible in private intake status. A submission received while paused remains in native Google response history; after reopening the reviewed gate, `shamrockV3ManagedFormReplay(key, responseId)` rereads it through the same native identity and journal checks. It accepts no caller-provided answers. A captured journal entry interrupted before interpretation can resume; a committed revision is never dispatched twice. Bulk automatic backfill of all response history is not implemented.
 
+### Reviewed unresolved Attendance and Excusal replay
+
+A `pending-review` response with no prepared commands can be reinterpreted after
+its verified principal or reviewed intake binding is corrected. Do not delete the
+journal entry, change its original answers, or reset attempted commands.
+`shamrockV3ManagedPendingReplayQueue()` returns the retained sources and current
+review fingerprints; `shamrockV3ManagedReviewReplay(input)` requires the actual
+active automation account. Its exact input is:
+
+```json
+{"intakeId":"SHA256","reviewId":"review-unique","sourceHash":"SHA256","entryHash":"SHA256","bindingHash":"SHA256","principalHash":"SHA256","reason":"Reviewed enrollment or binding correction."}
+```
+
+Use the hashes returned by the queue. For programmatic review, `entryHash` is the
+SHA-256 of `formsCanonical(entry)` before review; `bindingHash` hashes the current
+Form's `intake` object; `principalHash` hashes the matching original respondent's
+merged configured/enrollment principal array. `sourceHash` is the original saved
+native fingerprint. Every hash must still match at execution.
+
+The adapter rereads the native response by its original ID and compares its full
+saved source fingerprint before interpretation. It resolves choice references
+through the retained edition, including private historical storage. It preserves
+the original source, revision and previous issue; appends a dated review receipt
+with reviewer evidence and exact command hashes; and queues deterministic commands
+with the original verified respondent as actor. D1 rechecks that respondent's
+current authority. Review itself sends no command; the normal enabled intake
+consumer delivers the saved queue. A stale event/roster version still conflicts.
+
+A repeated identical review returns its retained state. Reusing its review ID with
+changed input fails. An unresolved interpretation remains pending with its review
+history. Any existing command, including queued/ambiguous delivery, conflict or
+rejection, excludes this replay path. An edited native response must be captured
+as its new native revision. Each entry permits 32 explicit reviews before a
+maintainer investigation; completed-entry retention preserves all review receipts.
+
+For background execution, place `action: "review-replay"` and the same `replay`
+object inside the existing monotonic `controlRequest`, with exact publication and
+intake checkpoint hashes. This action requires the config to come from an
+owner-only Drive file; a full Script Properties config cannot authorize it. It
+records `private-control` automation evidence with request ID/sequence and does
+not invent a human reviewer from an empty `Session` identity. It preserves pause
+flags and only queues work. As with other controls, an interrupted consumed
+request requires a freshly reviewed sequence. Ordinary replay of a held response
+still returns its held status; it never silently performs this review.
+
 ## Required live acceptance evidence
 
 Before claiming parity, use the staged copies to verify all existing branch paths, selected-event scope, choice/reference rendering, preserved item IDs/response destinations, edited-response revisions and old-edition response binding. Submit as a real non-owner account, verify automatic enrollment and self excusal submission, and prove another cadet's profile and managerial actions remain inaccessible. Confirm photo URI/file chip behavior with the real Drive permissions. Test a manager review and stale self update, a paused response replay, forced partial publication/recovery, private state readback and final pause. Record actual Google quotas, lease duration and retained-state growth for the target wing size. The local tests exercise code and injected ports; they do not substitute for those provider checks.
 
 The same controls can be requested through the owner-only config without opening the
 Apps Script editor. Optional `controlRequest` contains a unique `requestId`, increasing
-positive `sequence`, `action` (`setup`, `resume-publication`, `resume-intake`, or `pause`),
+positive `sequence`, `action` (`setup`, `resume-publication`, `resume-intake`, `pause`, or
+`review-replay`),
 and canonical SHA-256 hashes `stateSha256` and `intakeSha256` of the reviewed private
 journals. The scheduled refresh verifies both checkpoints and consumes the request
 once before performing that control. A retained request cannot override a later pause.

@@ -93,3 +93,70 @@ test('native additive layout creates stable cohorts and verifies new Submit cont
  f.services.FormApp.openById=id=>({...open(id),getItems:()=>f.fx.forms[id].items.map((item,index)=>({getIndex:()=>index,getTitle:()=>item.title??'',getType:()=>item.pageBreakItem?'PAGE_BREAK':item.questionItem?.question?.choiceQuestion?.type==='CHECKBOX'?'CHECKBOX':'TEXT',asCheckboxItem:()=>({isRequired:()=>Boolean(item.questionItem?.question?.required),hasOtherOption:()=>false}),asPageBreakItem:()=>({getPageNavigationType:()=>f.fx.nativeNavigation[item.itemId],setGoToPage:value=>{assert.equal(f.fx.open[id],false);assert(f.fx.files['state-file'].value.pending);f.fx.nativeNavigation[item.itemId]=value;f.fx.forms[id].revisionId+='n';changes++;}})}))});
  f.runtime.setup();f.runtime.resumePublication();assert.equal(f.runtime.refresh().status,'published');assert.equal(changes,2);assert.equal(f.fx.claim,false);assert(Object.values(f.fx.nativeNavigation).every(x=>x==='SUBMIT'));const state=f.fx.files['state-file'].value;assert.equal(Object.values(state.editions).find(e=>e.formId===binding.formId).attendanceRules.length,4);
 });
+
+function pendingFixture(kind='excusals'){
+ const f=fixture(),binding=f.config.forms.find(b=>b.key===kind),form=f.fx.forms[binding.formId];
+ if(kind==='attendance'){
+  binding.intake.scope=['scope'];binding.intake.present=['present'];binding.intake.completeness='complete';
+  for(const [questionId,source,type] of [['scope',{kind:'flights'},'RADIO'],['present',{kind:'people'},'CHECKBOX']]){
+   binding.choices.push({itemId:`i-${questionId}`,questionId,source});form.items.push({itemId:`i-${questionId}`,questionItem:{question:{questionId,choiceQuestion:{type,options:[{value:'old'}]}}}});
+  }
+  form.items.push({itemId:'complete',questionItem:{question:{questionId:'complete',textQuestion:{}}}});
+  f.snapshot.people=[{personId:'cadet-one',firstName:'One',lastName:'Example',flightId:'alpha',asYear:'AS100',active:true}];
+ }
+ f.runtime.setup();f.runtime.resumePublication();f.runtime.refresh();f.runtime.resumeIntake();
+ const choice=q=>form.items.find(i=>i.questionItem?.question.questionId===q).questionItem.question.choiceQuestion.options[0].value;
+ const answers=kind==='excusals'?{'q-0':choice('q-0'),outcome:'E',reason:'Fictional reason'}:{'q-0':choice('q-0'),scope:choice('scope'),present:[choice('present')],complete:'complete'};
+ f.fx.responses[binding.formId]={responseId:'held-response',lastSubmittedTime:'2026-11-06T12:01:00.000Z',respondentEmail:'cadet@example.invalid',answers:Object.fromEntries(Object.entries(answers).map(([questionId,v])=>[questionId,{questionId,textAnswers:{answers:(Array.isArray(v)?v:[v]).map(value=>({value}))}}]))};
+ const held=f.runtime.replay(kind,'held-response');assert.equal(held.status,'pending-review');assert.equal(f.fx.commands.length,0);
+ f.services.Session.getActiveUser=()=>({getEmail:()=>owner});
+ f.config.principals.push({email:'cadet@example.invalid',principalId:'cadet',personId:'cadet-one'});
+ f.intakeId=held.intakeId;f.binding=binding;return f;
+}
+function replayReview(f,reviewId='review-one'){
+ const e=f.runtime.pendingReplayQueue().find(e=>e.id===f.intakeId);assert(e);
+ return {intakeId:e.id,reviewId,sourceHash:e.sourceHash,entryHash:e.entryHash,bindingHash:e.bindingHash,principalHash:e.principalHash,reason:'Verified original responder enrollment and retained Form binding.'};
+}
+test('reviewed pending Attendance and Excusal replay preserves original source, issue and actor and only queues exact commands',()=>{
+ for(const kind of ['attendance','excusals']){
+  const f=pendingFixture(kind),original=clone(f.fx.files['intake-file'].value.entries[f.intakeId]),request=replayReview(f);
+  const result=f.runtime.reviewReplay(request);assert.equal(result.status,'queued');assert.equal(f.fx.commands.length,0);
+  const e=f.fx.files['intake-file'].value.entries[f.intakeId];assert.deepEqual(e.source,original.source);assert.equal(e.sourceHash,original.sourceHash);assert.equal(e.reviews.length,1);assert.equal(e.reviews[0].previousIssue,'confirmation_required');assert.equal(e.reviews[0].reviewedBy.kind,'active-account');
+  assert.equal(e.commands[0].command.actor.principalId,'cadet');assert.equal(e.commands[0].command.actor.evidence,'google-form');assert.equal(e.commands[0].command.payload.expectedEventVersion??e.commands[0].command.payload.events[0].expectedEventVersion,1);
+  assert.equal(f.runtime.reviewReplay(request).replayed,true);assert.equal(f.fx.commands.length,0);assert.equal(f.runtime.flush().attempted,1);assert.equal(f.fx.commands.length,1);assert.equal(f.runtime.reviewReplay(request).status,'committed');assert.equal(f.fx.commands.length,1);
+  assert.throws(()=>f.runtime.reviewReplay({...request,reason:'Changed instructions'}),e=>e.code==='forms_review');
+ }
+});
+test('review rejects missing active identity, changed native response, changed binding and any prepared command',()=>{
+ const f=pendingFixture(),request=replayReview(f);f.services.Session.getActiveUser=()=>({getEmail:()=>''});assert.throws(()=>f.runtime.reviewReplay(request),e=>e.code==='confirmation_required');
+ f.services.Session.getActiveUser=()=>({getEmail:()=>owner});f.fx.responses['form-excusals'].answers.reason.textAnswers.answers[0].value='Changed native response';assert.throws(()=>f.runtime.reviewReplay(request),e=>e.code==='forms_revision');assert.equal(f.fx.commands.length,0);
+ const g=pendingFixture(),r=replayReview(g);g.binding.intake.reason='changed';assert.throws(()=>g.runtime.reviewReplay(r),e=>e.code==='forms_revision');
+ const h=pendingFixture(),q=replayReview(h);h.fx.files['intake-file'].value.entries[h.intakeId].commands=[{status:'queued',command:{commandId:'ambiguous'},path:'/v1/commands'}];assert.throws(()=>h.runtime.reviewReplay(q),e=>e.code==='forms_review');assert.equal(h.fx.commands.length,0);
+});
+test('unresolved interpretation stays pending and retains both source and review history',()=>{
+ const f=pendingFixture(),entry=f.fx.files['intake-file'].value.entries[f.intakeId];f.config.principals=f.config.principals.filter(p=>p.principalId!=='cadet');
+ const original=clone(entry.source),request=replayReview(f);assert.equal(f.runtime.reviewReplay(request).status,'pending-review');const held=f.fx.files['intake-file'].value.entries[f.intakeId];assert.deepEqual(held.source,original);assert.equal(held.commands.length,0);assert.equal(held.reviews[0].issue,'confirmation_required');assert.equal(held.issue,'confirmation_required');
+ f.config.principals.push({email:'cadet@example.invalid',principalId:'cadet',personId:'cadet-one'});assert.equal(f.runtime.reviewReplay(replayReview(f,'review-two')).status,'queued');assert.equal(f.fx.files['intake-file'].value.entries[f.intakeId].reviews.length,2);
+});
+test('owner-only monotonic replay control works with no active user, consumes once, and retains explicit automation review evidence',()=>{
+ const f=pendingFixture(),replay=replayReview(f);f.services.Session.getActiveUser=()=>({getEmail:()=>''});control(f,'review-replay',1);f.config.controlRequest.replay=replay;
+ assert.equal(f.runtime.applyControl().status,'queued');assert.equal(f.fx.commands.length,0);assert.equal(f.runtime.applyControl().status,'already-consumed');
+ const e=f.fx.files['intake-file'].value.entries[f.intakeId];assert.deepEqual(e.reviews[0].reviewedBy,{kind:'private-control',principalId:'publisher',requestId:'review-1',sequence:1});assert.equal(e.commands[0].command.actor.principalId,'cadet');
+ f.runtime.pause();assert.equal(f.runtime.applyControl().status,'already-consumed');assert.equal(f.runtime.flush().status,'paused');assert.equal(f.fx.commands.length,0);
+});
+test('background replay refuses a Script-Property-owned request and changed private checkpoint',()=>{
+ const f=pendingFixture(),replay=replayReview(f);control(f,'review-replay',1);f.config.controlRequest.replay=replay;f.values[FORMS_PROPERTIES.config]=JSON.stringify(f.config);
+ assert.throws(()=>f.runtime.applyControl(),e=>e.code==='forms_control');assert.equal(f.fx.commands.length,0);
+ const g=pendingFixture(),other=replayReview(g);control(g,'review-replay',1);g.config.controlRequest.replay=other;g.fx.files['intake-file'].value.entries[g.intakeId].issue='changed';
+ assert.throws(()=>g.runtime.applyControl(),e=>e.code==='forms_control');assert.equal(g.fx.commands.length,0);
+});
+
+test('review checkpoint interruption queues no command and the same exact review can retry safely',()=>{
+ const f=pendingFixture(),request=replayReview(f),original=clone(f.fx.files['intake-file'].value.entries[f.intakeId]);f.fx.failWrite=true;
+ assert.throws(()=>f.runtime.reviewReplay(request),e=>e.code==='forms_google');assert.deepEqual(f.fx.files['intake-file'].value.entries[f.intakeId],original);assert.equal(f.fx.commands.length,0);
+ f.fx.failWrite=false;assert.equal(f.runtime.reviewReplay(request).status,'queued');assert.equal(f.fx.files['intake-file'].value.entries[f.intakeId].reviews.length,1);f.runtime.flush();assert.equal(f.fx.commands.length,1);
+});
+test('reviewed delayed response keeps its original event version after a new catalog publication',()=>{
+ const f=pendingFixture();f.snapshot.events[0].version=2;f.snapshot.revision.operations++;f.fx.claim=true;f.runtime.refresh();
+ assert.equal(f.runtime.reviewReplay(replayReview(f)).status,'queued');assert.equal(f.fx.files['intake-file'].value.entries[f.intakeId].commands[0].command.payload.events[0].expectedEventVersion,1);
+});
