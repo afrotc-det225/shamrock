@@ -13,6 +13,23 @@ Use `scripts/lib/import-refresh.mjs` after the initial private import. The initi
 
 The private plan is deliberately explicit. `createIncrementalImportPlan` accepts `before`, reviewed `desired` rows, append-only `evidence`, `context` and `review`; it does not discover production files or infer operational decisions. Store its execution hash alongside the review. The tracked helper rejects unsupported tables, retargeted baseline/request/contact identities, incorrect version increments, changed schema and non-staging targets.
 
+### Offline interruption rehearsal
+
+Use the exact native backup and immutable execution plan before submitting a new refresh. Both input files must be owned by the current user, private (`0600`) and outside source control. The output directory must be new and, if inside a repository, ignored by Git.
+
+```sh
+node scripts/rehearse-import-refresh.mjs \
+  --source-sql /private/path/staging-backup.sql \
+  --plan /private/path/refresh-execution.private.json \
+  --out-dir /private/path/new-refresh-fault-rehearsal
+```
+
+This command makes no provider calls and requires no credentials. It first checks the backup hash, execution hash, staging generation and exact migration ledger. It restores a fresh private temporary SQLite database; it cannot accept an existing database target. At every SQL statement boundary in initialization, every evidence batch and finalization, a separate process executes that prefix in a transaction and is killed with `SIGKILL` before commit. Reopening must recover every table, `sqlite_sequence` and the durable resume checkpoint exactly. After each complete commit it reopens, checks the pending receipt list and repeats the identical batch to simulate a lost committed response.
+
+Finalization requires exact evidence readback first. Completion requires exact canonical readback, integrity/foreign-key checks, one refresh audit and no operational commands. Restricted SQL execution blocks filesystem attachment, schema changes, extension loading and gate changes. Temporary raw records and journals are removed on completion or a handled failure; the private output contains only aggregate proof and hashes. If the rehearsal itself is forcibly terminated, its `shamrock-refresh-faults-*` temporary directory remains private and can be removed after that process exits.
+
+Passing this rehearsal establishes local SQLite transaction recovery for these exact bytes. It does **not** establish hosted D1 availability, current production-source freshness, Google permissions or native spreadsheet behavior. A frozen plan still needs the source/destination freshness and free-tier checks below before hosted application. Never change the frozen source or plan merely to make a rehearsal pass.
+
 ## Apply the reviewed plan
 
 Use the existing staging API transport with explicit account/database bindings. `assertIncrementalImportTarget` must match the observed target and approved execution hash before any write.
