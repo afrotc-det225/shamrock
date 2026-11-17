@@ -199,6 +199,13 @@ full snapshot; History can load independently after the access check. Navigation
 aborts superseded reads and discards late results. The existing in-memory cache
 is keyed by environment/actor binding, manifest/access revision and View as
 revision; no private data is written to browser storage.
+Opening an editor keeps the Events list visible with a compact loading status
+and Cancel control. Repeat editor launches remain disabled until it finishes.
+Returning to Events uses the list profile on a changed revision even after an
+editor loaded a full capture. Every capture waits for the shared session bootstrap;
+rapid navigation invalidates older waiting intents before they can start requests.
+Throttled browser tests cover these races, including navigation to History while
+an editor is loading. Mobile account controls occupy a separate row above navigation.
 
 The initial loading view retains the page heading and table layout, reports actual
 loading/verification stages, and offers Cancel/Retry. Its progress indicator counts

@@ -48,23 +48,41 @@ function App() {
     [sync, setSync] = useState("");
   const [preview, setPreview] = useState(null), [previewName, setPreviewName] = useState("");
   const [readProgress, setReadProgress] = useState({stage: "Checking access"});
+  const [loadingEditor, setLoadingEditor] = useState(false);
   const pendingAbort = useRef(null);
+  const pendingActions = useRef(0);
+  const readIntent = useRef(0);
+  const bootstrap = useRef(null);
+  const initialize = () => {
+    if (!bootstrap.current) bootstrap.current = startSession().then(value => {
+      setPreview(value.viewAs || null); return value;
+    }).catch(error => { bootstrap.current = null; throw error; });
+    return bootstrap.current;
+  };
   const pendingRead = useRef(null),
     lastRead = useRef(0),
     live = useRef({});
   live.current = { busy, proposal, data, preview, page };
   const reload = async (force = false, profile) => {
+    if (!force && pendingRead.current) return pendingRead.current;
+    const intent = ++readIntent.current;
+    await initialize();
+    if (intent !== readIntent.current)
+      throw Object.assign(new Error("A newer view is loading."), {code:"SUPERSEDED"});
     if (pendingRead.current) {
       if (force && pendingAbort.current) { pendingAbort.current.superseded = true; pendingAbort.current.abort(); }
-      const previous = await pendingRead.current.catch(() => null);
-      if (!force) return previous;
+      await pendingRead.current.catch(() => null);
     }
+    if (intent !== readIntent.current)
+      throw Object.assign(new Error("A newer view is loading."), {code:"SUPERSEDED"});
     const controller = new AbortController();
     pendingAbort.current = controller;
     setReadProgress({stage: "Checking access"});
-    profile ||= live.current.data?.snapshot ? "full" : live.current.page === "History" ? "access" : live.current.page === "Events" ? "events" : "full";
-    const task = api("/state", undefined, {profile, signal: controller.signal, onProgress: setReadProgress}).then((value) => {
-      if (controller.signal.aborted || pendingAbort.current !== controller)
+    profile ||= live.current.page === "History" ? "access" : live.current.page === "Events" ? "events" : "full";
+    const task = api("/state", undefined, {profile, signal: controller.signal, onProgress: value => {
+      if (!controller.signal.aborted && pendingAbort.current === controller) setReadProgress(value);
+    }}).then((value) => {
+      if (controller.signal.aborted || pendingAbort.current !== controller || intent !== readIntent.current)
         throw Object.assign(new Error("A newer view is loading."), {code:"SUPERSEDED"});
       setData(value);
       setPreview(value.viewAs || null);
@@ -76,23 +94,22 @@ function App() {
       lastRead.current = Date.now();
       setSync("");
       return value;
-    });
-    pendingRead.current = task;
-    try {
-      return await task;
-    } catch (error) {
+    }).catch(error => {
       controller.abort();
       if (controller.superseded) throw Object.assign(new Error("A newer view is loading."), {code:"SUPERSEDED"});
       if (error.name === "AbortError") throw new Error("Loading stopped.");
       throw error;
+    });
+    pendingRead.current = task;
+    try {
+      return await task;
     } finally {
       if (pendingRead.current === task) pendingRead.current = null;
       if (pendingAbort.current === controller) pendingAbort.current = null;
     }
   };
   useEffect(() => {
-    startSession()
-      .then(value => { setPreview(value.viewAs || null); return reload(); })
+    reload()
       .catch((e) => {
         if (e.code === "SUPERSEDED") return;
         if (e.code === "SIGN_IN_REQUIRED") setSignIn(true);
@@ -151,6 +168,7 @@ function App() {
     };
   }, []);
   const run = async (fn) => {
+    pendingActions.current++;
     setBusy(true);
     setError("");
     try {
@@ -163,7 +181,7 @@ function App() {
       }
       setError(e.message);
     } finally {
-      setBusy(false);
+      if (--pendingActions.current === 0) setBusy(false);
     }
   };
   const propose = (operation, payload, close) =>
@@ -184,16 +202,27 @@ function App() {
       await reload(true);
     });
   const navigate = (value) => {
+    readIntent.current++;
+    if (pendingAbort.current) { pendingAbort.current.superseded = true; pendingAbort.current.abort(); }
     setPage(value);
     setError("");
     setNotice("");
     if (!data?.snapshot && (value !== "History" || !data))
       void run(() => reload(true, value === "Events" ? "events" : value === "History" ? "access" : "full"));
   };
+  const cancelRead = () => {
+    readIntent.current++;
+    pendingAbort.current?.abort();
+    setError("Loading stopped.");
+  };
   const withFullData = (callback) => run(async () => {
-    const value = live.current.data?.snapshot ? live.current.data : await reload(true, "full");
-    if (!value?.snapshot) throw new Error("The records could not be loaded.");
-    callback(value.snapshot);
+    const needsRecords = !live.current.data?.snapshot;
+    if (needsRecords) setLoadingEditor(true);
+    try {
+      const value = needsRecords ? await reload(true, "full") : live.current.data;
+      if (!value?.snapshot) throw new Error("The records could not be loaded.");
+      callback(value.snapshot);
+    } finally { if (needsRecords) setLoadingEditor(false); }
   });
   const viewAs = (person) => run(async () => {
     if (pendingRead.current) await pendingRead.current.catch(() => {});
@@ -295,6 +324,10 @@ function App() {
                 {sync}
               </small>
             )}
+            {loadingEditor && data?.eventsList && <div className="editor-loading">
+              <span role="status">{readProgress.stage === "Verifying records" ? "Verifying editor records…" : "Loading editor records…"}</span>
+              <button onClick={cancelRead}>Cancel</button>
+            </div>}
             {error && (
               <div className="error" role="alert">
                 {error}
@@ -310,7 +343,7 @@ function App() {
                 {error ? (
                   <button
                     onClick={() =>
-                      run(() => startSession().then(() => reload(true)))
+                      run(() => { bootstrap.current = null; return reload(true); })
                     }
                   >
                     Retry connection
@@ -319,7 +352,7 @@ function App() {
                   <>
                     <h1>{page}</h1>
                     <div className="loading-status"><span role="status">{readProgress.stage}…</span>
-                      <button onClick={() => pendingAbort.current?.abort()}>Cancel</button></div>
+                      <button onClick={cancelRead}>Cancel</button></div>
                     {readProgress.total && <progress aria-label="Record groups loaded" value={readProgress.completed} max={readProgress.total} />}
                     <div className="loading-table" aria-hidden="true">{Array.from({length:6},(_,i)=><div key={i}><i/><i/><i/></div>)}</div>
                   </>

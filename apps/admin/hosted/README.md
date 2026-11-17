@@ -164,9 +164,20 @@ choice does not connect production data or remove staging isolation.
 
 ## Paged panel transport and scoped commands
 
-`/api/state` returns a fresh panel manifest and display metadata. The browser then
-requests one bounded `/api/page` at a time and publishes state only after the final
-revision check. Limits remain 512 pages and 16 MiB per capture; no partial snapshot
+`/api/state` returns a fresh panel manifest and display metadata after session
+bootstrap. The initial administrator Events list reads only verified terms/events
+through an explicit `events-list-v1` profile (four page requests for the local
+fixture, five for a 47-event fixture). Editors, the account-preview selector and
+other current-data screens request a complete snapshot on demand. History can
+load independently after authorization. These local counts are not hosted CPU
+or end-to-end latency measurements.
+
+At most two bounded `/api/page` requests run concurrently; each section's cursor
+remains sequential. Exact zero counts in a strictly validated manifest eliminate
+redundant empty pages. Completed profiles/captures publish only after final
+revision verification; superseded navigation invalidates and aborts earlier work,
+including waiters on the same session/bootstrap or capture promise. Full-capture
+limits remain 512 pages and 16 MiB; no partial snapshot
 or cross-user cache is displayed. An unchanged manifest reuses only this tab's
 verified in-memory capture, keyed by backend/principal binding, generation, scope
 and authority revision. Sign-in, logout or authorization errors clear it; every

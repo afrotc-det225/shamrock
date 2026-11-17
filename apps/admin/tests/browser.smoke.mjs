@@ -111,6 +111,9 @@ try {
   assert.deepEqual((await service.snapshot()).events.find(e=>e.eventId==='veterans').eligiblePersonIds,
     beforeEdit.events.find(e=>e.eventId==='veterans').eligiblePersonIds,"on-demand editor preserves complete eligibility");
   await apply();
+  await page.getByRole("button",{name:"Edit Veterans Day ceremony",exact:true}).waitFor();
+  assert.deepEqual(requestedSections.slice(-4).sort(),["events","manifest","terms","verify"],
+    "changed revision on Events returns to the list profile after a full editor capture");
   assert.equal(
     (await service.snapshot()).events.find((e) => e.eventId === "veterans")
       .label,
