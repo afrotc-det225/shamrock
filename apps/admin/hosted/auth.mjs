@@ -1,6 +1,7 @@
 import { createRemoteJWKSet, jwtVerify } from "jose";
 import { PanelError } from "../errors.mjs";
 import { boundedJson, originCheck, json } from "./http.mjs";
+import { getPreview, previewResponse } from "./view-as.mjs";
 const encoder = new TextEncoder();
 const keys = createRemoteJWKSet(
   new URL("https://www.googleapis.com/oauth2/v3/certs"),
@@ -255,7 +256,7 @@ export async function authRoute(
   if (url.pathname === "/api/session" && request.method === "POST") {
     originCheck(request, env.APP_ORIGIN);
     const current = await session(request, env);
-    return json({ csrf: current.csrf });
+    return json({ csrf: current.csrf, viewAs: previewResponse(await getPreview(env, current)) });
   }
   if (url.pathname === "/auth/logout" && request.method === "POST") {
     const current = await session(request, env);

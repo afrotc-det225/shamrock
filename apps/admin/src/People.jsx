@@ -17,6 +17,7 @@ export default function People({
   propose,
   busy,
   leadership = false,
+  readOnly = false,
 }) {
   const [query, setQuery] = useState(""),
     [flight, setFlight] = useState(""),
@@ -115,7 +116,7 @@ export default function People({
     <>
       <section className="page-controls">
         <Heading title={leadership ? "Leadership" : "Cadets"}>
-          <button className="primary" onClick={() => open()}>
+          <button className="primary" disabled={readOnly} onClick={() => open()}>
             <Plus size={17} />
             {leadership ? "Add contact" : "Add cadet"}
           </button>
@@ -158,7 +159,7 @@ export default function People({
                   {p.lastName?.[0]}
                 </span>
                 <span>
-                  <button className="text-button" onClick={() => open(p)}>
+                  <button className="text-button" disabled={readOnly} onClick={() => open(p)}>
                     {name(p)}
                   </button>
                   <small>{p.rank}</small>
@@ -187,6 +188,7 @@ export default function People({
             <td>
               <button
                 className="icon"
+                disabled={readOnly}
                 aria-label={`Edit ${name(p)}`}
                 onClick={() => open(p)}
               >

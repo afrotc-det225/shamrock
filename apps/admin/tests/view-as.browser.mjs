@@ -1,0 +1,54 @@
+import assert from 'node:assert/strict';
+import {chromium} from 'playwright';
+import {createLocalBackend} from '../backend.mjs';
+import {AdminService} from '../service.mjs';
+import {createPanelServer} from '../server.mjs';
+const local=await createLocalBackend(),service=new AdminService(local.backend),server=createPanelServer(service);
+await new Promise(r=>server.listen(0,'127.0.0.1',r));
+const browser=await chromium.launch(process.env.SHAMROCK_CHROMIUM_PATH?{executablePath:process.env.SHAMROCK_CHROMIUM_PATH}:{});
+try {
+ const page=await browser.newPage({viewport:{width:1440,height:1000}}),errors=[];
+ page.on('pageerror',e=>errors.push(e.message));
+ let mode=null,nextStatus='ready';
+ const snapshot=await local.backend.snapshot(),person=snapshot.people[0],personName=[person.firstName,person.lastName].join(' ');
+ await page.route('**/api/session',async route=>{const response=await route.fetch();await route.fulfill({response,json:{...await response.json(),viewAs:mode}});});
+ await page.route('**/api/state',async route=>{
+  const response=await route.fetch(),data=await response.json();
+  data.meta={...data.meta,hosted:true,viewAsEnabled:true};data.viewAs=mode;
+  if(mode?.status!=='ready'&&mode){data.snapshot=null;delete data.reporting;}
+  await route.fulfill({response,json:data});
+ });
+ await page.route('**/api/view-as',async route=>{
+  const {personId}=route.request().postDataJSON();mode=personId?{personId,entryAuditId:crypto.randomUUID(),status:nextStatus,readOnly:true}:null;
+  await route.fulfill({json:{viewAs:mode}});
+ });
+ await page.goto(`http://127.0.0.1:${server.address().port}`);
+ const enter=async()=>{await page.getByRole('button',{name:'View as',exact:true}).click();await page.getByRole('dialog').getByRole('button',{name:new RegExp(personName)}).click();await page.getByRole('button',{name:'Exit view',exact:true}).waitFor();};
+ await enter();
+ await page.getByRole('heading',{name:'Events',exact:true}).waitFor();
+ assert(await page.getByRole('button',{name:'Add event',exact:true}).isDisabled());
+ await page.getByRole('navigation').getByRole('button',{name:'Cadets',exact:true}).click();
+ assert(await page.getByRole('button',{name:'Add cadet',exact:true}).isDisabled());
+ await page.getByLabel('Find a cadet',{exact:true}).fill(person.lastName);
+ assert((await page.locator('tbody tr').count())>0);
+ await page.getByRole('navigation').getByRole('button',{name:'Attendance & excusals',exact:true}).click();
+ for(const button of await page.getByRole('button',{name:'Correct',exact:true}).all())assert(await button.isDisabled());
+ await page.getByRole('button',{name:/^Excusals \(/}).click();
+ for(const button of await page.getByRole('button',{name:'Review',exact:true}).all())assert(await button.isDisabled());
+ await page.reload();await page.getByRole('button',{name:'Exit view',exact:true}).waitFor();
+ assert(await page.getByRole('button',{name:'Add event',exact:true}).isDisabled());
+ await page.screenshot({path:'/tmp/shamrock-view-as-desktop.png'});
+ await page.setViewportSize({width:390,height:844});
+ assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
+ await page.screenshot({path:'/tmp/shamrock-view-as-mobile.png'});
+ await page.getByRole('button',{name:'Exit view',exact:true}).click();
+ await page.getByRole('button',{name:'View as',exact:true}).waitFor();
+ assert(await page.getByRole('button',{name:'Add event',exact:true}).isEnabled());
+ nextStatus='no-panel-access';await enter();
+ await page.getByText('This person does not currently have access to the panel.',{exact:true}).waitFor();
+ assert.equal(await page.getByRole('navigation').getByRole('button').count(),0);
+ await page.getByRole('button',{name:'Exit view',exact:true}).click();
+ await page.getByRole('button',{name:'View as',exact:true}).waitFor();
+ assert.deepEqual(errors,[]);
+ console.log('PASS: View as selector, readonly controls, working filters, reload retention, exit restores own view, explicit no-access, mobile layout, no runtime errors.');
+}finally{await browser.close();await new Promise(r=>server.close(r));service.close();await local.dispose();}

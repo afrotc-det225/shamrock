@@ -2,7 +2,7 @@ import React, { useState } from "react";
 import { Send } from "lucide-react";
 import { Heading, Table, Status, Empty } from "./components";
 import { api } from "./api";
-export function Overview({ snapshot: s, reporting, history, navigate }) {
+export function Overview({ snapshot: s, reporting, history, navigate, readOnly = false }) {
   const d = reporting?.dashboard;
   return (
     <>
@@ -30,14 +30,14 @@ export function Overview({ snapshot: s, reporting, history, navigate }) {
           <span>Pending excusals</span>
         </div>
       </div>
-      <section className="form-section">
+      {!readOnly && <section className="form-section">
         <h2>Recent changes</h2>
         {history.length ? (
           <History rows={history.slice(0, 5)} />
         ) : (
           <Empty>No changes yet.</Empty>
         )}
-      </section>
+      </section>}
     </>
   );
 }

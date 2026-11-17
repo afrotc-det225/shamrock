@@ -2,13 +2,14 @@ import { hydrateReporting } from "./reporting";
 import { loadSnapshot } from "../snapshot-client";
 let csrf;
 let retainedCapture;
+let viewRevision;
 export async function api(path, body) {
   const response = await fetch(`/api${path}`, {
     method: body === undefined ? "GET" : "POST",
-    headers:
-      body === undefined
-        ? {}
-        : { "content-type": "application/json", "x-shamrock-csrf": csrf || "" },
+    headers: {
+      ...(body === undefined ? {} : { "content-type": "application/json", "x-shamrock-csrf": csrf || "" }),
+      ...(viewRevision && path !== "/state" ? { "x-shamrock-view-revision": viewRevision } : {}),
+    },
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),
   });
   const data = await response.json();
@@ -23,8 +24,13 @@ export async function api(path, body) {
     throw error;
   }
   if (path === "/state") {
+    viewRevision = data.viewAsRevision || undefined;
+    if (data.viewAs && data.viewAs.status !== "ready") {
+      retainedCapture = undefined;
+      return data;
+    }
     if (data.transport === "paged-v1") {
-      const key = JSON.stringify([data.captureKey, data.manifest]);
+      const key = JSON.stringify([data.captureKey, data.manifest, data.viewAsRevision]);
       if (retainedCapture?.key === key)
         data.snapshot = retainedCapture.snapshot;
       else {
@@ -34,11 +40,15 @@ export async function api(path, body) {
     }
     return hydrateReporting(data);
   }
+  if (path === "/view-as") { retainedCapture = undefined; viewRevision = undefined; }
   return data;
 }
 export async function startSession() {
   retainedCapture = undefined;
-  csrf = (await api("/session", {})).csrf;
+  viewRevision = undefined;
+  const result = await api("/session", {});
+  csrf = result.csrf;
+  return result;
 }
 export const name = (p) =>
   p ? [p.firstName, p.lastName].filter(Boolean).join(" ") : "Unknown cadet";

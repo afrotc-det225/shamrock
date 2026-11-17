@@ -2,6 +2,8 @@ import { createHash, createHmac } from "node:crypto";
 import { PanelError } from "../errors.mjs";
 import { boundedJson } from "./http.mjs";
 const paths = new Set([
+  "/v1/admin/panel/view-as/authorize",
+  "/v1/admin/panel/view-as/page",
   "/v1/admin/history/list",
   "/v1/admin/history/page",
   "/v1/admin/snapshot/page",
@@ -16,7 +18,7 @@ const paths = new Set([
   "/v1/admin/transitions/prepare/step",
 ]);
 export class HostedBackend {
-  constructor(env, principalId) {
+  constructor(env, principalId, preview = null, viewRevision = null) {
     const origin = new URL(env.BACKEND_ORIGIN);
     if (
       env.ENVIRONMENT !== "staging" ||
@@ -35,6 +37,8 @@ export class HostedBackend {
       );
     this.env = env;
     this.principalId = principalId;
+    this.preview = preview;
+    this.viewRevision = viewRevision;
     this.environment = "staging";
     this.generation = Number(env.GENERATION);
     this.calls = 0;
@@ -53,6 +57,7 @@ export class HostedBackend {
           env.SOURCE_KIND,
           env.SOURCE_RESOURCE,
           env.BRIDGE_KEY_ID,
+          ...(preview ? [preview.entry_audit_id] : []),
         ]),
       )
       .digest("hex");
@@ -85,6 +90,33 @@ export class HostedBackend {
     };
   }
   async post(path, input) {
+    if (this.preview) {
+      const kind = {
+        "/v1/admin/panel/page": "panel",
+        "/v1/admin/snapshot/page": "snapshot",
+        "/v1/admin/history/page": "history",
+        "/v1/admin/history/list": "history-list",
+      }[path];
+      if (!kind) throw new PanelError("VIEW_AS_READ_ONLY", "Exit View as before making changes.", 403);
+      const { environment, generation, principalId, ...page } = input;
+      const result = await this.send("/v1/admin/panel/view-as/page", {
+        ...this.identity(), targetPersonId: this.preview.person_id,
+        entryAuditId: this.preview.entry_audit_id,
+        viewRevision: this.viewRevision, kind, page,
+      });
+      if (result.contractVersion !== "panel-view-as-page-v1" || result.readOnly !== true ||
+          result.kind !== kind ||
+          result.entryAuditId !== this.preview.entry_audit_id ||
+          result.targetPersonId !== this.preview.person_id ||
+          typeof result.viewRevision !== "string" ||
+          (this.viewRevision !== null && result.viewRevision !== this.viewRevision))
+        throw new PanelError("SNAPSHOT_CHANGED", "Access changed. Reload this view.", 409);
+      this.viewRevision = result.viewRevision;
+      return result.page;
+    }
+    return this.send(path, input);
+  }
+  async send(path, input) {
     if (!paths.has(path))
       throw new PanelError("INVALID_ACTION", "This operation is unavailable.");
     if (++this.calls > 30)

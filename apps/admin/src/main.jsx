@@ -25,6 +25,7 @@ import "@fontsource/libre-franklin/latin-600.css";
 import "@fontsource/libre-franklin/latin-700.css";
 import "@fontsource/barlow-condensed/latin-600.css";
 import Brand from "./Brand";
+import { ViewAsSelector, ViewAsBanner, viewAsStatus } from "./ViewAs";
 import "./style.css";
 const pages = [
   ["Overview", Home],
@@ -45,10 +46,11 @@ function App() {
     [proposal, setProposal] = useState(null),
     [signIn, setSignIn] = useState(false),
     [sync, setSync] = useState("");
+  const [preview, setPreview] = useState(null), [previewName, setPreviewName] = useState("");
   const pendingRead = useRef(null),
     lastRead = useRef(0),
     live = useRef({});
-  live.current = { busy, proposal, data };
+  live.current = { busy, proposal, data, preview };
   const reload = async (force = false) => {
     if (pendingRead.current) {
       await pendingRead.current;
@@ -56,8 +58,9 @@ function App() {
     }
     const task = api("/state").then((value) => {
       setData(value);
+      setPreview(value.viewAs || null);
       if (
-        value.snapshot.access &&
+        value.snapshot?.access &&
         !value.snapshot.access.capabilities.fullSnapshot
       )
         setPage("Attendance & excusals");
@@ -73,7 +76,7 @@ function App() {
   };
   useEffect(() => {
     startSession()
-      .then(reload)
+      .then(value => { setPreview(value.viewAs || null); return reload(); })
       .catch((e) => {
         if (e.code === "SIGN_IN_REQUIRED") setSignIn(true);
         else setError(e.message);
@@ -109,7 +112,7 @@ function App() {
           failures = Math.min(failures + 1, 3);
           if (e.code === "SIGN_IN_REQUIRED" || e.status === 403) {
             setData(null);
-            setSignIn(true);
+            if (!current.preview) setSignIn(true);
           } else setSync("Updates interrupted. Retrying automatically.");
         }
       }
@@ -167,12 +170,21 @@ function App() {
     setError("");
     setNotice("");
   };
+  const viewAs = (person) => run(async () => {
+    if (pendingRead.current) await pendingRead.current.catch(() => {});
+    const result = await api("/view-as", { personId: person?.personId || null });
+    setPreview(result.viewAs); setPreviewName(person ? `${person.firstName} ${person.lastName}` : "");
+    setProposal(null); setData(null); setNotice("");
+    await reload(true);
+    if (result.auditRecorded === false) setNotice("Exited View as; the exit audit could not be saved.");
+  });
+  const blockedPreview = preview && preview.status !== "ready";
   const scoped =
-    data?.snapshot.access && !data.snapshot.access.capabilities.fullSnapshot;
-  const visiblePages = scoped
+    data?.snapshot?.access && !data.snapshot.access.capabilities.fullSnapshot;
+  const visiblePages = blockedPreview ? [] : scoped
     ? pages.filter(([title]) => title === "Attendance & excusals")
     : pages.filter(([title]) => title !== "History" || data?.meta.hosted);
-  const common = { ...data, propose, busy, notify: setNotice, refresh: reload };
+  const common = { ...data, propose, busy, readOnly: !!preview, notify: setNotice, refresh: reload };
   if (signIn) {
     const code = new URLSearchParams(location.search).get("signin");
     const message =
@@ -225,7 +237,9 @@ function App() {
             ))}
           </nav>
           <div className="sidebar-bottom">
-            {!scoped && (
+            {!preview && !scoped && data?.meta.viewAsEnabled && data?.snapshot &&
+              <ViewAsSelector people={data.snapshot.people} onSelect={viewAs} busy={busy} />}
+            {!preview && !scoped && (
               <button
                 className={page === "Assistant" ? "selected" : ""}
                 onClick={() => navigate("Assistant")}
@@ -248,6 +262,9 @@ function App() {
         </aside>
         <div className="workspace">
           <main>
+            {preview && <ViewAsBanner busy={busy} onExit={() => viewAs(null)}
+              label={previewName || [data?.snapshot?.people.find(p => p.personId === preview.personId)?.firstName,
+                data?.snapshot?.people.find(p => p.personId === preview.personId)?.lastName].filter(Boolean).join(" ") || "selected cadet"} />}
             {sync && (
               <small className="sync-status" role="status">
                 {sync}
@@ -263,7 +280,7 @@ function App() {
                 {notice}
               </div>
             )}
-            {!data ? (
+            {blockedPreview ? <p>{viewAsStatus[preview.status] || "This account cannot be previewed."}</p> : !data ? (
               <p aria-live="polite">
                 {error ? (
                   <button
@@ -278,7 +295,7 @@ function App() {
                 )}
               </p>
             ) : (
-              <>
+              <React.Fragment key={preview?.entryAuditId || "own-account"}>
                 {!scoped && page === "Events" && <Events {...common} />}{" "}
                 {!scoped && page === "Cadets" && (
                   <People key="cadets" {...common} />
@@ -288,17 +305,18 @@ function App() {
                 )}{" "}
                 {page === "Attendance & excusals" && <Attendance {...common} />}{" "}
                 {!scoped && page === "History" && <History />}
-                {!scoped && page === "Semester" && <Semester {...common} />}{" "}
+                {!preview && !scoped && page === "Semester" && <Semester {...common} />}{" "}
                 {!scoped && page === "Overview" && (
                   <Overview {...common} navigate={navigate} />
                 )}{" "}
-                {!scoped && page === "System" && (
+                {!preview && !scoped && page === "System" && (
                   <System {...common} retry={apply} />
                 )}{" "}
-                {!scoped && page === "Assistant" && (
+                {!preview && !scoped && page === "Assistant" && (
                   <Assistant meta={data.meta} />
                 )}
-              </>
+                {preview && ["Semester", "System", "Assistant"].includes(page) && <p>Exit View as to use this page.</p>}
+              </React.Fragment>
             )}
           </main>
         </div>

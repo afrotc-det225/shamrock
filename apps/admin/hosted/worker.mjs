@@ -5,6 +5,7 @@ import { AdminService } from "../service-core.mjs";
 import { PanelError } from "../errors.mjs";
 import { json, boundedJson, secure } from "./http.mjs";
 import { TRANSITION_POLICY } from "../../../packages/domain/src/transitions.ts";
+import { getPreview, previewResponse, changePreview } from "./view-as.mjs";
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
@@ -47,10 +48,12 @@ export default {
         return secure(asset);
       }
       const user = await session(request, env),
-        backend = new HostedBackend(env, user.principal_id),
+        preview = await getPreview(env, user),
+        backend = new HostedBackend(env, user.principal_id, preview,
+          url.pathname === "/api/state" ? null : request.headers.get("x-shamrock-view-revision")),
         service = new AdminService(
           backend,
-          new ProposalStore(env.PANEL_DB, backend.binding, user.principal_id),
+          new ProposalStore(env.PANEL_DB, backend.binding, user.principal_id, user.token_hash),
         );
       let body;
       if (request.method === "POST") {
@@ -64,21 +67,36 @@ export default {
           );
         body = await boundedJson(request);
       }
+      if (request.method === "POST" && url.pathname === "/api/view-as")
+        return secure(json(await changePreview(env, user,
+          new HostedBackend(env, user.principal_id), body)));
+      if (preview && ![
+        "GET /api/state", "POST /api/page", "GET /api/history/list", "POST /api/history/page",
+      ].includes(`${request.method} ${url.pathname}`))
+        throw new PanelError("VIEW_AS_READ_ONLY", "Exit View as before making changes.", 403);
+      if (preview && url.pathname !== "/api/state" && !backend.viewRevision)
+        throw new PanelError("SNAPSHOT_CHANGED", "Reload the selected view.", 409);
       if (url.pathname === "/api/state" && request.method === "GET") {
+        if (preview && preview.status !== "ready")
+          return secure(json({ viewAs: previewResponse(preview), snapshot: null,
+            meta: { hosted: true, viewAsEnabled: true } }));
         const manifest = await backend.panelManifest();
         return secure(
           json({
             manifest,
             transport: "paged-v1",
             captureKey: backend.binding,
+            viewAs: previewResponse(preview),
+            viewAsRevision: backend.viewRevision,
             reportingTime: Date.now(),
-            history: manifest.access.capabilities.fullSnapshot
+            history: !preview && manifest.access.capabilities.fullSnapshot
               ? await service.history()
               : [],
             meta: {
               environment: "staging",
               fictional: true,
               hosted: true,
+              viewAsEnabled: env.VIEW_AS_ENABLED === "1",
               assistantAvailable: false,
               transitionPolicy: TRANSITION_POLICY,
             },

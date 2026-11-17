@@ -1,6 +1,6 @@
 export class ProposalStore {
-  constructor(db, binding, principal) {
-    Object.assign(this, { db, binding, principal });
+  constructor(db, binding, principal, previewSession = null) {
+    Object.assign(this, { db, binding, principal, previewSession });
     this.lease = crypto.randomUUID();
   }
   prepare(sql) {
@@ -29,7 +29,8 @@ export class ProposalStore {
   async acquire(id) {
     const result = await this.db
       .prepare(
-        "UPDATE proposals SET lease_token=?,lease_until=?,state='applying' WHERE id=? AND binding=? AND principal=? AND lease_until<? AND state NOT IN ('cancelled','conflict','rejected') RETURNING id",
+        "UPDATE proposals SET lease_token=?,lease_until=?,state='applying' WHERE id=? AND binding=? AND principal=? AND lease_until<? AND state NOT IN ('cancelled','conflict','rejected')" +
+        (this.previewSession ? " AND NOT EXISTS(SELECT 1 FROM session_previews WHERE token_hash=?)" : "") + " RETURNING id",
       )
       .bind(
         this.lease,
@@ -38,6 +39,7 @@ export class ProposalStore {
         this.binding,
         this.principal,
         Date.now(),
+        ...(this.previewSession ? [this.previewSession] : []),
       )
       .first();
     return !!result;

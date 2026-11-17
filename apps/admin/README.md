@@ -183,6 +183,39 @@ That loopback-browser check does not establish hosted CPU capacity or completene
 against later production updates. The hosted real-data binding remains a separate
 release gate.
 
+### View as
+
+Administrators can choose **View as**, select a cadet, and inspect that person's
+current panel access. The pinned banner identifies the read-only view and provides
+**Exit view**. Filters remain usable; change controls are disabled. A missing,
+ambiguous, inactive or unverified account link produces an explicit unavailable
+view rather than invented permissions. This preview does not establish that the
+person's actual Google login works; that needs separate account acceptance.
+
+The actual Google subject and administrator principal never change. The target
+and audited entry are stored in `session_previews`, outside operational records.
+Every read uses the dedicated backend dual-identity guard, with a revision binding
+across pages. Every mutation and saved-proposal receipt is refused while previewing,
+including requests without preview headers. Entry and saved-command apply leases
+exclude one another. Existing proposals and their bindings are preserved. Exit
+clears the session's preview even if access has been revoked; a failed exit audit
+is reported explicitly and does not trap the operator in preview.
+
+Release requirements: apply `hosted/migrations/0002_view_as.sql` to the **separate
+panel session database**, verify its schema/foreign key, and deploy the operational
+backend's reviewed View as routes/audit migration before enabling
+`VIEW_AS_ENABLED=1`. The base `hosted/schema.sql` hash remains unchanged; retain a
+separate migration hash in the private release evidence. The new Worker reads the
+preview table even when the feature flag is off, so a missing migration fails
+closed. Turning the flag off prevents new entries but preserves existing read-only
+sessions and permits exit. Do not deploy this bundle before that migration.
+
+Local acceptance includes verified-actor preservation, mutation/header-bypass
+rejection, entry/apply lease exclusion, revoked-access exit, and browser checks
+for disabled changes, usable filters, reload persistence, no-access states and
+mobile layout. Hosted dual-identity/CPU and real Google-account tests remain
+separate deployment gates.
+
 The presentation now takes its navy, gold and Libre Franklin inspiration from
 [Notre Dame AFROTC](https://afrotc.nd.edu/). Fonts are self-hosted open-license
 Libre Franklin and Barlow Condensed; no licensed Notre Dame font files are copied.

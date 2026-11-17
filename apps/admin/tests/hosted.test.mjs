@@ -43,7 +43,7 @@ await build({
   ],
 });
 const origin = "https://panel-staging.example.invalid";
-async function fixture(t, backendScript) {
+async function fixture(t, backendScript, viewAsEnabled = false) {
   const mf = new Miniflare({
     workers: [
       {
@@ -68,6 +68,7 @@ async function fixture(t, backendScript) {
           SOURCE_KIND: "sheet",
           SOURCE_RESOURCE: "panel-source",
           GENERATION: "1",
+          VIEW_AS_ENABLED: viewAsEnabled ? "1" : "0",
         },
       },
       {
@@ -102,6 +103,7 @@ async function fixture(t, backendScript) {
       await readFile(new URL("../hosted/schema.sql", import.meta.url), "utf8"),
     ).map((sql) => ({ sql })),
   );
+  await execute(splitMigrationSql(await readFile(new URL("../hosted/migrations/0002_view_as.sql", import.meta.url), "utf8")).map(sql => ({sql})));
   const run = async (sql, ...values) => (await execute([{ sql, values }]))[0];
   const db = {
     prepare: (sql) => ({
@@ -590,4 +592,49 @@ test("scoped HTTP sessions cannot reach full pages, management or transition rou
     ).status,
     403,
   );
+});
+
+test('View as keeps the verified actor, wraps reads, and blocks every mutation even without preview headers', async t => {
+  const script=`export default {async fetch(request){
+    const b=await request.json(),path=new URL(request.url).pathname;
+    if(b.principalId!=='actual-admin')return Response.json({error:{code:'WRONG_ACTOR'}},{status:403});
+    if(path==='/v1/admin/panel/view-as/authorize') {
+      if(b.action==='exit')return Response.json({error:{code:'REVOKED'}},{status:403});
+      return Response.json({contractVersion:'panel-view-as-v1',readOnly:true,action:'enter',entryAuditId:b.auditId,targetPersonId:b.targetPersonId,targetPrincipalId:'flight-reader',status:'ready'});
+    }
+    if(path==='/v1/admin/panel/view-as/page'&&b.targetPersonId==='selected-cadet')return Response.json({contractVersion:'panel-view-as-page-v1',readOnly:true,entryAuditId:b.entryAuditId,targetPersonId:b.targetPersonId,targetPrincipalId:'flight-reader',viewRevision:'a'.repeat(64),kind:b.kind,page:{contractVersion:'panel-pages-v1',section:'manifest',revision:{access:'scoped'},access:{mode:'scoped',flightIds:['alpha'],capabilities:{fullSnapshot:false,attendanceCorrectionFlightIds:[],attendanceReportFlightIds:['alpha']}}}});
+    return Response.json({error:{code:'UNWRAPPED_ROUTE',message:'Unexpected route'}},{status:403});
+  }};`;
+  const f=await fixture(t,script,true), token=random(),csrf=random(),hash=await sha(token);
+  await f.run("INSERT INTO identity_bindings VALUES('actual-sub','actual-admin',1)");
+  await f.run('INSERT INTO sessions VALUES(?,?,?,?)',hash,'actual-sub',csrf,Date.now()+60000);
+  const headers={cookie:'__Host-shamrock='+token,origin,'content-type':'application/json','x-shamrock-csrf':csrf};
+  const post=(path,body)=>f.mf.dispatchFetch(origin+path,{method:'POST',headers,body:JSON.stringify(body)});
+  const entered=await post('/api/view-as',{personId:'selected-cadet'});assert.equal(entered.status,200);
+  const state=await f.mf.dispatchFetch(origin+'/api/state',{headers});assert.equal(state.status,200);
+  const data=await state.json();assert.equal(data.viewAs.personId,'selected-cadet');assert.equal(data.manifest.access.capabilities.fullSnapshot,false);assert.equal(data.viewAsRevision,'a'.repeat(64));
+  const binding=await f.run('SELECT principal_id FROM identity_bindings WHERE google_sub=?','actual-sub');assert.equal(binding.results[0].principal_id,'actual-admin');
+  for(const path of ['/api/proposals','/api/proposals/00000000-0000-4000-8000-000000000001/apply','/api/proposals/00000000-0000-4000-8000-000000000001/cancel','/api/chat']){
+    const r=await post(path,{operation:'excusal.decide',approved:true,payload:{}});assert.equal(r.status,403);assert.equal((await r.json()).error.code,'VIEW_AS_READ_ONLY');
+  }
+  assert.equal((await f.mf.dispatchFetch(origin+'/api/transition?id=saved',{headers})).status,403);
+  assert.equal((await post('/api/page',{surface:'full',section:'people',offset:0})).status,409,'missing revision cannot bypass preview');
+  const exited=await post('/api/view-as',{personId:null});assert.equal(exited.status,200,'exit succeeds despite revoked audit authority');assert.equal((await exited.json()).viewAs,null);
+  assert.equal((await f.run('SELECT count(*) AS n FROM session_previews')).results[0].n,0);
+});
+
+test('View as entry and proposal apply leases exclude each other',async t=>{
+  const f=await fixture(t),hash='fictional-session';
+  await f.run("INSERT INTO identity_bindings VALUES('sub','owner',1)");
+  await f.run('INSERT INTO sessions VALUES(?,?,?,?)',hash,'sub','csrf',Date.now()+60000);
+  await f.run("INSERT INTO proposals(id,binding,principal,command,summary,created,state) VALUES('saved','binding','owner','{}','{}',?,'prepared')",Date.now());
+  await f.run("INSERT INTO session_previews VALUES(?,?,?,'ready')",hash,'cadet','audit-entry');
+  const store=new ProposalStore(f.db,'binding','owner',hash);
+  assert.equal(await store.acquire('saved'),false);
+  await f.run('DELETE FROM session_previews WHERE token_hash=?',hash);
+  assert.equal(await store.acquire('saved'),true);
+  const {changePreview}=await import('../hosted/view-as.mjs');
+  const backend={identity:()=>({principalId:'owner'}),post:async()=>({contractVersion:'panel-view-as-v1',readOnly:true,action:'enter',entryAuditId:'entry',targetPersonId:'cadet',status:'ready'})};
+  await assert.rejects(()=>changePreview({VIEW_AS_ENABLED:'1',PANEL_DB:f.db},{token_hash:hash,principal_id:'owner'},backend,{personId:'cadet'}),e=>e.code==='CHANGE_IN_PROGRESS');
+  assert.equal((await f.run('SELECT count(*) AS n FROM session_previews')).results[0].n,0);
 });

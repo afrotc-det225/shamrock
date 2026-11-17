@@ -11,7 +11,7 @@ import {
   AttendanceRate,
 } from "./components";
 import { name } from "./api";
-export default function Attendance({ snapshot: s, reporting, propose, busy }) {
+export default function Attendance({ snapshot: s, reporting, propose, busy, readOnly = false }) {
   const [tab, setTab] = useState("attendance"),
     [event, setEvent] = useState(s.events[0]?.eventId || ""),
     [flight, setFlight] = useState(""),
@@ -114,7 +114,7 @@ export default function Attendance({ snapshot: s, reporting, propose, busy }) {
                   </td>
                   <td>
                     {canCorrect(p) && (
-                      <button onClick={() => correction(p)}>Correct</button>
+                      <button disabled={readOnly} onClick={() => correction(p)}>Correct</button>
                     )}
                   </td>
                 </tr>
@@ -140,6 +140,7 @@ export default function Attendance({ snapshot: s, reporting, propose, busy }) {
               <td>
                 {(!scoped || r.canDecide === true) && (
                   <button
+                    disabled={readOnly}
                     onClick={() => {
                       setReason("");
                       setCode("Approved");

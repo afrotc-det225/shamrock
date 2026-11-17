@@ -13,7 +13,7 @@ import {
 import { eventTypes, displayDate, name } from "./api";
 import { toEastern, fromEastern } from "./time";
 import BulkSchedule from "./BulkSchedule";
-export default function Events({ snapshot: s, propose, busy, refresh }) {
+export default function Events({ snapshot: s, propose, busy, refresh, readOnly = false }) {
   const [bulk, setBulk] = useState(false);
   const [query, setQuery] = useState(""),
     [type, setType] = useState(""),
@@ -88,10 +88,10 @@ export default function Events({ snapshot: s, propose, busy, refresh }) {
       <section className="page-controls">
         <Heading title="Events">
           <div className="actions">
-            <button disabled={!term || busy} onClick={() => setBulk(true)}>
+            <button disabled={readOnly || !term || busy} onClick={() => setBulk(true)}>
               Change schedule
             </button>
-            <button className="primary" onClick={() => open()}>
+            <button className="primary" disabled={readOnly} onClick={() => open()}>
               <Plus size={17} />
               Add event
             </button>
@@ -130,7 +130,7 @@ export default function Events({ snapshot: s, propose, busy, refresh }) {
         {rows.map((e) => (
           <tr key={e.eventId}>
             <td>
-              <button className="text-button" onClick={() => open(e)}>
+              <button className="text-button" disabled={readOnly} onClick={() => open(e)}>
                 {e.label}
               </button>
               <small>{e.location}</small>
@@ -147,6 +147,7 @@ export default function Events({ snapshot: s, propose, busy, refresh }) {
             <td>
               <button
                 className="icon"
+                disabled={readOnly}
                 aria-label={`Edit ${e.label}`}
                 onClick={() => open(e)}
               >
