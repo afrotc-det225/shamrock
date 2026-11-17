@@ -173,6 +173,7 @@ metadata. See the private release evidence for the live read-back checkpoint.
 New source modules cover [administrative commands and corrections](D1_ADMIN_COMMANDS.md),
 [attendance and birthday reporting](D1_REPORTING_RULES.md),
 [notification planning](D1_NOTIFICATIONS.md),
+[owner-only native mail rehearsal](D1_OWNER_MAIL_REHEARSAL.md),
 [keyed frontend publication](D1_FRONTEND_PUBLICATION.md) and its
 [Google runtime](D1_FRONTEND_RUNTIME.md). Source completion, local tests and
 hosted deployment are separate evidence. Check the private release record for

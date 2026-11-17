@@ -57,6 +57,7 @@ function shamrockV3StagingPauseBoth_(host) {
   try { if (typeof SHAMROCKV3 !== 'undefined' && SHAMROCKV3.createNativeFormsRuntime) shamrockV3StagingForms_().pause(); } catch (error) { if (!failure) failure = error; }
   try { if (typeof SHAMROCKV3 !== 'undefined' && SHAMROCKV3.createNativeFrontendInput) shamrockV3NativeInput_().pause(); } catch (error) { if (!failure) failure = error; }
   try { if(typeof SHAMROCKV3!== 'undefined' && SHAMROCKV3.createNativePermissionRuntime) shamrockV3NativePermissions_().pause(); } catch(error) { if(!failure)failure=error; }
+  try { if (typeof SHAMROCKV3 !== 'undefined' && SHAMROCKV3.createNativeOwnerMailRuntime) shamrockV3OwnerMail_().pause(); } catch(error) { if(!failure)failure=error; }
   if (failure) throw failure;
   return result;
 }
@@ -77,7 +78,7 @@ function shamrockV3StagingResume() { return shamrockV3StagingHost_().resume(); }
 function shamrockV3StagingFlush() {
   return SHAMROCKV3.runScheduledStaging({ PropertiesService: PropertiesService, Utilities: Utilities,
     UrlFetchApp: UrlFetchApp, ScriptApp: ScriptApp, Session: Session, FormApp: FormApp,
-    SpreadsheetApp: SpreadsheetApp, LockService: LockService });
+    SpreadsheetApp: SpreadsheetApp, LockService: LockService, MailApp: MailApp });
 }
 function shamrockV3StagingFrontendRefresh() { return shamrockV3StagingFrontend_().refresh(); }
 function shamrockV3StagingFrontendPause() { return shamrockV3StagingFrontend_().pause(); }
@@ -120,3 +121,8 @@ function shamrockV3NativePermissionsControl() { return shamrockV3NativePermissio
 
 function shamrockV3ManagedPendingReplayQueue() { return shamrockV3StagingForms_().pendingReplayQueue(); }
 function shamrockV3ManagedReviewReplay(input) { return shamrockV3StagingForms_().reviewReplay(input); }
+function shamrockV3OwnerMail_() { return SHAMROCKV3.createNativeOwnerMailRuntime({PropertiesService:PropertiesService,Utilities:Utilities,UrlFetchApp:UrlFetchApp,ScriptApp:ScriptApp,Session:Session,LockService:LockService,MailApp:MailApp}); }
+function shamrockV3OwnerMailControl() { return shamrockV3OwnerMail_().applyControl(); }
+function shamrockV3OwnerMailFlush() { return shamrockV3OwnerMail_().flush(); }
+function shamrockV3OwnerMailPause() { return shamrockV3OwnerMail_().pause(); }
+function shamrockV3OwnerMailStatus() { return shamrockV3OwnerMail_().status(); }

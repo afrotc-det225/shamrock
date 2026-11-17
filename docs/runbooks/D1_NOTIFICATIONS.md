@@ -62,7 +62,7 @@ the uncertain-delivery boundary using fictional addresses.
 
 ## Isolated durable foundation (migration 0005)
 
-The Worker now exposes signed `POST /v1/admin/notifications/plan` and `/status` endpoints. This is a suppressed staging foundation, not an enabled mail service. There is no enabled hosted sender, Gmail credential, paid queue or external email transport binding. Migration 0006 adds the local-only signed delivery protocol described below. The current production notification triggers remain separate.
+The Worker now exposes signed `POST /v1/admin/notifications/plan` and `/status` endpoints. This is a suppressed staging foundation, not an enabled mail service. Operational delivery remains disabled; no paid queue or external email transport binding is required. An optional separately gated [owner-only native rehearsal](D1_OWNER_MAIL_REHEARSAL.md) can exercise MailApp without releasing operational intents. Migration 0006 adds the local-only signed delivery protocol described below. The current production notification triggers remain separate.
 
 Planning uses the standard command envelope with `operation: 'notifications.plan'` and this strict payload:
 
@@ -135,8 +135,11 @@ retries that saved result without another provider call. Expiry and lost provide
 results never silently requeue. Both D1 and the provider enforce recipient quota.
 The dependency-injected MailApp wrapper preserves To/CC/Reply-To and SHAMROCK's
 sender name. A normal MailApp return confirms API acceptance, not inbox delivery;
-MailApp supplies no message receipt ID. No staging global binds MailApp or adds
-mail OAuth scope, so this code sends no actual email during staging or imports.
+MailApp supplies no message receipt ID. The optional [owner-only native mail
+rehearsal](D1_OWNER_MAIL_REHEARSAL.md) now binds MailApp with the staging mail OAuth
+scope, separate private configuration and explicit Worker gates. It uses a
+separate ledger and replaces all recipients with the verified automation owner.
+Operational staging intents remain suppressed; imports never enable delivery.
 
 The protocol/consumer/provider port have local regression tests, including frozen
 request versions, retry/uncertainty, suppression, quotas and continuations. The native suppress-only host is implemented and tested through provider fakes.

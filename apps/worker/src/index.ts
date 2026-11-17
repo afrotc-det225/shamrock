@@ -1,4 +1,5 @@
 import { beginTransitionPreparation,stepTransitionPreparation,readTransitionArchivePage,abandonTransitionPreparation } from './transition-transport.js';
+import { ownerMailRehearsal } from './mail-rehearsal.js';
 import { adminEffectAvailability } from './effect-availability.js';
 import { permissionCommand, permissionRefresh, attestPermissionFence, recoverPermissionRefresh } from './permissions.js';
 import { effectiveAccessGrants } from './permission-grants.js';
@@ -24,6 +25,9 @@ export interface Env {
   GENERATION: string;
   BRIDGE_KEY_ID: string;
   BRIDGE_SECRET: string;
+  OWNER_MAIL_REHEARSAL_ENABLED?: string;
+  OWNER_MAIL_REHEARSAL_EMAIL?: string;
+  OWNER_MAIL_REHEARSAL_PRINCIPAL?: string;
 }
 
 const MAX_BODY_BYTES = 65_536;
@@ -458,6 +462,9 @@ export default {
       }
       for (const action of ['claim', 'complete', 'recover'] as const) {
         if (url.pathname === `/v1/admin/notifications/delivery/${action}` && !url.search) return json(await notificationDelivery(env, action, input));
+      }
+      for (const action of ['prepare','claim','complete','status','recover'] as const) {
+        if (url.pathname === `/v1/admin/notifications/rehearsal/${action}` && !url.search) return json(await ownerMailRehearsal(env, action, input));
       }
       if (url.pathname === '/v1/admin/notifications/plan' && !url.search) return json(await planNotifications(env, input));
       if (url.pathname === '/v1/admin/notifications/process' && !url.search) return json(await processNotificationTask(env, input));

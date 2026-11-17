@@ -1,3 +1,4 @@
+import { createNativeOwnerMailRuntime, type NativeOwnerMailServices } from './owner-mail-native.js';
 import { createNativePermissionRuntime } from './permissions-host.js';
 import { PERMISSION_FENCE_PROPERTY } from './permissions-refresh.js';
 /** One cheap five-minute poll; full reconciliation and slower maintenance have explicit cadences. */
@@ -29,7 +30,7 @@ export function createEffectAvailabilityProbe(services:Pick<Parameters<typeof cr
     cached.set(body,value);return value;
   };
 }
-type Services=Parameters<typeof createNativeFrontendInput>[0]&Parameters<typeof createNativeStagingHost>[0]&Parameters<typeof createNativeMaintenanceRuntime>[0]&Parameters<typeof createNativeFormsRuntime>[0];
+type Services=Parameters<typeof createNativeFrontendInput>[0]&Parameters<typeof createNativeStagingHost>[0]&Parameters<typeof createNativeMaintenanceRuntime>[0]&Parameters<typeof createNativeFormsRuntime>[0]&Partial<Pick<NativeOwnerMailServices,'MailApp'>>;
 export function runScheduledStaging(input:Services,nowSeconds=()=>Math.floor(Date.now()/1000)){
   const services=invocationServices(input),props=services.PropertiesService.getScriptProperties(),now=nowSeconds();
   const hour=String(Math.floor(now/3600)),quarter=String(Math.floor(now/900));
@@ -52,7 +53,9 @@ export function runScheduledStaging(input:Services,nowSeconds=()=>Math.floor(Dat
     maintenance=createNativeMaintenanceRuntime(shared,nowSeconds).planNotifications();
     if((maintenance as {status?:string})?.status!=='busy')props.setProperty(SCHEDULE_PROPERTIES.maintenance,quarter);
   }
+  let ownerMail:unknown={status:'unbound'};
+  if (services.MailApp) { const mail=createNativeOwnerMailRuntime({...services,MailApp:services.MailApp,nowSeconds}); mail.applyControl(); ownerMail=mail.flush(); }
   // Never mark a failed/incomplete pass reconciled; the next tick retries it.
   if(reconcile)props.setProperty(SCHEDULE_PROPERTIES.reconciled,hour);
-  return Object.assign({},intake,{frontend,maintenance,formIntake,forms:published,nativeInput:native,permissions:permissionResult,reconciled:reconcile});
+  return Object.assign({},intake,{frontend,maintenance,formIntake,forms:published,nativeInput:native,permissions:permissionResult,ownerMail,reconciled:reconcile});
 }

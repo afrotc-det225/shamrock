@@ -47,3 +47,8 @@ test('config fetch cache excludes checkpoints and invalidates on Google mutation
  cached.fetch('https://www.googleapis.com/drive/v3/files/state?alt=media',{method:'get'});cached.fetch('https://www.googleapis.com/drive/v3/files/state?alt=media',{method:'get'});assert.equal(count,3);
  cached.fetch('https://sheets.googleapis.com/v4/spreadsheets/book:batchUpdate',{method:'post'});cached.fetch('https://www.googleapis.com/drive/v3/files/root?alt=media',{method:'get'});assert.equal(count,5);
 });
+
+test('native MailApp availability alone leaves owner mail paused and adds no idle fetch calls',()=>{
+ const f=fixture(true);f.services.MailApp={getRemainingDailyQuota(){assert.fail('unreviewed mail quota access');},sendEmail(){assert.fail('unreviewed provider send');}};
+ const result=runScheduledStaging(f.services,()=>f.now);assert.equal(result.ownerMail.status,'paused');assert.equal(f.fx.calls.length,7);
+});

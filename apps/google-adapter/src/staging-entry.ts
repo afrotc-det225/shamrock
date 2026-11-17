@@ -19,3 +19,5 @@ export { runPermissionRefresh, assertPermissionFenceClear, permissionPolicyAcces
 export { createNativePermissionProvider, createNativePermissionApi, resolveAppliedPermissionIdentity } from './permissions-native.js';
 
 export { createNativePermissionRuntime } from './permissions-host.js';
+
+export { createNativeOwnerMailRuntime, OWNER_MAIL_PROPERTIES, parseNativeOwnerMailConfig } from './owner-mail-native.js';
