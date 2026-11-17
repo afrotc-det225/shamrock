@@ -23,11 +23,22 @@ export async function readBackupEvidence(query, plan) {
     check(quick.length === 1 && Object.values(quick[0])[0] === 'ok' && foreign.length === 0, 'BACKUP_INTEGRITY');
     return { inventory, ledger, controls, evidenceSha256: migrationEvidenceHash(inventory, ledger, controls) };
 }
+// D1 accepts at most 32 arguments per SQL function. Keep the same flat JSON bytes
+// while joining bounded json_array fragments for wider current/future tables.
+function boundedJsonArray(values) {
+    if (values.length <= 32) return `json_array(${values.join(',')})`;
+    const chunks = [];
+    for (let offset = 0; offset < values.length; offset += 32) {
+        const chunk = `json_array(${values.slice(offset, offset + 32).join(',')})`;
+        chunks.push(`substr(${chunk},2,length(${chunk})-2)`);
+    }
+    return "'['||" + chunks.join("||','||") + "||']'";
+}
 /** Typed hexadecimal values preserve embedded NUL, Unicode, blobs and integer precision. */
 export function backupRowSql(table, columns, cursor = null) {
     const selected = columns.map(c => identifier(c.name)), primary = columns.filter(c => c.pk).sort((a, b) => a.pk - b.pk).map(c => identifier(c.name)), keys = primary.length ? primary : ['rowid'];
     const packed = selected.flatMap(c => [`typeof(${c})`, `CASE WHEN typeof(${c}) IN ('text','blob') THEN hex(CAST(${c} AS BLOB)) ELSE quote(${c}) END`]);
-    return { sql: `SELECT json_array(${packed.join(',')}) AS packed,json_array(${keys.map(c => `CAST(${c} AS TEXT)`).join(',')}) AS cursor FROM ${identifier(table)}${cursor ? ` WHERE (${keys.join(',')})>(${keys.map(() => '?').join(',')})` : ''} ORDER BY ${keys.join(',')} LIMIT ${BACKUP_LIMITS.pageRows}`, params: cursor ?? [] };
+    return { sql: `SELECT ${boundedJsonArray(packed)} AS packed,${boundedJsonArray(keys.map(c => `CAST(${c} AS TEXT)`))} AS cursor FROM ${identifier(table)}${cursor ? ` WHERE (${keys.join(',')})>(${keys.map(() => '?').join(',')})` : ''} ORDER BY ${keys.join(',')} LIMIT ${BACKUP_LIMITS.pageRows}`, params: cursor ?? [] };
 }
 export async function fingerprintBackupTables(query, evidence, { progress = () => {
 } } = {}) {

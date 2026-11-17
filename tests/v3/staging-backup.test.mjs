@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { DatabaseSync } from 'node:sqlite';
 import { createMigrationPlan, readMigrationSources, createFreshDatabaseBatch } from '../../scripts/lib/v3-migrations.mjs';
-import { backupHash, captureStagingBackup, proveBackupSql, uploadPrivateBackup, sanitizedBackupSupport, restoreBackupSql, privateDriveAcl } from '../../scripts/lib/staging-backup.mjs';
+import { backupRowSql, backupHash, captureStagingBackup, proveBackupSql, uploadPrivateBackup, sanitizedBackupSupport, restoreBackupSql, privateDriveAcl } from '../../scripts/lib/staging-backup.mjs';
 import { backupProviderPorts, validateBackupConfig } from '../../scripts/staging-backup.mjs';
 const commit = 'a'.repeat(40), sources = await readMigrationSources(new URL('../../database/migrations/', import.meta.url));
 function fixture() {
@@ -219,4 +219,19 @@ test('resumable Drive uploads persist the session before bytes and resume only t
     assert.equal(calls.length, 4);
     await assert.rejects(ports.drive.upload('file', 'folder', '0123456789', 'hash', { sessionUrl: 'https://external.example.invalid/upload' }), /BACKUP_DRIVE_SESSION/);
     assert.equal(calls.length, 4);
+});
+
+test('wide row fingerprints stay within D1 function arguments and preserve flat typed JSON', () => {
+    const db = new DatabaseSync(':memory:');
+    try {
+        const names = Array.from({length:40},(_,index)=>'field_'+index);
+        db.exec('CREATE TABLE wide('+names.map(name=>name+' TEXT').join(',')+')');
+        const values=names.map((name,index)=>index===0?'Unicode \0 sample':String(index));
+        db.prepare('INSERT INTO wide VALUES('+names.map(()=>'?').join(',')+')').run(...values);
+        const input=backupRowSql('wide',db.prepare('PRAGMA table_info(wide)').all());
+        let calls=0;db.function('json_array',{varargs:true},(...args)=>{calls++;assert(args.length<=32);return JSON.stringify(args);});
+        const actual=db.prepare(input.sql).get();
+        assert.deepEqual(JSON.parse(actual.packed),values.flatMap(value=>['text',Buffer.from(value).toString('hex').toUpperCase()]));
+        assert.deepEqual(JSON.parse(actual.cursor),['1']);assert(calls>1);
+    }finally{db.close();}
 });
