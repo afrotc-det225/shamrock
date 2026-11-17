@@ -140,7 +140,8 @@ export function buildDashboardLayoutRepair(input: DashboardInput, current: {
   return [
     ...managed.map(range => ({ unmergeCells: { range } })),
     ...layout.flatMap(request => request.addChart ? [{ updateEmbeddedObjectPosition: {
-      objectId: current.chartIds[chart++], newPosition: request.addChart.chart.position, fields: 'overlayPosition',
+      objectId: current.chartIds[chart++], newPosition: request.addChart.chart.position,
+      fields: 'anchorCell,widthPixels,heightPixels',
     } }] : request.updateCells ? [] : [request]),
   ];
 }

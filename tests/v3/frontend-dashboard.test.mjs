@@ -35,6 +35,7 @@ test('paused Dashboard repair preserves chart identities and excludes values and
   const current = { merges: original.flatMap(r => r.mergeCells ? [r.mergeCells.range] : []), chartIds: [401, 402, 403, 404] };
   const repair = buildDashboardLayoutRepair(x, current);
   assert.deepEqual(repair.flatMap(r => r.updateEmbeddedObjectPosition ? [r.updateEmbeddedObjectPosition.objectId] : []), current.chartIds);
+  assert(repair.filter(r => r.updateEmbeddedObjectPosition).every(r => r.updateEmbeddedObjectPosition.fields === 'anchorCell,widthPixels,heightPixels'));
   assert.equal(repair.some(r => r.updateCells || r.addChart || r.deleteEmbeddedObject || r.updateTable || r.setDataValidation || r.addProtectedRange), false);
   assert.throws(() => buildDashboardLayoutRepair(x, { ...current, merges: [{ sheetId: x.sheetId, startRowIndex: 46, endRowIndex: 49, startColumnIndex: 0, endColumnIndex: 2 }] }));
 });
