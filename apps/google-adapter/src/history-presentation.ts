@@ -16,11 +16,15 @@ export function historySheetPlan(manifest:HistoryPageManifest,sha:(value:string)
 }
 export function historyPresentationRequests(manifest:HistoryPageManifest,plan:HistorySheetPlan,owner:string):Record<string,unknown>[] {
   const range={sheetId:plan.sheetId,startRowIndex:1,endRowIndex:plan.rowCount,startColumnIndex:0,endColumnIndex:plan.columnCount};
+  const tableId=`shamrock_${plan.tableName}`;
   const requests:Record<string,unknown>[]=[
     {addSheet:{properties:{sheetId:plan.sheetId,title:plan.title,hidden:true,gridProperties:{rowCount:plan.rowCount,columnCount:plan.columnCount}}}},
     {addProtectedRange:{protectedRange:{range:{sheetId:plan.sheetId},description:`Retained source report ${manifest.snapshotId}`,warningOnly:false,editors:{users:[owner],domainUsersCanEdit:false}}}},
     {updateCells:{start:{sheetId:plan.sheetId,rowIndex:0,columnIndex:0},rows:[plan.headers,plan.labels].map(row=>({values:row.map(literal)})),fields:'userEnteredValue'}},
-    {addTable:{table:{name:plan.tableName,range,rowsProperties:{headerColorStyle:{rgbColor:color('#356854')},firstBandColorStyle:{rgbColor:color('#FFFFFF')},secondBandColorStyle:{rgbColor:color('#F6F8F9')}},columnProperties:plan.labels.map((columnName,columnIndex)=>({columnIndex,columnName,columnType:'COLUMN_TYPE_UNSPECIFIED'}))}}},
+    // Google rejects some wide addTable requests containing column/banding properties
+    // with HTTP 500. Create the named Table, then configure it in this same atomic batch.
+    {addTable:{table:{tableId,name:plan.tableName,range}}},
+    {updateTable:{table:{tableId,rowsProperties:{headerColorStyle:{rgbColor:color('#356854')},firstBandColorStyle:{rgbColor:color('#FFFFFF')},secondBandColorStyle:{rgbColor:color('#F6F8F9')}},columnProperties:plan.labels.map((columnName,columnIndex)=>({columnIndex,columnName,columnType:'COLUMN_TYPE_UNSPECIFIED'}))},fields:'rowsProperties,columnProperties'}},
     ...buildAttendanceLayout({sheetId:plan.sheetId,headers:plan.headers,labels:plan.labels,eventHeaders:manifest.report.eventColumns.map(c=>c.machineHeader),dataEndRow:plan.rowCount}),
     {repeatCell:{range:{...range,endRowIndex:2},cell:{userEnteredFormat:{backgroundColor:color('#356854'),textFormat:{foregroundColor:color('#FFFFFF')}}},fields:'userEnteredFormat.backgroundColor,userEnteredFormat.textFormat.foregroundColor'}},
     {updateDimensionProperties:{range:{sheetId:plan.sheetId,dimension:'COLUMNS',startIndex:plan.hiddenStart,endIndex:plan.columnCount},properties:{hiddenByUser:true},fields:'hiddenByUser'}},
