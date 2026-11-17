@@ -273,7 +273,7 @@ function App() {
             Sign in with Google
           </a>
           <small>
-            Use the Google account your administrator has authorized.
+            Sign in with the school email listed in SHAMROCK.
           </small>
         </main>
       </div>
