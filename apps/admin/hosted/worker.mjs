@@ -6,6 +6,7 @@ import { PanelError } from "../errors.mjs";
 import { json, boundedJson, secure } from "./http.mjs";
 import { TRANSITION_POLICY } from "../../../packages/domain/src/transitions.ts";
 import { previewFromSession, previewResponse, changePreview } from "./view-as.mjs";
+import { dailyLimitResponse } from "./provider-errors.mjs";
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
@@ -150,6 +151,8 @@ export default {
         );
       throw new PanelError("NOT_FOUND", "This action is unavailable.", 404);
     } catch (error) {
+      const limited = dailyLimitResponse(error, url);
+      if (limited) return secure(limited);
       const status = error instanceof PanelError ? error.status : 400,
         code = error.code || "REQUEST_FAILED";
       if (url.pathname.startsWith("/auth/"))

@@ -140,6 +140,16 @@ OAuth callback URLs contain transient authorization codes. Do not enable automat
 URL/body/header tracing on authentication routes. Operator data changes remain
 audited in the operational backend; add only redacted event-code logs if needed.
 
+If D1 explicitly rejects a request for exceeding its daily read or write limit,
+sign-in returns `SERVICE_LIMIT_REACHED` rather than blaming Google credentials.
+Authenticated API requests return HTTP 503 with that same safe code and a
+`Retry-After` value for the next midnight UTC reset. No provider error details,
+OAuth values or automatic retries are exposed. Stop hosted rehearsals until the
+reset; do not upgrade billing or rotate working OAuth credentials to bypass this
+limit. An ordinary SQL, token-exchange or identity error is not classified as a
+daily limit. Free-tier exhaustion prevents authenticating and reading records;
+health/static-page success alone cannot establish that sign-in is working.
+
 ## Hosted acceptance
 
 - Public page loads the designed sign-in interface; anonymous `/api/state` and
