@@ -41,6 +41,7 @@ function App() {
   const [page, setPage] = useState("Events"),
     [data, setData] = useState(null),
     [error, setError] = useState(""),
+    [errorSource, setErrorSource] = useState("read"),
     [notice, setNotice] = useState(""),
     [busy, setBusy] = useState(false),
     [proposal, setProposal] = useState(null),
@@ -64,6 +65,7 @@ function App() {
   };
   const pendingRead = useRef(null),
     lastRead = useRef(0),
+    readFailures = useRef(0),
     capacityRetryAt = useRef(0),
     live = useRef({});
   const pauseAtServiceLimit = (error) => {
@@ -78,7 +80,10 @@ function App() {
   const recordsUnavailable = (error) => {
     if (pauseAtServiceLimit(error)) return true;
     if (error.status >= 500 || error instanceof TypeError) {
-      capacityRetryAt.current = Date.now() + (error.retryAfterSeconds || 60) * 1000;
+      readFailures.current = Math.min(readFailures.current + 1, 4);
+      const delay = Math.max((error.retryAfterSeconds || 0) * 1000,
+        Math.min(300000, 60000 * 2 ** (readFailures.current - 1)));
+      capacityRetryAt.current = Date.now() + delay;
       setReadOutage({limited:false, retryAt:capacityRetryAt.current});
       return true;
     }
@@ -111,7 +116,7 @@ function App() {
       if (controller.signal.aborted || pendingAbort.current !== controller || intent !== readIntent.current)
         throw Object.assign(new Error("A newer view is loading."), {code:"SUPERSEDED"});
       setData(value);
-      setReadOutage(null); setError(""); capacityRetryAt.current = 0;
+      setReadOutage(null); setError(""); capacityRetryAt.current = 0; readFailures.current = 0;
       setPreview(value.viewAs || null);
       if (
         value.snapshot?.access &&
@@ -125,7 +130,15 @@ function App() {
       controller.abort();
       if (controller.superseded) throw Object.assign(new Error("A newer view is loading."), {code:"SUPERSEDED"});
       if (error.name === "AbortError") throw new Error("Loading stopped.");
-      recordsUnavailable(error);
+      // A failed read never creates a change receipt. Do not surface the generic
+      // mutation recovery message returned by an upstream INTERNAL_ERROR.
+      error.recordReadFailure = true;
+      error.recordReadUnavailable = recordsUnavailable(error);
+      if (error.code !== "SIGN_IN_REQUIRED" && error.status !== 403) {
+        error.message = error.code === "SERVICE_LIMIT_REACHED"
+          ? "Cadet records will load when the database allowance resets."
+          : "SHAMROCK could not load cadet records. Please try again after the retry delay.";
+      }
       throw error;
     });
     pendingRead.current = task;
@@ -140,9 +153,9 @@ function App() {
     reload()
       .catch((e) => {
         if (e.code === "SUPERSEDED") return;
-        pauseAtServiceLimit(e);
+        if (!e.recordReadFailure) pauseAtServiceLimit(e);
         if (e.code === "SIGN_IN_REQUIRED") requireSignIn();
-        else setError(e.message);
+        else { setErrorSource("read"); setError(e.message); }
       });
   }, []);
   useEffect(() => {
@@ -151,8 +164,10 @@ function App() {
       failures = 0;
     const schedule = () => {
       clearTimeout(timer);
-      if (!stopped)
-        timer = setTimeout(tick, Math.max(capacityRetryAt.current - Date.now(), Math.min(300000, 60000 * 2 ** failures)));
+      if (!stopped) {
+        const remaining = capacityRetryAt.current - Date.now();
+        timer = setTimeout(tick, remaining > 0 ? remaining : Math.min(300000, 60000 * 2 ** failures));
+      }
     };
     const tick = async () => {
       const current = live.current;
@@ -174,7 +189,7 @@ function App() {
           failures = 0;
         } catch (e) {
           if (e.code === "SUPERSEDED") { schedule(); return; }
-          if (recordsUnavailable(e)) { schedule(); return; }
+          if (e.recordReadUnavailable) { schedule(); return; }
           failures = Math.min(failures + 1, 3);
           if (e.code === "SIGN_IN_REQUIRED" || e.status === 403) {
             setData(null);
@@ -207,12 +222,13 @@ function App() {
       await fn();
     } catch (e) {
       if (e.code === "SUPERSEDED") return;
-      pauseAtServiceLimit(e);
+      if (!e.recordReadFailure) pauseAtServiceLimit(e);
       if (e.code === "SIGN_IN_REQUIRED") requireSignIn();
       if (e.code === "SIGN_IN_REQUIRED" || e.status === 403) {
         setData(null);
         setProposal(null);
       }
+      setErrorSource(e.recordReadFailure ? "read" : "action");
       setError(e.message);
     } finally {
       if (--pendingActions.current === 0) setBusy(false);
@@ -247,6 +263,7 @@ function App() {
   const cancelRead = () => {
     readIntent.current++;
     pendingAbort.current?.abort();
+    setErrorSource("read");
     setError("Loading stopped.");
   };
   const withFullData = (callback) => run(async () => {
@@ -330,9 +347,9 @@ function App() {
         <p role="status">Cadet records are temporarily unavailable.</p>
         <p>{readOutage.limited
           ? `The database has reached its daily allowance. We'll check again after ${retryTime}.`
-          : "SHAMROCK will retry shortly. You can stay on this page."}</p>
+          : `SHAMROCK could not load cadet records. We'll try again after ${retryTime}. You can stay on this page.`}</p>
         {preview && <p>View as remains read-only.</p>}
-        {error && <div className="error" role="alert">{error}</div>}
+        {error && errorSource === "action" && <div className="error" role="alert">{error}</div>}
         {busy && <small role="status">Checking records…</small>}
         <div className="outage-actions">
           <button disabled={busy || Date.now() < capacityRetryAt.current}

@@ -301,6 +301,17 @@ semester forms pause background refresh; writes retain their original expected
 versions and always receive fresh server checks. Failed refreshes back off to five
 minutes and display a retry status. Successful writes force a fresh read.
 
+A failed records read keeps a successful sign-in active and shows record-loading
+guidance, never a change-receipt instruction. Mutation and sign-out failures keep
+their actionable messages. Storage failures retry after 60, 120, 240 and then 300
+seconds; a longer server `Retry-After` is respected. Focus and network-status events
+share that deadline and cannot bypass or reset it. A successful read resets the
+backoff. During an outage, editors stay mounted with their drafts preserved while
+their native modal and all record controls are suspended; recovery restores them.
+`node apps/admin/tests/records-outage.browser.mjs` covers read-error messaging and
+retry bounds, and `node apps/admin/tests/outage-draft.browser.mjs` covers draft and
+modal recovery. Both use fictional local data and make no provider calls.
+
 Semester name, length and recurring meeting defaults come from the current term.
 The first Sunday remains an explicit calendar choice; the system does not invent
 Notre Dame academic dates. Preparing a semester records an automatic audit label,
