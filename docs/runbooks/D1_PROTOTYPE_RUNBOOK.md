@@ -18,6 +18,10 @@ The three Google journal entries committed on their first attempts and their thr
 
 This is not full workflow parity: cross-domain editor evidence, unknown-editor authenticated confirmation, broader concurrency and failure recovery remain unverified or unimplemented. Newly submitted requests now have live-published dynamic slots and a verified owner-account decision retry; the exact original contention overlap was not reproduced after the fix. The OAuth **Testing** seven-day authorization caveat also remains a long-term automation consideration; see the [staging authorization guidance](D1_STAGING_RUNBOOK.md#standalone-google-staging-adapter).
 
+For ongoing CSV imports/exports and reviewed bulk Attendance corrections, use the
+[operational administration tools](D1_OPERATIONAL_ADMIN.md); these are separate
+from the one-time migration loader and preserve original history.
+
 ## Run it locally
 
 Use Node.js 26 and npm 11, matching the initial validated environment. No Google sign-in, Cloudflare account, GitHub subscription, AI service, `.env` file or production export is needed for these commands:
