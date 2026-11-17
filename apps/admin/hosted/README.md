@@ -199,3 +199,35 @@ These changes reduce per-request work; local tests do not establish the live
 Workers Free CPU budget. Measure cold and warm `/api/state`, both page surfaces,
 proposal/apply and transition continuation requests after each hosted release.
 Do not raise billing tiers or claim production capacity from successful HTTP codes.
+
+### Paged release rehearsal — 2026-11-17
+
+The hosted administrator panel was updated through release `7cb46ed`, following
+`8539c3b`'s paged transport and scoped UI. An existing authenticated owner browser
+loaded the final page with the supplied shamrock and without the breadcrumb bar.
+HTML, JavaScript, CSS and JPEG responses had the expected MIME types; unauthenticated
+state requests returned 401. The HTML entry explicitly retains `text/html` even
+when the asset-upload service retains stale binary metadata; `nosniff` stays on.
+
+A programmatic five-minute session used only the already verified owner binding
+for a fictional-data read/command rehearsal. Full capture returned 16 people,
+7 events and 9 requests in 19 browser API requests. A saved decision preserved its
+existing decision and reason, advanced its version once, and returned an identical
+receipt on retry. Receipts omitted submitter/decider identity fields. Temporary
+sessions and local session tokens were removed afterward. This was not a new
+Google OAuth login test or a live ordinary-cadet access test.
+
+Cloudflare's sampled request CPU maxima were 7.273 ms in the read window,
+6.744 ms in the command/replay window for the panel, and 8.929 ms for its fictional
+backend in the command window. Startup CPU was reported separately. All measured
+successful operation requests returned 200. These bounded fictional rehearsals
+met the 10 ms request target; they do not establish full real-data capacity, all
+semester-transition paths, long-term daily quotas or every cold-start outcome.
+Private operations records retain the request windows, release hashes and metrics.
+
+All 25 admin tests passed, including scoped route denial, access revocation during
+capture, atomic command scope, replay revocation and unchanged-data refresh. Local
+Chromium desktop/mobile tests exercised the workflows, document scrolling, sticky
+headers and reduced motion. A real non-owner Google account with a reviewed Flight
+assignment is still needed for the final hosted scoped-account acceptance check.
+Production remains unchanged.
