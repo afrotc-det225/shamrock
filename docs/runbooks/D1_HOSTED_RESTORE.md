@@ -83,3 +83,23 @@ The comparison requires exact schema/ledger/control, every application-table row
 Record SQL byte sizes, source/target database storage before and after, account database count/storage, read-check `rows_read`, reset/import `rows_written`, import duration, request count and export/import bookmarks privately. Current [free limits](https://developers.cloudflare.com/d1/platform/limits/) are ten databases, 500 MB per database and 5 GB total; the published [daily allowances](https://developers.cloudflare.com/d1/platform/pricing/) are five million rows read and 100,000 written. Native import/export is excluded from daily query limits according to the [D1 enforcement notice](https://developers.cloudflare.com/changelog/post/2026-09-01-d1-free-tier-limit-enforcement/); ordinary reset and verification queries still count. Reuse the existing target and stop on capacity errors. This procedure never enables billing or raises provider limits.
 
 On completion leave the target unbound and paused. Hosted data restoration does not establish recovery of Google Script Properties, private checkpoints, workbook protections, or a successor's independent account access; those remain the corresponding steps in the [successor rehearsal](D1_SUCCESSOR_REHEARSAL.md).
+
+
+## Completed schema 15 rehearsal — November 17, 2026 UTC
+
+The coordinating operator executed the reviewed plan against the existing disposable restore database after preserving its prior schema 5 export. This was an actual hosted restore. The source and restored export each contained **94 tables including SQLite sequence state, 25,547 rows and 48,933,713 SQL bytes**. Full canonical table hashes, schema, ordered ledger and paused control matched. The source export before and after the exercise also matched exactly. Integrity passed and foreign-key violations were zero. The restore target remained isolated from Worker bindings.
+
+The provider recorded these aggregate results:
+
+| Stage | Statements/queries | Rows read | Rows written | Other measured result |
+| --- | ---: | ---: | ---: | --- |
+| Guarded reset | 88 | 28,663 | 323 | Existing target reset transaction completed |
+| Native import | 25,679 | 38,796 | 66,097 | 4,403.8838 ms SQL duration; 61,321,216 bytes after import |
+
+These are provider operation counters, not a complete account-day billing statement or an end-to-end recovery duration. The native import's published quota treatment does not justify ignoring its reported work. The approved exercise was limited to one full import for that UTC day; an equivalent repeat requires a later window and fresh account usage review. No paid resource or production binding was added by the restore.
+
+The same source SQL was subsequently uploaded to the existing owner-private Google Drive staging folder. Custody verification checked the folder/file owner-only ACL, expected parent, byte count, content tag and downloaded SHA-256. Its journal retained the allocated file identity; no backup or questionable upload was deleted. Private evidence retains provider responses, export and table hashes, bookmarks, comparison reports and the verified custody receipt.
+
+The committed backup/restore suites cover 17 focused cases, including exact typed-row paging, D1's 32-argument function bound, source races, unsafe local SQL, interrupted upload resumption, wrong/bound reset targets and transactional reset rollback. Both current and D1 builds passed for the helper release. The concrete reset/import sequence was also rehearsed locally with these real exports before provider execution. Test counts describe those checks only.
+
+Still separate: an independent successor repeating recovery with their own authorized access, restoration of Google configuration/checkpoints/projections, reconciliation of writes accepted after a backup, notification and semester-transition recovery, and full-day capacity measurements. This evidence establishes recovery of this schema 15 database export; later releases or accepted writes need their own bound recovery evidence.
