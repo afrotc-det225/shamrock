@@ -30,8 +30,22 @@ export default {
           "This sign-in action is unavailable.",
           404,
         );
-      if (!url.pathname.startsWith("/api/"))
-        return secure(await env.ASSETS.fetch(request));
+      if (!url.pathname.startsWith("/api/")) {
+        const asset = await env.ASSETS.fetch(request);
+        // Asset uploads may retain a stale binary MIME type for the HTML entry.
+        // Keep nosniff and fix only the known successful document routes.
+        if (
+          asset.status === 200 &&
+          ["/", "/index.html"].includes(url.pathname)
+        ) {
+          const headers = new Headers(asset.headers);
+          headers.set("content-type", "text/html; charset=utf-8");
+          return secure(
+            new Response(asset.body, { status: asset.status, headers }),
+          );
+        }
+        return secure(asset);
+      }
       const user = await session(request, env),
         backend = new HostedBackend(env, user.principal_id),
         service = new AdminService(

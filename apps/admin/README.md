@@ -164,7 +164,8 @@ all administration. Source-code bug fixes still require a development workflow.
 The presentation now takes its navy, gold and Libre Franklin inspiration from
 [Notre Dame AFROTC](https://afrotc.nd.edu/). Fonts are self-hosted open-license
 Libre Franklin and Barlow Condensed; no licensed Notre Dame font files are copied.
-The three-leaf SHAMROCK mark is an original vector. Environment information stays
+The mark is the exact unmodified Notre Dame shamrock image supplied for this
+project, with no ND monogram: [official source](https://onmessage.nd.edu/assets/189127/300x/shamrock_1.jpg). It is shown on a white tile so its original background is preserved. Environment information stays
 in deployment records and the separate hostname instead of dominating the interface.
 
 ## Internal-tool interaction rules

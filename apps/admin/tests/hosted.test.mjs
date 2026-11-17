@@ -231,6 +231,7 @@ test("OAuth state is browser-bound, single-use and PKCE-protected; only subject 
 test("hosted runtime refuses anonymous sessions, spoofed identity, cross-origin writes and wrong host", async (t) => {
   const f = await fixture(t),
     send = (path, init = {}) => f.mf.dispatchFetch(origin + path, init);
+  assert.match((await send("/")).headers.get("content-type"), /^text\/html/);
   assert.equal((await send("/api/state")).status, 401);
   assert.equal(
     (
