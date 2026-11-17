@@ -106,8 +106,8 @@ of archives or history; a retention/cleanup policy is separate from this flow.
 
 Plans cover at most 500 explicit changes and 60 generated events; the existing
 64-KiB HTTP request bound also applies. Large plans must be reduced to a reviewed
-supported scope, not split into independently accepted transitions. Snapshots
-are bounded to 1.5 MB. Mutations use set-based JSON SQL rather than one query per
+supported scope, not split into independently accepted transitions. Frozen source pages
+are bounded to 5 MiB total, with a 6-MiB assembled snapshot bound. Mutations use set-based JSON SQL rather than one query per
 person/event. A 60-event acceptance measured 30 prepared statements locally, below the 50-query per-invocation budget. This does not measure hosted CPU, daily rows or sustained capacity; record those before activation.
 
 A failed archive retains its continuation and stable source hash. A stale plan
@@ -150,10 +150,12 @@ Versioned entry points:
   Forms, resume D1 or enable mail.
 - `shamrockV3StagingNotificationsPlan()` runs the bounded suppressed planner.
 - `shamrockV3StagingTransitionCommand({commandId,operation,payload})` signs the
-  reviewed command. It requires the actual active Google user to be the intended
+  reviewed command. For `transition.prepare`, repeat the exact same command while
+  the result is `preparing`; each call advances one durable source or calendar
+  page and submits the reviewed command only after capture completes. It requires the actual active Google user to be the intended
   automation account; a scheduled trigger's effective identity is insufficient.
 - `shamrockV3StagingTransitionArchive(transitionId)` advances one saved chunk.
-  Repeat the same invocation while its state is `continuing` or `verifying`.
+  Repeat the same invocation while its state is `capturing`, `continuing` or `verifying`.
   No acceptance or completion command is silently invoked.
 
 Each transition has deterministic Directory, Leadership, Attendance, Excusals and
@@ -161,7 +163,8 @@ recovery tabs in the archive workbook. Each uses a native Table, stable machine
 headers, display headers and a strict whole-sheet protection. The recovery tab
 is hidden for presentation, while owner-only file sharing supplies privacy.
 The values come from the frozen D1 snapshot, not from a possibly lagging frontend.
-Recovery rows retain the exact JSON plus snapshot/plan hashes, frozen local date
+Recovery rows retain the exact JSON plus distinct assembled snapshot, frozen
+page descriptor and plan hashes, frozen local date
 and reporting-policy version. Photos archive their URI as a literal value; active
 file chips, validation and editable inputs are not duplicated into historical
 values-only tables. Existing history is never deleted.
@@ -174,8 +177,14 @@ protections and complete ACLs. Revision drift stops for review, not automatic
 rewriting. Drive files are not technically immutable: the owner can still change
 them, so the checks detect drift rather than claiming an unchangeable provider.
 An ambiguous write reuses the same tab identity and chunk. A lost ACK retries
-verification without writing a second archive. Checkpoint storage has a 2-MB bound
-and each provider request is bounded; oversized snapshots stop without truncation.
+verification without writing a second archive. The native consumer retrieves at
+most four frozen pages per call and saves each verified page before proceeding.
+It verifies the complete descriptor, ordered page hashes, byte lengths and final
+manifest before any Sheets write. After assembly it replaces the page checkpoint
+with the exact snapshot and separately retains its assembled hash and descriptor
+hash. Resume verifies the stored content; lease renewal must preserve both source
+identity and hashes. Checkpoint storage has an 8-MiB bound and each provider request
+is bounded; oversized snapshots stop without truncation.
 
 Local native-host tests cover default pause, active-user identity, owner-only
 sharing, ambiguous writes, literal grid read-back, native Tables, resumable

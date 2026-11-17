@@ -3,21 +3,28 @@ import test from 'node:test';
 import {createHash,createHmac} from 'node:crypto';
 import {createNativeMaintenanceRuntime,nativeArchiveTables} from '../../.build/v3/apps/google-adapter/src/native-maintenance.js';
 import {parseNativeMaintenanceConfig,MAINTENANCE_PROPERTIES as M} from '../../.build/v3/apps/google-adapter/src/maintenance-config.js';
+import {FRONTEND_PAGE_VERSION,FRONTEND_SECTIONS,assembleFrontendSnapshotPages} from '../../.build/v3/packages/domain/src/frontend-transport.js';
+import {TRANSITION_SNAPSHOT_PAGE_VERSION} from '../../.build/v3/packages/domain/src/transition-transport.js';
 const hash=v=>createHash('sha256').update(v).digest('hex'), copy=v=>structuredClone(v), owner='automation@example.invalid';
 const config={version:1,environment:'staging',generation:1,enabled:true,resourceReview:'EXISTING_PRIVATE_MAINTENANCE_REVIEWED_FOR_STAGING',principalId:'automation',workerId:'maintenance-adapter',sourceResource:'maintenance-source',stateFileId:'maintenance-state',archiveSpreadsheetId:'maintenance-archive',archiveExpectedTitle:'SHAMROCK staging private archives'};
-function fixture(){
+function fixture(paged=false){
  const host={version:1,environment:'staging',generation:1,resourceReview:'EXISTING_RESOURCES_REVIEWED_FOR_STAGING',workerOrigin:'https://worker.example.invalid',keyId:'fixture',expectedAutomationEmail:owner,journal:{spreadsheetId:'private-journal',sheetId:1},attendance:{formId:'attendance',resourceKey:'attendance-source',itemRoles:{event:'1',scope:'2',present:['3'],completeness:'4'}}};
  const map={SHAMROCK_V3_MAINTENANCE_CONFIG:JSON.stringify(config)};
  const snapshot={contractVersion:1,environment:'staging',generation:1,revision:{operations:0,administration:0},people:[],leadership:[],flights:[],squadrons:[],terms:[{termId:'current',label:'Fictional term',sortOrder:1,isCurrent:true}],events:[],observations:[],corrections:[],requests:[],attendanceVersions:[],diagnostics:[]};
+ const pages=FRONTEND_SECTIONS.map(section=>({contractVersion:FRONTEND_PAGE_VERSION,section,offset:0,nextOffset:null,revision:snapshot.revision,rows:section==='terms'?snapshot.terms:[]}));
+ const manifest={contractVersion:FRONTEND_PAGE_VERSION,section:'manifest',environment:'staging',generation:1,revision:snapshot.revision,sections:pages.map(p=>({section:p.section,count:p.rows.length})),diagnostics:[]},verify={contractVersion:FRONTEND_PAGE_VERSION,section:'verify',revision:snapshot.revision,verified:true};
+ const descriptor={contractVersion:TRANSITION_SNAPSHOT_PAGE_VERSION,manifest,verify,pages:pages.map((p,sequence)=>({sequence,section:p.section,offset:p.offset,sha256:hash(JSON.stringify(p)),bytes:Buffer.byteLength(JSON.stringify(p))}))},descriptorHash=hash(JSON.stringify(descriptor));
  const claim={transitionId:'transition',asOfDate:'2026-11-06',snapshotHash:hash(JSON.stringify(snapshot)),planHash:'a'.repeat(64),claimToken:'token',leaseExpiresAt:new Date(1800000600*1000).toISOString(),snapshot};
+ if(paged){claim.snapshot=assembleFrontendSnapshotPages(manifest,pages,verify);claim.snapshotHash=hash(JSON.stringify(claim.snapshot));claim.descriptorHash=descriptorHash;}
  const properties={SHAMROCK_V3_HOST_CONFIG:JSON.stringify(host),SHAMROCK_V3_CONFIG_FILE_ID:'private-config',SHAMROCK_V3_BRIDGE_SECRET:'fictional-maintenance-bridge-signing-material'};
  const f={map,claim,properties,state:{version:1,environment:'staging',generation:1},stateVersion:1,archiveVersion:1,sheets:[],calls:[],writes:0,ack:0,active:owner,shared:false,loseWrite:false,gridFormula:false,metadataDrift:false,externalState:false,patches:0,formats:[]};
  const metadata=id=>({id,name:id==='maintenance-archive'?config.archiveExpectedTitle:id,mimeType:id==='maintenance-archive'?'application/vnd.google-apps.spreadsheet':'application/json',size:String(JSON.stringify(id==='private-config'?map:f.state).length),version:String(id==='maintenance-state'?f.stateVersion:f.archiveVersion),owners:[{emailAddress:owner}]});
  const services={PropertiesService:{getScriptProperties:()=>({getProperty:k=>properties[k]??null,setProperty:(k,v)=>properties[k]=v})},Session:{getEffectiveUser:()=>({getEmail:()=>owner}),getActiveUser:()=>({getEmail:()=>f.active})},ScriptApp:{getOAuthToken:()=> 'fictional-oauth'},Utilities:{DigestAlgorithm:{SHA_256:'sha256'},Charset:{UTF_8:'utf8'},computeDigest:(_,v)=>[...createHash('sha256').update(v).digest()],computeHmacSha256Signature:(v,k)=>[...createHmac('sha256',k).update(v).digest()]},LockService:{getScriptLock:()=>({tryLock:()=>true,releaseLock(){}})},UrlFetchApp:{fetch(raw,options){
   f.calls.push(raw);const url=new URL(raw),body=options.payload?JSON.parse(options.payload):undefined;let result;
   if(url.hostname==='worker.example.invalid'){
-   if(url.pathname.endsWith('/claim')){if(f.externalState)f.state.operatorChange='retain';result=claim;}
-   else if(url.pathname.endsWith('/ack')){f.ack++;result={status:'done'};}
+   if(url.pathname.endsWith('/claim')){if(f.externalState)f.state.operatorChange='retain';result=paged?{...claim,snapshot:undefined,snapshotHash:null,snapshotTransport:descriptor}:claim;}
+   else if(url.pathname.endsWith('/page'))result={sequence:body.sequence,sha256:descriptor.pages[body.sequence].sha256,descriptorHash,page:pages[body.sequence]};
+   else if(url.pathname.endsWith('/ack')){if(paged){assert.equal(body.proof.descriptorHash,descriptorHash);assert.equal(body.proof.snapshotHash,claim.snapshotHash);assert.notEqual(body.proof.snapshotHash,descriptorHash);}f.ack++;result={status:'done'};}
    else if(url.pathname.endsWith('/commands'))result={status:'accepted'};
    else throw Error('Unexpected Worker request');
   }else if(url.hostname==='www.googleapis.com'){
@@ -80,4 +87,12 @@ test('native maintenance checkpoint permits metadata-only Drive drift but refuse
  assert.equal(result.state,'ready-for-reviewed-acceptance');assert.equal(f.ack,1);assert.ok(f.patches>5);
  const g=fixture();g.runtime.resume();g.externalState=true;assert.throws(()=>g.runtime.archive('transition'),e=>e.code==='maintenance_state');
  assert.equal(g.state.operatorChange,'retain');assert.equal(g.patches,0);assert.equal(g.writes,0);assert.equal(g.ack,0);
+});
+
+test('native frozen-page archive assembles before Google writes and records distinct descriptor and snapshot hashes',()=>{
+ const f=fixture(true);f.runtime.resume();assert.equal(f.runtime.archive('transition').state,'capturing');assert.equal(f.writes,0);assert.equal(f.state.archive.capture.pages.length,4);
+ let result;for(let i=0;i<50;i++){result=f.runtime.archive('transition');if(result.state==='ready-for-reviewed-acceptance')break;}
+ assert.equal(result.state,'ready-for-reviewed-acceptance');assert.equal(f.ack,1);assert.equal(f.sheets.length,5);
+ const recovery=f.sheets.find(s=>s.properties.hidden);assert.ok(JSON.stringify(recovery.cells).includes(f.claim.descriptorHash));assert.ok(JSON.stringify(recovery.cells).includes(f.claim.snapshotHash));
+ assert.deepEqual(JSON.parse(recovery.cells.slice(3).map(row=>row[1].userEnteredValue.stringValue).join('')),f.claim.snapshot);
 });

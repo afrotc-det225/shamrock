@@ -5,7 +5,7 @@ import { HOST_PROPERTIES, parseStagingHostConfig } from './staging-host.js';
 import { CONFIG_FILE_ID_PROPERTY } from './staging-config.js';
 import { MAINTENANCE_PROPERTIES, parseNativeMaintenanceConfig } from './maintenance-config.js';
 import { callMaintenance, planNotificationWork, advanceSundayCloseout, type MaintenanceApi } from './notification-runtime.js';
-import { continueTransitionArchive, type TransitionArchiveClaim, type TransitionArchivePorts } from './transition-runtime.js';
+import { continueTransitionArchive, continueTransitionPreparation, TRANSITION_ARCHIVE_LIMITS, type TransitionArchiveClaim, type TransitionArchivePorts } from './transition-runtime.js';
 import { buildCoherentFrontendModel } from './frontend-runtime.js';
 import { REPORTING_POLICY_VERSION } from '../../../packages/domain/src/frontend-reporting.js';
 interface NativeMaintenanceServices {
@@ -96,12 +96,12 @@ export function nativeArchiveTables(claim: TransitionArchiveClaim, sha: (value: 
             ['Request ID', 'Cadet ID', 'Event ID', 'Status', 'Requested outcome', 'Reason', 'Decision reason', 'Submitted', 'Decided', 'Version'],
             ...requests.map(r => [r.requestId, r.personId, r.eventId, r.status, r.requestedOutcome, r.reason, r.decisionReason ?? '', r.submittedAt, r.decidedAt ?? '', r.version])] });
     const serialized = JSON.stringify(claim.snapshot);
-    if (sha(serialized) !== claim.snapshotHash || bytes(serialized) > 1500000)
+    if (sha(serialized) !== claim.snapshotHash || bytes(serialized) > TRANSITION_ARCHIVE_LIMITS.snapshotBytes)
         fail('archive_snapshot', 'The source snapshot is invalid or exceeds its reviewed bound.');
     const chunks: Scalar[][] = [];
     for (let offset = 0; offset < serialized.length; offset += 16000)
         chunks.push([chunks.length, serialized.slice(offset, offset + 16000)]);
-    matrix.push({ kind: 'recovery', rows: [['sequence', 'content'], ['Part', 'Frozen recovery data'], [-1, JSON.stringify({ snapshotHash: claim.snapshotHash, planHash: claim.planHash, reportingPolicyVersion: REPORTING_POLICY_VERSION, asOfDate })], ...chunks] });
+    matrix.push({ kind: 'recovery', rows: [['sequence', 'content'], ['Part', 'Frozen recovery data'], [-1, JSON.stringify({ snapshotHash: claim.snapshotHash, ...(claim.descriptorHash ? { descriptorHash: claim.descriptorHash } : {}), planHash: claim.planHash, reportingPolicyVersion: REPORTING_POLICY_VERSION, asOfDate })], ...chunks] });
     return matrix.map((table, index) => {
         const rows = table.rows.length === 2 ? [...table.rows, table.rows[0].map(() => '')] : table.rows;
         return { kind: table.kind, title: `${term.label.slice(0, 48)} — ${table.kind} — ${token}`, sheetId: base + index,
@@ -110,9 +110,9 @@ export function nativeArchiveTables(claim: TransitionArchiveClaim, sha: (value: 
 }
 export function createNativeMaintenanceRuntime(services: NativeMaintenanceServices, nowSeconds = () => Math.floor(Date.now() / 1000)) {
     const properties = services.PropertiesService.getScriptProperties();
-    function google(url: string, method: 'get' | 'post' | 'patch' = 'get', body?: unknown, maximum = 2000000): Record<string, any> {
+    function google(url: string, method: 'get' | 'post' | 'patch' = 'get', body?: unknown, maximum = 2000000, maximumWrite = 1800000): Record<string, any> {
         const payload = body === undefined ? undefined : JSON.stringify(body);
-        if (payload && bytes(payload) > 1800000)
+        if (payload && bytes(payload) > maximumWrite)
             fail('maintenance_capacity', 'A native maintenance write exceeds its bound.');
         let response: ReturnType<NativeMaintenanceServices['UrlFetchApp']['fetch']>;
         try {
@@ -183,7 +183,7 @@ export function createNativeMaintenanceRuntime(services: NativeMaintenanceServic
         if ([config.stateFileId, config.archiveSpreadsheetId].some(id => denied.includes(id)))
             fail('maintenance_isolation', 'Maintenance must use separate reviewed private storage.');
         const state = inspect(config.stateFileId, host.expectedAutomationEmail), archive = inspect(config.archiveSpreadsheetId, host.expectedAutomationEmail);
-        if (state.mimeType !== 'application/json' || (!Number.isSafeInteger(Number(state.size)) || Number(state.size) < 1 || Number(state.size) > 2000000) || archive.mimeType !== 'application/vnd.google-apps.spreadsheet' || archive.name !== config.archiveExpectedTitle)
+        if (state.mimeType !== 'application/json' || (!Number.isSafeInteger(Number(state.size)) || Number(state.size) < 1 || Number(state.size) > TRANSITION_ARCHIVE_LIMITS.checkpointBytes) || archive.mimeType !== 'application/vnd.google-apps.spreadsheet' || archive.name !== config.archiveExpectedTitle)
             fail('maintenance_isolation', 'State and archive metadata do not match the reviewed bindings.');
         const signer = createGoogleSigner(services.Utilities, properties.getProperty(HOST_PROPERTIES.secret) ?? '');
         const api: MaintenanceApi = { config: { environment: 'staging', generation: host.generation, baseUrl: host.workerOrigin, keyId: host.keyId }, principalId: config.principalId, workerId: config.workerId, signer, transport: createGoogleTransport(services.UrlFetchApp), nowSeconds };
@@ -234,7 +234,7 @@ export function createNativeMaintenanceRuntime(services: NativeMaintenanceServic
         const metadata = () => google(`${sheets(c.config.archiveSpreadsheetId)}?fields=spreadsheetId,sheets(properties,protectedRanges,tables)`);
         function readState() {
             const before = inspect(c.config.stateFileId, c.host.expectedAutomationEmail);
-            const value = google(`${drive(c.config.stateFileId)}?alt=media`) as ArchiveState;
+            const value = google(`${drive(c.config.stateFileId)}?alt=media`, 'get', undefined, TRANSITION_ARCHIVE_LIMITS.checkpointBytes) as ArchiveState;
             const fingerprint = c.api.signer.sha256(canonical(value));
             const after = inspect(c.config.stateFileId, c.host.expectedAutomationEmail);
             if (value.version !== 1 || value.environment !== 'staging' || value.generation !== c.host.generation)
@@ -242,7 +242,7 @@ export function createNativeMaintenanceRuntime(services: NativeMaintenanceServic
             // Drive can advance metadata versions after a successful content upload.
             // Version drift triggers a content reread rather than proving another writer.
             if (String(before.version) !== String(after.version)
-                && c.api.signer.sha256(canonical(google(`${drive(c.config.stateFileId)}?alt=media`))) !== fingerprint)
+                && c.api.signer.sha256(canonical(google(`${drive(c.config.stateFileId)}?alt=media`, 'get', undefined, TRANSITION_ARCHIVE_LIMITS.checkpointBytes))) !== fingerprint)
                 fail('maintenance_state', 'The private maintenance checkpoint changed during its read.');
             stateFingerprint = fingerprint;
             state = value;
@@ -250,14 +250,14 @@ export function createNativeMaintenanceRuntime(services: NativeMaintenanceServic
         }
         function saveState(value: ArchiveState) {
             inspect(c.config.stateFileId, c.host.expectedAutomationEmail);
-            const prior = google(`${drive(c.config.stateFileId)}?alt=media`);
-            if (!stateFingerprint || c.api.signer.sha256(canonical(prior)) !== stateFingerprint || bytes(JSON.stringify(value)) > 2000000)
+            const prior = google(`${drive(c.config.stateFileId)}?alt=media`, 'get', undefined, TRANSITION_ARCHIVE_LIMITS.checkpointBytes);
+            if (!stateFingerprint || c.api.signer.sha256(canonical(prior)) !== stateFingerprint || bytes(JSON.stringify(value)) > TRANSITION_ARCHIVE_LIMITS.checkpointBytes)
                 fail('maintenance_state', 'The private maintenance checkpoint content changed or exceeds its bound.');
-            const result = google(`https://www.googleapis.com/upload/drive/v3/files/${encodeURIComponent(c.config.stateFileId)}?uploadType=media&fields=id,version`, 'patch', value);
+            const result = google(`https://www.googleapis.com/upload/drive/v3/files/${encodeURIComponent(c.config.stateFileId)}?uploadType=media&fields=id,version`, 'patch', value, 2000000, TRANSITION_ARCHIVE_LIMITS.checkpointBytes);
             if (result.id !== c.config.stateFileId || !/^[1-9][0-9]*$/.test(String(result.version)))
                 fail('maintenance_state', 'Checkpoint persistence was not confirmed.');
             const expected = c.api.signer.sha256(canonical(value));
-            const reread = google(`${drive(c.config.stateFileId)}?alt=media`);
+            const reread = google(`${drive(c.config.stateFileId)}?alt=media`, 'get', undefined, TRANSITION_ARCHIVE_LIMITS.checkpointBytes);
             if (c.api.signer.sha256(canonical(reread)) !== expected)
                 fail('maintenance_state', 'Checkpoint read-back differs.');
             // Recheck complete sharing and current provider metadata after upload.
@@ -359,7 +359,7 @@ export function createNativeMaintenanceRuntime(services: NativeMaintenanceServic
                         return { done: false, continuation: JSON.stringify({ ...cursor, row: end }) };
                     if (cursor.table + 1 < tables.length)
                         return { done: false, continuation: JSON.stringify({ ...cursor, table: cursor.table + 1, row: 0 }) };
-                    return { done: true, proof: { snapshotHash: claim.snapshotHash, archiveBinding: 'term-archive-' + c.api.signer.sha256(claim.transitionId), protected: true, private: true, valuesOnly: true } };
+                    return { done: true, proof: { snapshotHash: claim.snapshotHash, ...(claim.descriptorHash ? { descriptorHash: claim.descriptorHash } : {}), archiveBinding: 'term-archive-' + c.api.signer.sha256(claim.transitionId), protected: true, private: true, valuesOnly: true } };
                 },
             },
         };
@@ -376,8 +376,9 @@ export function createNativeMaintenanceRuntime(services: NativeMaintenanceServic
         const row = input as Record<string, unknown>;
         if (Object.keys(row).sort().join(',') !== 'commandId,operation,payload')
             fail('maintenance_command', 'Unexpected transition command fields.');
-        return callMaintenance(c.api, '/v1/admin/transitions/commands', { ...row, contractVersion: 1, environment: 'staging', generation: c.host.generation,
-            actor: { principalId: c.config.principalId, evidence: 'authenticated-confirmation' }, source: { kind: 'sheet', resourceKey: c.config.sourceResource, submissionId: row.commandId, revision: 1 } });
+        const envelope = { ...row, contractVersion: 1, environment: 'staging', generation: c.host.generation,
+            actor: { principalId: c.config.principalId, evidence: 'authenticated-confirmation' }, source: { kind: 'sheet', resourceKey: c.config.sourceResource, submissionId: row.commandId, revision: 1 } };
+        return row.operation === 'transition.prepare' ? continueTransitionPreparation(c.api, envelope) : callMaintenance(c.api, '/v1/admin/transitions/commands', envelope);
     }
     return { pause, resume, planNotifications, archive, command };
 }

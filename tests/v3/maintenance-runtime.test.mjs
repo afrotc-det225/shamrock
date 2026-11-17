@@ -53,7 +53,7 @@ function archiveFixture(){
  const snapshot={fictional:'immutable archive data'},snapshotHash=hash(JSON.stringify(snapshot));
  let saved,done=false,ack=0,now=1800000000,serverDone=false;
  const f=base((path)=>{
-  if(path.endsWith('/claim'))return {status:200,body:JSON.stringify({transitionId:'transition',snapshotHash,planHash:'a'.repeat(64),claimToken:'token',leaseExpiresAt:new Date((now+600)*1000).toISOString(),snapshot})};
+  if(path.endsWith('/claim'))return {status:200,body:JSON.stringify({transitionId:'transition',asOfDate:'2026-11-06',snapshotHash,planHash:'a'.repeat(64),claimToken:'token',leaseExpiresAt:new Date((now+600)*1000).toISOString(),snapshot})};
   if(path.endsWith('/status'))return {status:200,body:JSON.stringify({snapshotHash,archive:{state:serverDone?'done':'leased'}})};
   if(path.endsWith('/ack')){ack++;serverDone=true;return {status:200,body:'{"status":"done"}'};}
  });
