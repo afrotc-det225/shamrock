@@ -1,9 +1,11 @@
 import { createHash, createHmac } from "node:crypto";
-import { captureOperationalSnapshot } from "../../../scripts/lib/operational-admin.mjs";
 import { PanelError } from "../errors.mjs";
 import { boundedJson } from "./http.mjs";
 const paths = new Set([
   "/v1/admin/snapshot/page",
+  "/v1/admin/panel/page",
+  "/v1/admin/panel/authorize",
+  "/v1/admin/panel/commands",
   "/v1/admin/commands",
   "/v1/commands",
   "/v1/admin/transitions/status",
@@ -83,7 +85,7 @@ export class HostedBackend {
   async post(path, input) {
     if (!paths.has(path))
       throw new PanelError("INVALID_ACTION", "This operation is unavailable.");
-    if (++this.calls > 40)
+    if (++this.calls > 30)
       throw new PanelError(
         "TRANSFER_LIMIT",
         "This operation needs another batch. Retry the saved change.",
@@ -130,10 +132,118 @@ export class HostedBackend {
       );
     return result;
   }
-  snapshot() {
-    return captureOperationalSnapshot(this.identity(), async (path, input) => ({
-      status: 200,
-      body: await this.post(path, input),
-    }));
+  async authorizeOperation(operation, payload) {
+    if (["excusal.decide", "attendance.correct"].includes(operation)) {
+      const target =
+        operation === "excusal.decide"
+          ? { requestId: payload?.requestId }
+          : { personId: payload?.personId, eventId: payload?.eventId };
+      return this.post("/v1/admin/panel/authorize", {
+        ...this.identity(),
+        operation,
+        target,
+      });
+    }
+    const manifest = await this.panelManifest();
+    if (!manifest.access.capabilities.fullSnapshot)
+      throw new PanelError(
+        "FORBIDDEN",
+        "This action is outside your access.",
+        403,
+      );
+    return manifest;
+  }
+  async previewContext(operation, payload) {
+    const authority = await this.authorizeOperation(operation, payload);
+    if (authority.current) {
+      for (const key of [
+        "expectedVersion",
+        "expectedBaseVersion",
+        "expectedEventVersion",
+      ])
+        if (key in authority.current && payload[key] !== authority.current[key])
+          throw new PanelError(
+            "STALE_VERSION",
+            "This record changed. Reload it before saving.",
+            409,
+          );
+    }
+    return { proposedValuesOnly: true, events: [], people: [], leadership: [] };
+  }
+  submit(command) {
+    const path = ["excusal.decide", "attendance.correct"].includes(
+      command.operation,
+    )
+      ? "/v1/admin/panel/commands"
+      : command.operation.startsWith("transition.")
+        ? "/v1/admin/transitions/commands"
+        : "/v1/admin/commands";
+    return this.post(path, command);
+  }
+  panelManifest() {
+    return this.post("/v1/admin/panel/page", {
+      ...this.identity(),
+      section: "manifest",
+      offset: 0,
+      revision: null,
+    });
+  }
+  async page(input) {
+    if (
+      !input ||
+      !["full", "scoped"].includes(input.surface) ||
+      typeof input.section !== "string" ||
+      !Number.isSafeInteger(input.offset) ||
+      input.offset < 0
+    )
+      throw new PanelError("INVALID_REQUEST", "This page is unavailable.");
+    if (input.surface === "scoped") {
+      if (
+        JSON.stringify(input.revision) !== JSON.stringify(input.accessRevision)
+      )
+        throw new PanelError(
+          "SNAPSHOT_CHANGED",
+          "Access changed. Reload SHAMROCK.",
+          409,
+        );
+      return this.post("/v1/admin/panel/page", {
+        ...this.identity(),
+        section: input.section,
+        offset: input.offset,
+        revision: input.revision,
+      });
+    }
+    const manifest = await this.panelManifest();
+    if (!manifest.access.capabilities.fullSnapshot)
+      throw new PanelError(
+        "FORBIDDEN",
+        "This page is outside your access.",
+        403,
+      );
+    if (
+      JSON.stringify(manifest.revision) !== JSON.stringify(input.accessRevision)
+    )
+      throw new PanelError(
+        "SNAPSHOT_CHANGED",
+        "Records or access changed. Reload SHAMROCK.",
+        409,
+      );
+    const page = await this.post("/v1/admin/snapshot/page", {
+      ...this.identity(),
+      section: input.section,
+      offset: input.offset,
+      revision: input.revision,
+    });
+    const verified = await this.panelManifest();
+    if (
+      !verified.access.capabilities.fullSnapshot ||
+      JSON.stringify(verified.revision) !== JSON.stringify(input.accessRevision)
+    )
+      throw new PanelError(
+        "SNAPSHOT_CHANGED",
+        "Records or access changed. Reload SHAMROCK.",
+        409,
+      );
+    return page;
   }
 }

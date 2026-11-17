@@ -161,3 +161,41 @@ access; old session tokens must not become valid again.
 The main interface intentionally omits development badges. Its separate staging
 hostname and these release records identify the environment. This presentation
 choice does not connect production data or remove staging isolation.
+
+## Paged panel transport and scoped commands
+
+`/api/state` returns a fresh panel manifest and display metadata. The browser then
+requests one bounded `/api/page` at a time and publishes state only after the final
+revision check. Limits remain 512 pages and 16 MiB per capture; no partial snapshot
+or cross-user cache is displayed. An unchanged manifest reuses only this tab's
+verified in-memory capture, keyed by backend/principal binding, generation, scope
+and authority revision. Sign-in, logout or authorization errors clear it; every
+refresh still asks the server for current authority and revision. Full administrator reads check the current panel
+access fingerprint before and after every full-data page, including private lifetime
+Directory/contact catalogs. Scoped reads use only the backend's panel pages;
+request-only people stay in the excusal queue rather than entering the roster.
+Changes to records or authority invalidate the capture. Session identity always
+comes from the verified Google subject binding, never request JSON.
+
+Scoped navigation exposes Attendance & excusals only. Flight Commanders can see
+their authorized Flights without receiving private Directory/contact fields.
+Blue/Gold decision authority comes from each server-authorized request's
+`canDecide`; attendance correction controls follow the separate Flight capability.
+Hiding controls is not authorization: both preview and apply check fresh backend
+authority, and scoped decisions/corrections use `/v1/admin/panel/commands`, whose
+scope predicate is checked inside the mutation transaction and on receipt replay.
+Other management proposals and transition reads require current full panel access.
+Existing Google Sheets permissions are unchanged.
+
+Hosted proposals show parsed proposed values, not a claimed before/after diff.
+They do not collect the full dataset to build a preview. Decision/correction
+preflight checks the target versions; all actual writes retain the saved expected
+versions and the backend's business validation. Apply never rebases a draft.
+Semester previews show training weeks and proposed people changes; backend
+preparation validates the actual roster. Each apply continuation captures at most
+one preparation step. Interrupted operations retain the same command for retry.
+
+These changes reduce per-request work; local tests do not establish the live
+Workers Free CPU budget. Measure cold and warm `/api/state`, both page surfaces,
+proposal/apply and transition continuation requests after each hosted release.
+Do not raise billing tiers or claim production capacity from successful HTTP codes.

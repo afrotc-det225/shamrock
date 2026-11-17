@@ -1047,7 +1047,7 @@ h1 {
 
 /* List navigation and semantic cues; never rely on color alone. */
 :root {
-  --topbar-height: 64px;
+  --topbar-height: 0px;
 }
 .topbar {
   position: sticky;
@@ -1109,7 +1109,8 @@ h1 {
   margin-bottom: 14px;
 }
 .table-scroll {
-  max-height: 64vh;
+  max-height: none;
+  overflow: visible;
   scrollbar-width: thin;
   scrollbar-color: #b5c1ce #f6f8fb;
   border-radius: 4px;
@@ -1330,7 +1331,7 @@ tr:hover td {
 }
 @media (max-width: 640px) {
   :root {
-    --topbar-height: 52px;
+    --topbar-height: 0px;
   }
   .sidebar {
     z-index: auto;
@@ -1351,9 +1352,67 @@ tr:hover td {
     gap: 8px;
   }
   .table-scroll {
-    max-height: 58vh;
+    max-height: none;
   }
   .initials {
     display: none;
   }
+}
+
+/* The document owns vertical scrolling; tables only scroll when too wide. */
+html {
+  scrollbar-gutter: stable;
+}
+html:has(dialog[open]) {
+  overflow: hidden;
+}
+.table-scroll th {
+  top: calc(var(--topbar-height) + var(--controls-height, 0px));
+}
+.table-scroll[data-horizontal="true"] {
+  overflow: auto;
+}
+.table-scroll[data-horizontal="true"] th {
+  top: 0;
+}
+.drawer {
+  overscroll-behavior: contain;
+  max-height: 100dvh;
+}
+.drawer .table-scroll th {
+  position: static;
+}
+@media (min-width: 1200px) {
+  .drawer {
+    height: calc(100dvh - 64px);
+    max-height: calc(100dvh - 64px);
+  }
+}
+@media (max-width: 640px) {
+  .page-controls {
+    position: static;
+  }
+  .table-scroll th {
+    top: var(--topbar-height);
+  }
+}
+@media (max-width: 900px) {
+  .table-scroll {
+    overflow: auto;
+  }
+  .table-scroll th {
+    top: 0;
+  }
+}
+
+/* The page heading supplies context; there is no duplicate breadcrumb bar. */
+.sync-status {
+  display: block;
+  color: var(--muted);
+  margin-bottom: 12px;
+}
+.drawer {
+  top: 0;
+  height: 100dvh;
+  max-height: 100dvh;
 }

@@ -41,7 +41,9 @@ export class AdminService {
       );
     const id = crypto.randomUUID(),
       command = this.backend.envelope(operation, payload, `panel-${id}`);
-    const snapshot = await this.snapshot(); // Live read rechecks actor authorization, even for retries/read-only views.
+    const snapshot = this.backend.previewContext
+      ? await this.backend.previewContext(operation, payload)
+      : await this.snapshot(); // Hosted previews use fresh authority without collecting an entire dataset.
     let summary;
     if (
       ["event.upsert", "directory.upsert", "leadership.upsert"].includes(
@@ -63,8 +65,9 @@ export class AdminService {
             : snapshot.leadership;
       const current = rows.find((r) => r[key] === payload[key]);
       if (
+        !snapshot.proposedValuesOnly &&
         (current?.version ?? current?.contactVersion ?? 0) !==
-        payload.expectedVersion
+          payload.expectedVersion
       )
         throw new PanelError(
           "STALE_VERSION",
@@ -72,7 +75,7 @@ export class AdminService {
           409,
         );
       summary = {
-        title: `${current ? "Update" : "Add"} ${operation.split(".")[0] === "directory" ? "cadet" : operation.split(".")[0]}`,
+        title: `${(snapshot.proposedValuesOnly ? payload.expectedVersion > 0 : current) ? "Update" : "Add"} ${operation.split(".")[0] === "directory" ? "cadet" : operation.split(".")[0]}`,
         target:
           payload.label ||
           [payload.profile?.firstName, payload.profile?.lastName]
@@ -96,14 +99,14 @@ export class AdminService {
       parseAttendanceCorrection(command);
       summary = {
         title: "Correct attendance",
-        target: snapshot.events.find((e) => e.eventId === payload.eventId)
-          ?.label,
+        target:
+          snapshot.events.find((e) => e.eventId === payload.eventId)?.label ||
+          payload.eventId,
         changes: [
           { field: "Attendance code", value: payload.code ?? "Blank" },
           { field: "Reason", value: payload.reason },
         ],
-        consequence:
-          "The original attendance record is retained.",
+        consequence: "The original attendance record is retained.",
       };
     } else if (operation === "excusal.decide") {
       parseCommand(command);
@@ -114,15 +117,18 @@ export class AdminService {
           { field: "Decision", value: payload.decision },
           { field: "Reason", value: payload.reason },
         ],
-        consequence:
-          "",
+        consequence: "",
       };
     } else if (operation === "transition.prepare") {
       const plan = parseTransitionPlan(payload.plan),
-        roster = prepareTransitionRoster(plan, snapshot);
-      const events = Array.from({ length: plan.schedule.weeks }, (_, i) =>
-        prepareTransitionWeek(plan, roster, i),
-      ).flat();
+        roster = snapshot.proposedValuesOnly
+          ? null
+          : prepareTransitionRoster(plan, snapshot);
+      const events = roster
+        ? Array.from({ length: plan.schedule.weeks }, (_, i) =>
+            prepareTransitionWeek(plan, roster, i),
+          ).flat()
+        : null;
       summary = {
         title: "Prepare semester",
         target: plan.targetTerm.label,
@@ -131,21 +137,23 @@ export class AdminService {
           {
             field: "Cadet changes",
             value: plan.people.map((p) => ({
-              name:
-                snapshot.people.find((x) => x.personId === p.personId)
-                  ?.firstName +
-                " " +
-                snapshot.people.find((x) => x.personId === p.personId)
-                  ?.lastName,
+              name: snapshot.proposedValuesOnly
+                ? p.personId
+                : snapshot.people.find((x) => x.personId === p.personId)
+                    ?.firstName +
+                  " " +
+                  snapshot.people.find((x) => x.personId === p.personId)
+                    ?.lastName,
               status: p.flightPathStatus,
               asYear: p.asYear,
             })),
           },
-          { field: "Events to create", value: events.length },
+          ...(events
+            ? [{ field: "Events to create", value: events.length }]
+            : [{ field: "Training weeks", value: plan.schedule.weeks }]),
           { field: "Schedule", value: plan.schedule },
         ],
-        consequence:
-          "Prepare now; activate after the archive is verified.",
+        consequence: "Prepare now; activate after the archive is verified.",
       };
     } else {
       if (
@@ -168,8 +176,7 @@ export class AdminService {
         target: status.plan.targetTerm.label,
         transitionId: payload.transitionId,
         changes: [{ field: "Current status", value: status.state }],
-        consequence:
-          "",
+        consequence: "",
       };
     }
     const record = {
@@ -217,11 +224,17 @@ export class AdminService {
       .get(id, this.backend.binding, this.backend.principalId);
     if (!row)
       throw new PanelError("NOT_FOUND", "This change is unavailable.", 404);
-    await this.snapshot(); // Current backend permission check, including completed receipts.
+    const savedCommand = JSON.parse(row.command);
+    if (this.backend.authorizeOperation)
+      await this.backend.authorizeOperation(
+        savedCommand.operation,
+        savedCommand.payload,
+      );
+    else await this.snapshot(); // Recheck current authority, including completed receipts.
     if (row.state === "complete") {
       const command = JSON.parse(row.command);
       // Revalidate the operation's own current authority before replaying a receipt.
-      await this.backend.post(route(command.operation), command);
+      await this.submit(command);
       return JSON.parse(row.result);
     }
     if (["conflict", "rejected"].includes(row.state))
@@ -264,7 +277,7 @@ export class AdminService {
         // Bounded steps, durable in the existing transition store. Retry retains this exact command.
         for (
           let i = 0;
-          capture.preparation?.state === "capturing" && i < 8;
+          capture.preparation?.state === "capturing" && i < 1;
           i++
         )
           capture = await this.backend.post(
@@ -287,10 +300,7 @@ export class AdminService {
           };
         }
       }
-      const receipt = await this.backend.post(
-        route(command.operation),
-        command,
-      );
+      const receipt = await this.submit(command);
       const result = {
         state: "complete",
         receipt,
@@ -318,6 +328,11 @@ export class AdminService {
       this.busy.delete(id);
       await this.store.release?.(id);
     }
+  }
+  async submit(command) {
+    return this.backend.submit
+      ? this.backend.submit(command)
+      : this.backend.post(route(command.operation), command);
   }
   async transition(transitionId) {
     return this.backend.post("/v1/admin/transitions/status", {

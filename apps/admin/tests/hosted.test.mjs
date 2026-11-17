@@ -43,7 +43,7 @@ await build({
   ],
 });
 const origin = "https://panel-staging.example.invalid";
-async function fixture(t) {
+async function fixture(t, backendScript) {
   const mf = new Miniflare({
     workers: [
       {
@@ -75,6 +75,7 @@ async function fixture(t) {
         modules: true,
         compatibilityDate: "2026-07-01",
         script:
+          backendScript ||
           'export default {fetch(){return Response.json({error:{code:"NOT_AUTHORIZED",message:"No current permission"}},{status:403})}}',
       },
       {
@@ -447,9 +448,23 @@ test("public login is bounded and cleanup retains uncertain proposals", async (t
   await assert.rejects(authRoute(new Request(origin + "/auth/login"), env), {
     code: "SIGN_IN_LIMIT",
   });
-  await f.run("WITH RECURSIVE n(x) AS (VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x<1999) INSERT INTO auth_limits SELECT 'capacity-'||x,1,? FROM n", Date.now()+600000);
-  await assert.rejects(authRoute(new Request(origin + "/auth/login", {headers:{'cf-connecting-ip':'192.0.2.5'}}), env), {code:'SIGN_IN_LIMIT'});
-  assert.equal((await f.run("SELECT COUNT(*) AS n FROM auth_limits")).results[0].n, 2000);
+  await f.run(
+    "WITH RECURSIVE n(x) AS (VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x<1999) INSERT INTO auth_limits SELECT 'capacity-'||x,1,? FROM n",
+    Date.now() + 600000,
+  );
+  await assert.rejects(
+    authRoute(
+      new Request(origin + "/auth/login", {
+        headers: { "cf-connecting-ip": "192.0.2.5" },
+      }),
+      env,
+    ),
+    { code: "SIGN_IN_LIMIT" },
+  );
+  assert.equal(
+    (await f.run("SELECT COUNT(*) AS n FROM auth_limits")).results[0].n,
+    2000,
+  );
   const now = Date.now();
   for (const [id, state, age] of [
     ["unfinished", "retryable", 100],
@@ -493,5 +508,85 @@ test("public login is bounded and cleanup retains uncertain proposals", async (t
       )
     ).results[0].n,
     0,
+  );
+});
+
+test("scoped HTTP sessions cannot reach full pages, management or transition routes", async (t) => {
+  const script = `export default {async fetch(request){
+    const body=await request.json();
+    if(new URL(request.url).pathname==='/v1/admin/panel/page' && body.section==='manifest')
+      return Response.json({contractVersion:'panel-pages-v1',section:'manifest',revision:{operations:1,administration:1,access:'a'.repeat(64)},access:{mode:'scoped',flightIds:['alpha'],capabilities:{fullSnapshot:false,attendanceReportFlightIds:['alpha'],attendanceCorrectionFlightIds:[]}}});
+    return Response.json({error:{code:'FORBIDDEN',message:'Unavailable'}},{status:403});
+  }};`;
+  const f = await fixture(t, script),
+    token = random(),
+    csrf = random();
+  await f.run(
+    "INSERT INTO identity_bindings VALUES('scoped-sub','scoped-principal',1)",
+  );
+  await f.run(
+    "INSERT INTO sessions VALUES(?,?,?,?)",
+    await sha(token),
+    "scoped-sub",
+    csrf,
+    Date.now() + 60000,
+  );
+  const headers = {
+    cookie: "__Host-shamrock=" + token,
+    origin,
+    "content-type": "application/json",
+    "x-shamrock-csrf": csrf,
+  };
+  const state = await f.mf.dispatchFetch(origin + "/api/state", { headers });
+  assert.equal(state.status, 200);
+  const data = await state.json();
+  assert.equal(data.snapshot, undefined);
+  assert.deepEqual(data.history, []);
+  assert.equal(data.transport, "paged-v1");
+  for (const [path, body] of [
+    [
+      "/api/page",
+      {
+        surface: "full",
+        section: "directory-catalog",
+        offset: 0,
+        revision: null,
+        accessRevision: data.manifest.revision,
+        principalId: "owner",
+      },
+    ],
+    [
+      "/api/proposals",
+      {
+        operation: "directory.upsert",
+        payload: { personId: "private-target" },
+      },
+    ],
+    ["/api/proposals", { operation: "transition.prepare", payload: {} }],
+  ]) {
+    const r = await f.mf.dispatchFetch(origin + path, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(body),
+    });
+    assert.equal(r.status, 403, path);
+  }
+  assert.equal(
+    (
+      await f.mf.dispatchFetch(origin + "/api/transition?id=private-plan", {
+        headers,
+      })
+    ).status,
+    403,
+  );
+  assert.equal(
+    (
+      await f.mf.dispatchFetch(origin + "/api/page", {
+        method: "POST",
+        headers: { ...headers, "x-shamrock-csrf": "invalid" },
+        body: "{}",
+      })
+    ).status,
+    403,
   );
 });

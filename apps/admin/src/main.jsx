@@ -53,6 +53,11 @@ function App() {
     }
     const task = api("/state").then((value) => {
       setData(value);
+      if (
+        value.snapshot.access &&
+        !value.snapshot.access.capabilities.fullSnapshot
+      )
+        setPage("Attendance & excusals");
       lastRead.current = Date.now();
       setSync("");
     });
@@ -99,7 +104,7 @@ function App() {
           failures = 0;
         } catch (e) {
           failures = Math.min(failures + 1, 3);
-          if (e.code === "SIGN_IN_REQUIRED") {
+          if (e.code === "SIGN_IN_REQUIRED" || e.status === 403) {
             setData(null);
             setSignIn(true);
           } else setSync("Updates interrupted. Retrying automatically.");
@@ -128,6 +133,10 @@ function App() {
     try {
       await fn();
     } catch (e) {
+      if (e.code === "SIGN_IN_REQUIRED" || e.status === 403) {
+        setData(null);
+        setProposal(null);
+      }
       setError(e.message);
     } finally {
       setBusy(false);
@@ -155,6 +164,11 @@ function App() {
     setError("");
     setNotice("");
   };
+  const scoped =
+    data?.snapshot.access && !data.snapshot.access.capabilities.fullSnapshot;
+  const visiblePages = scoped
+    ? pages.filter(([title]) => title === "Attendance & excusals")
+    : pages;
   const common = { ...data, propose, busy, notify: setNotice, refresh: reload };
   if (signIn) {
     const code = new URLSearchParams(location.search).get("signin");
@@ -195,7 +209,7 @@ function App() {
         <aside className="sidebar">
           <Brand />
           <nav aria-label="Main navigation">
-            {pages.map(([title, Icon]) => (
+            {visiblePages.map(([title, Icon]) => (
               <button
                 key={title}
                 className={page === title ? "selected" : ""}
@@ -208,17 +222,19 @@ function App() {
             ))}
           </nav>
           <div className="sidebar-bottom">
-            <button
-              className={page === "Assistant" ? "selected" : ""}
-              onClick={() => navigate("Assistant")}
-            >
-              <Sparkles size={20} />
-              <span>
-                Assistant<small>Optional</small>
-              </span>
-            </button>
+            {!scoped && (
+              <button
+                className={page === "Assistant" ? "selected" : ""}
+                onClick={() => navigate("Assistant")}
+              >
+                <Sparkles size={20} />
+                <span>
+                  Assistant<small>Optional</small>
+                </span>
+              </button>
+            )}
             <p>
-              Administrator
+              {scoped ? "Flight / Squadron access" : "Administrator"}
               {data?.meta.hosted && (
                 <button className="sign-out" onClick={() => run(logout)}>
                   Sign out
@@ -228,13 +244,12 @@ function App() {
           </div>
         </aside>
         <div className="workspace">
-          <header className="topbar">
-            <span>
-              Wing <span className="slash">/</span> <strong>{page}</strong>
-            </span>
-            {sync && <small role="status">{sync}</small>}
-          </header>
           <main>
+            {sync && (
+              <small className="sync-status" role="status">
+                {sync}
+              </small>
+            )}
             {error && (
               <div className="error" role="alert">
                 {error}
@@ -261,18 +276,24 @@ function App() {
               </p>
             ) : (
               <>
-                {page === "Events" && <Events {...common} />}{" "}
-                {page === "Cadets" && <People key="cadets" {...common} />}{" "}
-                {page === "Leadership" && (
+                {!scoped && page === "Events" && <Events {...common} />}{" "}
+                {!scoped && page === "Cadets" && (
+                  <People key="cadets" {...common} />
+                )}{" "}
+                {!scoped && page === "Leadership" && (
                   <People key="leadership" leadership {...common} />
                 )}{" "}
                 {page === "Attendance & excusals" && <Attendance {...common} />}{" "}
-                {page === "Semester" && <Semester {...common} />}{" "}
-                {page === "Overview" && (
+                {!scoped && page === "Semester" && <Semester {...common} />}{" "}
+                {!scoped && page === "Overview" && (
                   <Overview {...common} navigate={navigate} />
                 )}{" "}
-                {page === "System" && <System {...common} retry={apply} />}{" "}
-                {page === "Assistant" && <Assistant meta={data.meta} />}
+                {!scoped && page === "System" && (
+                  <System {...common} retry={apply} />
+                )}{" "}
+                {!scoped && page === "Assistant" && (
+                  <Assistant meta={data.meta} />
+                )}
               </>
             )}
           </main>
@@ -281,7 +302,7 @@ function App() {
           <Drawer title="Review change" onClose={() => setProposal(null)}>
             <div className="fields">
               <h3>{proposal.summary.title}</h3>
-              <p>{proposal.summary.target}</p>
+              <p>{displayTarget(proposal.summary.target, data?.snapshot)}</p>
               <dl className="review">
                 {proposal.summary.changes.map((c, i) => (
                   <React.Fragment key={i}>
@@ -325,7 +346,24 @@ function App() {
     </EditorError.Provider>
   );
 }
+function displayTarget(target, s) {
+  if (!s) return target;
+  const request = s.requests.find((r) => r.requestId === target);
+  if (request)
+    return `${
+      request.personDisplayName ||
+      s.people
+        .filter((p) => p.personId === request.personId)
+        .map((p) => `${p.firstName} ${p.lastName}`)
+        .join("")
+    } · ${s.events.find((e) => e.eventId === request.eventId)?.label || "Excusal"}`;
+  return s.events.find((e) => e.eventId === target)?.label || target;
+}
 function displayValue(value, s, key) {
+  if (key === "name") {
+    const person = s.people.find((p) => p.personId === value);
+    if (person) return `${person.firstName} ${person.lastName}`;
+  }
   if (key === "flightId")
     return s.flights.find((f) => f.flightId === value)?.label || "Unassigned";
   if (key === "termId")

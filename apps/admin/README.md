@@ -1,11 +1,11 @@
 # SHAMROCK administrator panel
 
-This is an isolated, local staging application. Its D1 database contains fictional
-cadets and events. It does not change production or publish to Google. The intended
-hosted address is `shamrock.det225.workers.dev`; this version is **not deployed**
-there. Workers-native Google sign-in and D1 session/proposal storage are implemented under
-`hosted/`. Provider setup and live account verification follow the [hosted staging
-runbook](hosted/README.md), coordinated with the main D1 migration work.
+Hosted staging is deployed at [SHAMROCK staging](https://shamrock-admin-staging.det225.workers.dev),
+with Google sign-in and D1 session/proposal storage. A separate loopback fixture
+supports local development with fictional cadets and events. Neither surface
+changes production. The intended production address, `shamrock.det225.workers.dev`,
+has not been switched over. Provider setup and live verification follow the
+[hosted staging runbook](hosted/README.md), coordinated with the main D1 migration.
 
 ## Try the panel
 
@@ -199,8 +199,11 @@ Commanders retain excusal approval authority. Existing spreadsheet permissions
 are unchanged. The third-hour attendance policy is unchanged until a versioned
 configuration workflow and its parity tests are implemented.
 
-List views keep page filters below the sticky top bar. Long tables scroll within
-a bounded region with pinned column headings and the first identifying column.
+The page heading supplies context without a duplicate breadcrumb bar. Desktop
+list controls stay at the top when scrolling. The document owns vertical scrolling, avoiding nested scroll regions on trackpads.
+Tables scroll horizontally only when needed, retaining the first identifying
+column. Column headings stick on tables that fit horizontally. On small screens,
+filters scroll normally so they do not consume most of the viewport.
 The sidebar marks the current page with a gold icon and short underline rather
 than a filled selection box. Flight labels, event types and decision states have
 color cues alongside text; attendance rates include a small proportional bar

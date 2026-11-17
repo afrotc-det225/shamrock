@@ -18,6 +18,10 @@ export default function Attendance({ snapshot: s, reporting, propose, busy }) {
     [edit, setEdit] = useState(null),
     [reason, setReason] = useState(""),
     [code, setCode] = useState("P");
+  const scoped = s.access && !s.access.capabilities.fullSnapshot;
+  const canCorrect = (p) =>
+    !scoped ||
+    s.access.capabilities.attendanceCorrectionFlightIds.includes(p.flightId);
   const requests = s.requests.filter((r) => !flight || r.flightId === flight);
   const matrix = reporting?.matrices?.find(
     (m) => m.termId === s.events.find((e) => e.eventId === event)?.termId,
@@ -109,7 +113,9 @@ export default function Attendance({ snapshot: s, reporting, propose, busy }) {
                     <AttendanceRate value={row?.llab} />
                   </td>
                   <td>
-                    <button onClick={() => correction(p)}>Correct</button>
+                    {canCorrect(p) && (
+                      <button onClick={() => correction(p)}>Correct</button>
+                    )}
                   </td>
                 </tr>
               );
@@ -120,7 +126,8 @@ export default function Attendance({ snapshot: s, reporting, propose, busy }) {
           {requests.map((r) => (
             <tr key={r.requestId}>
               <td>
-                {name(s.people.find((p) => p.personId === r.personId))}
+                {r.personDisplayName ||
+                  name(s.people.find((p) => p.personId === r.personId))}
                 <small>
                   {s.events.find((e) => e.eventId === r.eventId)?.label}
                 </small>
@@ -131,15 +138,17 @@ export default function Attendance({ snapshot: s, reporting, propose, busy }) {
                 <Status>{r.status}</Status>
               </td>
               <td>
-                <button
-                  onClick={() => {
-                    setReason("");
-                    setCode("Approved");
-                    setEdit({ request: r });
-                  }}
-                >
-                  Review
-                </button>
+                {(!scoped || r.canDecide === true) && (
+                  <button
+                    onClick={() => {
+                      setReason("");
+                      setCode("Approved");
+                      setEdit({ request: r });
+                    }}
+                  >
+                    Review
+                  </button>
+                )}
               </td>
             </tr>
           ))}
@@ -179,7 +188,8 @@ export default function Attendance({ snapshot: s, reporting, propose, busy }) {
         >
           <p>
             {edit.request
-              ? name(s.people.find((p) => p.personId === edit.request.personId))
+              ? edit.request.personDisplayName ||
+                name(s.people.find((p) => p.personId === edit.request.personId))
               : name(edit.person)}{" "}
             ·{" "}
             {edit.request

@@ -194,8 +194,29 @@ export function Editor({
   );
 }
 export function Table({ headers, children }) {
+  const ref = useRef();
+  useEffect(() => {
+    const container = ref.current,
+      table = container.querySelector("table");
+    const controls = container.closest("main")?.querySelector(".page-controls");
+    const measure = () => {
+      container.dataset.horizontal = String(
+        table.scrollWidth > container.clientWidth + 1,
+      );
+      container.style.setProperty(
+        "--controls-height",
+        `${controls?.getBoundingClientRect().height || 0}px`,
+      );
+    };
+    const observer = new ResizeObserver(measure);
+    observer.observe(container);
+    observer.observe(table);
+    if (controls) observer.observe(controls);
+    measure();
+    return () => observer.disconnect();
+  }, []);
   return (
-    <div className="table-scroll">
+    <div ref={ref} className="table-scroll">
       <table>
         <thead>
           <tr>

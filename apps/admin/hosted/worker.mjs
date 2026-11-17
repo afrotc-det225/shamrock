@@ -51,12 +51,16 @@ export default {
         body = await boundedJson(request);
       }
       if (url.pathname === "/api/state" && request.method === "GET") {
-        const snapshot = await service.snapshot();
+        const manifest = await backend.panelManifest();
         return secure(
           json({
-            snapshot,
+            manifest,
+            transport: "paged-v1",
+            captureKey: backend.binding,
             reportingTime: Date.now(),
-            history: await service.history(),
+            history: manifest.access.capabilities.fullSnapshot
+              ? await service.history()
+              : [],
             meta: {
               environment: "staging",
               fictional: true,
@@ -67,6 +71,8 @@ export default {
           }),
         );
       }
+      if (request.method === "POST" && url.pathname === "/api/page")
+        return secure(json(await backend.page(body)));
       if (request.method === "POST" && url.pathname === "/api/proposals")
         return secure(
           json(await service.propose(body.operation, body.payload)),
@@ -82,10 +88,17 @@ export default {
               : await service.cancel(action[1]),
           ),
         );
-      if (request.method === "GET" && url.pathname === "/api/transition")
+      if (request.method === "GET" && url.pathname === "/api/transition") {
+        if (!(await backend.panelManifest()).access.capabilities.fullSnapshot)
+          throw new PanelError(
+            "FORBIDDEN",
+            "This page is outside your access.",
+            403,
+          );
         return secure(
           json(await service.transition(url.searchParams.get("id"))),
         );
+      }
       if (url.pathname === "/api/chat")
         throw new PanelError(
           "ASSISTANT_UNAVAILABLE",

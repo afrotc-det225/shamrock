@@ -1,5 +1,7 @@
-import { hydrateReporting } from './reporting';
+import { hydrateReporting } from "./reporting";
+import { loadSnapshot } from "../snapshot-client";
 let csrf;
+let retainedCapture;
 export async function api(path, body) {
   const response = await fetch(`/api${path}`, {
     method: body === undefined ? "GET" : "POST",
@@ -11,6 +13,8 @@ export async function api(path, body) {
   });
   const data = await response.json();
   if (!response.ok) {
+    if (response.status === 401 || response.status === 403)
+      retainedCapture = undefined;
     const error = new Error(
       data.error?.message || "Unable to complete this request.",
     );
@@ -18,9 +22,22 @@ export async function api(path, body) {
     error.status = response.status;
     throw error;
   }
-  return path === '/state' ? hydrateReporting(data) : data;
+  if (path === "/state") {
+    if (data.transport === "paged-v1") {
+      const key = JSON.stringify([data.captureKey, data.manifest]);
+      if (retainedCapture?.key === key)
+        data.snapshot = retainedCapture.snapshot;
+      else {
+        data.snapshot = await loadSnapshot(data, api);
+        retainedCapture = { key, snapshot: data.snapshot };
+      }
+    }
+    return hydrateReporting(data);
+  }
+  return data;
 }
 export async function startSession() {
+  retainedCapture = undefined;
   csrf = (await api("/session", {})).csrf;
 }
 export const name = (p) =>
@@ -118,5 +135,6 @@ export async function logout() {
   });
   if (!response.ok)
     throw new Error("Sign-out did not complete. Please reload.");
+  retainedCapture = undefined;
   location.assign("/");
 }
