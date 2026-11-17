@@ -1,3 +1,4 @@
+import { hydrateReporting } from './reporting';
 let csrf;
 export async function api(path, body) {
   const response = await fetch(`/api${path}`, {
@@ -17,7 +18,7 @@ export async function api(path, body) {
     error.status = response.status;
     throw error;
   }
-  return data;
+  return path === '/state' ? hydrateReporting(data) : data;
 }
 export async function startSession() {
   csrf = (await api("/session", {})).csrf;

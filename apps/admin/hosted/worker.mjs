@@ -4,8 +4,6 @@ import { ProposalStore } from "./store.mjs";
 import { AdminService } from "../service-core.mjs";
 import { PanelError } from "../errors.mjs";
 import { json, boundedJson, secure } from "./http.mjs";
-import { buildFrontendReporting } from "../../../packages/domain/src/frontend-reporting.ts";
-import { snapshotToFrontendReportingInput } from "../../google-adapter/src/frontend-publication.ts";
 import { TRANSITION_POLICY } from "../../../packages/domain/src/transitions.ts";
 export default {
   async fetch(request, env) {
@@ -53,16 +51,11 @@ export default {
         body = await boundedJson(request);
       }
       if (url.pathname === "/api/state" && request.method === "GET") {
-        const snapshot = await service.snapshot(),
-          date = new Intl.DateTimeFormat("en-CA", {
-            timeZone: "America/Indiana/Indianapolis",
-          }).format(new Date());
+        const snapshot = await service.snapshot();
         return secure(
           json({
             snapshot,
-            reporting: buildFrontendReporting(
-              snapshotToFrontendReportingInput(snapshot, date),
-            ),
+            reportingTime: Date.now(),
             history: await service.history(),
             meta: {
               environment: "staging",

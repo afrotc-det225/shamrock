@@ -79,6 +79,12 @@ the actual deployed Worker through the hosted acceptance checks.
 - Snapshot transfer and requests are bounded. Semester capture proceeds in saved
   batches; the UI continues those batches without requiring the operator to manage
   cursors. Large transfers that exceed the free-tier request budget fail closed.
+- Display reporting runs in the browser using the shared pure reporting module,
+  the fresh authenticated snapshot and a server timestamp interpreted in Eastern
+  time. This avoids Worker ICU initialization and duplicate report serialization.
+  These display results never authorize commands or supply trusted calculations
+  to D1. Backend authorization, version checks and business validation still run
+  for every change; no cross-user snapshot cache is used.
 - The hosted assistant is disconnected. No staging records or private backend
   context go to CRC. This gate is independent of normal administrator operations.
 
@@ -126,6 +132,10 @@ attendance rows and percentages loaded. Signing out returned to the sign-in page
 Automated authentication, authorization and proposal tests passed (15 tests),
 alongside browser workflow and mobile-layout checks. This evidence does not
 establish production readiness or live spreadsheet publication parity.
+
+The initial release had a measured state response above the free-plan CPU budget.
+Display reporting was subsequently moved to the browser; its free-tier headroom
+must be measured again on the hosted release before capacity is claimed.
 
 OAuth credentials are held in 1Password under
 `SHAMROCK administrator staging OAuth` in the SHAMROCK vault and deployed as

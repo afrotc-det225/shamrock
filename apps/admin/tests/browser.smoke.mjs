@@ -19,6 +19,17 @@ try {
     }),
     errors = [];
   page.on("pageerror", (e) => errors.push(e.message));
+  // Exercise the hosted contract: compute display projections in the browser
+  // instead of relying on the local server's precomputed reporting object.
+  await page.route('**/api/state', async route => {
+    const response = await route.fetch();
+    const data = await response.json();
+    if (response.ok()) {
+      delete data.reporting;
+      data.reportingTime = Date.now();
+    }
+    await route.fulfill({response, json:data});
+  });
   page.on("response", async (r) => {
     if (r.status() >= 400 && r.url().includes("/api/"))
       console.error("Rejected request", r.status(), await r.text());
