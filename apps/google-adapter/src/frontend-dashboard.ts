@@ -125,7 +125,7 @@ export function buildFrontendDashboard(input: DashboardInput): Request[] {
 }
 
 /** Explicit paused presentation repair. Keep the four existing chart IDs and
- * all managed values; the normal publication planner refreshes their contents.
+ * all managed values and number formats; the normal publication planner refreshes their contents.
  * Caller must verify the workbook fence and re-read the exact source first. */
 export function buildDashboardLayoutRepair(input: DashboardInput, current: {
   merges: { sheetId: number; startRowIndex: number; endRowIndex: number; startColumnIndex: number; endColumnIndex: number }[];
@@ -136,6 +136,13 @@ export function buildDashboardLayoutRepair(input: DashboardInput, current: {
   const managed = current.merges.filter(m => m.startRowIndex < 47);
   if (managed.some(m => m.sheetId !== input.sheetId || m.endRowIndex > 47 || m.startColumnIndex < 0 || m.endColumnIndex > 12)) throw Error('A merge crosses the Dashboard layout boundary.');
   const layout = buildFrontendDashboard(input) as Record<string, any>[];
+  // Layout callers can supply placeholder metric values. Never let those
+  // placeholders turn an existing percentage card into a rounded integer.
+  for (const request of layout) if (request.repeatCell?.cell.userEnteredFormat.numberFormat) {
+    delete request.repeatCell.cell.userEnteredFormat.numberFormat;
+    request.repeatCell.fields = request.repeatCell.fields.split(',')
+      .filter((field: string) => field !== 'userEnteredFormat.numberFormat').join(',');
+  }
   let chart = 0;
   return [
     ...managed.map(range => ({ unmergeCells: { range } })),

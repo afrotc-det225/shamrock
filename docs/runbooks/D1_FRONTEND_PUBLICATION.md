@@ -111,7 +111,9 @@ removed subtitle/spacer rows remain removed.
 only under the verified edit fence, after reading the managed Dashboard, retaining
 its four chart IDs. It replaces only the owned layout merges, styling, dimensions
 and chart positions. Then use normal coherent Dashboard publication for values
-and chart sources, and verify the exact result. Routine refresh does not silently
+and chart sources, and verify the exact result. Numeric formats are retained;
+placeholder maintenance metrics cannot change percentages into rounded counts.
+Routine refresh does not silently
 resize an operator's charts or reorder populated input rows. No native Table,
 validation rule, filter view or input protection is recreated by this repair.
 
@@ -121,3 +123,12 @@ transparent PNG render from an immutable public repository commit, independent
 of the staging application. The fixed image formula cannot choose a user-supplied
 URL or send spreadsheet contents to an external endpoint. Publish that asset
 commit before deploying a renderer that references it.
+
+On a newly provisioned Main workbook, enable
+`properties.importFunctionsExternalUrlAccessAllowed` through the Sheets API
+with that exact field mask, then verify the image cell has no error and renders
+correctly. The preview creation plan includes this one-time setting. Google
+documents this flag as writable from false to true; it is not a per-image or
+per-domain permission and cannot subsequently be reset through that property.
+Keep all image formulas fixed to reviewed public assets.
+See [SpreadsheetProperties](https://developers.google.com/workspace/sheets/api/reference/rest/v4/spreadsheets#SpreadsheetProperties).

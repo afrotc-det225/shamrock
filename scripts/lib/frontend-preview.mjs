@@ -105,6 +105,8 @@ export function buildFrontendPreview({ dashboardActions = [] } = {}) {
   const main = { title: 'SHAMROCK — Staging', sheets: [], requests: [], tables: [], dropdownSeeds: [], cellPresentation: [], photoChipTargets: [] };
   const excusals = { title: 'SHAMROCK Excusals — Staging', sheets: [], requests: [], tables: [], dropdownSeeds: [], cellPresentation: [], photoChipTargets: [] };
   const ids = { dashboard: 101, leadership: 102, directory: 103, attendance: 104, legend: 105, chartData: 106, blue: 201, gold: 202, excusalLegend: 203 };
+  // One-time creation setting for the fixed public Dashboard artwork.
+  main.requests.push({ updateSpreadsheetProperties: { properties: { importFunctionsExternalUrlAccessAllowed: true }, fields: 'importFunctionsExternalUrlAccessAllowed' } });
   const cadets = Array.from({ length: 16 }, (_, i) => ({ last: `Cadet ${String(i + 1).padStart(2, '0')}`, first: 'Example', year: YEARS[i % 4], flight: FLIGHTS[Math.floor(i / 4)], squadron: i < 8 ? 'Blue' : 'Gold', rank: ['C/4C', 'C/3C', 'C/2d Lt', 'C/Capt'][i % 4] }));
   const marks = cadets.map((_c, i) => ['P', 'P', i % 5 === 0 ? 'E' : 'P', i % 7 === 0 ? 'A' : 'P', i % 4 === 0 ? 'T' : 'P', i % 6 === 0 ? 'MED' : 'P']);
   const percentages = marks.map(codes => [calculateAttendancePercent(codes), calculateAttendancePercent([codes[2], codes[5]])]);
