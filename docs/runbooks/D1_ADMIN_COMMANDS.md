@@ -111,3 +111,10 @@ Local regressions cover both audit streams, commands arriving after the claim, a
 Directory-derived Leadership uses the supported source role inclusion rules. Only exact Blue/Gold Squadron Commander assignments (or the shorthand Squadron Commander with an operational Squadron assignment) generate a Squadron commander contact. Mission Support and Abroad Squadron Commander titles do not become operational commander contacts. Existing manual Leadership contacts remain explicit records. Rendering a contact does not itself authorize an account.
 
 The optional [trusted role-permission policy](D1_ROLE_PERMISSIONS.md) adds explicit permission-manager authorization and publisher-attested native fencing for privilege-bearing Directory/Leadership changes. Harmless edits retain current derived authority in the same D1 transaction. This policy starts disabled; private host integration and named-account provider rehearsal are separate enablement gates.
+
+
+Future event creation can use `prepareEventUpsert` to derive eligible cadets from
+explicit selected Flights instead of maintaining ID arrays. Imported and manual
+future events can adopt an audited current-membership policy through a reviewed
+preview/apply. See [future event rosters](D1_EVENT_ROSTERS.md) for automatic verified
+enrollment/transfer handling, historical-capture boundaries and native scheduling.

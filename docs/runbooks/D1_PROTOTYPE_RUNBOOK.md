@@ -194,3 +194,6 @@ Current production account succession is a separate workstream. Follow the [acco
 Before migration/cutover, complete directory and leadership workflows, corrections, multi-event notification intents, notifications, reports/charts, imports/exports, term transitions, backups/restore, diagnostics and the rest of the parity matrix. Multi-event submissions now use one parent command and explicit child identities; notification intent and withdrawal/amendment behavior remain separate work. No production records have been imported or reconciled by this prototype.
 
 Operational policy questions and approval to host the applicable records on Cloudflare remain production gates in the redesign plan. Continue developing engineering mechanisms with fictional data while resolving those gates. Ordinary attendance processing and spreadsheet filtering will not depend on AI availability or any maintainer's chat history.
+
+Future roster policy and operator create/update helpers are documented in
+[reviewed future event rosters](D1_EVENT_ROSTERS.md).

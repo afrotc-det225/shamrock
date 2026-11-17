@@ -46,6 +46,8 @@ export function runScheduledStaging(input:Services,nowSeconds=()=>Math.floor(Dat
   forms.applyControl();if(!accessFenced)nativeInput.applyControl();
   const intake=createNativeStagingHost(shared).flush();
   const formIntake=forms.flush();
+  const eventRosters=createNativeMaintenanceRuntime(shared,nowSeconds).refreshEventRosters();
+  if(['waiting-event-rosters','busy'].includes(eventRosters.status))return Object.assign({},intake,{eventRosters,formIntake,frontend:{status:'waiting-event-rosters'},forms:{status:'waiting-event-rosters'},nativeInput:{status:'waiting-event-rosters'},permissions:permissionResult,reconciled:false});
   const frontend=accessFenced?{status:'permissions-fenced'}:createNativeFrontendRuntime(shared).refresh();
   const published=forms.refresh();
   const native=accessFenced?{status:'permissions-fenced'}:nativeInput.flush({force:(frontend as {status?:string}).status==='published-with-drafts'});
@@ -59,5 +61,5 @@ export function runScheduledStaging(input:Services,nowSeconds=()=>Math.floor(Dat
   const history=createNativeHistoryRuntime(services,nowSeconds).run();
   // Never mark a failed/incomplete pass reconciled; the next tick retries it.
   if(reconcile)props.setProperty(SCHEDULE_PROPERTIES.reconciled,hour);
-  return Object.assign({},intake,{frontend,maintenance,formIntake,forms:published,nativeInput:native,permissions:permissionResult,ownerMail,history,reconciled:reconcile});
+  return Object.assign({},intake,{frontend,maintenance,formIntake,eventRosters,forms:published,nativeInput:native,permissions:permissionResult,ownerMail,history,reconciled:reconcile});
 }

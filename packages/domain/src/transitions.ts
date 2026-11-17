@@ -1,7 +1,8 @@
 /** Reviewed term preparation. Legacy defaults are suggestions, never authority to change a cadet. */
 import { AS_YEARS, FLIGHT_PATH_STATUSES, adminIdentifier, operationallyActive, type DirectoryRecord, type FrontendSnapshot, type EventUpsert } from './admin.js';
 import { DomainError } from './index.js';
-export const TRANSITION_POLICY = 'explicit-term-review-v1';
+import { operationalFlight } from './event-rosters.js';
+export const TRANSITION_POLICY = 'explicit-term-review-v2';
 export const TRANSITION_TIME_ZONE = 'America/Indiana/Indianapolis';
 export interface MeetingSchedule {
     weekday: number;
@@ -134,7 +135,7 @@ export function prepareTransitionRoster(plan: TransitionPlan, snapshot: Frontend
     const people = snapshot.people.map(person => { const change = changes.get(person.personId); return change ? { ...person, ...change, version: person.version + 1, active: operationallyActive(change) } : person; });
     if (people.some(p => p.flightId && !snapshot.flights.some(f => f.flightId === p.flightId && f.squadronId)))
         return invalid('flightId');
-    const flights = snapshot.flights.filter(f => f.squadronId).map(f => f.flightId);
+    const flights = snapshot.flights.filter(f => f.squadronId && operationalFlight(f.label)).map(f => f.flightId);
     if (!flights.length)
         return invalid('schedule', 'At least one operational Flight is required.');
     const eligible = people.filter(p => p.active && p.flightId && flights.includes(p.flightId)).map(p => p.personId);

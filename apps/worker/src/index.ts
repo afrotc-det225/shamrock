@@ -1,5 +1,6 @@
 import { beginTransitionPreparation,stepTransitionPreparation,readTransitionArchivePage,abandonTransitionPreparation } from './transition-transport.js';
 import { ownerMailRehearsal } from './mail-rehearsal.js';
+import { previewEventRoster,applyEventRoster,refreshEventRoster } from './event-rosters.js';
 import { adminEffectAvailability } from './effect-availability.js';
 import { permissionCommand, permissionRefresh, attestPermissionFence, recoverPermissionRefresh } from './permissions.js';
 import { effectiveAccessGrants } from './permission-grants.js';
@@ -218,6 +219,8 @@ async function acceptCommand(env: Env, command: Command): Promise<Receipt> {
   const eventVersions = command.operation === 'excusal.submitMany' ? command.payload.events
     : command.operation === 'excusal.decide' ? [] : [command.payload];
   const expectedEvents = eventVersions.filter(e => e.expectedEventVersion !== undefined).map(e => ({ eventId: e.eventId, version: e.expectedEventVersion }));
+  guard.sql+=` AND NOT EXISTS(SELECT 1 FROM event_roster_refresh_work WHERE event_id IN(SELECT value FROM json_each(?)))`;
+  guard.values.push(JSON.stringify(command.operation==='excusal.submitMany'?command.payload.events.map(e=>e.eventId):[ctx.eventId]));
   if (expectedEvents.length) {
     guard.sql += ` AND NOT EXISTS(SELECT 1 FROM json_each(?) selected WHERE NOT EXISTS(
       SELECT 1 FROM event_details e WHERE e.event_id=json_extract(selected.value,'$.eventId') AND e.version=json_extract(selected.value,'$.version')))`;
@@ -470,11 +473,15 @@ export default {
       if (url.pathname === '/v1/admin/notifications/process' && !url.search) return json(await processNotificationTask(env, input));
       if (url.pathname === '/v1/admin/notifications/status' && !url.search) return json(await notificationStatus(env, input));
       if (url.pathname === '/v1/admin/commands' && !url.search) {
+        if(input&&typeof input==='object'&&'operation' in input&&input.operation==='event.roster.apply')return json(await applyEventRoster(env,input));
         if (input && typeof input === 'object' && 'operation' in input && input.operation === 'attendance.correct') {
           return json(await acceptAttendanceCorrection(env, input));
         }
         return json(await acceptAdminCommand(env, input));
       }
+      if(url.pathname==='/v1/admin/event-rosters/preview'&&!url.search)return json(await previewEventRoster(env,input));
+      if(url.pathname==='/v1/admin/event-rosters/apply'&&!url.search)return json(await applyEventRoster(env,input));
+      if(url.pathname==='/v1/admin/event-rosters/refresh'&&!url.search)return json(await refreshEventRoster(env,input));
       if (url.pathname === '/v1/admin/directory/review-authorize' && !url.search) return json(await authorizeDirectoryReview(env, input));
       if (url.pathname === '/v1/admin/history/list' && !url.search) return json(await listLegacyHistory(env, input));
       if (url.pathname === '/v1/admin/history/requests' && !url.search) return json(await listLegacyRequestHistory(env, input));

@@ -1,4 +1,5 @@
 import { frontendAttendanceVersions } from '../../../packages/domain/src/frontend-transport.js';
+import { markManagedFutureRosters } from './event-rosters.js';
 import { preparePermissionMutation, permissionManagerSql } from './permissions.js';
 import { effectiveAdminGrants } from './permission-grants.js';
 import { attendanceVersionsSql, correctionReceipt } from './corrections.js';
@@ -95,6 +96,7 @@ export async function acceptAdminCommand(env: AdminEnv, input: unknown): Promise
     return previous;
   const now = new Date().toISOString();
   const writes: D1PreparedStatement[] = [], identityWrites: D1PreparedStatement[] = [];
+  let rosterFlights:string[]=[];
   let resultVersion = c.operation === 'directory.enroll' ? 1 : c.payload.expectedVersion + 1;
   let before: unknown = null;
   let scopes: string[] = [];
@@ -124,6 +126,7 @@ export async function acceptAdminCommand(env: AdminEnv, input: unknown): Promise
       AND (SELECT COUNT(*) FROM principals WHERE principal_id=?)=?`;
     conditionValues = [targetId, existing?.version ?? 0, p.verifiedEmail, matches.length, scopes[0], c.actor.principalId, principal ? 1 : 0];
     if (!existing) {
+      rosterFlights=[p.flightId];
       identityWrites.push(stmt(env.DB, 'INSERT INTO people(person_id,display_name) VALUES(?,?) ON CONFLICT(person_id) DO UPDATE SET display_name=excluded.display_name', targetId, `${p.profile.lastName}, ${p.profile.firstName}`));
       const columns = ['person_id','version','flight_id',...profileColumns,'updated_at'];
       writes.push(stmt(env.DB, `INSERT INTO directory_profiles(${columns.join(',')}) VALUES(${columns.map(()=>'?').join(',')})`, targetId,1,p.flightId,...DIRECTORY_FIELDS.map(k=>p.profile[k]),now));
@@ -146,6 +149,7 @@ export async function acceptAdminCommand(env: AdminEnv, input: unknown): Promise
     const existing = rows[0].results[0] as unknown as DirectoryRecord | undefined;
     if (c.operation === 'directory.selfUpdate' && !existing) throw new HttpError(409, 'ENROLLMENT_REQUIRED', 'A Directory manager must review this enrollment first.');
     const p = c.operation === 'directory.upsert' ? c.payload : { personId: target.personId, expectedVersion: target.expectedVersion, flightId: existing!.flightId, profile: { ...existing!, ...c.payload.changes } };
+    if(!existing||existing.flightId!==p.flightId||(['lastName','firstName','asYear','flightPathStatus','dateOfBirth'] as const).some(key=>existing[key]!==p.profile[key]))rosterFlights=[existing?.flightId,p.flightId].filter((id):id is string=>!!id);
     const memberships = rows[1].results as {
       flightId: string;
       active: number;
@@ -202,16 +206,18 @@ export async function acceptAdminCommand(env: AdminEnv, input: unknown): Promise
       stmt(env.DB, 'SELECT unit_id AS flightId FROM event_units WHERE event_id=? ORDER BY unit_id', p.eventId),
     ]);
     before = { event: current[0].results[0] ?? null, flights: current[1].results };
+    const oldStart=current[0].results[0]?.start_at;
+    const captureCurrent=p.startAt!==null&&Date.parse(p.startAt)>Date.parse(now)&&(!current[0].results[0]||typeof oldStart==='string'&&Date.parse(oldStart)>Date.parse(now));
     condition = `COALESCE((SELECT version FROM event_details WHERE event_id=?),0)=? AND
    EXISTS(SELECT 1 FROM terms WHERE term_id=?) AND NOT EXISTS(SELECT 1 FROM json_each(?) f WHERE NOT EXISTS(SELECT 1 FROM flight_hierarchy WHERE unit_id=f.value))
    AND NOT EXISTS(SELECT 1 FROM event_details WHERE event_id=? AND term_id<>?)`;
     conditionValues = [p.eventId, p.expectedVersion, p.termId, JSON.stringify(p.flightIds), p.eventId, p.termId];
     condition += ` AND NOT EXISTS(SELECT 1 FROM json_each(?) selected WHERE NOT EXISTS(
-      SELECT 1 FROM directory_profiles d LEFT JOIN event_roster_members prior ON prior.person_id=d.person_id AND prior.event_id=? AND prior.version=?
+      SELECT 1 FROM directory_profiles d LEFT JOIN event_roster_members prior ON prior.person_id=d.person_id AND prior.event_id=? AND prior.version=? AND ?=0
       WHERE d.person_id=selected.value AND COALESCE(prior.flight_id,d.flight_id) IN (SELECT value FROM json_each(?))
       AND (prior.person_id IS NOT NULL OR (d.flight_path_status NOT IN ('Inactive','Commissioned','Dropped')
         AND EXISTS(SELECT 1 FROM memberships m WHERE m.person_id=d.person_id AND m.unit_id=d.flight_id AND m.active=1)))))`;
-    conditionValues.push(JSON.stringify(p.eligiblePersonIds),p.eventId,p.expectedVersion,JSON.stringify(p.flightIds));
+    conditionValues.push(JSON.stringify(p.eligiblePersonIds),p.eventId,p.expectedVersion,captureCurrent?1:0,JSON.stringify(p.flightIds));
     writes.push(stmt(env.DB, 'INSERT INTO events VALUES(?,?,?) ON CONFLICT(event_id) DO UPDATE SET label=excluded.label,active=excluded.active', p.eventId, p.label, p.status === 'active' ? 1 : 0));
     writes.push(stmt(env.DB, `INSERT INTO event_details VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(event_id) DO UPDATE SET
    version=excluded.version,event_type=excluded.event_type,training_week=excluded.training_week,display_order=excluded.display_order,
@@ -223,11 +229,16 @@ export async function acceptAdminCommand(env: AdminEnv, input: unknown): Promise
         COALESCE(prior.first_name,d.first_name),COALESCE(prior.as_year,d.as_year),COALESCE(prior.flight_path_status,d.flight_path_status),
         CASE WHEN prior.person_id IS NOT NULL THEN prior.date_of_birth ELSE d.date_of_birth END
       FROM json_each(?) selected JOIN directory_profiles d ON d.person_id=selected.value
-      LEFT JOIN event_roster_members prior ON prior.person_id=d.person_id AND prior.event_id=? AND prior.version=?`,
-      p.eventId,p.expectedVersion+1,JSON.stringify(p.eligiblePersonIds),p.eventId,p.expectedVersion));
+      LEFT JOIN event_roster_members prior ON prior.person_id=d.person_id AND prior.event_id=? AND prior.version=? AND ?=0`,
+      p.eventId,p.expectedVersion+1,JSON.stringify(p.eligiblePersonIds),p.eventId,p.expectedVersion,captureCurrent?1:0));
     writes.push(stmt(env.DB, 'DELETE FROM event_units WHERE event_id=?', p.eventId));
     writes.push(stmt(env.DB, 'INSERT INTO event_units(event_id,unit_id) SELECT ?,value FROM json_each(?)', p.eventId, JSON.stringify(p.flightIds)));
+    writes.push(stmt(env.DB,'UPDATE event_roster_policies SET selected_flight_ids_json=? WHERE event_id=?',JSON.stringify(p.flightIds),p.eventId));
+    if(p.status!=='active')writes.push(stmt(env.DB,'DELETE FROM event_roster_refresh_work WHERE event_id=?',p.eventId));
+    else writes.push(stmt(env.DB,`INSERT INTO event_roster_refresh_work SELECT event_id,?,? FROM event_roster_policies WHERE event_id=? AND enabled=1 AND EXISTS(SELECT 1 FROM event_details WHERE event_id=? AND julianday(start_at)>julianday(?))
+      ON CONFLICT(event_id) DO UPDATE SET cause_command_id=excluded.cause_command_id,requested_at=excluded.requested_at`,c.commandId,now,p.eventId,p.eventId,now));
   }
+  if(rosterFlights.length)writes.push(markManagedFutureRosters(env.DB,c.commandId,now,[...new Set(rosterFlights)]));
   const permissionChange = await preparePermissionMutation(env, c, now, targetId, hash);
   const auth = commandAuth(env, c, capability, scopes, targetId);
   if (permissionChange?.managerRequired) { auth.sql += ` AND ${permissionManagerSql}`; auth.values.push(c.actor.principalId); }
@@ -302,7 +313,7 @@ export async function frontendSnapshot(env: AdminEnv, input: unknown, scope?:Fro
   const facts=scope?.includeAttendanceFacts===false?'0':'1';
   const bounds = [0, 0, 500, 200, 50, 20, 20, 200, 10000, 10000, 5000, 0, 10000, 25000, 10000, 25000];
   const results = await env.DB.batch<Record<string, unknown>>([
-    stmt(env.DB, `SELECT (${guard.sql}) AS allowed`, ...guard.values),
+    stmt(env.DB, `SELECT (${guard.sql}) AS allowed,(SELECT COUNT(*) FROM event_roster_refresh_work) AS rosterPending`, ...guard.values),
     stmt(env.DB, `SELECT (SELECT COALESCE(MAX(audit_id),0) FROM audit_events) AS operations,(SELECT COALESCE(MAX(audit_id),0) FROM admin_audit_events) AS administration`),
     stmt(env.DB, `${profileProjection} WHERE ${personFilter("d.person_id")} ORDER BY d.person_id LIMIT 501`,...personParams),
     stmt(env.DB, `SELECT contact_id AS contactId,version,person_id AS personId,last_name AS lastName,first_name AS firstName,rank,role,email,cell_phone AS cellPhone,reports_to AS reportsTo,office_phone AS officePhone,office_location AS officeLocation,active FROM leadership_contacts c WHERE NOT EXISTS(SELECT 1 FROM legacy_operational_adoption_rows r JOIN legacy_operational_adoptions a ON a.adoption_id=r.adoption_id WHERE r.kind='leadership' AND r.target_id=c.contact_id AND a.state<>'complete') ORDER BY contact_id LIMIT 201`),
@@ -331,6 +342,7 @@ export async function frontendSnapshot(env: AdminEnv, input: unknown, scope?:Fro
   ]);
   if (results[0].results[0]?.allowed !== 1)
     throw new HttpError(403, 'NOT_AUTHORIZED', 'A current Wing frontend read grant is required.');
+  if(results[0].results[0]?.rosterPending)throw new HttpError(409,'EVENT_ROSTERS_PENDING','Future event eligibility is refreshing before publication.');
   if(scope && (results[1].results[0].operations!==scope.expectedRevision.operations || results[1].results[0].administration!==scope.expectedRevision.administration)) throw new HttpError(409,'SNAPSHOT_CHANGED','The reporting scope changed before its coherent read.');
   if (results.some((r, i) => bounds[i] > 0 && r.results.length > bounds[i]))
     throw new HttpError(409, 'SNAPSHOT_TOO_LARGE', 'This snapshot exceeds its reviewed bounds. Use a reviewed term-scoped export.');

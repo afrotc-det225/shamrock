@@ -380,5 +380,15 @@ export function createNativeMaintenanceRuntime(services: NativeMaintenanceServic
             actor: { principalId: c.config.principalId, evidence: 'authenticated-confirmation' }, source: { kind: 'sheet', resourceKey: c.config.sourceResource, submissionId: row.commandId, revision: 1 } };
         return row.operation === 'transition.prepare' ? continueTransitionPreparation(c.api, envelope) : callMaintenance(c.api, '/v1/admin/transitions/commands', envelope);
     }
-    return { pause, resume, planNotifications, archive, command };
+    function refreshEventRosters(){
+        if(!enabled())return {status:'paused'};const c=configuration();if(!c?.config.enabled||!c.config.rosterRefreshEnabled)return {status:'disabled'};
+        const lock=services.LockService.getScriptLock();if(!lock.tryLock(1000))return {status:'busy'};
+        try{let refreshed=0;for(let i=0;i<10;i++){
+            const result=callMaintenance(c.api,'/v1/admin/event-rosters/refresh',{environment:'staging',generation:c.host.generation,principalId:c.config.principalId,sourceResource:c.config.sourceResource});
+            if(!['idle','refreshed','review-required'].includes(String(result.state))||!Number.isSafeInteger(result.pending)||Number(result.pending)<0||Number(result.pending)>200)fail('event_roster_refresh','The bounded event roster result is invalid.');
+            if(result.state==='review-required')return {status:'waiting-event-rosters',pending:result.pending,refreshed,reviewRequired:true};
+            if(result.state==='refreshed')refreshed++;if(result.pending===0)return {status:'ready',refreshed};
+        }return {status:'waiting-event-rosters',refreshed};}finally{lock.releaseLock();}
+    }
+    return { pause, resume, planNotifications, archive, command,refreshEventRosters };
 }

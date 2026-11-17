@@ -28,9 +28,17 @@ minute and duration. Training weeks stay within 1–99. Local wall times use
 `America/Indiana/Indianapolis`; nonexistent or ambiguous DST times are rejected.
 Each week produces Mando PT, Secondary PT and LLAB in that order. Secondary
 covers Sunday 00:00 through Saturday 23:59. These preserve the current source's
-three-event convention, with all mapped Flights and an explicit eligible roster
+three-event convention, excluding Abroad from standard event Flights and using an explicit eligible roster
 of operational cadets. Preview those generated scopes and dates before approval.
 One-off events remain separate reviewed event commands.
+
+Policy `explicit-term-review-v2` also approves the current-active-membership
+policy for generated standard events whose start is still future at acceptance.
+Subsequent verified enrollments and Flight changes refresh those future rosters
+through the [bounded event-roster workflow](D1_EVENT_ROSTERS.md). Past captures
+remain fixed. Old v1 drafts must be cancelled/abandoned and re-prepared for a new
+review; already accepted transition completion and existing archives retain their
+original identities. There is no silent reinterpretation of a saved v1 plan.
 
 ## Commands and authority
 
@@ -45,7 +53,7 @@ command fence atomically. No API grants its own transition permission.
 
 - `transition.prepare`, payload `{plan}`. The plan includes `transitionId`,
   `kind: 'semester' | 'academic-year'`, `sourceTermId`,
-  `targetTerm: {termId,label,sortOrder}`, `policyVersion: 'explicit-term-review-v1'`,
+  `targetTerm: {termId,label,sortOrder}`, `policyVersion: 'explicit-term-review-v2'`,
   `reviewReason`, `people` and `schedule`.
 - `transition.accept`, `transition.cancel` or `transition.complete`, payload
   `{transitionId,expectedVersion,planHash}` from the reviewed status/receipt.
@@ -108,7 +116,7 @@ Plans cover at most 500 explicit changes and 60 generated events; the existing
 64-KiB HTTP request bound also applies. Large plans must be reduced to a reviewed
 supported scope, not split into independently accepted transitions. Frozen source pages
 are bounded to 5 MiB total, with a 6-MiB assembled snapshot bound. Mutations use set-based JSON SQL rather than one query per
-person/event. A 60-event acceptance measured 30 prepared statements locally, below the 50-query per-invocation budget. This does not measure hosted CPU, daily rows or sustained capacity; record those before activation.
+person/event. A 60-event acceptance measured 34 prepared statements locally, below the 50-query per-invocation budget. This does not measure hosted CPU, daily rows or sustained capacity; record those before activation.
 
 A failed archive retains its continuation and stable source hash. A stale plan
 requires a new reviewed preparation. An accepted transition has no automatic
@@ -133,7 +141,7 @@ flush invokes suppressed notification planning only when maintenance is enabled.
 No additional trigger, Google file, MailApp binding or mail OAuth scope is created.
 
 The strict binding contains `version: 1`, `environment: 'staging'`, the current
-`generation`, `enabled`, optional `closeoutEnabled` (default false), the exact review marker
+`generation`, `enabled`, optional `closeoutEnabled` and `rosterRefreshEnabled` (both default false), the exact review marker
 `EXISTING_PRIVATE_MAINTENANCE_REVIEWED_FOR_STAGING`, `principalId`, `workerId`,
 `sourceResource`, `stateFileId`, `archiveSpreadsheetId` and `archiveExpectedTitle`.
 The resources must already exist, be separate from current frontends and transport

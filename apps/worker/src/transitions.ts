@@ -196,6 +196,7 @@ export async function transitionCommand(env: TransitionEnv, input: unknown): Pro
             writes.push(stmt(env.DB, `INSERT INTO event_roster_versions SELECT json_extract(value,'$.eventId'),1,json_extract(value,'$.commandId'),? FROM ${eventsSource}`, now, eventsJson));
             writes.push(stmt(env.DB, `INSERT INTO event_roster_members SELECT json_extract(e.value,'$.eventId'),1,d.person_id,d.flight_id,d.last_name,d.first_name,d.as_year,d.flight_path_status,d.date_of_birth
         FROM ${eventsSource} e,json_each(json_extract(e.value,'$.eligiblePersonIds')) p JOIN directory_profiles d ON d.person_id=p.value`, eventsJson));
+            writes.push(stmt(env.DB,`INSERT INTO event_roster_policies SELECT json_extract(value,'$.eventId'),1,'current-active-flight-v1',1,json_extract(value,'$.flightIds'),json_extract(value,'$.commandId'),?,?,? FROM ${eventsSource} WHERE julianday(json_extract(value,'$.startAt'))>julianday(?)`,c.actor.principalId,now,now,eventsJson,now));
             writes.push(stmt(env.DB, `INSERT INTO admin_audit_events(command_id,actor_id,actor_evidence,operation,target_id,accepted_at,before_json,after_json)
         SELECT json_extract(value,'$.commandId'),?,?,'transition.event',json_extract(value,'$.eventId'),?,'{}',value FROM ${eventsSource}`, c.actor.principalId, c.actor.evidence, now, eventsJson));
             for (const kind of ['forms.refresh', 'frontend.refresh'])

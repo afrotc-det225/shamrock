@@ -14,7 +14,7 @@ const profile=()=>({lastName:'Example',firstName:'Cadet',asYear:'AS300',rank:'C/
 function envelope(operation,payload,id=operation){return {commandId:id,contractVersion:1,environment:'local',generation:1,actor:{principalId:'admin',evidence:'authenticated-confirmation'},source:{kind:'test',resourceKey:'console',submissionId:id,revision:1},operation,payload};}
 function native(input,path){const body=JSON.stringify(input),time=String(Math.floor(Date.now()/1000));return new Request('https://fixture.invalid'+path,{method:'POST',body,headers:{'content-type':'application/json','x-shamrock-key-id':'fixture','x-shamrock-timestamp':time,'x-shamrock-signature':createHmac('sha256',secret).update(`POST\n${path}\n${time}\n${createHash('sha256').update(body).digest('hex')}`).digest('hex')}});}
 const identity={environment:'local',generation:1,principalId:'admin'};
-const plan=()=>({transitionId:'next-term',kind:'academic-year',sourceTermId:'current',targetTerm:{termId:'next',label:'Next Fall',sortOrder:2},policyVersion:'explicit-term-review-v1',reviewReason:'Reviewed fictional roster and training schedule',people:[{personId:'person',expectedVersion:1,asYear:'AS400',rank:'C/2d Lt',role:'Flight Commander',flightId:'alpha',flightPathStatus:'Active 3/4'}],schedule:{firstSunday:'2026-08-23',firstTrainingWeek:1,weeks:2,mando:{weekday:4,hour:6,minute:30,durationMinutes:60},llab:{weekday:2,hour:15,minute:30,durationMinutes:120}}});
+const plan=()=>({transitionId:'next-term',kind:'academic-year',sourceTermId:'current',targetTerm:{termId:'next',label:'Next Fall',sortOrder:2},policyVersion:'explicit-term-review-v2',reviewReason:'Reviewed fictional roster and training schedule',people:[{personId:'person',expectedVersion:1,asYear:'AS400',rank:'C/2d Lt',role:'Flight Commander',flightId:'alpha',flightPathStatus:'Active 3/4'}],schedule:{firstSunday:'2026-08-23',firstTrainingWeek:1,weeks:2,mando:{weekday:4,hour:6,minute:30,durationMinutes:60},llab:{weekday:2,hour:15,minute:30,durationMinutes:120}}});
 async function fixture(t){
  const mf=new Miniflare({modules:true,scriptPath:resolve('.build/v3-artifacts/worker.mjs'),compatibilityDate:'2026-07-01',d1Databases:{DB:'transition-fixture'},log:new Log(LogLevel.NONE)});t.after(()=>mf.dispose());const db=await mf.getD1Database('DB');await db.batch(sql.map(s=>db.prepare(s)));
  await db.batch([db.prepare("INSERT INTO system_control VALUES(1,'local',1,1)"),db.prepare("INSERT INTO principals VALUES('admin',NULL,1),('outsider',NULL,1)"),db.prepare("INSERT INTO transition_authorities VALUES('admin',1)"),db.prepare("INSERT INTO organizational_units VALUES('alpha','Alpha',1)"),db.prepare("INSERT INTO squadrons VALUES('blue','Blue')"),db.prepare("INSERT INTO flight_hierarchy VALUES('alpha','blue')"),db.prepare("INSERT INTO terms VALUES('current','Current Spring',1,1)"),db.prepare("INSERT INTO admin_grants SELECT 'admin',value,'wing','*' FROM json_each('[\"directory.manage\",\"frontend.read\"]')"),db.prepare("INSERT INTO adapter_sources VALUES('test','console',1)")]);
@@ -39,7 +39,7 @@ test('review, protected archive, acceptance and refresh receipts preserve histor
  assert.deepEqual(await f.send(archive.request,'/v1/admin/transitions/archive/ack'),{status:200,body:{status:'done'}});
  const accepted=await f.send(next('transition.accept',p));assert.equal(accepted.status,200,JSON.stringify(accepted.body));assert.equal(accepted.body.result.state,'publishing');
  assert.equal((await f.db.prepare('SELECT as_year FROM directory_profiles').first()).as_year,'AS400');assert.equal((await f.db.prepare('SELECT as_year FROM term_roster_snapshots WHERE term_id=?').bind('current').first()).as_year,before.as_year);
- assert.equal(await f.count('event_roster_versions'),6);assert.equal(await f.count('event_roster_members'),6);assert.equal(await f.count('transition_people_history'),1);
+ assert.equal(await f.count('event_roster_versions'),6);assert.equal(await f.count('event_roster_members'),6);assert.equal(await f.count('transition_people_history'),1);assert.equal(await f.count('event_roster_policies'),0);
  assert.deepEqual(await f.send(next('transition.accept',p)),accepted);
  assert.equal((await f.send(next('transition.complete',p,3))).status,409);
  await f.db.prepare("UPDATE admin_effects SET state='done' WHERE command_id='transition.accept' AND kind='frontend.refresh'").run();assert.equal((await f.send(next('transition.complete',p,3))).status,409);
@@ -76,11 +76,11 @@ test('acceptance rolls back every event/profile/receipt if any audit insert fail
 });
 
 test('largest reviewed schedule uses bounded query count and concurrent acceptance keeps one term',async t=>{
- const f=await fixture(t),proposal=plan();proposal.schedule.weeks=20;
+ const f=await fixture(t),proposal=plan();proposal.schedule.weeks=20;proposal.schedule.firstSunday='2035-01-07';
  const p=await prepared(f,proposal);await archived(f,p);let preparedQueries=0;
  const DB={prepare(sql){preparedQueries++;return f.db.prepare(sql);},batch:statements=>f.db.batch(statements)};
  const input=next('transition.accept',p);const first=await f.send(input,undefined,{...f.env,DB});assert.equal(first.status,200,JSON.stringify(first.body));assert.ok(preparedQueries<50,`prepared ${preparedQueries}`);
- assert.equal(await f.count('events'),60);assert.equal(await f.count('event_roster_versions'),60);t.diagnostic(`Maximum schedule acceptance uses ${preparedQueries} prepared statements.`);
+ assert.equal(await f.count('events'),60);assert.equal(await f.count('event_roster_versions'),60);assert.equal(await f.count('event_roster_policies'),60);assert.deepEqual(JSON.parse((await f.db.prepare('SELECT selected_flight_ids_json AS selected FROM event_roster_policies LIMIT 1').first()).selected),['alpha']);t.diagnostic(`Maximum schedule acceptance uses ${preparedQueries} prepared statements.`);
  const g=await fixture(t),q=await prepared(g);await archived(g,q);const c=next('transition.accept',q);
  const results=await Promise.all([g.send(c),g.send(c)]);assert.deepEqual(results[0],results[1]);assert.equal(results[0].status,200);assert.equal(await g.count('transition_people_history'),1);
 });

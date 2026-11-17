@@ -1,9 +1,10 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import {parseTransitionPlan,prepareTransition,suggestAcademicProgression} from '../../.build/v3/packages/domain/src/transitions.js';
+import {TRANSITION_POLICY,parseTransitionPlan,prepareTransition,suggestAcademicProgression} from '../../.build/v3/packages/domain/src/transitions.js';
 const profile=()=>({lastName:'Example',firstName:'Cadet',asYear:'AS300',rank:'C/2d Lt',role:'Flight Commander',university:'Notre Dame',email:'cadet@example.invalid',phone:'',dorm:'',cipBroadArea:'14 - Engineering',cipCode:'14.0901',afsc:'',homeTown:'',homeState:'',classYear:'2030',dateOfBirth:'2000-01-02',flightPathStatus:'Active 3/4',photoLink:''});
-const plan=()=>({transitionId:'next-term',kind:'academic-year',sourceTermId:'current',targetTerm:{termId:'next',label:'Next Fall',sortOrder:2},policyVersion:'explicit-term-review-v1',reviewReason:'Reviewed fictional roster and training schedule',people:[{personId:'person',expectedVersion:1,asYear:'AS400',rank:'C/2d Lt',role:'Flight Commander',flightId:'alpha',flightPathStatus:'Active 3/4'}],schedule:{firstSunday:'2026-08-23',firstTrainingWeek:1,weeks:2,mando:{weekday:4,hour:6,minute:30,durationMinutes:60},llab:{weekday:2,hour:15,minute:30,durationMinutes:120}}});
+const plan=()=>({transitionId:'next-term',kind:'academic-year',sourceTermId:'current',targetTerm:{termId:'next',label:'Next Fall',sortOrder:2},policyVersion:'explicit-term-review-v2',reviewReason:'Reviewed fictional roster and training schedule',people:[{personId:'person',expectedVersion:1,asYear:'AS400',rank:'C/2d Lt',role:'Flight Commander',flightId:'alpha',flightPathStatus:'Active 3/4'}],schedule:{firstSunday:'2026-08-23',firstTrainingWeek:1,weeks:2,mando:{weekday:4,hour:6,minute:30,durationMinutes:60},llab:{weekday:2,hour:15,minute:30,durationMinutes:120}}});
 test('transition policy preserves inactive and AS400 records; validates calendar, explicit scope and schedule',()=>{
+ assert.equal(TRANSITION_POLICY,'explicit-term-review-v2');assert.throws(()=>parseTransitionPlan({...plan(),policyVersion:'explicit-term-review-v1'}));
  const p={...profile(),personId:'person',version:1,active:true,flightId:'alpha'};
  assert.equal(suggestAcademicProgression(p).asYear,'AS400');assert.equal(suggestAcademicProgression({...p,asYear:'AS400'}).asYear,'AS400');
  assert.equal(suggestAcademicProgression({...p,asYear:'AS100',flightPathStatus:'Dropped'}).asYear,'AS100');

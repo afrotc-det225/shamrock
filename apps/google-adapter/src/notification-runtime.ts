@@ -13,7 +13,7 @@ export interface MaintenanceApi {
     nowSeconds(): number;
 }
 export function callMaintenance(api: MaintenanceApi, path: string, input: unknown): Record<string, unknown> {
-    if (!/^\/v1\/admin\/(notifications|transitions|closeout)\/[a-z/]+$/.test(path))
+    if (!/^\/v1\/admin\/(notifications|transitions|closeout|event-rosters)\/[a-z/]+$/.test(path))
         throw new AdapterError('maintenance_path', 'Unsupported maintenance operation.');
     if (!/^https:\/\//.test(api.config.baseUrl) || /[?#]/.test(api.config.baseUrl))
         throw new AdapterError('maintenance_origin', 'Use the configured HTTPS Worker origin.');

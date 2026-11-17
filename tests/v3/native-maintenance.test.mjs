@@ -26,6 +26,7 @@ function fixture(paged=false){
    else if(url.pathname.endsWith('/page'))result={sequence:body.sequence,sha256:descriptor.pages[body.sequence].sha256,descriptorHash,page:pages[body.sequence]};
    else if(url.pathname.endsWith('/ack')){if(paged){assert.equal(body.proof.descriptorHash,descriptorHash);assert.equal(body.proof.snapshotHash,claim.snapshotHash);assert.notEqual(body.proof.snapshotHash,descriptorHash);}f.ack++;result={status:'done'};}
    else if(url.pathname.endsWith('/commands'))result={status:'accepted'};
+   else if(url.pathname.endsWith('/event-rosters/refresh'))result=f.rosterResults?.shift()??{state:'refreshed',pending:99};
    else throw Error('Unexpected Worker request');
   }else if(url.hostname==='www.googleapis.com'){
    const id=url.pathname.split('/').filter(Boolean).at(-1)==='permissions'?url.pathname.split('/').at(-2):url.pathname.split('/').at(-1);
@@ -95,4 +96,13 @@ test('native frozen-page archive assembles before Google writes and records dist
  assert.equal(result.state,'ready-for-reviewed-acceptance');assert.equal(f.ack,1);assert.equal(f.sheets.length,5);
  const recovery=f.sheets.find(s=>s.properties.hidden);assert.ok(JSON.stringify(recovery.cells).includes(f.claim.descriptorHash));assert.ok(JSON.stringify(recovery.cells).includes(f.claim.snapshotHash));
  assert.deepEqual(JSON.parse(recovery.cells.slice(3).map(row=>row[1].userEnteredValue.stringValue).join('')),f.claim.snapshot);
+});
+
+test('future roster maintenance is explicitly enabled, bounded to ten events and stops for review',()=>{
+ const f=fixture();assert.equal(f.runtime.refreshEventRosters().status,'paused');f.runtime.resume();assert.equal(f.runtime.refreshEventRosters().status,'disabled');
+ f.map.SHAMROCK_V3_MAINTENANCE_CONFIG=JSON.stringify({...config,rosterRefreshEnabled:true});
+ f.rosterResults=[{state:'refreshed',pending:1},{state:'refreshed',pending:0}];assert.deepEqual(f.runtime.refreshEventRosters(),{status:'ready',refreshed:2});
+ const count=()=>f.calls.filter(u=>u.endsWith('/event-rosters/refresh')).length,before=count();assert.deepEqual(f.runtime.refreshEventRosters(),{status:'waiting-event-rosters',refreshed:10});assert.equal(count()-before,10);
+ f.rosterResults=[{state:'review-required',pending:1}];assert.deepEqual(f.runtime.refreshEventRosters(),{status:'waiting-event-rosters',refreshed:0,pending:1,reviewRequired:true});
+ f.rosterResults=[{state:'refreshed',pending:-1}];assert.throws(()=>f.runtime.refreshEventRosters(),e=>e.code==='event_roster_refresh');
 });
