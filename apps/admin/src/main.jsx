@@ -143,6 +143,7 @@ function App() {
           await reload();
           failures = 0;
         } catch (e) {
+          if (e.code === "SUPERSEDED") { schedule(); return; }
           failures = Math.min(failures + 1, 3);
           if (e.code === "SIGN_IN_REQUIRED" || e.status === 403) {
             setData(null);
