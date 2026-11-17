@@ -6,6 +6,7 @@ import { previewEventRoster,applyEventRoster,refreshEventRoster } from './event-
 import { adminEffectAvailability } from './effect-availability.js';
 import { permissionCommand, permissionRefresh, attestPermissionFence, recoverPermissionRefresh } from './permissions.js';
 import { effectiveAccessGrants } from './permission-grants.js';
+import { retainedHistorySummary } from './retained-history-summary.js';
 import { legacyHistoryPage } from './legacy-history-transport.js';
 import { frontendSnapshotPage } from './frontend-transport.js';
 import { panelSnapshotPage, preparePanelAuthorization } from './panel-read.js';
@@ -499,6 +500,7 @@ export default {
       if (url.pathname === '/v1/admin/directory/review-authorize' && !url.search) return json(await authorizeDirectoryReview(env, input));
       if (url.pathname === '/v1/admin/history/list' && !url.search) return json(await listLegacyHistory(env, input));
       if (url.pathname === '/v1/admin/history/requests' && !url.search) return json(await listLegacyRequestHistory(env, input));
+      if (url.pathname === '/v1/admin/history/summary' && !url.search) return json(await retainedHistorySummary(env, input));
       if (url.pathname === '/v1/admin/history/page' && !url.search) return json(await legacyHistoryPage(env, input));
       if (url.pathname === '/v1/admin/history/read' && !url.search) return json(await readLegacyHistory(env, input));
       if (url.pathname === '/v1/admin/effects/availability' && !url.search) return json(await adminEffectAvailability(env, input));

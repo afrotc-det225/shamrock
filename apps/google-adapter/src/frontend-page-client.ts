@@ -1,5 +1,6 @@
 /** Read a complete coherent snapshot through bounded requests before exposing it to a writer. */
-import {summarizeNativeTerm,type FrontendDashboardSnapshot} from './frontend-history-summary.js';
+import {summarizeNativeTerm,summarizeRetainedTerm,type FrontendDashboardSnapshot} from './frontend-history-summary.js';
+import {parseReviewedRetainedHistory,validateRetainedHistorySummary,RETAINED_HISTORY_SUMMARY_VERSION,type ReviewedRetainedHistory,type ReviewedRetainedTerm} from '../../../packages/domain/src/retained-history-summary.js';
 import {AdapterError,type AdapterConfig,type Signer,type Transport} from './index.js';
 import {assembleFrontendSnapshotPages,FRONTEND_PAGE_VERSION,FRONTEND_PAGE_MAX_BYTES,FRONTEND_SECTIONS,FRONTEND_SECTION_BOUNDS,
   type FrontendPageManifest,type FrontendDataPage,type FrontendVerifyPage} from '../../../packages/domain/src/frontend-transport.js';
@@ -13,7 +14,8 @@ const revision=(value:any)=>record(value)&&Object.keys(value).sort().join(',')==
 const sameRevision=(a:any,b:any)=>revision(a)&&revision(b)&&a.operations===b.operations&&a.administration===b.administration;
 
 /** Only the two read paths are substituted. Commands, claims and receipts retain their exact transport. */
-export function createPagedFrontendTransport(transport:Transport,config:AdapterConfig,signer:Signer,nowSeconds:()=>number):Transport{
+export function createPagedFrontendTransport(transport:Transport,config:AdapterConfig,signer:Signer,nowSeconds:()=>number,reviewedRetainedHistory?:ReviewedRetainedHistory):Transport{
+  const retained=reviewedRetainedHistory===undefined?undefined:parseReviewedRetainedHistory(reviewedRetainedHistory,signer.sha256);
   return{send(original){
     const effect=original.url===config.baseUrl+'/v1/admin/effects/project';
     if(!effect&&original.url!==config.baseUrl+'/v1/admin/snapshot')return transport.send(original);
@@ -64,7 +66,27 @@ export function createPagedFrontendTransport(transport:Transport,config:AdapterC
       if(!Array.isArray(manifest.previousTerms)||manifest.previousTerms.length>2||new Set(manifest.previousTerms.map(t=>t.termId)).size!==manifest.previousTerms.length)fail('The Dashboard comparison catalog is incomplete.');
       const current=snapshot.terms.find(t=>t.isCurrent);
       if(!current||current.termId!==manifest.scope.currentTermId||manifest.previousTerms.some(t=>!id(t.termId)||typeof t.label!=='string'||!Number.isSafeInteger(t.sortOrder)||t.sortOrder>=current.sortOrder))fail('The Dashboard comparison catalog is invalid.');
-      const summaries=manifest.previousTerms.map(term=>{
+      const native = manifest.previousTerms.map(term => ({ ...term, retained: undefined as ReviewedRetainedTerm | undefined }));
+      const candidates = [...native, ...(retained?.terms ?? []).map(term => ({ termId: term.termId, label: term.label, sortOrder: term.sortOrder, retained: term }))];
+      if (candidates.some(term => term.termId === current.termId || term.sortOrder >= current.sortOrder)
+        || ['termId','sortOrder','label'].some(field => new Set(candidates.map(term => term[field as 'termId'|'sortOrder'|'label'])).size !== candidates.length)) fail('Reviewed historical selections overlap the native term catalog; review the exact sources.');
+      const selected = candidates.sort((a,b) => b.sortOrder-a.sortOrder).slice(0,2);
+      const selections = selected.filter(term => term.retained).map(term => ({ snapshotId: term.retained!.snapshotId, sourceSnapshotSha256: term.retained!.sourceSnapshotSha256, expectedPeriodLabel: term.retained!.expectedPeriodLabel }));
+      let retainedSummaries: ReturnType<typeof validateRetainedHistorySummary>[] = [];
+      if (selections.length) {
+        const requestPath='/v1/admin/history/summary',timestamp=String(before());if(++count>FRONTEND_TRANSFER_LIMITS.pages)fail('The coherent transfer exceeded its page budget.');
+        const body=JSON.stringify({environment:base.environment,generation:base.generation,principalId:base.principalId,selections});
+        const response=transport.send({method:'POST',url:config.baseUrl+requestPath,body,headers:{'x-shamrock-key-id':config.keyId,'x-shamrock-timestamp':timestamp,'x-shamrock-signature':signer.hmacSha256(`POST\n${requestPath}\n${timestamp}\n${signer.sha256(body)}`)}});
+        before();if(response.status!==200||typeof response.body!=='string'||bytes(response.body)>16000)fail('The reviewed historical summary did not complete; retained work must retry without replacing the Dashboard.');
+        total+=bytes(response.body);if(total>FRONTEND_TRANSFER_LIMITS.bytes)fail('The coherent transfer exceeded its total response bound.');
+        try {
+          const value=JSON.parse(response.body);
+          if(!record(value)||Object.keys(value).sort().join(',')!=='contractVersion,environment,generation,summaries'||value.contractVersion!==RETAINED_HISTORY_SUMMARY_VERSION||value.environment!==base.environment||value.generation!==base.generation||!Array.isArray(value.summaries)||value.summaries.length!==selections.length)fail('The reviewed historical summary binding changed.');
+          retainedSummaries=value.summaries.map((summary:any,i:number)=>validateRetainedHistorySummary(summary,selections[i]));
+        } catch { fail('The reviewed historical summary is invalid; no partial Dashboard was returned.'); }
+      }
+      const summaries=selected.map(term=>{
+        if(term.retained)return summarizeRetainedTerm(term.retained,retainedSummaries.find(summary=>summary.snapshotId===term.retained!.snapshotId)!);
         const historical=read({environment:base.environment,generation:base.generation,principalId:base.principalId,termId:term.termId},'/v1/admin/snapshot/page',false,manifest.revision);
         if(historical.manifest.scope?.currentTermId!==current.termId||historical.manifest.scope.termId!==term.termId)fail('The Dashboard semester changed during transfer.');
         const summary=summarizeNativeTerm(historical.snapshot,term.termId);
