@@ -30,7 +30,7 @@ export class ProposalStore {
     const result = await this.db
       .prepare(
         "UPDATE proposals SET lease_token=?,lease_until=?,state='applying' WHERE id=? AND binding=? AND principal=? AND lease_until<? AND state NOT IN ('cancelled','conflict','rejected')" +
-        (this.previewSession ? " AND NOT EXISTS(SELECT 1 FROM session_previews WHERE token_hash=?)" : "") + " RETURNING id",
+        (this.previewSession ? " AND NOT EXISTS(SELECT 1 FROM session_previews WHERE token_hash=?) AND NOT EXISTS(SELECT 1 FROM session_preview_intents WHERE token_hash=? AND exit_audit_id IS NULL)" : "") + " RETURNING id",
       )
       .bind(
         this.lease,
@@ -39,7 +39,7 @@ export class ProposalStore {
         this.binding,
         this.principal,
         Date.now(),
-        ...(this.previewSession ? [this.previewSession] : []),
+        ...(this.previewSession ? [this.previewSession, this.previewSession] : []),
       )
       .first();
     return !!result;

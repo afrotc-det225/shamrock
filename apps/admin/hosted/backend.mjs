@@ -18,7 +18,7 @@ const paths = new Set([
   "/v1/admin/transitions/prepare/step",
 ]);
 export class HostedBackend {
-  constructor(env, principalId, preview = null, viewRevision = null) {
+  constructor(env, principalId, preview = null) {
     const origin = new URL(env.BACKEND_ORIGIN);
     if (
       env.ENVIRONMENT !== "staging" ||
@@ -38,7 +38,7 @@ export class HostedBackend {
     this.env = env;
     this.principalId = principalId;
     this.preview = preview;
-    this.viewRevision = viewRevision;
+    this.viewRevision = null;
     this.environment = "staging";
     this.generation = Number(env.GENERATION);
     this.calls = 0;
@@ -90,31 +90,27 @@ export class HostedBackend {
     };
   }
   async post(path, input) {
-    if (this.preview) {
-      const kind = {
-        "/v1/admin/panel/page": "panel",
-        "/v1/admin/snapshot/page": "snapshot",
-        "/v1/admin/history/page": "history",
-        "/v1/admin/history/list": "history-list",
-      }[path];
-      if (!kind) throw new PanelError("VIEW_AS_READ_ONLY", "Exit View as before making changes.", 403);
-      const { environment, generation, principalId, ...page } = input;
-      const result = await this.send("/v1/admin/panel/view-as/page", {
-        ...this.identity(), targetPersonId: this.preview.person_id,
-        entryAuditId: this.preview.entry_audit_id,
-        viewRevision: this.viewRevision, kind, page,
-      });
-      if (result.contractVersion !== "panel-view-as-page-v1" || result.readOnly !== true ||
-          result.kind !== kind ||
-          result.entryAuditId !== this.preview.entry_audit_id ||
-          result.targetPersonId !== this.preview.person_id ||
-          typeof result.viewRevision !== "string" ||
-          (this.viewRevision !== null && result.viewRevision !== this.viewRevision))
-        throw new PanelError("SNAPSHOT_CHANGED", "Access changed. Reload this view.", 409);
-      this.viewRevision = result.viewRevision;
-      return result.page;
-    }
+    if (this.preview) throw new PanelError("VIEW_AS_READ_ONLY", "Exit View as before making changes.", 403);
     return this.send(path, input);
+  }
+  async previewPage(kind, page, viewRevision = null) {
+    const start = kind === "history-list" ? Object.keys(page).length === 0 :
+      page.section === "manifest" && page.offset === 0 && (kind === "history" ? page.sourceSnapshotSha256 === null : page.revision === null) ||
+      kind === "snapshot" && ["term-catalog","directory-catalog","contacts-catalog"].includes(page.section) && page.offset === 0 && page.revision === null;
+    if ((viewRevision === null) !== start)
+      throw new PanelError("SNAPSHOT_CHANGED","Reload the selected view.",409);
+    const identity = this.identity();
+    const result = await this.send("/v1/admin/panel/view-as/page", {
+      ...identity, targetPersonId: this.preview.person_id,
+      entryAuditId: this.preview.entry_audit_id, viewRevision, kind, page,
+    });
+    if (result.contractVersion !== "panel-view-as-page-v1" || result.readOnly !== true ||
+        result.kind !== kind || result.environment !== identity.environment || result.generation !== identity.generation ||
+        result.entryAuditId !== this.preview.entry_audit_id || result.targetPersonId !== this.preview.person_id ||
+        typeof result.viewRevision !== "string" || !/^[a-f0-9]{64}$/.test(result.viewRevision) ||
+        (viewRevision !== null && result.viewRevision !== viewRevision))
+      throw new PanelError("SNAPSHOT_CHANGED", "Access changed. Reload this view.", 409);
+    return {...result.page, viewRevision: result.viewRevision};
   }
   async send(path, input) {
     if (!paths.has(path))
@@ -214,7 +210,22 @@ export class HostedBackend {
         : "/v1/admin/commands";
     return this.post(path, command);
   }
-  panelManifest() {
+  async panelManifest() {
+    if (this.preview) {
+      const authority = await this.send("/v1/admin/panel/view-as/authorize", {
+        ...this.identity(), action: "enter", auditId: this.preview.entry_audit_id,
+        targetPersonId: this.preview.person_id,
+      });
+      if (authority.status !== "ready" || !authority.access)
+        throw new PanelError("VIEW_AS_CHANGED", "This account's access changed. Exit and select it again.", 409);
+      const full = authority.access.capabilities.fullSnapshot;
+      const manifest = await this.previewPage(full ? "snapshot" : "panel", {section:"manifest",offset:0,revision:null});
+      this.viewRevision = manifest.viewRevision;
+      if (!full) return manifest;
+      this.snapshotManifest = manifest;
+      return {...manifest, contractVersion:"panel-view-as-manifest-v1", access:authority.access,
+        revision:{...manifest.revision,access:manifest.viewRevision}};
+    }
     return this.post("/v1/admin/panel/page", {
       ...this.identity(),
       section: "manifest",
@@ -223,6 +234,11 @@ export class HostedBackend {
     });
   }
   async historyPage(input) {
+    if (this.preview) {
+      if (input === null) return this.previewPage("history-list", {});
+      return this.previewPage("history", {snapshotId:input.snapshotId,section:input.section,
+        offset:input.offset,sourceSnapshotSha256:input.sourceSnapshotSha256},input.viewRevision ?? null);
+    }
     const before = await this.panelManifest();
     if (!before.access.capabilities.fullSnapshot)
       throw new PanelError("FORBIDDEN", "This page is outside your access.", 403);
@@ -255,6 +271,11 @@ export class HostedBackend {
       input.offset < 0
     )
       throw new PanelError("INVALID_REQUEST", "This page is unavailable.");
+    if (this.preview) {
+      return this.previewPage(input.surface === "full" ? "snapshot" : "panel", {
+        section:input.section,offset:input.offset,revision:input.revision,
+      }, input.viewRevision ?? null);
+    }
     if (input.surface === "scoped") {
       if (
         JSON.stringify(input.revision) !== JSON.stringify(input.accessRevision)

@@ -2,14 +2,12 @@ import { hydrateReporting } from "./reporting";
 import { loadSnapshot, loadEventsList } from "../snapshot-client";
 let csrf;
 let retainedCapture;
-let viewRevision;
 let retainedEvents;
 export async function api(path, body, options = {}) {
   const response = await fetch(`/api${path}`, {
     method: body === undefined ? "GET" : "POST",
     headers: {
       ...(body === undefined ? {} : { "content-type": "application/json", "x-shamrock-csrf": csrf || "" }),
-      ...(viewRevision && path !== "/state" ? { "x-shamrock-view-revision": viewRevision } : {}),
     },
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),
     signal: options.signal,
@@ -27,7 +25,6 @@ export async function api(path, body, options = {}) {
     throw error;
   }
   if (path === "/state") {
-    viewRevision = data.viewAsRevision || undefined;
     if (data.viewAs && data.viewAs.status !== "ready") {
       retainedCapture = undefined;
       return data;
@@ -53,13 +50,12 @@ export async function api(path, body, options = {}) {
     }
     return hydrateReporting(data);
   }
-  if (path === "/view-as") { retainedCapture = undefined; retainedEvents = undefined; viewRevision = undefined; }
+  if (path === "/view-as") { retainedCapture = undefined; retainedEvents = undefined; }
   return data;
 }
 export async function startSession() {
   retainedCapture = undefined;
   retainedEvents = undefined;
-  viewRevision = undefined;
   const result = await api("/session", {});
   csrf = result.csrf;
   return result;

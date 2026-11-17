@@ -33,14 +33,16 @@ const identifier = (v) =>
 /** An explicit list profile, never a partial FrontendSnapshot. Editors load full data. */
 export async function loadEventsList(state, request, progress = (_value) => {}) {
   check(state.manifest.access.capabilities.fullSnapshot);
-  const get = async (section, offset, revision) => {
-    const page = await request("/page", {surface:"full",section,offset,revision,accessRevision:state.manifest.revision});
+  let transfer = state.manifest.viewRevision ?? null;
+  const get = async (section, offset, revision, viewRevision = transfer) => {
+    const page = await request("/page", {surface:"full",section,offset,revision,accessRevision:state.manifest.revision,...(state.viewAs ? {viewRevision} : {})});
     check(new TextEncoder().encode(JSON.stringify(page)).length <= FRONTEND_PAGE_MAX_BYTES);
     check(page.contractVersion === "frontend-pages-v1" && page.section === section &&
       (revision === null || same(page.revision, revision)));
     return page;
   };
-  const manifest = await get("manifest",0,null);
+  const manifest = state.snapshotManifest || await get("manifest",0,null,null);
+  transfer = manifest.viewRevision ?? null;
   check(Array.isArray(manifest.sections) && manifest.sections.length === FRONTEND_SECTIONS.length &&
     manifest.sections.every((entry,index)=>entry.section===FRONTEND_SECTIONS[index] &&
       Number.isSafeInteger(entry.count) && entry.count >= 0 && entry.count <= FRONTEND_SECTION_BOUNDS[entry.section]));
@@ -174,13 +176,15 @@ export async function loadSnapshot(state, request, progress = (_value) => {}) {
     full = panel.access.capabilities.fullSnapshot;
   let count = 0,
     bytes = 0;
-  const get = async (section, offset, revision) => {
+  let transfer = state.manifest.viewRevision ?? null;
+  const get = async (section, offset, revision, viewRevision = transfer) => {
     const page = await request("/page", {
       surface: full ? "full" : "scoped",
       section,
       offset,
       revision,
       accessRevision: panel.revision,
+      ...(state.viewAs ? {viewRevision} : {}),
     });
     const size = new TextEncoder().encode(JSON.stringify(page)).length;
     check(
@@ -195,7 +199,8 @@ export async function loadSnapshot(state, request, progress = (_value) => {}) {
     );
     return page;
   };
-  const manifest = full ? await get("manifest", 0, null) : panel;
+  const manifest = full ? state.snapshotManifest || await get("manifest", 0, null, null) : panel;
+  transfer = manifest.viewRevision ?? null;
   const sections = full ? FRONTEND_SECTIONS : PANEL_SECTIONS;
   check(Array.isArray(manifest.sections) && manifest.sections.length === sections.length &&
     manifest.sections.every((entry, index) => entry.section === sections[index] &&
@@ -248,9 +253,11 @@ export async function loadSnapshot(state, request, progress = (_value) => {}) {
   if (full) {
     const catalog = async (section) => {
       const rows = [];
-      let offset = 0;
+      let offset = 0, catalogTransfer = null;
       do {
-        const page = await get(section, offset, manifest.revision);
+        const page = await get(section, offset, state.viewAs && offset === 0 ? null : manifest.revision, state.viewAs ? catalogTransfer : transfer);
+        check(same(page.revision,manifest.revision));
+        if (state.viewAs) catalogTransfer = page.viewRevision;
         check(Array.isArray(page.rows) && page.rows.length <= 32);
         rows.push(...page.rows);
         if (page.nextOffset === null) break;

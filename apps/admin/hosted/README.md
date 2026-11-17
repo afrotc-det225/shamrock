@@ -244,3 +244,22 @@ Chromium desktop/mobile tests exercised the workflows, document scrolling, stick
 headers and reduced motion. A real non-owner Google account with a reviewed Flight
 assignment is still needed for the final hosted scoped-account acceptance check.
 Production remains unchanged.
+
+### Account preview release gate
+
+`View as` remains disabled until its operational backend and separate panel schema
+are deployed and exercised together. In addition to panel migration `0002`, apply
+`0003_preview_intents.sql` before deploying the integrated preview bundle. It saves
+entry/exit audit request IDs before network calls, fences pending entry against
+command apply leases, and prevents delayed entry responses from restoring an
+exited session. Missing schema fails closed, including when the feature flag is off.
+
+The browser carries a separate consistency token for each snapshot, catalog or
+historical report. These tokens never choose the actor or target; the verified
+session and server-side preview record do. Full-target state bootstraps the full
+snapshot reader, whereas scoped targets use the scoped panel reader. Catalogs
+start independent transfers and must still match the enclosing data revision.
+The actual administrator remains the audit actor throughout. Local tests cover
+real backend full/scoped transfers, wrong-entry tokens, revocation, pending entry,
+interrupted entry/exit retries and delayed-entry cancellation. They do not prove
+hosted CPU or another cadet's Google sign-in.

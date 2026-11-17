@@ -2,15 +2,16 @@ import { assembleLegacyHistoryPages } from "../../packages/domain/src/legacy-his
 
 /** Fetch one immutable archive in bounded requests; never display a partial capture. */
 export async function loadHistory(snapshotId, request, progress = (_count, _total) => {}) {
-  let bytes = 0, calls = 0;
+  let bytes = 0, calls = 0, viewRevision;
   async function page(section, offset, sourceSnapshotSha256) {
     if (++calls > 520) throw new Error("This report exceeds the supported size.");
-    const value = await request("/history/page", { snapshotId, section, offset, sourceSnapshotSha256 });
+    const value = await request("/history/page", { snapshotId, section, offset, sourceSnapshotSha256, ...(viewRevision ? {viewRevision} : {}) });
     bytes += new TextEncoder().encode(JSON.stringify(value)).length;
     if (bytes > 32 * 1024 * 1024) throw new Error("This report exceeds the supported size.");
     return value;
   }
   const manifest = await page("manifest", 0, null), pages = [];
+  viewRevision = manifest.viewRevision;
   if (manifest.snapshotId !== snapshotId || manifest.rowCount > 500 || manifest.rosterCount > 500)
     throw new Error("The report could not be verified.");
   for (const section of ["roster", "rows"]) {

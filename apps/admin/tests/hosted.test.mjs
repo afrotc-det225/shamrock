@@ -104,16 +104,19 @@ async function fixture(t, backendScript, viewAsEnabled = false) {
     ).map((sql) => ({ sql })),
   );
   await execute(splitMigrationSql(await readFile(new URL("../hosted/migrations/0002_view_as.sql", import.meta.url), "utf8")).map(sql => ({sql})));
+  await execute(splitMigrationSql(await readFile(new URL("../hosted/migrations/0003_preview_intents.sql", import.meta.url), "utf8")).map(sql => ({sql})));
   const run = async (sql, ...values) => (await execute([{ sql, values }]))[0];
   const db = {
     prepare: (sql) => ({
       bind: (...values) => ({
+        sql, values,
         first: async () => (await run(sql, ...values)).results[0] || null,
         all: () => run(sql, ...values),
         run: () => run(sql, ...values),
       }),
     }),
   };
+  db.batch = statements => execute(statements.map(({sql,values})=>({sql,values})));
   return { mf, run, db };
 }
 test("Google JWT requires verified signature, audience, nonce, issuer, time and subject", async () => {
@@ -642,9 +645,9 @@ test('View as keeps the verified actor, wraps reads, and blocks every mutation e
     if(b.principalId!=='actual-admin')return Response.json({error:{code:'WRONG_ACTOR'}},{status:403});
     if(path==='/v1/admin/panel/view-as/authorize') {
       if(b.action==='exit')return Response.json({error:{code:'REVOKED'}},{status:403});
-      return Response.json({contractVersion:'panel-view-as-v1',readOnly:true,action:'enter',entryAuditId:b.auditId,targetPersonId:b.targetPersonId,targetPrincipalId:'flight-reader',status:'ready'});
+      return Response.json({contractVersion:'panel-view-as-v1',readOnly:true,action:'enter',entryAuditId:b.auditId,targetPersonId:b.targetPersonId,targetPrincipalId:'flight-reader',status:'ready',access:{mode:'scoped',flightIds:['alpha'],capabilities:{fullSnapshot:false,attendanceCorrectionFlightIds:[],attendanceReportFlightIds:['alpha']}}});
     }
-    if(path==='/v1/admin/panel/view-as/page'&&b.targetPersonId==='selected-cadet')return Response.json({contractVersion:'panel-view-as-page-v1',readOnly:true,entryAuditId:b.entryAuditId,targetPersonId:b.targetPersonId,targetPrincipalId:'flight-reader',viewRevision:'a'.repeat(64),kind:b.kind,page:{contractVersion:'panel-pages-v1',section:'manifest',revision:{access:'scoped'},access:{mode:'scoped',flightIds:['alpha'],capabilities:{fullSnapshot:false,attendanceCorrectionFlightIds:[],attendanceReportFlightIds:['alpha']}}}});
+    if(path==='/v1/admin/panel/view-as/page'&&b.targetPersonId==='selected-cadet')return Response.json({contractVersion:'panel-view-as-page-v1',readOnly:true,environment:'staging',generation:1,entryAuditId:b.entryAuditId,targetPersonId:b.targetPersonId,targetPrincipalId:'flight-reader',viewRevision:'a'.repeat(64),kind:b.kind,page:{contractVersion:'panel-pages-v1',section:'manifest',revision:{access:'scoped'},access:{mode:'scoped',flightIds:['alpha'],capabilities:{fullSnapshot:false,attendanceCorrectionFlightIds:[],attendanceReportFlightIds:['alpha']}}}});
     return Response.json({error:{code:'UNWRAPPED_ROUTE',message:'Unexpected route'}},{status:403});
   }};`;
   const f=await fixture(t,script,true), token=random(),csrf=random(),hash=await sha(token);
@@ -680,4 +683,44 @@ test('View as entry and proposal apply leases exclude each other',async t=>{
   const backend={identity:()=>({principalId:'owner'}),post:async()=>({contractVersion:'panel-view-as-v1',readOnly:true,action:'enter',entryAuditId:'entry',targetPersonId:'cadet',status:'ready'})};
   await assert.rejects(()=>changePreview({VIEW_AS_ENABLED:'1',PANEL_DB:f.db},{token_hash:hash,principal_id:'owner'},backend,{personId:'cadet'}),e=>e.code==='CHANGE_IN_PROGRESS');
   assert.equal((await f.run('SELECT count(*) AS n FROM session_previews')).results[0].n,0);
+});
+
+test('preview audit requests retain IDs before network calls and resume lost entry/exit replies',async t=>{
+ const f=await fixture(t),hash='retry-preview';
+ await f.run("INSERT INTO identity_bindings VALUES('retry-sub','owner',1)");
+ await f.run('INSERT INTO sessions VALUES(?,?,?,?)',hash,'retry-sub','csrf',Date.now()+60000);
+ const {changePreview,getPreview}=await import('../hosted/view-as.mjs'),env={VIEW_AS_ENABLED:'1',PANEL_DB:f.db},user={token_hash:hash,principal_id:'owner'},calls=[];
+ let failEnter=true,failExit=true;
+ const backend={identity:()=>({principalId:'owner'}),post:async(_path,input)=>{
+  calls.push(input);
+  if(input.action==='enter'&&failEnter){failEnter=false;throw Error('Lost entry response');}
+  if(input.action==='exit'&&failExit){failExit=false;throw Error('Lost exit response');}
+  return {contractVersion:'panel-view-as-v1',readOnly:true,action:input.action,entryAuditId:input.entryAuditId||input.auditId,targetPersonId:'cadet',status:input.action==='enter'?'ready':'exited'};
+ }};
+ await assert.rejects(()=>changePreview(env,user,backend,{personId:'cadet'}),/Lost entry/);
+ assert.equal((await getPreview(env,user)).status,'starting');
+ await f.run("INSERT INTO proposals(id,binding,principal,command,summary,created,state) VALUES('pending','binding','owner','{}','{}',?,'prepared')",Date.now());
+ assert.equal(await new ProposalStore(f.db,'binding','owner',hash).acquire('pending'),false,'pending entry blocks mutation leases');
+ assert.equal((await changePreview(env,user,backend,{personId:'cadet'})).viewAs.status,'ready');
+ assert.equal(calls[0].auditId,calls[1].auditId);
+ const firstExit=await changePreview(env,user,backend,{personId:null});assert.equal(firstExit.auditRecorded,false);assert.equal(await getPreview(env,user),null);
+ assert.equal((await changePreview(env,user,backend,{personId:null})).auditRecorded,true);
+ assert.equal(calls[2].auditId,calls[3].auditId);assert.equal(calls[2].entryAuditId,calls[0].auditId);
+ assert.equal((await f.run('SELECT count(*) AS n FROM session_preview_intents')).results[0].n,0);
+});
+
+test('a delayed entry reply cannot restore preview after Exit',async t=>{
+ const f=await fixture(t),hash='cancel-preview';
+ await f.run("INSERT INTO identity_bindings VALUES('cancel-sub','owner',1)");
+ await f.run('INSERT INTO sessions VALUES(?,?,?,?)',hash,'cancel-sub','csrf',Date.now()+60000);
+ const {changePreview,getPreview}=await import('../hosted/view-as.mjs'),env={VIEW_AS_ENABLED:'1',PANEL_DB:f.db},user={token_hash:hash,principal_id:'owner'};
+ let release,started;const held=new Promise(r=>{release=r;}),observed=new Promise(r=>{started=r;});
+ const backend={identity:()=>({principalId:'owner'}),post:async(_path,input)=>{
+  if(input.action==='enter'){started();await held;}
+  return {contractVersion:'panel-view-as-v1',readOnly:true,action:input.action,entryAuditId:input.entryAuditId||input.auditId,targetPersonId:'cadet',status:input.action==='enter'?'ready':'exited'};
+ }};
+ const entering=changePreview(env,user,backend,{personId:'cadet'});await observed;
+ await changePreview(env,user,backend,{personId:null});release();
+ await assert.rejects(entering,e=>e.code==='VIEW_AS_CANCELLED');
+ assert.equal(await getPreview(env,user),null);
 });

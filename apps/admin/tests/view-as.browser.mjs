@@ -58,6 +58,12 @@ try {
  assert.equal(await page.getByRole('navigation').getByRole('button').count(),0);
  await page.getByRole('button',{name:'Exit view',exact:true}).click();
  await page.getByRole('button',{name:'View as',exact:true}).waitFor();
+ nextStatus='starting';await enter();
+ await page.getByRole('button',{name:'Retry view',exact:true}).waitFor();
+ nextStatus='ready';await page.getByRole('button',{name:'Retry view',exact:true}).click();
+ await page.getByRole('heading',{name:'Events',exact:true}).waitFor();
+ await page.getByRole('button',{name:'Exit view',exact:true}).click();
+ await page.getByRole('button',{name:'View as',exact:true}).waitFor();
  assert.deepEqual(errors,[]);
  console.log('PASS: loading skeleton/cancel/retry, View as selector, readonly controls, working filters, reload retention, exit restores own view, explicit no-access, mobile layout, no runtime errors.');
 }finally{await browser.close();await new Promise(r=>server.close(r));service.close();await local.dispose();}

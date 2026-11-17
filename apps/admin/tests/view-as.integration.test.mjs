@@ -1,0 +1,47 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {build} from 'esbuild';
+import {resolve} from 'node:path';
+import {createLocalBackend} from '../backend.mjs';
+import {HostedBackend} from '../hosted/backend.mjs';
+await build({absWorkingDir:resolve(import.meta.dirname,'../../..'),entryPoints:['apps/admin/snapshot-client.ts'],outfile:'.build/admin/view-as-client.mjs',bundle:true,format:'esm',platform:'browser'});
+const {loadSnapshot,loadEventsList}=await import('../../../.build/admin/view-as-client.mjs');
+async function fixture(t,full){
+ const local=await createLocalBackend();t.after(()=>local.dispose());
+ const source=await local.backend.snapshot(),person=source.people[0],principal='preview-target';
+ await local.db.batch([
+  local.db.prepare("INSERT INTO command_registry VALUES('preview-binding','admin')"),
+  local.db.prepare('INSERT INTO principals VALUES(?,?,1)').bind(principal,person.personId),
+  local.db.prepare("INSERT INTO principal_accounts VALUES(?,?,'authenticated-confirmation','preview-binding')").bind(principal,person.email),
+  local.db.prepare("INSERT INTO admin_grants VALUES(?,'frontend.read',?,?)").bind(principal,full?'wing':'flight',full?'*':'alpha'),
+ ]);
+ const entry=await local.backend.post('/v1/admin/panel/view-as/authorize',{...local.backend.identity(),action:'enter',auditId:'preview-entry',targetPersonId:person.personId});
+ assert.equal(entry.status,'ready');
+ const host=Object.create(HostedBackend.prototype);host.identity=()=>local.backend.identity();host.send=(path,input)=>local.backend.post(path,input);host.preview={person_id:person.personId,entry_audit_id:'preview-entry',status:'ready'};
+ return {local,host,source,person};
+}
+test('actual backend full View as supports list, full snapshot and independent catalog/history transfers',async t=>{
+ const {host,source,local,person}=await fixture(t,true);
+ const manifest=await host.panelManifest(),state={manifest,snapshotManifest:host.snapshotManifest,viewAs:{status:'ready'}};
+ assert.equal(manifest.access.capabilities.fullSnapshot,true);
+ const calls=[];
+ const request=(_path,body)=>{calls.push(body);return host.page(body);};
+ const events=await loadEventsList(state,request);assert.equal(events.events.length,source.events.length);
+ const complete=await loadSnapshot(state,request);assert.deepEqual(complete.people,source.people);
+ const catalogStarts=calls.filter(body=>['directory-catalog','contacts-catalog'].includes(body.section)&&body.offset===0);
+ assert.equal(catalogStarts.length,2);assert(catalogStarts.every(body=>body.revision===null&&body.viewRevision===null));
+ const list=await host.historyPage(null);assert.deepEqual(list.snapshots,[]);
+ await assert.rejects(()=>host.page({surface:'full',section:'directory-catalog',offset:0,revision:source.revision,viewRevision:manifest.viewRevision}),e=>e.status===409||e.status===400);
+ await assert.rejects(()=>host.post('/v1/admin/commands',{}),e=>e.code==='VIEW_AS_READ_ONLY');
+ await local.backend.post('/v1/admin/panel/view-as/authorize',{...local.backend.identity(),action:'enter',auditId:'another-entry',targetPersonId:person.personId});
+ host.preview.entry_audit_id='another-entry';
+ await assert.rejects(()=>host.page({surface:'full',section:'verify',offset:0,revision:source.revision,viewRevision:manifest.viewRevision}),e=>e.code==='VIEW_AS_CHANGED');
+});
+test('actual backend scoped View as preserves Flight privacy and rejects actor revocation mid-transfer',async t=>{
+ const {host,local}=await fixture(t,false),manifest=await host.panelManifest();
+ const snapshot=await loadSnapshot({manifest,viewAs:{status:'ready'}},(_path,body)=>host.page(body));
+ assert(snapshot.people.every(person=>person.flightId==='alpha'&&!('email' in person)));
+ await assert.rejects(()=>host.historyPage(null),e=>e.status===403);
+ await local.db.prepare("DELETE FROM admin_grants WHERE principal_id='panel-owner' AND capability='frontend.read'").run();
+ await assert.rejects(()=>host.page({surface:'scoped',section:'people',offset:0,revision:manifest.revision,viewRevision:manifest.viewRevision}),e=>e.status===403);
+});

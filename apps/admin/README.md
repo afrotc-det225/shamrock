@@ -249,14 +249,23 @@ person's actual Google login works; that needs separate account acceptance.
 
 The actual Google subject and administrator principal never change. The target
 and audited entry are stored in `session_previews`, outside operational records.
-Every read uses the dedicated backend dual-identity guard, with a revision binding
-across pages. Every mutation and saved-proposal receipt is refused while previewing,
+Every read uses the dedicated backend dual-identity guard. Each snapshot, catalog
+and historical report retains its own revision binding across pages; tokens cannot
+be reused across readers, targets or audited entries. Every mutation and saved-proposal receipt is refused while previewing,
 including requests without preview headers. Entry and saved-command apply leases
 exclude one another. Existing proposals and their bindings are preserved. Exit
 clears the session's preview even if access has been revoked; a failed exit audit
 is reported explicitly and does not trap the operator in preview.
 
-Release requirements: apply `hosted/migrations/0002_view_as.sql` to the **separate
+Entry and exit audit IDs are saved before network calls in `session_preview_intents`.
+Interrupted entry remains read-only and offers Retry/Exit; retries reuse the exact
+audit ID. An exit clears local mode transactionally before audit delivery and retains
+a failed exit request for a later retry during that session. A delayed entry response
+cannot recreate a cancelled preview. Session deletion removes these session-scoped
+intents; completed operational audit records remain in the backend ledger.
+
+Release requirements: apply `hosted/migrations/0002_view_as.sql` and then
+`hosted/migrations/0003_preview_intents.sql` to the **separate
 panel session database**, verify its schema/foreign key, and deploy the operational
 backend's reviewed View as routes/audit migration before enabling
 `VIEW_AS_ENABLED=1`. The base `hosted/schema.sql` hash remains unchanged; retain a

@@ -19,6 +19,7 @@ export function ViewAsSelector({ people, onSelect, onOpen, busy }) {
   </>;
 }
 export const viewAsStatus = {
+  "starting": "The preview was interrupted before it finished. Retry or exit this view.",
   "no-active-principal": "This person does not have an active SHAMROCK account.",
   "ambiguous-principal": "More than one account is linked to this person. Their access cannot be previewed until the link is corrected.",
   "no-verified-login": "This person does not have a verified sign-in linked to SHAMROCK.",

@@ -227,8 +227,15 @@ function App() {
   });
   const viewAs = (person) => run(async () => {
     if (pendingRead.current) await pendingRead.current.catch(() => {});
-    const result = await api("/view-as", { personId: person?.personId || null });
-    setPreview(result.viewAs); setPreviewName(person ? `${person.firstName} ${person.lastName}` : "");
+    if (person?.firstName) setPreviewName([person.firstName,person.lastName].filter(Boolean).join(" "));
+    let result;
+    try { result = await api("/view-as", {personId:person?.personId || null}); }
+    catch (error) {
+      const current = await api("/session",{}).catch(()=>null);
+      if (current?.viewAs) { setPreview(current.viewAs); setData(null); }
+      throw error;
+    }
+    setPreview(result.viewAs); if (!person) setPreviewName("");
     setProposal(null); setData(null); setNotice("");
     await reload(true);
     if (result.auditRecorded === false) setNotice("Exited View as; the exit audit could not be saved.");
@@ -339,7 +346,8 @@ function App() {
                 {notice}
               </div>
             )}
-            {blockedPreview ? <p>{viewAsStatus[preview.status] || "This account cannot be previewed."}</p> : !data || (!data.snapshot && page !== "History" && !(page === "Events" && data.eventsList)) ? (
+            {blockedPreview ? <div><p>{viewAsStatus[preview.status] || "This account cannot be previewed."}</p>
+              {preview.status === "starting" && <button disabled={busy} onClick={()=>viewAs({personId:preview.personId})}>Retry view</button>}</div> : !data || (!data.snapshot && page !== "History" && !(page === "Events" && data.eventsList)) ? (
               <section className="loading-panel" aria-busy={!error}>
                 {error ? (
                   <button

@@ -61,7 +61,7 @@ export async function session(request, env) {
   if (!/^[A-Za-z0-9_-]{43}$/.test(token))
     throw new PanelError("SIGN_IN_REQUIRED", "Sign in to SHAMROCK.", 401);
   const row = await env.PANEL_DB.prepare(
-    "SELECT s.token_hash,s.google_sub,s.csrf,s.expires,b.principal_id,p.person_id AS preview_person_id,p.entry_audit_id AS preview_entry_audit_id,p.status AS preview_status FROM sessions s JOIN identity_bindings b ON b.google_sub=s.google_sub LEFT JOIN session_previews p ON p.token_hash=s.token_hash WHERE s.token_hash=? AND s.expires>? AND b.active=1",
+    "SELECT s.token_hash,s.google_sub,s.csrf,s.expires,b.principal_id,COALESCE(p.person_id,i.person_id) AS preview_person_id,COALESCE(p.entry_audit_id,i.entry_audit_id) AS preview_entry_audit_id,CASE WHEN p.person_id IS NOT NULL THEN p.status WHEN i.person_id IS NOT NULL THEN 'starting' ELSE NULL END AS preview_status FROM sessions s JOIN identity_bindings b ON b.google_sub=s.google_sub LEFT JOIN session_previews p ON p.token_hash=s.token_hash LEFT JOIN session_preview_intents i ON i.token_hash=s.token_hash AND i.exit_audit_id IS NULL WHERE s.token_hash=? AND s.expires>? AND b.active=1",
   )
     .bind(await sha(token), Date.now())
     .first();
