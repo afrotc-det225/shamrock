@@ -20,6 +20,7 @@ import { buildExcusalPublicationTables, planExcusalPublication, planDashboardPub
   type DashboardPublicationPlan, type DashboardPublicationRead } from './frontend-supplemental.js';
 import type { DashboardAction } from './frontend-dashboard.js';
 import { createPrivateCheckpoint } from './private-checkpoint.js';
+import { freezeFrontendPhotos, inspectFrontendPhotoPhase, splitFrontendPhotos, type FrozenPhotoCell } from './frontend-photos.js';
 import type { SnapshotRevision } from '../../../packages/domain/src/admin.js';
 
 export const FRONTEND_PROPERTIES = { config: 'SHAMROCK_V3_FRONTEND_CONFIG', claim: 'SHAMROCK_V3_FRONTEND_CLAIM', pause: 'SHAMROCK_V3_FRONTEND_PAUSED', resumeReceipt: 'SHAMROCK_V3_FRONTEND_RESUME_RECEIPT' } as const;
@@ -70,8 +71,8 @@ export interface FrontendPublicationState {
   baselines: Record<Kind, FrontendPublicationBaseline>;
   drafts: Record<Kind, FrontendDraft[]>;
   supplemental?: FrontendSupplementalState;
-  /** Written before the single atomic Google publication, retained across an ambiguous response. */
-  pending?: { claim: FrontendRefreshClaim; plans: Record<Kind, FrontendPublicationPlan>; supplemental?: FrontendSupplementalPlans };
+  /** Frozen before Google writes. Large photo updates retain their exact original cells. */
+  pending?: { claim: FrontendRefreshClaim; plans: Record<Kind, FrontendPublicationPlan>; supplemental?: FrontendSupplementalPlans; photos?: FrozenPhotoCell[] };
   completedClaim?: { effectId: string; claimToken: string };
   /** Exact committed input receipts applied to this checkpoint, for cross-file recovery. */
   inputReceipts?: Record<string, string>;
@@ -104,7 +105,7 @@ export interface FrontendRefreshPorts {
     verifyValidation(plan: FrontendPublicationPlan): boolean;
     writeAtomic(requests: Record<string, unknown>[]): void;
   };
-  /** One atomic batch across all three tables. Never split or use USER_ENTERED. */
+  /** One atomic provider batch. Large photo phases use verified ten-chip batches under the same fence. */
   writeAtomic(requests: Record<string, unknown>[]): void;
   restoreEditPolicy(): void;
   assertEditPolicy(): void;
@@ -367,7 +368,10 @@ export function consumeFrontendRefresh(runtime: FrontendRefreshPorts): { status:
         const dashboard = supplemental ? runtime.supplemental!.readDashboard() : undefined;
         const mainAfter = KINDS.every(k => verifyFrontendPublicationReadback(plans[k], reads[k]))
           && (!supplemental || verifyDashboardPublicationReadback(supplemental.dashboard, dashboard!));
-        if (!mainAfter) {
+        const photoIntermediate = !mainAfter && state.pending.photos
+          && inspectFrontendPhotoPhase(plans, state.pending.photos, reads).ready
+          && (!supplemental || verifyDashboardPublicationReadback(supplemental.dashboard, dashboard!));
+        if (!mainAfter && !photoIntermediate) {
           KINDS.forEach(k => assertFrontendPublicationPreconditions(plans[k], reads[k]));
           if (supplemental && dashboardReadFingerprint(dashboard!) !== supplemental.dashboard.expectedRead) fail('frontend_readback', 'Recovery found mixed Main state.');
         } else if (KINDS.some(k => !runtime.verifyValidation(plans[k]))) fail('frontend_validation', 'Recovery must verify copied Main controls.');
@@ -378,7 +382,7 @@ export function consumeFrontendRefresh(runtime: FrontendRefreshPorts): { status:
           if (!queuesAfter) QUEUES.forEach(q => assertFrontendPublicationPreconditions(supplemental.excusals[q], reads[q]));
           else if (QUEUES.some(q => !runtime.supplemental!.verifyValidation(supplemental.excusals[q]))) fail('frontend_validation', 'Recovery must verify copied decision controls.');
         }
-        providerState = mainAfter && queuesAfter ? 'after' : mainAfter || queuesAfter ? 'partial' : 'before';
+        providerState = mainAfter && queuesAfter ? 'after' : mainAfter || queuesAfter || photoIntermediate ? 'partial' : 'before';
       }
       // Reuse the validated identity/config/clock, but sign the exact recovery path/body.
       const signed = buildSignedFrontendRequest('project', { workerId: runtime.workerId, principalId: runtime.principalId, claim }, runtime.config, runtime.signer, runtime.nowSeconds());
@@ -418,13 +422,17 @@ export function consumeFrontendRefresh(runtime: FrontendRefreshPorts): { status:
         if (model.generation !== runtime.config.generation || !equal(model.revision, projected.snapshot.revision)
           || model.tables.length !== 3 || new Set(model.tables.map(t => t.kind)).size !== 3) fail('frontend_contract', 'Frontend projections must share one coherent snapshot.');
         const seeds = runtime.readSeeds(); runtime.refreshReads?.(); const plans = {} as Record<Kind, FrontendPublicationPlan>;
+        const initialReads = {} as Record<Kind, FrontendTableRead>;
         for (const kind of KINDS) {
           const table = model.tables.find(t => t.kind === kind);
           if (!table) fail('frontend_contract', 'A required frontend table is missing.');
+          initialReads[kind] = runtime.readTable(kind);
           plans[kind] = planFrontendPublication({ generation: model.generation, revision: model.revision, table,
-            current: runtime.readTable(kind), baseline: state.baselines[kind], drafts: state.drafts[kind], seeds, editFenceVerified: true });
+            current: initialReads[kind], baseline: state.baselines[kind], drafts: state.drafts[kind], seeds, editFenceVerified: true });
         }
         state.pending = { claim: clone(claim), plans };
+        const photos = freezeFrontendPhotos(plans, initialReads);
+        if (photos) state.pending.photos = photos;
         if (runtime.supplemental) {
           const extra = runtime.supplemental.plan(projected.snapshot as FrontendSnapshot, state.supplemental!);
           if (!equal(extra.dashboard.revision, model.revision) || QUEUES.some(queue => extra.excusals[queue].nextBaseline.generation !== model.generation
@@ -444,12 +452,27 @@ export function consumeFrontendRefresh(runtime: FrontendRefreshPorts): { status:
       const dashboardRead = supplemental ? runtime.supplemental!.readDashboard() : undefined;
       const alreadyWritten = KINDS.every(kind => verifyFrontendPublicationReadback(plans[kind], reads[kind]))
         && (!supplemental || verifyDashboardPublicationReadback(supplemental.dashboard, dashboardRead!));
-      if (!alreadyWritten) {
+      const photos = state.pending!.photos;
+      const photoIntermediate = !alreadyWritten && photos && inspectFrontendPhotoPhase(plans, photos, reads).ready
+        && (!supplemental || verifyDashboardPublicationReadback(supplemental.dashboard, dashboardRead!));
+      if (!alreadyWritten && !photoIntermediate) {
         for (const kind of KINDS) assertFrontendPublicationPreconditions(plans[kind], reads[kind]);
         if (supplemental && dashboardReadFingerprint(dashboardRead!) !== supplemental.dashboard.expectedRead) fail('frontend_readback', 'Main is neither the frozen original nor the complete planned publication.');
         runtime.assertFenced(); checkLease();
-        const requests = boundedRequests([...KINDS.flatMap(kind => plans[kind].requests), ...(supplemental?.dashboard.requests ?? [])]);
+        const requests = boundedRequests([...(photos ? splitFrontendPhotos(plans).core : KINDS.flatMap(kind => plans[kind].requests)), ...(supplemental?.dashboard.requests ?? [])]);
         if (requests.length) runtime.writeAtomic(requests);
+      }
+      if (photos && !alreadyWritten) {
+        // Derive remaining work from exact readback, including after a lost response.
+        // Nonphoto cells and stable identities must already match the frozen plan.
+        for (let batch = 0; batch < 50; batch++) {
+          runtime.assertFenced(); checkLease(); runtime.refreshReads?.();
+          const fresh = Object.fromEntries(KINDS.map(kind => [kind, runtime.readTable(kind)])) as Record<Kind, FrontendTableRead>;
+          const phase = inspectFrontendPhotoPhase(plans, photos, fresh);
+          if (!phase.ready || supplemental && !verifyDashboardPublicationReadback(supplemental.dashboard, runtime.supplemental!.readDashboard())) fail('frontend_photos', 'Photo publication requires the complete frozen Main values and identities.');
+          if (!phase.batches.length) break;
+          runtime.writeAtomic(boundedRequests(phase.batches[0]));
+        }
       }
       runtime.assertFenced(); runtime.refreshReads?.();
       for (const kind of KINDS) if (!verifyFrontendPublicationReadback(plans[kind], runtime.readTable(kind))) fail('frontend_readback', 'Published frontend cells did not read back exactly; the edit fence is retained.');

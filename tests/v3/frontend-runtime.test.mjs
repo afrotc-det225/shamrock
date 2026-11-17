@@ -61,6 +61,26 @@ function fixture() {
   return { fx, runtime, claim };
 }
 
+test('full-roster photos resume ten-chip batches after lost responses and reject unrelated changes', () => {
+  for (const interrupted of [false, true, 'tamper']) {
+    const {fx,runtime}=fixture(), oldRows=Array.from({length:26},(_,i)=>({key:`photo-${i}`,values:{person_id:`photo-${i}`,photo:{fileUri:`https://drive.google.com/file/d/old-${i}/view`}},versions:{}}));
+    const columns=[{header:'person_id',label:'ID',editable:false},{header:'photo',label:'Photo',editable:false,fileChip:true}];
+    fx.state.baselines.directory.rows=copy(oldRows);
+    Object.assign(fx.current.directory,{headers:columns.map(c=>c.header),labels:columns.map(c=>c.label),gridRowCount:28,rows:oldRows.map(r=>columns.map(c=>frontendLiteralCell(r.values[c.header]))),range:{sheetId:100,startRowIndex:1,endRowIndex:28,startColumnIndex:0,endColumnIndex:2}});
+    fx.model.tables[0]={kind:'directory',keyHeader:'person_id',columns,rows:oldRows.map((r,i)=>({...copy(r),values:{...r.values,photo:{fileUri:`https://drive.google.com/file/d/new-${i}/view`}}}))};
+    let lost=false;const chipCounts=[];runtime.writeAtomic=requests=>{
+      assert.equal(fx.fenced,true);assert.ok(fx.state.pending);
+      const chipCount=requests.reduce((n,r)=>n+(r.updateCells?.rows??[]).reduce((m,row)=>m+row.values.reduce((p,c)=>p+(c.chipRuns?.length??0),0),0),0);assert.ok(chipCount<=10);chipCounts.push(chipCount);
+      for(const request of requests){const b=request.updateCells;if(!b)continue;const target=Object.values(fx.current).find(t=>t.sheetId===b.range.sheetId);assert.ok(target);b.rows.forEach((r,i)=>r.values.forEach((cell,j)=>{const row=b.range.startRowIndex+i;if(row<2)return;target.rows[row-2][b.range.startColumnIndex+j]=copy(cell);}));}
+      if(interrupted&&chipCount&& !lost){lost=true;throw Error('accepted chip batch; response lost');}
+    };
+    if(interrupted){assert.throws(()=>consumeFrontendRefresh(runtime),/response lost/);assert.equal(fx.fenced,true);assert.equal(fx.ack,0);assert.equal(fx.state.pending.photos.length,26);fx.enabled=true;}
+    if(interrupted==='tamper'){fx.current.leadership.rows[0][1]=frontendLiteralCell('unrelated owner edit');assert.throws(()=>consumeFrontendRefresh(runtime));assert.equal(fx.fenced,true);assert.equal(fx.ack,0);assert.deepEqual(chipCounts.filter(n=>n>0),[10]);continue;}
+    assert.equal(consumeFrontendRefresh(runtime).status,'published');assert.equal(fx.ack,1);assert.equal(fx.fenced,false);
+    assert.deepEqual(chipCounts.filter(n=>n>0),[10,10,6]);assert.equal(fx.state.pending,undefined);
+  }
+});
+
 function fullFixture() {
   const result = fixture(), { fx, runtime } = result;
   fx.dashboard = { sheetId: 20, dataSheetId: 21, canvas: [[frontendLiteralCell('old'), ...Array.from({ length: 11 }, () => ({}))]],
