@@ -54,12 +54,14 @@ export default function People({
         profile: Object.fromEntries(
           profileFields.map((k) => [
             k,
-            k === 'dateOfBirth' ? p?.[k] ?? null : p?.[k] ??
-              {
-                asYear: "AS100",
-                flightPathStatus: "Active 3/4",
-              }[k] ??
-              "",
+            k === "dateOfBirth"
+              ? (p?.[k] ?? null)
+              : (p?.[k] ??
+                {
+                  asYear: "AS100",
+                  flightPathStatus: "Active 3/4",
+                }[k] ??
+                ""),
           ]),
         ),
       });

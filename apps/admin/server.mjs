@@ -140,7 +140,7 @@ export function createPanelServer(service, { assistantKey, port = 4173 } = {}) {
           return json(200, {
             snapshot,
             reporting,
-            history: service.history(),
+            history: await service.history(),
             meta: {
               environment: service.backend.environment,
               fictional: service.backend.environment === "local",
@@ -160,7 +160,7 @@ export function createPanelServer(service, { assistantKey, port = 4173 } = {}) {
             200,
             action[2] === "apply"
               ? await service.apply(action[1], body.approved)
-              : service.cancel(action[1]),
+              : await service.cancel(action[1]),
           );
         if (req.method === "GET" && url.pathname === "/api/transition")
           return json(

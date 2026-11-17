@@ -1,0 +1,39 @@
+{
+  "$schema": "https://raw.githubusercontent.com/cloudflare/workers-sdk/main/packages/wrangler/config-schema.json",
+  "name": "shamrock-admin-staging",
+  "main": "../../../.build/admin/hosted-worker.mjs",
+  "compatibility_date": "2026-11-16",
+  "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": true,
+  "preview_urls": false,
+  "assets": {
+    "directory": "../dist",
+    "binding": "ASSETS",
+    "run_worker_first": ["/api/*", "/auth/*", "/health"],
+  },
+  "d1_databases": [
+    {
+      "binding": "PANEL_DB",
+      "database_name": "shamrock-admin-staging",
+      "database_id": "REPLACE_WITH_PRIVATE_STAGING_DATABASE_ID",
+    },
+  ],
+  "services": [{ "binding": "BACKEND", "service": "shamrock-staging" }],
+  "vars": {
+    "ENVIRONMENT": "staging",
+    "APP_ORIGIN": "https://shamrock-admin-staging.det225.workers.dev",
+    "BACKEND_ORIGIN": "https://shamrock-staging.det225.workers.dev",
+    "GENERATION": "1",
+    "SOURCE_KIND": "test",
+    "SOURCE_RESOURCE": "admin-staging-web",
+    "BRIDGE_KEY_ID": "REPLACE_WITH_STAGING_KEY_ID",
+  },
+  // Secrets: GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, BRIDGE_SECRET.
+  // Never log callback URLs/codes, request bodies, cookies, or token claims.
+  "observability": {
+    "enabled": false,
+    "logs": { "enabled": false, "invocation_logs": false },
+    "traces": { "enabled": false },
+  },
+  "triggers": { "crons": ["17 * * * *"] },
+}

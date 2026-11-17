@@ -4,13 +4,8 @@ import { Miniflare, Log, LogLevel } from "miniflare";
 import { initializeLocalDatabase } from "../../scripts/lib/v3-local-database.mjs";
 import { captureOperationalSnapshot } from "../../.build/admin/domain.mjs";
 
-export class PanelError extends Error {
-  constructor(code, message, status = 400) {
-    super(message);
-    this.code = code;
-    this.status = status;
-  }
-}
+import { PanelError } from "./errors.mjs";
+export { PanelError } from "./errors.mjs";
 export const hash = (value) =>
   createHash("sha256").update(JSON.stringify(value)).digest("hex");
 export class Backend {

@@ -1,7 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import {
-  Clover,
   Home,
   Users,
   ChevronsUp,
@@ -12,13 +11,19 @@ import {
   Sparkles,
   RefreshCw,
 } from "lucide-react";
-import { api, startSession, label } from "./api";
+import { api, startSession, label, logout } from "./api";
 import { Drawer, EditorError } from "./components";
 import Events from "./Events";
 import People from "./People";
 import Attendance from "./Attendance";
 import Semester from "./Semester";
 import { Overview, System, Assistant } from "./Secondary";
+import "@fontsource/libre-franklin/latin-400.css";
+import "@fontsource/libre-franklin/latin-500.css";
+import "@fontsource/libre-franklin/latin-600.css";
+import "@fontsource/libre-franklin/latin-700.css";
+import "@fontsource/barlow-condensed/latin-600.css";
+import Brand from "./Brand";
 import "./style.css";
 const pages = [
   ["Overview", Home],
@@ -35,12 +40,16 @@ function App() {
     [error, setError] = useState(""),
     [notice, setNotice] = useState(""),
     [busy, setBusy] = useState(false),
-    [proposal, setProposal] = useState(null);
+    [proposal, setProposal] = useState(null),
+    [signIn, setSignIn] = useState(false);
   const reload = async () => setData(await api("/state"));
   useEffect(() => {
     startSession()
       .then(reload)
-      .catch((e) => setError(e.message));
+      .catch((e) => {
+        if (e.code === "SIGN_IN_REQUIRED") setSignIn(true);
+        else setError(e.message);
+      });
   }, []);
   const run = async (fn) => {
     setBusy(true);
@@ -61,7 +70,11 @@ function App() {
     });
   const apply = (id) =>
     run(async () => {
-      const result = await api(`/proposals/${id}/apply`, { approved: true });
+      let result = await api(`/proposals/${id}/apply`, { approved: true });
+      for (let step = 0; result.state === "continuing" && step < 40; step++) {
+        setNotice("Preparing the semester. Progress is being saved.");
+        result = await api(`/proposals/${id}/apply`, { approved: true });
+      }
       setNotice(result.message);
       setProposal(null);
       await reload();
@@ -72,16 +85,50 @@ function App() {
     setNotice("");
   };
   const common = { ...data, propose, busy, notify: setNotice };
+  if (signIn) {
+    const code = new URLSearchParams(location.search).get("signin");
+    const message =
+      code === "ACCESS_NOT_GRANTED"
+        ? "This account does not have SHAMROCK access. Contact your administrator."
+        : code === "SIGN_IN_LIMIT"
+          ? "Please wait a few minutes before trying again."
+          : code
+            ? "Sign-in did not complete. Please try again."
+            : "";
+    return (
+      <div className="login">
+        <section className="login-brand">
+          <Brand />
+          <p>
+            Detachment administration,
+            <br />
+            in one place.
+          </p>
+        </section>
+        <main className="login-form">
+          <h1>Welcome to SHAMROCK</h1>
+          <p>Sign in to manage the Wing’s people, schedule and attendance.</p>
+          {message && (
+            <div className="error" role="alert">
+              {message}
+            </div>
+          )}
+          <a className="google-sign-in" href="/auth/login">
+            Sign in with Google
+          </a>
+          <small>
+            Use the Google account your administrator has authorized.
+          </small>
+        </main>
+      </div>
+    );
+  }
+
   return (
     <EditorError.Provider value={error}>
       <div className="app">
         <aside className="sidebar">
-          <div className="brand">
-            <Clover size={31} fill="currentColor" />
-            <div>
-              SHAMROCK<small>Detachment 225</small>
-            </div>
-          </div>
+          <Brand />
           <nav aria-label="Main navigation">
             {pages.map(([title, Icon]) => (
               <button
@@ -105,7 +152,12 @@ function App() {
               </span>
             </button>
             <p>
-              Administrator<small>Local test session</small>
+              Administrator
+              {data?.meta.hosted && (
+                <button className="sign-out" onClick={() => run(logout)}>
+                  Sign out
+                </button>
+              )}
             </p>
           </div>
         </aside>
@@ -115,11 +167,6 @@ function App() {
               Wing <span className="slash">/</span> <strong>{page}</strong>
             </span>
             <div>
-              <span className="environment">
-                {data?.meta.fictional
-                  ? "Local staging · fictional data"
-                  : "Staging"}
-              </span>
               <button
                 className="icon"
                 aria-label="Refresh data"

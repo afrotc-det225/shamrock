@@ -9,8 +9,14 @@ export async function api(path, body) {
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),
   });
   const data = await response.json();
-  if (!response.ok)
-    throw new Error(data.error?.message || "Unable to complete this request.");
+  if (!response.ok) {
+    const error = new Error(
+      data.error?.message || "Unable to complete this request.",
+    );
+    error.code = data.error?.code;
+    error.status = response.status;
+    throw error;
+  }
   return data;
 }
 export async function startSession() {
@@ -103,3 +109,13 @@ export const displayDate = (value) =>
         timeZone: "America/Indiana/Indianapolis",
       }).format(new Date(value))
     : "Not scheduled";
+
+export async function logout() {
+  const response = await fetch("/auth/logout", {
+    method: "POST",
+    headers: { "x-shamrock-csrf": csrf || "" },
+  });
+  if (!response.ok)
+    throw new Error("Sign-out did not complete. Please reload.");
+  location.assign("/");
+}

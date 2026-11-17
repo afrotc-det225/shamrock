@@ -3,8 +3,9 @@
 This is an isolated, local staging application. Its D1 database contains fictional
 cadets and events. It does not change production or publish to Google. The intended
 hosted address is `shamrock.det225.workers.dev`; this version is **not deployed**
-there. Hosting and Google sign-in remain release gates, coordinated with the main
-D1 migration work.
+there. Workers-native Google sign-in and D1 session/proposal storage are implemented under
+`hosted/`. Provider setup and live account verification follow the [hosted staging
+runbook](hosted/README.md), coordinated with the main D1 migration work.
 
 ## Try the panel
 
@@ -125,12 +126,13 @@ preparation, navigation and mobile layout. They do not contact Google or CRC.
 
 ## Hosted staging and remaining work
 
-The local Node host is not deployable to Workers as-is. Before a hosted staging
-release, provide a Workers-native HTTP/session/proposal store, verified Google
-sign-in with server-side authorization, reviewed per-human D1 principal mappings,
-and a registered source binding. Never expose this owner-local session bootstrap.
-Use a separate staging Worker and staging database; bind no production resources.
-Keep Google delivery gated until the main migration's source/schema/bindings agree.
+The local Node host remains loopback-only. The separate `hosted/worker.mjs` is the
+Workers-native entry point, with verified Google subject mappings, backend
+per-operation authorization and a separate D1 store for sessions and proposals.
+Follow [hosted setup and recovery](hosted/README.md); never expose the local-owner
+session bootstrap or deploy the local fixture entry point. The hosted assistant
+remains disconnected from all records. A new web/admin source contract is required
+before production; the fictional rehearsal uses an explicitly registered test source.
 
 Hosted acceptance must cover ordinary administrator roles, revoked identity,
 concurrent edits, real-data sizes, snapshot fences, native Sheet/Form convergence,
@@ -148,8 +150,7 @@ drawer was corrected to reserve page width instead of obscuring event statuses.
 The search input's overlapping background was corrected. No page-width overflow
 or JavaScript runtime error remained in the checked views.
 
-Intentional differences from the concept: the environment badge explicitly says
-local fictional staging; start/end fields show full Eastern datetimes; the editor
+Intentional differences from the concept: development badges are omitted from normal navigation; start/end fields show full Eastern datetimes; the editor
 includes Location and collapsed roster details needed for the actual command;
 typography is more compact. The screenshot is a design reference, not the shipped
 interface. All controls are native HTML/React elements.
@@ -159,3 +160,9 @@ permission grants, notification routing and closeout controls, bulk CSV operatio
 photo-fetch recovery, or full historical report browsing. Those backend workflows
 must gain reviewed UI controls before calling the panel a complete replacement for
 all administration. Source-code bug fixes still require a development workflow.
+
+The presentation now takes its navy, gold and Libre Franklin inspiration from
+[Notre Dame AFROTC](https://afrotc.nd.edu/). Fonts are self-hosted open-license
+Libre Franklin and Barlow Condensed; no licensed Notre Dame font files are copied.
+The three-leaf SHAMROCK mark is an original vector. Environment information stays
+in deployment records and the separate hostname instead of dominating the interface.

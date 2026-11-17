@@ -103,8 +103,7 @@ export function System({ snapshot, history, retry, busy }) {
       />
       <div className="notice">
         A saved change confirms the database accepted it. Spreadsheet and Form
-        publication is a separate step. This local staging host does not publish
-        to Google.
+        publication is a separate step.
       </div>
       <section className="form-section">
         <h2>Change history</h2>
@@ -123,10 +122,7 @@ export function System({ snapshot, history, retry, busy }) {
             ))}
           </Table>
         ) : (
-          <p>
-            No catalog diagnostics were reported. This is not a check of Google
-            delivery or hosted service health.
-          </p>
+          <p>No catalog issues were reported.</p>
         )}
       </details>
     </>
@@ -170,7 +166,7 @@ export function Assistant({ meta }) {
       <p className="hint">
         {meta.assistantAvailable
           ? `Connected · ${meta.model}`
-          : "CRC is not connected on this test host. No AI subscription is required to use the panel."}
+          : "The assistant is currently unavailable. All administrator tools remain available."}
       </p>
       <div className="conversation" aria-live="polite">
         {messages.map((m, i) => (

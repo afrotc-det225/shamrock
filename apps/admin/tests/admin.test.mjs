@@ -68,7 +68,10 @@ test("event rename preserves excusal and attendance links; replay is idempotent 
   assert.deepEqual(after.requests, before.requests);
   assert.equal(after.corrections[0].eventId, "veterans");
   await assert.rejects(f.s.apply(stale.id, true));
-  assert.equal(f.s.history().find((r) => r.id === stale.id).state, "conflict");
+  assert.equal(
+    (await f.s.history()).find((r) => r.id === stale.id).state,
+    "conflict",
+  );
 });
 test("Directory updates preserve identity and Leadership contacts can be managed", async (t) => {
   const f = await fixture(t),
@@ -151,7 +154,9 @@ test("semester preparation remains separate from activation", async (t) => {
     },
   };
   const p = await f.s.propose("transition.prepare", { plan });
-  await f.s.apply(p.id, true);
+  let preparation = await f.s.apply(p.id, true);
+  while (preparation.state === "continuing")
+    preparation = await f.s.apply(p.id, true);
   assert.equal(
     (await f.s.snapshot()).terms.find((t) => t.isCurrent).termId,
     "fall-2026",
@@ -281,13 +286,34 @@ test("production cannot be selected by backend configuration", () => {
   );
 });
 
-test('lost write response retries the saved command without duplicate mutation',async t=>{
-  const f=await fixture(t),snapshot=await f.s.snapshot();
-  const proposal=await f.s.propose('event.upsert',{...eventPayload(snapshot),label:'Reviewed rename'});
-  const original=f.backend.post.bind(f.backend);let lose=true;
-  f.backend.post=async(path,input)=>{const result=await original(path,input);if(path==='/v1/admin/commands'&&lose){lose=false;throw new PanelError('CONNECTION_INTERRUPTED','Response lost',503)}return result};
-  await assert.rejects(f.s.apply(proposal.id,true),{code:'CONNECTION_INTERRUPTED'});
-  assert.equal(f.s.history().find(p=>p.id===proposal.id).state,'retryable');
-  await f.s.apply(proposal.id,true);
-  const updated=(await f.s.snapshot()).events.find(e=>e.eventId==='veterans');assert.equal(updated.version,2);assert.equal(updated.label,'Reviewed rename');
+test("lost write response retries the saved command without duplicate mutation", async (t) => {
+  const f = await fixture(t),
+    snapshot = await f.s.snapshot();
+  const proposal = await f.s.propose("event.upsert", {
+    ...eventPayload(snapshot),
+    label: "Reviewed rename",
+  });
+  const original = f.backend.post.bind(f.backend);
+  let lose = true;
+  f.backend.post = async (path, input) => {
+    const result = await original(path, input);
+    if (path === "/v1/admin/commands" && lose) {
+      lose = false;
+      throw new PanelError("CONNECTION_INTERRUPTED", "Response lost", 503);
+    }
+    return result;
+  };
+  await assert.rejects(f.s.apply(proposal.id, true), {
+    code: "CONNECTION_INTERRUPTED",
+  });
+  assert.equal(
+    (await f.s.history()).find((p) => p.id === proposal.id).state,
+    "retryable",
+  );
+  await f.s.apply(proposal.id, true);
+  const updated = (await f.s.snapshot()).events.find(
+    (e) => e.eventId === "veterans",
+  );
+  assert.equal(updated.version, 2);
+  assert.equal(updated.label, "Reviewed rename");
 });

@@ -850,3 +850,197 @@ blockquote {
     clip: rect(0, 0, 0, 0);
   }
 }
+/* Notre Dame AFROTC-inspired palette and open-license, locally served type. */
+:root {
+  font-family: "Libre Franklin", "Helvetica Neue", Arial, sans-serif;
+  --navy: #0c2340;
+  --green: #0c2340;
+  --gold: #ae9142;
+  --border: #d6dee7;
+  --muted: #596b7f;
+  color: #0c2340;
+}
+h1,
+h2,
+h3 {
+  color: #0c2340;
+}
+h1 {
+  font-family: "Barlow Condensed", "Arial Narrow", sans-serif;
+  font-size: 38px;
+  font-weight: 600;
+  letter-spacing: 0.1px;
+}
+.topbar {
+  background: #edf2f9;
+}
+.primary:hover {
+  background: #143865;
+}
+.sidebar button.selected {
+  background: #203b59;
+}
+.sidebar button:hover {
+  background: #193552;
+}
+.brand {
+  font-family: "Barlow Condensed", "Arial Narrow", sans-serif;
+  font-size: 29px;
+  font-weight: 600;
+  letter-spacing: 1.2px;
+  gap: 12px;
+  align-items: center;
+}
+.brand small {
+  font-family: "Libre Franklin", sans-serif;
+  font-size: 11px;
+  font-weight: 400;
+  letter-spacing: 0.4px;
+  margin-top: 4px;
+}
+.brand .brand-mark {
+  width: 31px;
+  height: 35px;
+  flex: none;
+  fill: #ae9142;
+  color: #ae9142;
+  overflow: visible;
+}
+.brand-stem {
+  fill: none;
+  stroke: #ae9142;
+  stroke-width: 3;
+  stroke-linecap: round;
+}
+.sidebar-bottom .sign-out {
+  font-size: 12px;
+  padding: 10px 0;
+  margin: 0;
+  border: 0;
+}
+.status.good {
+  background: #e3eee7;
+  color: #25543b;
+}
+.login {
+  min-height: 100vh;
+  display: grid;
+  grid-template-columns: 40% 60%;
+}
+.login-brand {
+  background: #0c2340;
+  color: #fff;
+  padding: 60px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+}
+.login-brand .brand {
+  border: 0;
+  margin: 0;
+  padding: 0;
+  justify-content: flex-start;
+}
+.login-brand p {
+  font-family: "Barlow Condensed", sans-serif;
+  font-size: 48px;
+  line-height: 1.15;
+  border-top: 2px solid #ae9142;
+  padding-top: 28px;
+  max-width: 390px;
+}
+.login-form {
+  align-self: center;
+  width: 100%;
+  max-width: 570px;
+  padding: 50px;
+}
+.login-form h1 {
+  font-size: 44px;
+}
+.login-form > p {
+  color: #596b7f;
+  line-height: 1.65;
+  margin: 18px 0 32px;
+}
+.google-sign-in {
+  display: block;
+  text-align: center;
+  background: #0c2340;
+  color: white;
+  text-decoration: none;
+  border-radius: 4px;
+  padding: 15px 20px;
+  font-weight: 600;
+  font-size: 14px;
+}
+.google-sign-in:hover {
+  background: #143865;
+}
+.login-form > small {
+  display: block;
+  color: #596b7f;
+  font-size: 12px;
+  line-height: 1.65;
+  text-align: center;
+  margin-top: 18px;
+}
+.login-form .error {
+  margin-bottom: 20px;
+}
+@media (max-width: 950px) {
+  .brand {
+    font-size: 24px;
+    gap: 8px;
+  }
+  .brand .brand-mark {
+    width: 26px;
+    height: 31px;
+  }
+  .login-brand {
+    padding: 35px;
+  }
+  .login-brand p {
+    font-size: 38px;
+  }
+}
+@media (max-width: 640px) {
+  .brand {
+    font-size: 27px;
+  }
+  .sidebar-bottom .sign-out {
+    display: inline-flex;
+  }
+  .login {
+    display: block;
+  }
+  .login-brand {
+    padding: 25px;
+  }
+  .login-brand p {
+    display: none;
+  }
+  .login-form {
+    padding: 45px 24px;
+  }
+  .login-form h1 {
+    font-size: 36px;
+  }
+  h1 {
+    font-size: 32px;
+  }
+  .brand .brand-mark {
+    height: 30px;
+  }
+  .sidebar-bottom p {
+    display: block;
+    padding: 0;
+    margin: 0;
+    border: 0;
+    font-size: 0;
+  }
+  .sidebar-bottom .sign-out {
+    font-size: 11px;
+    padding: 2px 5px;
+  }
+}

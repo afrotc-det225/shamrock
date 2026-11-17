@@ -1,0 +1,136 @@
+# Administrator panel: hosted staging
+
+This Worker serves the same administrator interface with verified Google sign-in,
+separate D1 session/proposal persistence, and a service binding to the **fictional
+staging** backend. It cannot select a production environment. The production
+Apps Script system is unaffected. Do not deploy `local-fixture.ts` or the Node
+owner-local server.
+
+## Provider setup
+
+Coordinate with the main migration release owner. Use the existing free Workers
+plan, free D1 capacity, and workers.dev address; no Cloudflare Access subscription,
+paid model, custom domain or GitHub subscription is required.
+
+1. Build with `node apps/admin/build-domain.mjs`,
+   `npm run build --prefix apps/admin`, and
+   `node apps/admin/build-hosted.mjs --release` from a committed checkout. The
+   generated `.build/admin/hosted-release.json` pins source, Worker, schema and
+   every static asset by SHA-256; release mode refuses dirty imported source.
+2. Create a separate session database and use `installPanelSchema` from `setup.mjs`
+   with a committed source hash and provider callbacks that inspect/apply/read back
+   the exact target. It refuses a nonempty/mismatched database, pins the schema hash
+   in `panel_schema`, and includes a transactional empty-database assertion. Apply
+   its ordered statements atomically; never execute the raw schema blindly. It is
+   independent of the operational migration ledger. Record its schema hash and
+   deployment binding in the private operations record.
+3. Make a private resolved copy of `wrangler.example.jsonc`. Its database ID,
+   origin, backend service, bridge key ID, generation and source must agree with
+   the reviewed fictional staging release. The main file is
+   `.build/admin/hosted-worker.mjs`; static assets are `apps/admin/dist/`.
+   Resolve paths relative to the private configuration's directory.
+4. Register a distinct `test` source named `admin-staging-web` in the fictional
+   backend. Do not impersonate a Google spreadsheet source. A future production
+   release needs a dedicated web/admin source contract, migration and audit tests.
+5. Create a Google OAuth **Web application** client in the project-owned Google
+   Cloud project. The exact callback is
+   `https://shamrock-admin-staging.det225.workers.dev/auth/callback`.
+   Only `openid email` scopes are requested; no Sheets, Drive, Forms, refresh
+   token or offline access. No browser Google SDK or JavaScript origin is required
+   for this server-side flow. Follow Google's consent-screen test-user settings
+   while the client remains in Testing.
+6. Store `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` and `BRIDGE_SECRET` as Worker
+   secrets from the shared vault. Never add them to source, a public config, logs,
+   chat or the browser bundle. Provider settings are the runtime configuration;
+   successors do not need to inherit an environment file.
+7. Map the operator's **verified Google subject** to the reviewed existing D1
+   principal in `identity_bindings`. Obtain the subject through a verified Google
+   identity flow; never infer it from a submitted email. The same operational
+   principal must be active and hold the required backend grants. There is no
+   automatic enrollment or public grant endpoint.
+8. Deploy only the separate administrator staging Worker and verify the checks
+   below. Preserve the original production resources and command gates. Resume
+   only the fictional staging mutation gate when the coordinated test requires it.
+
+The target hosted compatibility date is November 16, 2026. The locally installed
+workerd currently supports an older date; emulator tests use the existing July 1
+baseline. Those tests are not evidence for the hosted compatibility date. Verify
+the actual deployed Worker through the hosted acceptance checks.
+
+## Identity and request protections
+
+- Authorization code flow uses a browser-bound, ten-minute, single-use state,
+  PKCE S256, and nonce. Login invalidates the browser's old session before account
+  selection to prevent account confusion on a denied sign-in.
+- `jose` verifies RS256 signatures from Google's fixed JWKS endpoint, issuer,
+  client audience, authorized party, token age/expiry, nonce, verified-email claim
+  and subject. Only the subject maps to the operational principal.
+- Eight-hour opaque sessions are hashed in D1; cookies are Secure, HttpOnly,
+  host-only and SameSite=Lax. Every request rechecks the active identity binding.
+  Logout deletes the session. Removing a binding immediately blocks later requests.
+- Same-origin checks and a constant-time CSRF check protect writes. The Worker
+  never trusts a browser-supplied principal, email, operation grant or bridge key.
+- The backend independently checks the principal, exact operation grant, source,
+  generation, mutation fence and optimistic record version. A Google login by
+  itself grants no operational authority.
+- Proposals are scoped to the principal and backend binding. A database lease
+  prevents simultaneous application; ambiguous failures preserve the exact command
+  for idempotent retry. A stale or rejected command requires a new review.
+- Snapshot transfer and requests are bounded. Semester capture proceeds in saved
+  batches; the UI continues those batches without requiring the operator to manage
+  cursors. Large transfers that exceed the free-tier request budget fail closed.
+- The hosted assistant is disconnected. No staging records or private backend
+  context go to CRC. This gate is independent of normal administrator operations.
+
+Hourly cleanup removes bounded batches of expired authentication material only.
+Unfinished/uncertain proposals are retained. Unsubmitted/rejected/cancelled records
+expire after 30 days; completed panel receipts after 90 days. Operational audit
+receipts remain in the backend. Authentication tables are capped at 2,000 rows;
+sessions additionally at 20 per subject, and proposals at 2,000 total/500 per
+principal with a 128 KB record bound. Limits fail closed without upgrading billing.
+All request logging and tracing are disabled because
+OAuth callback URLs contain transient authorization codes. Do not enable automatic
+URL/body/header tracing on authentication routes. Operator data changes remain
+audited in the operational backend; add only redacted event-code logs if needed.
+
+## Hosted acceptance
+
+- Public page loads the designed sign-in interface; anonymous `/api/state` and
+  `/api/session` requests cannot access records or mint an authenticated session.
+- Login redirects only to Google, with the exact callback and minimal scopes.
+  Sign in as the explicitly authorized operator. Confirm the correct principal
+  appears in backend audit evidence after a fictional change.
+- An unregistered Google account is refused. Wrong nonce/audience/signature,
+  expired or reused state, missing browser cookie, cross-origin writes and forged
+  identity headers must fail. Automated tests cover these without live credentials.
+- Rename a fictional event, read back D1, and verify attendance/excusal identifiers
+  remain linked. Repeat a saved command and verify one mutation. Test a stale edit,
+  a revoked backend grant and a revoked identity binding.
+- Verify native Sheet/Form delivery separately using the main migration's paused
+  rehearsals. Database acceptance alone does not establish Google publication.
+- Verify free-tier request/CPU/D1 usage in the provider for the real hosted flow;
+  never upgrade a plan automatically when a limit is encountered.
+- Test sign-out and a fresh browser; there must be no local-owner bypass on the
+  hosted Worker. Inspect logs for absence of tokens, callback query strings and PII.
+
+## Recovery and handoff
+
+Keep the signed-in administrator panel and all ordinary operations independent of
+CRC. A successor needs the project-owned Cloudflare/Google accounts, shared vault,
+and an explicitly registered personal Google subject with backend grants.
+
+For an access incident, deactivate the relevant identity binding and backend
+principal/grants, then delete their sessions. Pausing backend mutations is the
+independent stop switch. Preserve proposal records when troubleshooting interrupted
+writes; retry the same command only after checking its receipt. Do not clear an
+active proposal lease to force a second write.
+
+To roll back, restore the prior reviewed administrator Worker/assets version with
+its compatible session schema and bindings. Do not roll back or overwrite the
+operational database to undo a presentation deployment. If the auth database must
+be restored, invalidate all restored sessions and OAuth states before reopening
+access; old session tokens must not become valid again.
+
+The main interface intentionally omits development badges. Its separate staging
+hostname and these release records identify the environment. This presentation
+choice does not connect production data or remove staging isolation.
