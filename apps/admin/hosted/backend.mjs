@@ -4,10 +4,12 @@ import { boundedJson } from "./http.mjs";
 const paths = new Set([
   "/v1/admin/panel/view-as/authorize",
   "/v1/admin/panel/view-as/page",
+  "/v1/admin/panel/view-as/access",
   "/v1/admin/history/list",
   "/v1/admin/history/page",
   "/v1/admin/snapshot/page",
   "/v1/admin/panel/page",
+  "/v1/admin/panel/access",
   "/v1/admin/panel/authorize",
   "/v1/admin/panel/commands",
   "/v1/admin/commands",
@@ -181,7 +183,7 @@ export class HostedBackend {
         target,
       });
     }
-    const manifest = await this.panelManifest();
+    const manifest = await this.panelAuthority();
     if (!manifest.access.capabilities.fullSnapshot)
       throw new PanelError(
         "FORBIDDEN",
@@ -240,13 +242,43 @@ export class HostedBackend {
       revision: null,
     });
   }
+  async panelAuthority() {
+    if (this.preview) {
+      const result = await this.send("/v1/admin/panel/view-as/access", {
+        ...this.identity(), targetPersonId: this.preview.person_id,
+        entryAuditId: this.preview.entry_audit_id,
+      });
+      if (result.contractVersion !== "panel-view-as-access-v1" || result.readOnly !== true ||
+          result.environment !== this.environment || result.generation !== this.generation ||
+          result.entryAuditId !== this.preview.entry_audit_id || result.targetPersonId !== this.preview.person_id ||
+          typeof result.viewRevision !== "string" || !/^[a-f0-9]{64}$/.test(result.viewRevision))
+        throw new PanelError("VIEW_AS_CHANGED", "Reload the selected view.", 409);
+      this.viewRevision = result.viewRevision;
+      return result;
+    }
+    return this.post("/v1/admin/panel/access", this.identity());
+  }
+  async captureUnchanged(encoded) {
+    if (!encoded) return false;
+    let expected;
+    try { if(encoded.length > 1024) throw Error(); expected=JSON.parse(decodeURIComponent(encoded)); }
+    catch { throw new PanelError("INVALID_REQUEST", "Reload SHAMROCK."); }
+    if (!expected || Object.keys(expected).sort().join(',') !== 'captureKey,revision,viewAsRevision')
+      throw new PanelError("INVALID_REQUEST", "Reload SHAMROCK.");
+    // The browser supplies only a comparison value, never authorization or rows.
+    // A changed actor/binding must obtain a new capture before any reuse.
+    if (expected.captureKey !== this.binding) return false;
+    const current=await this.panelAuthority();
+    return JSON.stringify(expected.revision)===JSON.stringify(current.revision) &&
+      expected.viewAsRevision===(this.viewRevision??null);
+  }
   async historyPage(input) {
     if (this.preview) {
       if (input === null) return this.previewPage("history-list", {});
       return this.previewPage("history", {snapshotId:input.snapshotId,section:input.section,
         offset:input.offset,sourceSnapshotSha256:input.sourceSnapshotSha256},input.viewRevision ?? null);
     }
-    const before = await this.panelManifest();
+    const before = await this.panelAuthority();
     if (!before.access.capabilities.fullSnapshot)
       throw new PanelError("FORBIDDEN", "This page is outside your access.", 403);
     let result;
@@ -263,7 +295,7 @@ export class HostedBackend {
         sourceSnapshotSha256: input.sourceSnapshotSha256,
       });
     }
-    const after = await this.panelManifest();
+    const after = await this.panelAuthority();
     if (!after.access.capabilities.fullSnapshot ||
         JSON.stringify(before.revision) !== JSON.stringify(after.revision))
       throw new PanelError("SNAPSHOT_CHANGED", "Records or access changed. Reload SHAMROCK.", 409);
@@ -299,7 +331,7 @@ export class HostedBackend {
         revision: input.revision,
       });
     }
-    const manifest = await this.panelManifest();
+    const manifest = await this.panelAuthority();
     if (!manifest.access.capabilities.fullSnapshot)
       throw new PanelError(
         "FORBIDDEN",
@@ -320,7 +352,7 @@ export class HostedBackend {
       offset: input.offset,
       revision: input.revision,
     });
-    const verified = await this.panelManifest();
+    const verified = await this.panelAuthority();
     if (
       !verified.access.capabilities.fullSnapshot ||
       JSON.stringify(verified.revision) !== JSON.stringify(input.accessRevision)

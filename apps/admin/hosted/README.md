@@ -149,6 +149,8 @@ reset; do not upgrade billing or rotate working OAuth credentials to bypass this
 limit. An ordinary SQL, token-exchange or identity error is not classified as a
 daily limit. Free-tier exhaustion prevents authenticating and reading records;
 health/static-page success alone cannot establish that sign-in is working.
+The panel pauses automatic and focus-triggered refreshes until the bounded
+`Retry-After` delay or the next UTC reset, and shows that time in the user's locale.
 
 ## Hosted acceptance
 
@@ -232,12 +234,34 @@ limits remain 512 pages and 16 MiB; no partial snapshot
 or cross-user cache is displayed. An unchanged manifest reuses only this tab's
 verified in-memory capture, keyed by backend/principal binding, generation, scope
 and authority revision. Sign-in, logout or authorization errors clear it; every
-refresh still asks the server for current authority and revision. Full administrator reads check the current panel
+refresh still asks the server for current authority and revision. A conditional
+request supplies only its previous binding/revision for comparison. The server
+revalidates the signed-in account (and both actor and target for View as) before
+answering unchanged; the browser then reuses its own captured manifest/records.
+No record counts, personal data or authorization decision come from the browser.
+Full administrator reads check the current panel
 access fingerprint before and after every full-data page, including private lifetime
 Directory/contact catalogs. Scoped reads use only the backend's panel pages;
 request-only people stay in the excusal queue rather than entering the roster.
 Changes to records or authority invalidate the capture. Session identity always
 comes from the verified Google subject binding, never request JSON.
+
+The private `/v1/admin/panel/access` and `/v1/admin/panel/view-as/access` routes
+reuse the same bounded authority queries and double-read drift fence without
+counting eleven data sections. Full pages, History pages and receipts use these
+checks before and after reading. Preview access additionally revalidates the
+original audit entry and account mapping inside each batch; it neither replays
+entry audit nor changes the independent snapshot/catalog/History transfer tokens.
+
+Local D1 measurement against the isolated 113-profile, 47-event, 356-request
+export, including hosted backend guards, measured 27,734 reads for the initial
+state, 28,681 for its Events pages, 313,991 for a complete capture, and 66 for an
+unchanged refresh. Reading all six retained reports (510 rows) took 87,783 reads.
+Previously, the History wrapper counted the complete panel before and after each
+page; provider analytics attributed over 20 million reads to those count queries
+in a single rehearsal minute. These local improvements do not establish a passed
+daily free-tier budget. Complete captures remain significant, and normal usage
+still needs a measured daily workload before production cutover.
 
 Scoped navigation exposes Attendance & excusals only. Flight Commanders can see
 their authorized Flights without receiving private Directory/contact fields.

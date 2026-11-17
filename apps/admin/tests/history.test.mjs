@@ -31,7 +31,7 @@ test('history browser refuses changed archives and nonadvancing cursors',async()
 test('history proxy gates actual administrator both before and after every private read',async()=>{
  const backend=Object.create(HostedBackend.prototype);backend.identity=()=>({principalId:'verified-admin',environment:'staging',generation:1});
  let calls=0,authorized=false;
- backend.panelManifest=async()=>({access:{capabilities:{fullSnapshot:authorized}},revision:{version:1}});
+ backend.panelAuthority=async()=>({access:{capabilities:{fullSnapshot:authorized}},revision:{version:1}});
  backend.post=async()=>{calls++;return {snapshots:[]};};
  await assert.rejects(()=>backend.historyPage(null),e=>e.status===403);assert.equal(calls,0);
  authorized=true;backend.post=async(path,input)=>{assert.equal(input.principalId,'verified-admin');authorized=false;calls++;return {snapshots:['private']};};

@@ -242,7 +242,7 @@ test("full page is withheld if panel access is revoked while old Sheets read sti
     generation: 1,
     principalId: "actor",
   });
-  host.panelManifest = async () => ({
+  host.panelAuthority = async () => ({
     revision,
     access: { capabilities: { fullSnapshot: ++checks === 1 } },
   });

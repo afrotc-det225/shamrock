@@ -3,33 +3,50 @@ import { loadSnapshot, loadEventsList } from "../snapshot-client";
 let csrf;
 let retainedCapture;
 let retainedEvents;
+let retainedState;
 export async function api(path, body, options = {}) {
+  const previous = path === "/state" ? retainedState : null;
   const response = await fetch(`/api${path}`, {
     method: body === undefined ? "GET" : "POST",
     headers: {
       ...(body === undefined ? {} : { "content-type": "application/json", "x-shamrock-csrf": csrf || "" }),
+      ...(previous?.transport === "paged-v1" ? {"x-shamrock-capture": encodeURIComponent(JSON.stringify({
+        captureKey:previous.captureKey,revision:previous.manifest.revision,viewAsRevision:previous.viewAsRevision??null,
+      }))} : {}),
     },
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),
     signal: options.signal,
   });
-  const data = await response.json();
+  let data = await response.json();
   options.signal?.throwIfAborted();
   if (!response.ok) {
     if (response.status === 401 || response.status === 403)
-      { retainedCapture = undefined; retainedEvents = undefined; }
+      { retainedCapture = undefined; retainedEvents = undefined; retainedState = undefined; }
     const error = new Error(
       data.error?.message || "Unable to complete this request.",
     );
     error.code = data.error?.code;
     error.status = response.status;
+    const retryAfter = response.headers.get("retry-after");
+    if (/^\d+$/.test(retryAfter || "") && Number(retryAfter) >= 1 && Number(retryAfter) <= 86400)
+      error.retryAfterSeconds = Number(retryAfter);
     throw error;
   }
   if (path === "/state") {
+    if (data.captureUnchanged) {
+      if (!previous || previous.captureKey !== data.captureKey ||
+          (previous.viewAsRevision??null) !== (data.viewAsRevision??null))
+        throw Object.assign(new Error("Reload SHAMROCK with current account access."), {code:"SNAPSHOT_CHANGED"});
+      data = {...previous,reportingTime:data.reportingTime,viewAs:data.viewAs,viewAsRevision:data.viewAsRevision};
+    }
     if (data.viewAs && data.viewAs.status !== "ready") {
       retainedCapture = undefined;
+      retainedEvents = undefined;
+      retainedState = undefined;
       return data;
     }
     if (data.transport === "paged-v1") {
+      retainedState = data;
       const key = JSON.stringify([data.captureKey, data.manifest, data.viewAsRevision]);
       if (options.profile === "access" && data.manifest.access.capabilities.fullSnapshot) return data;
       if (options.profile === "events" && data.manifest.access.capabilities.fullSnapshot && retainedCapture?.key !== key) {
@@ -50,12 +67,13 @@ export async function api(path, body, options = {}) {
     }
     return hydrateReporting(data);
   }
-  if (path === "/view-as") { retainedCapture = undefined; retainedEvents = undefined; }
+  if (path === "/view-as") { retainedCapture = undefined; retainedEvents = undefined; retainedState = undefined; }
   return data;
 }
 export async function startSession() {
   retainedCapture = undefined;
   retainedEvents = undefined;
+  retainedState = undefined;
   const result = await api("/session", {});
   csrf = result.csrf;
   return result;
@@ -156,5 +174,7 @@ export async function logout() {
   if (!response.ok)
     throw new Error("Sign-out did not complete. Please reload.");
   retainedCapture = undefined;
+  retainedEvents = undefined;
+  retainedState = undefined;
   location.assign("/");
 }

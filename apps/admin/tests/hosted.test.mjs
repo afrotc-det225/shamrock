@@ -686,7 +686,7 @@ test("scoped HTTP sessions cannot reach full pages, management or transition rou
 test("hosted state defers receipts; receipt reads retain the authenticated principal and backend binding", async t => {
   const script = `export default {async fetch(request){
     const body=await request.json();
-    if(new URL(request.url).pathname!=='/v1/admin/panel/page'||body.principalId!=='operator')
+    if(!['/v1/admin/panel/page','/v1/admin/panel/access'].includes(new URL(request.url).pathname)||body.principalId!=='operator')
       return Response.json({error:{code:'FORBIDDEN',message:'Unavailable'}},{status:403});
     return Response.json({section:'manifest',revision:{operations:1,administration:1,access:'a'.repeat(64)},access:{capabilities:{fullSnapshot:true}}});
   }};`;
@@ -708,6 +708,29 @@ test("hosted state defers receipts; receipt reads retain the authenticated princ
   assert.deepEqual(body.receipts.map(row=>row.id),['own']);
   await f.run("UPDATE identity_bindings SET active=0 WHERE google_sub='receipt-sub'");
   assert.equal((await f.mf.dispatchFetch(origin+'/api/receipts',{headers})).status,401);
+});
+
+test('unchanged state uses fresh authority without recounting, and never reuses another binding or stale revision',async t=>{
+  const script=`let manifests=0;export default{async fetch(request){
+    const input=await request.json(),path=new URL(request.url).pathname;
+    if(input.principalId!=='operator')return Response.json({error:{code:'NOT_AUTHORIZED'}},{status:403});
+    const value={revision:{operations:1,administration:1,access:'a'.repeat(64)},access:{capabilities:{fullSnapshot:true}}};
+    if(path==='/v1/admin/panel/access')return Response.json({...value,section:'verify',verified:true});
+    if(path==='/v1/admin/panel/page')return Response.json({...value,section:'manifest',manifests:++manifests});
+    return new Response(null,{status:404});}};`;
+  const f=await fixture(t,script),token=random();
+  await f.run("INSERT INTO identity_bindings VALUES('cached-sub','operator',1)");
+  await f.run("INSERT INTO sessions VALUES(?,?,?,?)",await sha(token),'cached-sub',random(),Date.now()+60000);
+  const headers={cookie:'__Host-shamrock='+token};
+  const first=await(await f.mf.dispatchFetch(origin+'/api/state',{headers})).json();assert.equal(first.manifest.manifests,1);
+  const capture={captureKey:first.captureKey,revision:first.manifest.revision,viewAsRevision:null};
+  const refresh=async value=>f.mf.dispatchFetch(origin+'/api/state',{headers:{...headers,'x-shamrock-capture':encodeURIComponent(JSON.stringify(value))}});
+  const same=await(await refresh(capture)).json();assert.equal(same.captureUnchanged,true);assert.equal(same.manifest,undefined);assert.equal(same.snapshot,undefined);
+  const changed=await(await refresh({...capture,revision:{...capture.revision,operations:0}})).json();assert.equal(changed.captureUnchanged,undefined);assert.equal(changed.manifest.manifests,2);
+  const other=await(await refresh({...capture,captureKey:'other-binding'})).json();assert.equal(other.manifest.manifests,3);
+  assert.equal((await refresh({...capture,extra:true})).status,400);
+  await f.run("UPDATE identity_bindings SET active=0 WHERE google_sub='cached-sub'");
+  assert.equal((await refresh(capture)).status,401);
 });
 
 test("receipt reads discard results when authority is revoked before the final access check",async t=>{

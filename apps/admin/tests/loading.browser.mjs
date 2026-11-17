@@ -8,8 +8,9 @@ const local=await createLocalBackend(),service=new AdminService(local.backend),s
 await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
 const browser=await chromium.launch(process.env.SHAMROCK_CHROMIUM_PATH?{executablePath:process.env.SHAMROCK_CHROMIUM_PATH}:{});
 try{
- const host=Object.create(HostedBackend.prototype);host.identity=()=>local.backend.identity();host.post=(path,body)=>local.backend.post(path,body);
+ const host=Object.create(HostedBackend.prototype);host.identity=()=>local.backend.identity();host.post=(path,body)=>local.backend.post(path,body);host.binding='fictional-browser-capture';
  const page=await browser.newPage({viewport:{width:1440,height:1000}}),errors=[],active=new Set(),requests=[];
+ await page.clock.install();
  let maximum=0,blockSection,held,release,gate,stateCalls=0,holdSession=false,releaseSession;
  const sessionGate=new Promise(resolve=>{releaseSession=resolve;});
  const hold=section=>{blockSection=section;held=false;gate=new Promise(resolve=>{release=resolve;});};
@@ -18,7 +19,9 @@ try{
  page.on('request',request=>{if(request.url().endsWith('/api/page')){active.add(request);maximum=Math.max(maximum,active.size);requests.push(request.postDataJSON().section);}});
  page.on('requestfinished',request=>active.delete(request));page.on('requestfailed',request=>active.delete(request));
  await page.route('**/api/session',async route=>{if(holdSession)await sessionGate;const response=await route.fetch();await route.fulfill({response});});
- await page.route('**/api/state',async route=>{stateCalls++;return route.fulfill({json:{manifest:await host.panelManifest(),transport:'paged-v1',reportingTime:Date.now(),history:[],meta:{hosted:true}}});});
+ await page.route('**/api/state',async route=>{stateCalls++;
+  if(await host.captureUnchanged(route.request().headers()['x-shamrock-capture']))return route.fulfill({json:{captureUnchanged:true,captureKey:host.binding,viewAs:null,viewAsRevision:null,reportingTime:Date.now()}});
+  return route.fulfill({json:{manifest:await host.panelManifest(),captureKey:host.binding,viewAs:null,viewAsRevision:null,transport:'paged-v1',reportingTime:Date.now(),history:[],meta:{hosted:true}}});});
  await page.route('**/api/history/list',route=>route.fulfill({json:{snapshots:[]}}));
  await page.route('**/api/page',async route=>{
   const body=route.request().postDataJSON(),delay=!held&&body.section===blockSection;
@@ -60,6 +63,11 @@ try{
  releaseSession();await page.getByRole('button',{name:'Add contact',exact:true}).waitFor();
  assert.equal(await page.locator('.error').count(),0,'superseded bootstrap navigation stays silent');
  assert(maximum<=2,`maximum page concurrency was ${maximum}`);
+ const beforeRefresh=requests.length;
+ const refreshResponse=page.waitForResponse(response=>response.url().endsWith('/api/state'));
+ await page.clock.fastForward(61000);
+ assert.equal((await(await refreshResponse).json()).captureUnchanged,true);
+ await page.waitForTimeout(80);assert.equal(requests.length,beforeRefresh,'unchanged background refresh never reloads record pages');
  assert.deepEqual(errors,[]);
- console.log(`PASS: throttled desktop/mobile skeletons and editor status, rapid Cadets/Leadership navigation, late-result rejection, History cancels editor capture, delayed session bootstrap blocks all reads, maximum concurrent page requests=${maximum}.`);
+ console.log(`PASS: throttled desktop/mobile skeletons and editor status, rapid Cadets/Leadership navigation, late-result rejection, History cancels editor capture, delayed session bootstrap blocks all reads, unchanged refresh reloads no record pages, maximum concurrent page requests=${maximum}.`);
 }finally{await browser.close();await new Promise(resolve=>server.close(resolve));service.close();await local.dispose();}

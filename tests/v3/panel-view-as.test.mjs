@@ -90,6 +90,27 @@ test('unmapped, ambiguous, unverified and ordinary cadets have explicit no-acces
   assert.equal((await f.send(enter('missing'))).status,404);
 });
 
+test('cheap preview authority preserves current transfer tokens without writing audit or exposing records',async t=>{
+  const f=await fixture(t),path='/v1/admin/panel/view-as/access';
+  for(const [person,kind]of [['lead','panel'],['administrator','snapshot']]){
+    const entry='entry-'+person;assert.equal((await f.send(enter(person,entry))).status,200);
+    const manifest=await f.page(preview(person,kind,entry));
+    const request={...base,targetPersonId:person,entryAuditId:entry};
+    const before=await f.db.prepare('SELECT COUNT(*) AS n FROM panel_view_as_audit').first();
+    const access=await f.send(request,path);assert.equal(access.status,200,JSON.stringify(access));
+    assert.equal(access.body.viewRevision,manifest.body.viewRevision);
+    assert.deepEqual(access.body.scope,manifest.body.page.scope);
+    assert.equal(access.body.rows,undefined);assert.equal(access.body.sections,undefined);assert.equal(access.body.readOnly,true);
+    assert.deepEqual(await f.db.prepare('SELECT COUNT(*) AS n FROM panel_view_as_audit').first(),before);
+    assert.equal((await f.send({...request,viewRevision:manifest.body.viewRevision},path)).status,400);
+    let calls=0;const race={prepare:sql=>f.db.prepare(sql),async batch(s){if(++calls===3)await f.db.prepare("DELETE FROM admin_grants WHERE principal_id='owner'").run();return f.db.batch(s);}};
+    assert.equal((await f.send(request,path,race)).status,409);
+    await f.db.prepare("INSERT INTO admin_grants VALUES('owner','frontend.read','wing','*')").run();
+    await f.send({...base,action:'exit',auditId:'exit-'+person,entryAuditId:entry});
+    assert.equal((await f.send(request,path)).status,403);
+  }
+});
+
 test('fullSnapshot targets use original full snapshot and history transports; no silently restricted Wing preview',async t=>{
   const f=await fixture(t);assert.equal((await f.send(enter('administrator'))).status,200);
   const head=await f.page(preview('administrator','snapshot'));assert.equal(head.status,200,JSON.stringify(head));

@@ -7,7 +7,7 @@ import { Miniflare, Log, LogLevel } from 'miniflare';
 import { buildRolePermissionPolicy } from '../../.build/v3/packages/domain/src/permissions.js';
 import { PANEL_SECTIONS, resolvePanelAccess, assemblePanelSnapshotPages, panelSnapshotToReportingInput } from '../../.build/v3/packages/domain/src/panel-read.js';
 import { buildFrontendReporting } from '../../.build/v3/packages/domain/src/frontend-reporting.js';
-import { panelSnapshotPage } from '../../.build/v3/apps/worker/src/panel-read.js';
+import { panelReadAuthority, panelSnapshotPage } from '../../.build/v3/apps/worker/src/panel-read.js';
 import { excusalDecisionPermission } from '../../.build/v3/apps/worker/src/excusal-scope.js';
 import worker from '../../.build/v3/apps/worker/src/index.js';
 
@@ -180,6 +180,19 @@ test('scope changes between authority resolution and data read discard rows; bou
     const DB = { prepare: sql => { queries++; return f.db.prepare(sql); }, batch: async stmts => { if (++batches === 2) await f.db.prepare("UPDATE principals SET active=0 WHERE principal_id='flight'").run(); return f.db.batch(stmts); } };
     await assert.rejects(panelSnapshotPage({ ...f.env, DB }, base('flight')), { code: 'SNAPSHOT_CHANGED' });
     assert.ok(queries < 50, `${queries} prepared queries`);
+});
+
+test('cheap authority matches manifest scope/revision, omits counts and rejects racing revocation',async t=>{
+    const f=await fixture(t),identity={environment:'local',generation:1,principalId:'flight'};
+    const manifest=await panelSnapshotPage(f.env,base('flight'));let reads=0;
+    const DB={prepare:sql=>f.db.prepare(sql),batch:async statements=>{const rows=await f.db.batch(statements);reads+=rows.reduce((n,r)=>n+r.meta.rows_read,0);return rows;}};
+    const authority=await panelReadAuthority({...f.env,DB},identity);
+    assert.deepEqual(authority.revision,manifest.revision);assert.deepEqual(authority.access,manifest.access);assert.deepEqual(authority.scope,manifest.scope);
+    assert.equal(authority.sections,undefined);assert.equal(authority.rows,undefined);assert.equal(authority.verified,true);assert(reads<500,`${reads} authority reads`);
+    assert.equal((await f.send({...identity,principalId:'cadet'},'/v1/admin/panel/access')).status,403);
+    assert.equal((await f.send({...identity,revision:manifest.revision},'/v1/admin/panel/access')).status,400);
+    let batches=0;const racing={prepare:sql=>f.db.prepare(sql),batch:async statements=>{if(++batches===2)await f.db.prepare("UPDATE principals SET active=0 WHERE principal_id='flight'").run();return f.db.batch(statements);}};
+    await assert.rejects(panelReadAuthority({...f.env,DB:racing},identity),{code:'SNAPSHOT_CHANGED'});
 });
 
 test('request-only Squadron manifest reuses transaction scopes while counts match every paged section', async t => {

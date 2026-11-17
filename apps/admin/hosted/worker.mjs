@@ -78,6 +78,10 @@ export default {
         if (preview && preview.status !== "ready")
           return secure(json({ viewAs: previewResponse(preview), snapshot: null,
             meta: { hosted: true, viewAsEnabled: true } }));
+        if (await backend.captureUnchanged(request.headers.get("x-shamrock-capture")))
+          return secure(json({captureUnchanged:true,captureKey:backend.binding,
+            viewAs:previewResponse(preview),viewAsRevision:backend.viewRevision,
+            reportingTime:Date.now()}));
         const manifest = await backend.panelManifest();
         return secure(
           json({
@@ -101,11 +105,11 @@ export default {
         );
       }
       if (request.method === "GET" && url.pathname === "/api/receipts") {
-        const before = await backend.panelManifest();
+        const before = await backend.panelAuthority();
         if (!before.access.capabilities.fullSnapshot)
           throw new PanelError("FORBIDDEN", "This page is outside your access.", 403);
         const receipts = await service.history();
-        const after = await backend.panelManifest();
+        const after = await backend.panelAuthority();
         if (!after.access.capabilities.fullSnapshot ||
             JSON.stringify(before.revision) !== JSON.stringify(after.revision))
           throw new PanelError("SNAPSHOT_CHANGED", "Records or access changed. Reload SHAMROCK.", 409);
@@ -133,7 +137,7 @@ export default {
           ),
         );
       if (request.method === "GET" && url.pathname === "/api/transition") {
-        if (!(await backend.panelManifest()).access.capabilities.fullSnapshot)
+        if (!(await backend.panelAuthority()).access.capabilities.fullSnapshot)
           throw new PanelError(
             "FORBIDDEN",
             "This page is outside your access.",

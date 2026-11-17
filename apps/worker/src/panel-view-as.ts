@@ -1,6 +1,6 @@
 import { PANEL_VIEW_AS_PAGE_MAX_BYTES, type PanelViewAsAuthorization, type PanelViewAsKind, type PanelViewAsPage, type PanelViewAsStatus } from '../../../packages/domain/src/panel-view-as.js';
 import { effectiveAdminGrants } from './permission-grants.js';
-import { panelSnapshotPage } from './panel-read.js';
+import { panelReadAuthority, panelSnapshotPage } from './panel-read.js';
 import { frontendSnapshotPage } from './frontend-transport.js';
 import { legacyHistoryPage } from './legacy-history-transport.js';
 import { listLegacyHistory } from './legacy-history.js';
@@ -91,7 +91,7 @@ export async function authorizePanelViewAs(env: Env, input: unknown): Promise<Pa
   const person = String(req.targetPersonId), { query, binding } = await readBinding(env, req.principalId, person, null);
   let status = binding.status, access: PanelViewAsAuthorization['access'] = null;
   if (status === 'ready') {
-    try { access = (await panelSnapshotPage(guardedEnvironment(env, query, binding.raw), { environment: req.environment, generation: req.generation, principalId: binding.targetPrincipalId, section: 'manifest', offset: 0, revision: null })).access; }
+    try { access = (await panelReadAuthority(guardedEnvironment(env, query, binding.raw), { environment: req.environment, generation: req.generation, principalId: binding.targetPrincipalId })).access; }
     catch (error) { if (error instanceof HttpError && error.code === 'NOT_AUTHORIZED') status = 'no-panel-access'; else throw error; }
   }
   const results = await env.DB.batch<Row>([
@@ -104,6 +104,27 @@ export async function authorizePanelViewAs(env: Env, input: unknown): Promise<Pa
   if (!saved || saved.request_hash !== requestHash || saved.target_principal_id !== binding.targetPrincipalId) fail(409, 'VIEW_AS_AUDIT_CONFLICT');
   if (saved.closed === 1 || saved.status !== status) fail(409, 'VIEW_AS_CHANGED');
   return { contractVersion: 'panel-view-as-v1', readOnly: true, action: 'enter', entryAuditId: String(req.auditId), targetPersonId: person, targetPrincipalId: binding.targetPrincipalId, status, access };
+}
+
+/** Revalidate an existing preview without replaying entry audit or counting its records. */
+export async function panelViewAsAuthority(env: Env, input: unknown) {
+  const req=identity(env,input);
+  if(Object.keys(req).sort().join(',')!=='entryAuditId,environment,generation,principalId,targetPersonId'
+    ||!id(req.entryAuditId)||!id(req.targetPersonId))fail(400,'INVALID_VIEW_AS_REQUEST');
+  const person=String(req.targetPersonId),entry=String(req.entryAuditId),{query,binding}=await readBinding(env,req.principalId,person,entry);
+  if(!binding.targetPrincipalId)fail(403,'NOT_AUTHORIZED');
+  const authority=await panelReadAuthority(guardedEnvironment(env,query,binding.raw),{
+    environment:req.environment,generation:req.generation,principalId:binding.targetPrincipalId});
+  const kind=binding.fullSnapshot?'snapshot':'panel';
+  const revision=binding.fullSnapshot?{operations:authority.revision.operations,administration:authority.revision.administration}:authority.revision;
+  // Exactly the existing current-snapshot transfer binding; catalog and History
+  // tokens remain independent and are never accepted by this access-only route.
+  const source={revision,scope:authority.scope,catalog:null};
+  const viewRevision=await digest({actorPrincipalId:req.principalId,entryAuditId:entry,targetPersonId:person,
+    targetPrincipalId:binding.targetPrincipalId,binding:binding.raw,kind,source});
+  return {contractVersion:'panel-view-as-access-v1',readOnly:true,environment:env.ENVIRONMENT,generation:Number(env.GENERATION),
+    entryAuditId:entry,targetPersonId:person,viewRevision,scope:authority.scope,access:authority.access,
+    revision:binding.fullSnapshot?{...revision,access:viewRevision}:revision};
 }
 
 /** Only allowlisted read functions can run, under both real-actor and target authority in every batch. */

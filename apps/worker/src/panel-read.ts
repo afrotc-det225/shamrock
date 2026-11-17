@@ -68,7 +68,7 @@ function queries() {
 }
 
 /** Signed adapter route; principalId must come from the panel server's verified session, never browser JSON. */
-export async function panelSnapshotPage(env: Env, input: unknown): Promise<PanelPage> {
+export async function panelSnapshotPage(env: Env, input: unknown, authorityOnly = false): Promise<PanelPage> {
     if (!input || typeof input !== 'object' || Array.isArray(input)) fail(400, 'INVALID_PANEL_REQUEST');
     const req = input as Row;
     if (Object.keys(req).sort().join(',') !== 'environment,generation,offset,principalId,revision,section' || !identifier(req.principalId)
@@ -112,15 +112,15 @@ export async function panelSnapshotPage(env: Env, input: unknown): Promise<Panel
           OR EXISTS(SELECT 1 FROM legacy_attendance_baselines b WHERE b.event_id=d.event_id AND b.person_id IN(SELECT person_id FROM scoped_people))) `;
     const bind = [JSON.stringify(access.flightIds), ...decision.values];
     const allQueries = queries(), statements = authorityStatements(env, principal), dataIndex = statements.length;
-    if (section === 'manifest') statements.push(env.DB.prepare(`${cte} SELECT ${PANEL_SECTIONS.map(s => `(SELECT COUNT(*) ${allQueries[s].countFrom ?? allQueries[s].from}) AS ${s}`).join(',')}`).bind(...bind));
-    else if (section !== 'verify') {
+    if (!authorityOnly && section === 'manifest') statements.push(env.DB.prepare(`${cte} SELECT ${PANEL_SECTIONS.map(s => `(SELECT COUNT(*) ${allQueries[s].countFrom ?? allQueries[s].from}) AS ${s}`).join(',')}`).bind(...bind));
+    else if (!authorityOnly && section !== 'verify' && section !== 'manifest') {
         const q = allQueries[section];
         statements.push(env.DB.prepare(`${cte} SELECT ${q.select} ${q.from} ORDER BY ${q.order} LIMIT ? OFFSET ?`).bind(...bind, q.limit + 1, offset));
     }
     const second = await env.DB.batch<Row>(statements);
     if (JSON.stringify(first) !== JSON.stringify(second.slice(0, dataIndex).map(r => r.results))) fail(409, 'SNAPSHOT_CHANGED');
     const response: PanelPage = { contractVersion: PANEL_PAGE_VERSION, environment: env.ENVIRONMENT as PanelPage['environment'], generation: Number(env.GENERATION), section, revision, scope: { termId: String(control.termId), currentTermId: String(control.termId) }, access };
-    if (section === 'verify') return { ...response, verified: true };
+    if (authorityOnly || section === 'verify') return { ...response, section: 'verify', verified: true };
     if (section === 'manifest') {
         const counts = second[dataIndex].results[0], sections = PANEL_SECTIONS.map(section => ({ section, count: Number(counts[section]) }));
         if (sections.some(s => s.count > FRONTEND_SECTION_BOUNDS[s.section])) fail(409, 'SNAPSHOT_TOO_LARGE');
@@ -135,6 +135,13 @@ export async function panelSnapshotPage(env: Env, input: unknown): Promise<Panel
         bytes += size; rows.push(row);
     }
     return { ...response, offset, nextOffset: source.length > rows.length ? offset + rows.length : null, rows };
+}
+
+/** A fresh, double-fenced access/revision read without recounting business records. */
+export async function panelReadAuthority(env: Env, input: unknown): Promise<PanelPage> {
+    if (!input || typeof input !== 'object' || Array.isArray(input)
+        || Object.keys(input).sort().join(',') !== 'environment,generation,principalId') fail(400, 'INVALID_PANEL_REQUEST');
+    return panelSnapshotPage(env, { ...(input as Row), section: 'manifest', offset: 0, revision: null }, true);
 }
 
 /** Capture exactly the authority inputs used by resolvePanelAccess, including out-of-band revocation.
