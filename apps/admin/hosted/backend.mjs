@@ -20,9 +20,15 @@ const paths = new Set([
 export class HostedBackend {
   constructor(env, principalId, preview = null) {
     const origin = new URL(env.BACKEND_ORIGIN);
+    const dataset = env.STAGING_DATASET ?? "fictional";
+    const realStaging = dataset === "real" &&
+      typeof env.BACKEND_SERVICE_NAME === "string" &&
+      /^[a-z0-9-]+-real-parity$/.test(env.BACKEND_SERVICE_NAME) &&
+      origin.hostname === `${env.BACKEND_SERVICE_NAME}.${origin.hostname.split(".")[1]}.workers.dev` &&
+      !origin.port;
     if (
       env.ENVIRONMENT !== "staging" ||
-      !origin.hostname.includes("staging") ||
+      !(dataset === "fictional" && origin.hostname.includes("staging") || realStaging) ||
       origin.protocol !== "https:" ||
       origin.origin !== env.BACKEND_ORIGIN ||
       !env.BACKEND ||
@@ -36,6 +42,7 @@ export class HostedBackend {
         503,
       );
     this.env = env;
+    this.dataset = dataset;
     this.principalId = principalId;
     this.preview = preview;
     this.viewRevision = null;

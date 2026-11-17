@@ -90,7 +90,7 @@ export default {
             receiptsDeferred: !preview && manifest.access.capabilities.fullSnapshot,
             meta: {
               environment: "staging",
-              fictional: true,
+              fictional: backend.dataset === "fictional",
               hosted: true,
               viewAsEnabled: env.VIEW_AS_ENABLED === "1",
               assistantAvailable: false,

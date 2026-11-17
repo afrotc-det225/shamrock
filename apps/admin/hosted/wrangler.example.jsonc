@@ -21,6 +21,7 @@
   "services": [{ "binding": "BACKEND", "service": "shamrock-staging" }],
   "vars": {
     "ENVIRONMENT": "staging",
+    "STAGING_DATASET": "fictional",
     "APP_ORIGIN": "https://shamrock-admin-staging.det225.workers.dev",
     "BACKEND_ORIGIN": "https://shamrock-staging.det225.workers.dev",
     "GENERATION": "1",
