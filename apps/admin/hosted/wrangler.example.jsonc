@@ -14,7 +14,7 @@
   "durable_objects": {
     "bindings": [{ "name": "AUTH_STORE", "class_name": "StagingPanelStore" }],
   },
-  "migrations": [{ "tag": "panel-auth-v1", "new_sqlite_classes": ["StagingPanelStore"] }],
+  "migrations": [{ "tag": "auth-store-v1", "new_sqlite_classes": ["StagingPanelStore"] }],
   "services": [{ "binding": "BACKEND", "service": "shamrock-staging" }],
   "vars": {
     "ENVIRONMENT": "staging",
