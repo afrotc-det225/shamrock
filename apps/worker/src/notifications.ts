@@ -1,3 +1,4 @@
+import { readCloseoutNoticeContext } from './closeout.js';
 import { effectiveAdminGrants } from './permission-grants.js';
 /** Suppressed planning/status API and local-only transport rehearsal. No mail provider binding. */
 import { adminIdentifier, type FrontendSnapshot } from '../../../packages/domain/src/admin.js';
@@ -139,6 +140,21 @@ export function planFromSnapshot(snapshot: FrontendSnapshot, recipe: PlanCommand
     eligible: cell.eligible, code: cell.effectiveCode, pendingRequest: cell.requests.some(request => request.status === 'Submitted'),
   }))));
   return planScheduledNotices({ now: recipe.asOf, mode: 'staging', events, flights, attendance });
+}
+/** One bounded current-facts revalidator for both local delivery and owner-only native rehearsal. */
+export async function revalidateNotificationIntent(env: NotificationEnv, principalId: string, value: unknown, noticeKey: string) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return invalid('Invalid retained notification recipe.');
+  const kind = (value as Record<string,unknown>).kind;
+  if (kind === 'closeout') {
+    const recipe = record(value, ['kind','closeoutId','policyVersion']);
+    const result = await readCloseoutNoticeContext(env, principalId, {kind,closeoutId:adminIdentifier(recipe.closeoutId),policyVersion:String(recipe.policyVersion)});
+    return {...result, intent:result.intents.find(item => item.key === noticeKey)};
+  }
+  const recipe = record(value, ['kind','asOf','requestId']);
+  if ((kind !== 'scheduled' && kind !== 'excusal') || kind === 'scheduled' && recipe.requestId !== null) return invalid('Invalid retained notification recipe.');
+  const parsed: PlanCommand['payload'] = {kind,asOf:instant(recipe.asOf),requestId:kind === 'excusal' ? adminIdentifier(recipe.requestId) : null};
+  const snapshot = await readNotificationContext(env, principalId, parsed);
+  return {snapshot,asOf:parsed.asOf,intent:planFromSnapshot(snapshot, parsed).find(item => item.key === noticeKey)};
 }
 export function messageHash(intent: NotificationIntent): Promise<string> {
   return hash(JSON.stringify({ to: intent.to, cc: intent.cc, replyTo: intent.replyTo ?? null, subject: intent.subject, body: intent.body }));
@@ -304,8 +320,7 @@ export async function claimLocalNotification(env: NotificationEnv, input: {
   }>();
   if (!candidate)
     return { attempted: false };
-  const snapshot = await readNotificationContext(env, input.principalId, JSON.parse(candidate.recipe) as PlanCommand['payload']);
-  const intent = planFromSnapshot(snapshot, JSON.parse(candidate.recipe) as PlanCommand['payload']).find(item => item.key === candidate.noticeKey);
+  const {snapshot,intent} = await revalidateNotificationIntent(env, input.principalId, JSON.parse(candidate.recipe), candidate.noticeKey);
   if (!intent || await messageHash(intent) !== candidate.payloadHash || !intent.to.length) {
     await env.DB.batch([
       statement(env.DB, `INSERT INTO notification_delivery_events(notice_id,action,principal_id,accepted_at,previous_state,state)

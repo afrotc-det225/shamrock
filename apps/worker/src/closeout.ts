@@ -244,3 +244,15 @@ async function noticeRows(env: Env, snapshot: FrontendSnapshot, run: Run, matrix
         rows: matrix.rows.flatMap(p => p.cells.filter(c => keys.has(JSON.stringify([c.eventId, p.personId]))).map(c => ({ flightId: keys.get(JSON.stringify([c.eventId, p.personId]))!.flight_id, personId: p.personId, name: `${p.lastName}, ${p.firstName} (${p.asYear})`, eventId: c.eventId, eventLabel: events.get(c.eventId)!.label, code: c.effectiveCode, needsReview: c.needsReview }))) });
     return Promise.all(intents.map(async (intent) => ({ ...intent, noticeId: await hash(intent.key), payloadHash: await hash(JSON.stringify({ to: intent.to, cc: intent.cc, replyTo: null, subject: intent.subject, body: intent.body })), recipientCount: new Set([...intent.to, ...intent.cc]).size })));
 }
+
+/** Recompute one terminal closeout's notices from its exact saved event set and current routing. */
+export async function readCloseoutNoticeContext(env: Env, principalId: string, recipe: {kind:'closeout';closeoutId:string;policyVersion:string}) {
+    adminIdentifier(recipe.closeoutId);
+    if (recipe.policyVersion !== CLOSEOUT_POLICY.version) bad('Unsupported closeout notice policy.');
+    const run = await stmt(env.DB, `SELECT * FROM attendance_closeouts WHERE closeout_id=? AND environment=? AND generation=? AND policy_version=? AND state IN ('complete','needs-review')`, recipe.closeoutId, env.ENVIRONMENT, Number(env.GENERATION), recipe.policyVersion).first<Run>();
+    if (!run) throw new HttpError(409, 'CLOSEOUT_NOTICE_UNAVAILABLE', 'Only a completed current-generation closeout can be reviewed for delivery.');
+    const snapshot = await readCloseoutStepContext(env, principalId, recipe.closeoutId, []);
+    const current = report(snapshot, run.as_of);
+    if (current.termId !== run.term_id) throw new HttpError(409, 'CLOSEOUT_TERM', 'A previous-term closeout cannot be replayed as a current notice.');
+    return {snapshot, intents: await noticeRows(env, snapshot, run, current.matrix), asOf: run.as_of};
+}

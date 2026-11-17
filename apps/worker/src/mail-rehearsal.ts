@@ -3,8 +3,7 @@ import { adminIdentifier } from '../../../packages/domain/src/admin.js';
 import { noticeLocalClock } from '../../../packages/domain/src/notifications.js';
 import { effectiveAdminGrants } from './permission-grants.js';
 import { HttpError } from './http-error.js';
-import { planFromSnapshot, messageHash } from './notifications.js';
-import { readNotificationContext } from './reporting-context.js';
+import { revalidateNotificationIntent, messageHash } from './notifications.js';
 export interface MailRehearsalEnv {
     DB: D1Database;
     ENVIRONMENT: string;
@@ -67,10 +66,9 @@ async function source(env: MailRehearsalEnv, principal: string, noticeId: string
     }>();
     if (!row || row.payload_hash !== expected || Date.parse(row.created_at) < Date.parse(now) - 86400000 || Date.parse(row.created_at) > Date.parse(now) + 30000)
         throw new HttpError(409, 'REHEARSAL_SOURCE_STALE', 'Choose a newly planned, reviewed suppressed intent.');
-    const recipe = JSON.parse(row.recipe_json);
-    if (!recipe || !['scheduled', 'excusal'].includes(recipe.kind) || !Number.isFinite(Date.parse(recipe.asOf)) || Date.parse(recipe.asOf) < Date.parse(now) - 86400000 || Date.parse(recipe.asOf) > Date.parse(now) + 30000)
+    const {snapshot,intent,asOf} = await revalidateNotificationIntent(env, principal, JSON.parse(row.recipe_json), row.notice_key);
+    if (Date.parse(asOf) < Date.parse(now) - 86400000 || Date.parse(asOf) > Date.parse(now) + 30000)
         throw new HttpError(409, 'REHEARSAL_SOURCE_STALE', 'Historical notification recipes cannot be replayed as mail rehearsals.');
-    const snapshot = await readNotificationContext(env, principal, recipe), intent = planFromSnapshot(snapshot, recipe).find(n => n.key === row.notice_key);
     if (!intent || !intent.to.length || intent.blockedReason || await messageHash(intent) !== expected)
         throw new HttpError(409, 'REHEARSAL_SOURCE_CHANGED', 'Current routing or notice content differs from the reviewed intent.');
     const message = { to: [env.OWNER_MAIL_REHEARSAL_EMAIL!], cc: [], subject: '[STAGING REHEARSAL] ' + intent.subject, body: 'Owner-only SHAMROCK rehearsal. No operational recipients were contacted.\n\n' + intent.body };

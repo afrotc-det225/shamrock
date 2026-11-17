@@ -166,3 +166,15 @@ summary. It does not change ordinary event-day or excusal task processing.
 Daily and weekly context tests compare exact planned content/routing with the complete snapshot, while proving that unrelated historic/future facts are absent. Excusal contexts contain the selected request and current routing without attendance facts. A catalog or routing change between selection and fact reads fails with `SNAPSHOT_CHANGED`; reader revocation fails authorization. Committed-version tasks still substitute their saved request version only after obtaining current routing. The same scoped read is used before a local delivery claim.
 
 A local rehearsal on the isolated imported dataset retained all message results while reducing the weekly context from 47 events and 4,230 baseline cells to the three due events and 270 cells. This establishes scope/content parity, not hosted Worker CPU or Google daily-quota headroom.
+
+### Closeout notice revalidation
+
+The delivery revalidator supports the exact saved Sunday closeout recipe as well
+as scheduled and excusal recipes. It reads the completed closeout's retained event
+set, rebuilds its current attendance facts and recipient routing through the scoped
+reader, and compares the same message hash before any claim. An incomplete run,
+wrong generation/policy, changed current term or revoked read authority cannot
+reach delivery. Current routing/content changes invalidate the reviewed hash.
+The owner-only native rehearsal uses this same path and keeps its 24-hour source
+and planning-window restriction; it cannot replay an old closeout. Operational
+staging notices remain suppressed.

@@ -105,3 +105,37 @@ test('closeout preparation omits facts and each step reads only its exact subjec
  const scope=await readCloseoutStepContext(f.env,'admin',p.body.closeoutId,items);assert.equal(scope.people.length,50);assert.equal(scope.corrections.length,1);assert.equal(scope.corrections[0].personId,f.people[0]);assert.equal(scope.events[0].eligiblePersonIds.length,50);
  const final=await readCloseoutStepContext(f.env,'admin',p.body.closeoutId,[]);assert.equal(final.people.length,55);assert.equal(final.corrections.length,2);
 });
+
+const {revalidateNotificationIntent,deliverLocalNotification,messageHash}=await import('../../.build/v3/apps/worker/src/notifications.js');
+const {ownerMailRehearsal}=await import('../../.build/v3/apps/worker/src/mail-rehearsal.js');
+async function completeFixtureCloseout(f){let r=await f.prepare();assert.equal(r.status,200);while(!['complete','needs-review'].includes(r.body.state)){r=await f.advance(r.body);assert.equal(r.status,200,JSON.stringify(r.body));}return r.body;}
+test('terminal closeout recipes revalidate exact scoped content and use the normal local claim/result protocol',async t=>{
+ const f=await fixture(t,2);await completeFixtureCloseout(f);const notice=await f.db.prepare('SELECT * FROM notification_intents').first();
+ const result=await revalidateNotificationIntent(f.env,'admin',JSON.parse(notice.recipe_json),notice.notice_key);
+ assert.equal(await messageHash(result.intent),notice.payload_hash);assert.equal(result.asOf,f.asOf);assert.equal(result.snapshot.events.length,1);assert.equal(result.intent.body,notice.body);
+ await f.db.batch([f.db.prepare("UPDATE notification_delivery_control SET mode='local-test',daily_recipient_budget=10"),f.db.prepare("UPDATE notification_intents SET mode='local-test',state='queued'")]);
+ let sends=0;const receipt=await deliverLocalNotification(f.env,{principalId:'admin',workerId:'closeout-mail',asOf:f.asOf},{async send(message){sends++;assert.equal(message.body,notice.body);assert.deepEqual(message.to,['commander@example.invalid']);return{outcome:'confirmed'};}});
+ assert.equal(receipt.state,'sent');assert.equal(sends,1);assert.equal((await deliverLocalNotification(f.env,{principalId:'admin',workerId:'closeout-mail',asOf:f.asOf},{async send(){assert.fail('duplicate closeout send');}})).attempted,false);
+});
+test('closeout owner rehearsal preserves the suppressed ledger and rechecks current routing',async t=>{
+ const f=await fixture(t,2);await completeFixtureCloseout(f);
+ // Fixture-only conversion models a staging run; no operational activation endpoint exists.
+ await f.db.batch([f.db.prepare("UPDATE system_control SET environment='staging'"),f.db.prepare("UPDATE attendance_closeouts SET environment='staging'"),f.db.prepare("UPDATE notification_intents SET environment='staging',created_at=?").bind(f.asOf)]);
+ const env={...f.env,ENVIRONMENT:'staging',OWNER_MAIL_REHEARSAL_ENABLED:'true',OWNER_MAIL_REHEARSAL_EMAIL:'owner@example.invalid',OWNER_MAIL_REHEARSAL_PRINCIPAL:'admin'},base={environment:'staging',generation:1,principalId:'admin'},at=new Date(Date.parse(f.asOf)+1000).toISOString();
+ const before=(await f.db.prepare('SELECT * FROM notification_intents').all()).results,notice=before[0];
+ const prepared=await ownerMailRehearsal(env,'prepare',{...base,caseId:'closeout-case',noticeId:notice.notice_id,payloadHash:notice.payload_hash},at);
+ const claim=await ownerMailRehearsal(env,'claim',{...base,caseId:'closeout-case',claimId:'closeout-claim',workerId:'native',reviewHash:prepared.reviewHash},at);
+ assert.deepEqual(claim.message.to,['owner@example.invalid']);assert.match(claim.message.body,/Sunday attendance closeout/);assert.deepEqual((await f.db.prepare('SELECT * FROM notification_intents').all()).results,before);
+ const g=await fixture(t,1);await completeFixtureCloseout(g);const original=await g.db.prepare('SELECT * FROM notification_intents').first();await g.db.prepare("UPDATE leadership_contacts SET email='changed@example.invalid',version=version+1 WHERE contact_id='commander'").run();
+ const changed=await revalidateNotificationIntent(g.env,'admin',JSON.parse(original.recipe_json),original.notice_key);assert.notEqual(await messageHash(changed.intent),original.payload_hash);
+});
+test('incomplete, old-generation, changed-term and revoked-reader closeout recipes cannot revalidate',async t=>{
+ const f=await fixture(t,1),prepared=await f.prepare(),recipe={kind:'closeout',closeoutId:prepared.body.closeoutId,policyVersion:CLOSEOUT_POLICY.version};
+ await assert.rejects(revalidateNotificationIntent(f.env,'admin',recipe,'fixture'),{code:'CLOSEOUT_NOTICE_UNAVAILABLE'});
+ let next=await f.advance(prepared.body);next=await f.advance(next.body);assert.equal(next.body.state,'complete');const notice=await f.db.prepare('SELECT * FROM notification_intents').first();
+ await assert.rejects(revalidateNotificationIntent(f.env,'admin',{...recipe,policyVersion:'unknown'},notice.notice_key),{code:'INVALID_CLOSEOUT'});
+ await assert.rejects(revalidateNotificationIntent({...f.env,GENERATION:'2'},'admin',recipe,notice.notice_key),{code:'CLOSEOUT_NOTICE_UNAVAILABLE'});
+ await f.db.prepare("DELETE FROM admin_grants WHERE capability='frontend.read'").run();await assert.rejects(revalidateNotificationIntent(f.env,'admin',recipe,notice.notice_key),{code:'NOT_AUTHORIZED'});
+ await f.db.batch([f.db.prepare("INSERT INTO admin_grants VALUES('admin','frontend.read','wing','*')"),f.db.prepare('UPDATE terms SET is_current=0'),f.db.prepare("INSERT INTO terms VALUES('next','Next',2,1)")]);
+ await assert.rejects(revalidateNotificationIntent(f.env,'admin',recipe,notice.notice_key),{code:'CLOSEOUT_TERM'});
+});

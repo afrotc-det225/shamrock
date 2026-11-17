@@ -102,7 +102,8 @@ control hash so it can finish after advancing the private checkpoint.
    database, owner and principal bindings, enable the Worker rehearsal binding,
    and submit `setup`. Run `shamrockV3OwnerMailControl` or allow one existing timer
    tick. Setup verifies the owner binding and stays paused.
-2. Plan a **new** suppressed notice using the existing notification planner. Review
+2. Plan a **new** suppressed notice using the existing notification planner,
+   or complete the current Sunday closeout to produce its actual closeout notice. Review
    its current content and routing through private tooling. Imports do not produce
    send cases. A source and its planning time must be less than 24 hours old, unblocked,
    suppressed and exactly match the current scoped D1 facts and recipients.
@@ -158,7 +159,9 @@ or mint another source to evade uncertainty or daily limits.
 The signed routes are `prepare`, `claim`, `complete`, `status` and `recover` under
 `/v1/admin/notifications/rehearsal/`. They use the existing bridge HMAC contract and
 strict request fields. Preparation and claim revalidate through the bounded
-notification context reader, not a whole-history frontend snapshot.
+notification context reader, not a whole-history frontend snapshot. Completed
+Sunday closeout recipes use their exact retained event set and current routing;
+wrong policy, generation, current term or an incomplete closeout is rejected.
 
 ## Local checks and remaining live evidence
 
