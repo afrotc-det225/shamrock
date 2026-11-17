@@ -110,3 +110,23 @@ cursor. This reduces an eight-row page's row reads from eight provider requests
 to one while retaining separate header, source-digest and workbook-revision checks.
 Local provider-port tests cover reordered and coalesced blocks; native Google
 behavior and the resulting quota use still need release-specific readback.
+
+
+## Saved-formula computation bound
+
+History calculation prepares each distinct exact saved formula and its column/LLAB
+selection once per bounded report call, and normalizes each validated attendance
+cell once for the credit rules. The prepared rules are local to that call; there
+is no cross-request cache of source data, permission results or report output.
+Source formulas, literal codes, row diagnostics, excluded-column evidence and
+saved percentage values remain unchanged. The existing row/byte bounds and every
+fresh authorization/source-binding check still apply.
+
+A November 17 local comparison against the retained schema 15 fixture reproduced
+every page and assembled report for all six archives, 510 rows and six unresolved
+identities exactly. With two-row pages unchanged, a Node CPU benchmark parsing
+cached real D1 responses anew and serializing each output reduced report-building
+CPU by 37–51% and the complete local page-processing median by 5–18%. These
+measurements exclude provider queries, bridge authentication and Worker isolate
+startup. They are not a hosted Free-tier CPU pass: repeat cold/warm provider
+measurements on the exact deployed release before claiming capacity.

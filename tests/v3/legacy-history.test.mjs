@@ -19,6 +19,26 @@ test('old prefix credit and both UR denominator policies remain distinct without
  const neutral=calculateLegacySavedCredit(columns,['MUR','UR','MRS'],formula(credit,total.filter(c=>c!=='UR')),1,'overall');assert.equal(neutral.policyVersion,'legacy-pre-v2-ur-neutral');assert.equal(neutral.matches,true);
  assert.equal(calculateLegacySavedCredit(columns,['R','D','N/A'],formula(),1,'overall').noCountedAttendance,true);
 });
+test('shared formula preparation preserves mixed policies, case-insensitive prefixes and independent result evidence',()=>{
+ const input=fixture(),credit=['P*','E','ES*','MU*','MRS*'],total=['P*','E','ES*','T*','U','UR','MU*','MRS*'];
+ const cases=[
+  {codes:['P','A','U'],credit:currentCredit,total:currentTotal,overall:1/3,llab:1/2},
+  {codes:['mur','ur','mrs'],credit,total,overall:2/3,llab:1},
+  {codes:['mur','ur','mrs'],credit,total:total.filter(c=>c!=='UR'),overall:1,llab:1},
+  {codes:['p','t','a'],credit:currentCredit,total:currentTotal,overall:2/3,llab:1/2},
+ ];
+ input.rows=cases.map((value,index)=>{const entry=structuredClone(input.rows[0]);entry.row.occurrenceId=`mixed-policy-${index}`;entry.row.events.forEach((event,i)=>event.code=value.codes[i]);entry.row.overall=value.overall;entry.row.llab=value.llab;entry.row.creditFormulaEvidence={overall:formula(value.credit,value.total),llab:formula(value.credit,value.total,{llab:true}),arrayAnchorRowIndex:2};return entry;});
+ const report=buildLegacyHistoryReport(input);assert.equal(report.summary.formulaMatches,8);
+ assert.deepEqual(report.rows.map(r=>r.overall.policyVersion),['legacy-shamrock-credit-v1','legacy-pre-v2-ur-counted','legacy-pre-v2-ur-neutral','legacy-shamrock-credit-v1']);
+ assert.deepEqual(report.rows.map(r=>r.cells.map(c=>c.code)),cases.map(c=>c.codes),'saved case and literal codes stay unchanged');
+ report.rows[0].overall.coveredEventIds.pop();report.rows[0].overall.sourceRange.endColumnIndex=8;
+ assert.equal(report.rows[3].overall.coveredEventIds.length,3);assert.equal(report.rows[3].overall.sourceRange.endColumnIndex,10);
+ assert.equal(buildLegacyHistoryReport(input).rows[0].overall.coveredEventIds.length,3);
+ input.metadata.columns[0].header='Other';input.rows.forEach(entry=>entry.row.events[0].header='Other');
+ const changed=buildLegacyHistoryReport(input);assert.equal(changed.rows[0].llab.calculated,0);assert.equal(changed.rows[3].llab.calculated,0,'another report cannot reuse an earlier LLAB mask');
+ input.rows[0].row.creditFormulaEvidence.overall+=' ';input.rows[0].row.creditFormulaEvidence.llab=null;
+ const unavailable=buildLegacyHistoryReport(input);assert.equal(unavailable.rows[0].overall.calculated,null);assert.equal(unavailable.rows[0].llab.sourceFormula,null);assert.equal(unavailable.rows[3].overall.matches,true);
+});
 test('only exact reviewed formula templates recalculate; altered formulas and manual percentages remain explicit',()=>{
  const input=fixture();input.rows[0].row.creditFormulaEvidence.overall+=' + 1';input.rows[0].row.creditFormulaEvidence.llab=null;
  const report=buildLegacyHistoryReport(input);assert.equal(report.summary.formulaUnavailable,2);assert.equal(report.rows[0].overall.stored,.5);assert.equal(report.rows[0].overall.calculated,null);
