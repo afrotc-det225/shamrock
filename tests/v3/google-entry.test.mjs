@@ -19,12 +19,13 @@ test('staging bundle loads without Google IO and exposes native trigger entry po
   assert.equal(context.onFormSubmit, undefined);
 });
 
-test('staging manifest authorizes required IO without mail or execution deployment', async () => {
+test('staging manifest grants send-only rehearsal scope without Gmail access or execution deployment', async () => {
   const manifest = JSON.parse(await readFile(new URL('../../.build/v3-artifacts/appsscript.json', import.meta.url), 'utf8'));
   assert.equal(manifest.runtimeVersion, 'V8');
   assert.equal(manifest.timeZone, 'America/Indiana/Indianapolis');
   for (const scope of ['drive', 'forms.body', 'forms.responses.readonly']) assert.ok(manifest.oauthScopes.includes(`https://www.googleapis.com/auth/${scope}`));
   assert.ok(manifest.oauthScopes.includes('https://www.googleapis.com/auth/script.scriptapp'));
+  assert.ok(manifest.oauthScopes.includes('https://www.googleapis.com/auth/script.send_mail'));
   assert.ok(!manifest.oauthScopes.some(scope => /gmail|mail\.google/.test(scope)));
   assert.equal(manifest.executionApi, undefined);
   assert.equal(manifest.webapp, undefined);
@@ -49,8 +50,8 @@ test('operator setup pauses and validates projection outputs before installing t
 
 test('installed scheduled flush delegates once to the shared invocation scheduler',async()=>{
  const source=await readFile(new URL('../../apps/google-adapter/staging-globals.js',import.meta.url),'utf8');let calls=0;
- const services=Object.fromEntries(['PropertiesService','Utilities','UrlFetchApp','ScriptApp','Session','FormApp','SpreadsheetApp','LockService'].map(name=>[name,{}]));
- const context=vm.createContext({...services,SHAMROCKV3:{runScheduledStaging(s){calls++;assert.equal(s.UrlFetchApp,services.UrlFetchApp);return{status:'paused',reconciled:true};}}});vm.runInContext(source,context);
+ const services=Object.fromEntries(['PropertiesService','Utilities','UrlFetchApp','ScriptApp','Session','FormApp','SpreadsheetApp','LockService','MailApp'].map(name=>[name,{}]));
+ const context=vm.createContext({...services,SHAMROCKV3:{runScheduledStaging(s){calls++;assert.equal(s.UrlFetchApp,services.UrlFetchApp);assert.equal(s.MailApp,services.MailApp);return{status:'paused',reconciled:true};}}});vm.runInContext(source,context);
  assert.deepEqual(context.shamrockV3StagingFlush(),{status:'paused',reconciled:true});assert.equal(calls,1);
 });
 
@@ -83,4 +84,20 @@ test('presentation repair has a dedicated entry point that does not install trig
   const calls = []; const context = vm.createContext({}); vm.runInContext(source, context);
   context.shamrockV3StagingHost_ = () => ({ repairPresentation() { calls.push('repair'); return 'presentation-ready-paused'; } });
   assert.equal(context.shamrockV3StagingRepairPresentation(), 'presentation-ready-paused'); assert.deepEqual(calls, ['repair']);
+});
+
+
+test('bundled scheduled flush with no owner-mail config never invokes provider or network IO',async()=>{
+ const source=await readFile(new URL('../../.build/v3-artifacts/GoogleAdapter.js',import.meta.url),'utf8'),properties={};let providerCalls=0,networkCalls=0;
+ const context=vm.createContext({
+  PropertiesService:{getScriptProperties:()=>({getProperty:k=>properties[k]??null,setProperty:(k,v)=>properties[k]=v,deleteProperty:k=>delete properties[k]})},
+  Utilities:{},FormApp:{},SpreadsheetApp:{},Session:{},ScriptApp:{},
+  LockService:{getScriptLock:()=>({tryLock:()=>true,releaseLock(){}})},
+  UrlFetchApp:{fetch(){networkCalls++;assert.fail('unconfigured flush must not call a provider');}},
+  MailApp:{getRemainingDailyQuota(){providerCalls++;assert.fail('unconfigured mail quota access');},sendEmail(){providerCalls++;assert.fail('unconfigured mail send');}}
+ });vm.runInContext(source,context);
+ assert.equal(context.shamrockV3StagingFlush().ownerMail.status,'paused');
+ properties.SHAMROCK_V3_OWNER_MAIL_PAUSED='false';
+ assert.equal(context.shamrockV3StagingFlush().ownerMail.status,'disabled');
+ assert.equal(providerCalls,0);assert.equal(networkCalls,0);
 });
