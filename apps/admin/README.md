@@ -166,3 +166,35 @@ The presentation now takes its navy, gold and Libre Franklin inspiration from
 Libre Franklin and Barlow Condensed; no licensed Notre Dame font files are copied.
 The three-leaf SHAMROCK mark is an original vector. Environment information stays
 in deployment records and the separate hostname instead of dominating the interface.
+
+## Internal-tool interaction rules
+
+Use direct labels rather than slogans, introductory blurbs or redundant help.
+Planning notes belong in the OPLAN. The panel does not collect event or semester
+planning notes; existing event notes are preserved when editing other fields.
+Audit reasons for attendance corrections and excusal decisions remain distinct.
+
+The panel refreshes data every minute while visible and online, and when returning
+to the tab after at least 15 seconds. Reads do not overlap. Open editors and dirty
+semester forms pause background refresh; writes retain their original expected
+versions and always receive fresh server checks. Failed refreshes back off to five
+minutes and display a retry status. Successful writes force a fresh read.
+
+Semester name, length and recurring meeting defaults come from the current term.
+The first Sunday remains an explicit calendar choice; the system does not invent
+Notre Dame academic dates. Preparing a semester records an automatic audit label,
+not an additional OPLAN notes field.
+
+Events → Change schedule selects active events by semester, type and effective
+date. Each preview shows the original and proposed Eastern date/time; moves stay
+within the event's Sunday-based training week. Saving uses the existing audited
+event command for each event, preserving its identity, roster and historical
+links. The batch is not atomic: completed events remain saved after an interruption.
+Retry in the open dialog reuses each saved proposal ID. Stale versions stop the
+batch for review. It does not silently rebase changes or overwrite newer edits.
+
+Flight Commander panel access must use server-scoped reads and trusted assignment
+data; filtering a Wing snapshot in the browser is insufficient. Blue/Gold Squadron
+Commanders retain excusal approval authority. Existing spreadsheet permissions
+are unchanged. The third-hour attendance policy is unchanged until a versioned
+configuration workflow and its parity tests are implemented.

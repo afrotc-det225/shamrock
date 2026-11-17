@@ -89,8 +89,8 @@ export class AdminService {
           .map(([field, value]) => ({ field, value })),
         consequence:
           operation === "leadership.upsert"
-            ? "Updates Leadership. Changing a title does not by itself grant account access."
-            : "Preserves record identities and historical attendance. Spreadsheet and Form updates are queued after saving.",
+            ? "Account access is managed separately."
+            : "",
       };
     } else if (operation === "attendance.correct") {
       parseAttendanceCorrection(command);
@@ -103,7 +103,7 @@ export class AdminService {
           { field: "Reason", value: payload.reason },
         ],
         consequence:
-          "Adds an auditable correction. Original attendance evidence is retained.",
+          "The original attendance record is retained.",
       };
     } else if (operation === "excusal.decide") {
       parseCommand(command);
@@ -115,7 +115,7 @@ export class AdminService {
           { field: "Reason", value: payload.reason },
         ],
         consequence:
-          "Records the decision and queues the related attendance update.",
+          "",
       };
     } else if (operation === "transition.prepare") {
       const plan = parseTransitionPlan(payload.plan),
@@ -145,7 +145,7 @@ export class AdminService {
           { field: "Schedule", value: plan.schedule },
         ],
         consequence:
-          "Prepares a frozen plan and requests an archive. It does not switch semesters. Acceptance remains blocked until the archive is verified.",
+          "Prepare now; activate after the archive is verified.",
       };
     } else {
       if (
@@ -169,7 +169,7 @@ export class AdminService {
         transitionId: payload.transitionId,
         changes: [{ field: "Current status", value: status.state }],
         consequence:
-          "The backend rechecks the exact plan, archive and publication state. It will refuse an unsafe or stale transition.",
+          "",
       };
     }
     const record = {
@@ -297,7 +297,7 @@ export class AdminService {
         message:
           command.operation === "transition.prepare"
             ? "Semester plan prepared. Waiting for its verified archive."
-            : "Saved in SHAMROCK. Any required spreadsheet and Form updates are queued.",
+            : "Saved.",
       };
       await this.store
         .prepare("UPDATE proposals SET state='complete',result=? WHERE id=?")

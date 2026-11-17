@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import {
   Home,
@@ -9,7 +9,6 @@ import {
   Layers,
   Settings,
   Sparkles,
-  RefreshCw,
 } from "lucide-react";
 import { api, startSession, label, logout } from "./api";
 import { Drawer, EditorError } from "./components";
@@ -41,8 +40,23 @@ function App() {
     [notice, setNotice] = useState(""),
     [busy, setBusy] = useState(false),
     [proposal, setProposal] = useState(null),
-    [signIn, setSignIn] = useState(false);
-  const reload = async () => setData(await api("/state"));
+    [signIn, setSignIn] = useState(false),
+    [sync, setSync] = useState("");
+  const pendingRead = useRef(null), lastRead = useRef(0), live = useRef({});
+  live.current = {busy, proposal, data};
+  const reload = async (force = false) => {
+    if (pendingRead.current) {
+      await pendingRead.current;
+      if (!force) return;
+    }
+    const task = api('/state').then(value => {
+      setData(value);
+      lastRead.current = Date.now();
+      setSync('');
+    });
+    pendingRead.current = task;
+    try { await task; } finally { if (pendingRead.current === task) pendingRead.current = null; }
+  };
   useEffect(() => {
     startSession()
       .then(reload)
@@ -50,6 +64,30 @@ function App() {
         if (e.code === "SIGN_IN_REQUIRED") setSignIn(true);
         else setError(e.message);
       });
+  }, []);
+  useEffect(() => {
+    let timer, stopped = false, failures = 0;
+    const schedule = () => { clearTimeout(timer); if (!stopped) timer = setTimeout(tick, Math.min(300000, 60000 * 2 ** failures)); };
+    const tick = async () => {
+      const current = live.current;
+      if (document.visibilityState === 'visible' && navigator.onLine && current.data &&
+          !current.busy && !current.proposal && !document.querySelector('dialog[open], form[data-dirty="true"]') &&
+          !['INPUT','TEXTAREA','SELECT'].includes(document.activeElement?.tagName) && Date.now() - lastRead.current >= 15000) {
+        try { await reload(); failures = 0; }
+        catch (e) {
+          failures = Math.min(failures + 1, 3);
+          if (e.code === 'SIGN_IN_REQUIRED') { setData(null); setSignIn(true); }
+          else setSync('Updates interrupted. Retrying automatically.');
+        }
+      }
+      schedule();
+    };
+    const resume = () => { if (!stopped) void tick(); };
+    window.addEventListener('focus', resume);
+    window.addEventListener('online', resume);
+    document.addEventListener('visibilitychange', resume);
+    schedule();
+    return () => { stopped = true; clearTimeout(timer); window.removeEventListener('focus', resume); window.removeEventListener('online', resume); document.removeEventListener('visibilitychange', resume); };
   }, []);
   const run = async (fn) => {
     setBusy(true);
@@ -77,14 +115,14 @@ function App() {
       }
       setNotice(result.message);
       setProposal(null);
-      await reload();
+      await reload(true);
     });
   const navigate = (value) => {
     setPage(value);
     setError("");
     setNotice("");
   };
-  const common = { ...data, propose, busy, notify: setNotice };
+  const common = { ...data, propose, busy, notify: setNotice, refresh:reload };
   if (signIn) {
     const code = new URLSearchParams(location.search).get("signin");
     const message =
@@ -99,15 +137,9 @@ function App() {
       <div className="login">
         <section className="login-brand">
           <Brand />
-          <p>
-            Detachment administration,
-            <br />
-            in one place.
-          </p>
         </section>
         <main className="login-form">
-          <h1>Welcome to SHAMROCK</h1>
-          <p>Sign in to manage the Wing’s people, schedule and attendance.</p>
+          <h1>Sign in</h1>
           {message && (
             <div className="error" role="alert">
               {message}
@@ -166,16 +198,7 @@ function App() {
             <span>
               Wing <span className="slash">/</span> <strong>{page}</strong>
             </span>
-            <div>
-              <button
-                className="icon"
-                aria-label="Refresh data"
-                disabled={busy}
-                onClick={() => run(reload)}
-              >
-                <RefreshCw size={17} />
-              </button>
-            </div>
+            {sync && <small role="status">{sync}</small>}
           </header>
           <main>
             {error && (
@@ -191,7 +214,7 @@ function App() {
             {!data ? (
               <p aria-live="polite">
                 {error
-                  ? "Unable to load SHAMROCK. Use Refresh data to retry."
+                  ? <button onClick={() => run(() => startSession().then(() => reload(true)))}>Retry connection</button>
                   : "Loading SHAMROCK…"}
               </p>
             ) : (
@@ -225,7 +248,7 @@ function App() {
                   </React.Fragment>
                 ))}
               </dl>
-              <p className="notice">{proposal.summary.consequence}</p>
+              {proposal.summary.consequence && <p className="notice">{proposal.summary.consequence}</p>}
               {error && (
                 <p role="alert" className="error">
                   {error}

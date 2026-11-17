@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { ArrowRight, Send } from "lucide-react";
+import { Send } from "lucide-react";
 import { Heading, Table, Status, Empty } from "./components";
 import { api } from "./api";
 export function Overview({ snapshot: s, reporting, history, navigate }) {
@@ -31,35 +31,11 @@ export function Overview({ snapshot: s, reporting, history, navigate }) {
         </div>
       </div>
       <section className="form-section">
-        <h2>What needs your attention?</h2>
-        {[
-          ["Events", "Edit an event, its schedule or attendance roster."],
-          ["Cadets", "Update profiles and Flight assignments."],
-          [
-            "Attendance & excusals",
-            "Review excusals or correct an attendance record.",
-          ],
-          ["Semester", "Review cadets and prepare the next semester."],
-        ].map(([title, copy]) => (
-          <button
-            key={title}
-            className="task-row"
-            onClick={() => navigate(title)}
-          >
-            <span>
-              <strong>{title}</strong>
-              <small>{copy}</small>
-            </span>
-            <ArrowRight size={19} />
-          </button>
-        ))}
-      </section>
-      <section className="form-section">
         <h2>Recent changes</h2>
         {history.length ? (
           <History rows={history.slice(0, 5)} />
         ) : (
-          <Empty>No panel changes have been submitted yet.</Empty>
+          <Empty>No changes yet.</Empty>
         )}
       </section>
     </>
@@ -99,15 +75,12 @@ export function System({ snapshot, history, retry, busy }) {
     <>
       <Heading
         title="System"
-        description="Check saved changes and recover interrupted requests."
       />
       <div className="notice">
-        A saved change confirms the database accepted it. Spreadsheet and Form
-        publication is a separate step.
+        Spreadsheet and Form sync may finish after a change is saved.
       </div>
       <section className="form-section">
         <h2>Change history</h2>
-        <p>Retries reuse the original request, preventing duplicate changes.</p>
         <History rows={history} retry={retry} busy={busy} />
       </section>
       <details>
@@ -156,7 +129,6 @@ export function Assistant({ meta }) {
     <>
       <Heading
         title="Assistant"
-        description="Optional help with SHAMROCK procedures."
       />
       <div className="notice">
         CRC access and usage limits may change, and this feature may be retired.

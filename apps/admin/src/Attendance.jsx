@@ -33,7 +33,6 @@ export default function Attendance({ snapshot: s, reporting, propose, busy }) {
     <>
       <Heading
         title="Attendance & excusals"
-        description="Review requests and make traceable attendance corrections."
       />
       <div className="tabs">
         <button

@@ -18,10 +18,12 @@ try {
       viewport: { width: 1488, height: 1056 },
     }),
     errors = [];
+  let stateReads = 0;
   page.on("pageerror", (e) => errors.push(e.message));
   // Exercise the hosted contract: compute display projections in the browser
   // instead of relying on the local server's precomputed reporting object.
   await page.route('**/api/state', async route => {
+    stateReads++;
     const response = await route.fetch();
     const data = await response.json();
     if (response.ok()) {
@@ -34,7 +36,13 @@ try {
     if (r.status() >= 400 && r.url().includes("/api/"))
       console.error("Rejected request", r.status(), await r.text());
   });
+  await page.clock.install();
   await page.goto(`http://127.0.0.1:${server.address().port}`);
+  await page.getByRole('button',{name:'Edit Veterans Day',exact:true}).waitFor();
+  const refreshed = page.waitForResponse(r=>r.url().endsWith('/api/state'));
+  await page.clock.fastForward(61000);
+  await refreshed;
+  assert(stateReads>=2,'visible idle panel refreshes automatically');
   const navigate = async (title) => {
     await page
       .getByRole("navigation")
@@ -57,12 +65,33 @@ try {
   await page
     .getByLabel("Event name", { exact: true })
     .fill("Veterans Day ceremony");
+  const readsWhileEditing = stateReads;
+  await page.clock.fastForward(61000);
+  assert.equal(stateReads,readsWhileEditing,'refresh pauses while editing');
+  assert.equal(await page.getByLabel('Event name',{exact:true}).inputValue(),'Veterans Day ceremony');
   await apply();
   assert.equal(
     (await service.snapshot()).events.find((e) => e.eventId === "veterans")
       .label,
     "Veterans Day ceremony",
   );
+  const beforeSchedule=await service.snapshot();
+  await page.getByRole('button',{name:'Change schedule',exact:true}).click();
+  await page.getByLabel('Events on or after').fill('2026-01-01');
+  await page.getByLabel('New weekday').selectOption('3');
+  await page.getByLabel('Start time (Eastern)').fill('07:00');
+  await page.getByRole('button',{name:'Review schedule',exact:true}).click();
+  await page.getByRole('button',{name:'Save schedule',exact:true}).click();
+  await page.locator('dialog').waitFor({state:'detached'});
+  const afterSchedule=await service.snapshot();
+  for(const original of beforeSchedule.events.filter(e=>e.eventType==='mando')) {
+    const updated=afterSchedule.events.find(e=>e.eventId===original.eventId);
+    assert.equal(updated.columnLabel,original.columnLabel);
+    assert.deepEqual(updated.eligiblePersonIds,original.eligiblePersonIds);
+    assert.equal(new Date(updated.startAt).getUTCDay(),3);
+  }
+  assert.deepEqual(afterSchedule.requests,beforeSchedule.requests);
+  assert.deepEqual(afterSchedule.observations,beforeSchedule.observations);
   await navigate("Cadets");
   await page
     .getByRole("button", { name: "Edit Alex Morgan", exact: true })
@@ -102,9 +131,6 @@ try {
   await page.getByLabel("New semester name").fill("Spring 2027");
   await page.getByLabel("First training-week Sunday").fill("2027-01-10");
   await page.getByLabel("Training weeks", { exact: true }).fill("2");
-  await page
-    .getByLabel("Reason / semester preparation notes")
-    .fill("Browser rehearsal");
   await page.getByRole("button", { name: "Review semester plan" }).click();
   await page.getByRole("button", { name: "Apply change", exact: true }).click();
   await page.locator("dialog").waitFor({ state: "detached" });

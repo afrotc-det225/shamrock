@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 import { Heading, Field, Select, Table } from "./components";
 import { name, years, statuses, api } from "./api";
+import { semesterDefaults } from './schedule.mjs';
 export default function Semester({
   snapshot: s,
   propose,
@@ -10,17 +11,15 @@ export default function Semester({
   history,
 }) {
   const current = s.terms.find((t) => t.isCurrent),
-    [title, setTitle] = useState(""),
+    [defaults] = useState(() => semesterDefaults(s)),
+    [title, setTitle] = useState(defaults.label),
     [first, setFirst] = useState(""),
-    [weeks, setWeeks] = useState(15),
-    [reason, setReason] = useState(""),
+    [weeks, setWeeks] = useState(defaults.weeks),
     [changes, setChanges] = useState({}),
-    [schedule, setSchedule] = useState({
-      mando: { weekday: 4, hour: 6, minute: 30, durationMinutes: 60 },
-      llab: { weekday: 2, hour: 15, minute: 30, durationMinutes: 120 },
-    });
+    [schedule, setSchedule] = useState(defaults.schedule);
   const [transition, setTransition] = useState(null),
-    [statusError, setStatusError] = useState("");
+    [statusError, setStatusError] = useState(""),
+    [dirty, setDirty] = useState(false);
   const loadStatus = async (id) => {
     try {
       setStatusError("");
@@ -64,7 +63,7 @@ export default function Semester({
           sortOrder: Math.max(...s.terms.map((t) => t.sortOrder)) + 1,
         },
         policyVersion: meta.transitionPolicy,
-        reviewReason: reason,
+        reviewReason: `Prepare ${title}`,
         people: Object.values(changes),
         schedule: {
           firstSunday: first,
@@ -79,13 +78,7 @@ export default function Semester({
     <>
       <Heading
         title="Semester"
-        description={`Prepare the next semester while ${current?.label || "the current semester"} stays intact.`}
       />
-      <div className="notice">
-        Preparation saves a plan and requests a verified archive. It does not
-        activate the next semester. No cadet is automatically marked graduated
-        or commissioned.
-      </div>
       {plans.length > 0 && (
         <section className="form-section">
           <h2>Prepared plans</h2>
@@ -162,9 +155,9 @@ export default function Semester({
           )}
         </section>
       )}
-      <form onSubmit={submit}>
+      <form onSubmit={submit} data-dirty={dirty} onChangeCapture={() => setDirty(true)}>
         <section className="form-section">
-          <h2>1. Set the schedule</h2>
+          <h2>Schedule</h2>
           <div className="form-grid">
             <Field
               label="New semester name"
@@ -252,11 +245,7 @@ export default function Semester({
           </div>
         </section>
         <section className="form-section">
-          <h2>2. Review cadets</h2>
-          <p>
-            Unchanged cadets retain their current status and assignments. Review
-            each senior explicitly.
-          </p>
+          <h2>Cadets</h2>
           <Table headers={["Cadet", "AS year", "Flight Path", "Flight", ""]}>
             {s.people.map((p) => {
               const draft = changes[p.personId] || p;
@@ -313,14 +302,6 @@ export default function Semester({
           </Table>
         </section>
         <section className="form-section">
-          <h2>3. Review the plan</h2>
-          <Field label="Reason / semester preparation notes">
-            <textarea
-              required
-              value={reason}
-              onChange={(e) => setReason(e.target.value)}
-            />
-          </Field>
           <button className="primary" disabled={busy || !current}>
             Review semester plan
           </button>

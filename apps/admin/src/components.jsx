@@ -48,7 +48,7 @@ export function Heading({ title, description, children }) {
     <div className="heading">
       <div>
         <h1>{title}</h1>
-        <p>{description}</p>
+        {description && <p>{description}</p>}
       </div>
       {children}
     </div>
@@ -73,7 +73,7 @@ export function Drawer({ title, children, onClose }) {
     return () => ref.current?.close();
   }, []);
   return (
-    <dialog ref={ref} className="drawer" onCancel={onClose}>
+    <dialog ref={ref} className="drawer" onCancel={e=>{e.preventDefault();onClose();}}>
       <header>
         <h2>{title}</h2>
         <button aria-label="Close editor" onClick={onClose}>
@@ -90,7 +90,7 @@ export function Editor({
   onSubmit,
   busy,
   children,
-  note = "Changes are reviewed before they are saved.",
+  note = "",
 }) {
   const error = useContext(EditorError);
   return (
@@ -110,7 +110,7 @@ export function Editor({
           {children}
         </div>
         <footer>
-          <p>{note}</p>
+          {note && <p>{note}</p>}
           <div className="actions">
             <button type="button" onClick={onClose}>
               Cancel

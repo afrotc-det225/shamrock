@@ -114,11 +114,6 @@ export default function People({
     <>
       <Heading
         title={leadership ? "Leadership" : "Cadets"}
-        description={
-          leadership
-            ? "Keep leadership contacts and reporting relationships current."
-            : "Manage cadet profiles, Flight assignments and participation."
-        }
       >
         <button className="primary" onClick={() => open()}>
           <Plus size={17} />
@@ -202,7 +197,7 @@ export default function People({
           note={
             leadership
               ? "Leadership titles do not automatically grant system access."
-              : "Historical attendance remains attached to this cadet."
+              : ""
           }
         >
           {edit.profile ? (

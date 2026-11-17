@@ -12,7 +12,9 @@ import {
 } from "./components";
 import { eventTypes, displayDate, name } from "./api";
 import { toEastern, fromEastern } from "./time";
-export default function Events({ snapshot: s, propose, busy }) {
+import BulkSchedule from './BulkSchedule';
+export default function Events({ snapshot: s, propose, busy, refresh }) {
+  const [bulk,setBulk]=useState(false);
   const [query, setQuery] = useState(""),
     [type, setType] = useState(""),
     [term, setTerm] = useState(s.terms.find((t) => t.isCurrent)?.termId || ""),
@@ -85,12 +87,13 @@ export default function Events({ snapshot: s, propose, busy }) {
     <>
       <Heading
         title="Events"
-        description="Manage the schedule. Keep attendance connected."
       >
+        <div className="actions"><button disabled={!term||busy} onClick={()=>setBulk(true)}>Change schedule</button>
         <button className="primary" onClick={() => open()}>
           <Plus size={17} />
           Add event
         </button>
+        </div>
       </Heading>
       <div className="toolbar">
         <SearchBox
@@ -147,9 +150,7 @@ export default function Events({ snapshot: s, propose, busy }) {
         ))}
       </Table>
       {!rows.length && <Empty>No events match these filters.</Empty>}
-      <p className="footnote">
-        Changes update attendance views and Form choices.
-      </p>
+      {bulk&&<BulkSchedule snapshot={s} term={term} onClose={()=>setBulk(false)} onSaved={()=>refresh(true)}/>}
       {edit && (
         <Editor
           title={edit.expectedVersion ? "Edit event" : "Add event"}
@@ -158,7 +159,6 @@ export default function Events({ snapshot: s, propose, busy }) {
           onSubmit={() =>
             !timeError && propose("event.upsert", edit, () => setEdit(null))
           }
-          note="Existing attendance and excusals stay linked."
         >
           <Field
             label="Event name"
@@ -210,12 +210,6 @@ export default function Events({ snapshot: s, propose, busy }) {
             value={edit.location}
             onChange={(e) => set("location", e.target.value)}
           />
-          <Field label="Notes">
-            <textarea
-              value={edit.notes}
-              onChange={(e) => set("notes", e.target.value)}
-            />
-          </Field>
           <details>
             <summary>Attendance roster & schedule details</summary>
             <Select
