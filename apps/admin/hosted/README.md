@@ -115,6 +115,23 @@ audited in the operational backend; add only redacted event-code logs if needed.
 
 ## Recovery and handoff
 
+### Verified staging evidence (November 16, 2026)
+
+Release `fed4946` was deployed to the separate administrator staging Worker.
+Public page and health checks returned 200; anonymous state/session requests
+returned 401. A real Google account-selection/callback flow successfully opened
+the panel with the explicitly registered staging operator. The dashboard showed
+the fictional backend's 16 cadets, six events and three pending excusals;
+attendance rows and percentages loaded. Signing out returned to the sign-in page.
+Automated authentication, authorization and proposal tests passed (15 tests),
+alongside browser workflow and mobile-layout checks. This evidence does not
+establish production readiness or live spreadsheet publication parity.
+
+OAuth credentials are held in 1Password under
+`SHAMROCK administrator staging OAuth` in the SHAMROCK vault and deployed as
+Worker secrets. Successor access to that vault still needs a separate handoff
+check; creating the vault alone does not establish shared access.
+
 Keep the signed-in administrator panel and all ordinary operations independent of
 CRC. A successor needs the project-owned Cloudflare/Google accounts, shared vault,
 and an explicitly registered personal Google subject with backend grants.
