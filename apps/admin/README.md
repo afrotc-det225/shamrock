@@ -183,6 +183,24 @@ That loopback-browser check does not establish hosted CPU capacity or completene
 against later production updates. The hosted real-data binding remains a separate
 release gate.
 
+### Loading behavior
+
+The initial loading view retains the page heading and table layout, reports actual
+loading/verification stages, and offers Cancel/Retry. Its progress indicator counts
+completed record groups; it is not an elapsed-time estimate. Motion is disabled
+when reduced motion is requested. The site icon uses the same transparent SVG as
+the panel mark.
+
+Complete captures fetch at most two independent sections concurrently, keeping
+each section's cursor sequential and reconstructing the original section order.
+An exact, bounded manifest can establish that a section is empty; only those
+sections omit the redundant empty-page request. Final revision/access verification
+still runs, and duplicate, missing or invalid manifest entries fail closed.
+In the local fictional fixture, a complete capture dropped from 17 page requests
+to 13, plus the unchanged initial state request. This is a local request-count
+measurement, not hosted CPU or wall-clock evidence. No browser-persistent data
+cache or background prefetch was added.
+
 ### View as
 
 Administrators can choose **View as**, select a cadet, and inspect that person's

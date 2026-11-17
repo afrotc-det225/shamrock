@@ -28,16 +28,43 @@ test("browser paged full capture matches existing operational catalogs and prese
   const expected = await local.backend.snapshot(),
     host = proxy(local.backend);
   const manifest = await host.panelManifest();
-  let pages = 0;
+  let pages = 0, active = 0, maximum = 0;
+  const requested = [];
+  const progress = [];
   const actual = await loadSnapshot({ manifest }, async (path, body) => {
     assert.equal(path, "/page");
     pages++;
-    return host.page(body);
-  });
+    requested.push(body.section);
+    maximum = Math.max(maximum, ++active);
+    try {
+      await new Promise(resolve => setTimeout(resolve, 3));
+      return await host.page(body);
+    } finally { active--; }
+  }, value => progress.push(value));
   const { access, ...snapshot } = actual;
   assert.deepEqual(snapshot, expected);
   assert.equal(access.capabilities.fullSnapshot, true);
   assert(pages > 10);
+  assert.equal(maximum, 2, "independent pages overlap without exceeding two requests");
+  assert.equal(progress.at(-1).stage, "Verifying records");
+  assert.equal(progress.at(-1).completed, progress.at(-1).total);
+  const sourceManifest = await host.post("/v1/admin/snapshot/page", {...host.identity(),section:"manifest",offset:0,revision:null});
+  const empty = sourceManifest.sections.filter(entry => entry.count === 0).map(entry => entry.section);
+  assert(empty.length > 0);
+  assert(empty.every(section => !requested.includes(section)), "proven empty sections need no request");
+  t.diagnostic(JSON.stringify({beforePageRequests: pages + empty.length, afterPageRequests: pages, skippedEmptySections: empty.length, maximumConcurrent: maximum}));
+});
+
+test("empty-section optimization rejects duplicate or invalid manifest counts", async (t) => {
+  const local = await createLocalBackend(); t.after(() => local.dispose());
+  const host = proxy(local.backend), manifest = await host.panelManifest();
+  for (const tamper of [m => m.sections[1].section=m.sections[0].section, m => m.sections[0].count=-1]) {
+    let calls=0;
+    await assert.rejects(()=>loadSnapshot({manifest},async (_path,body)=>{
+      calls++; const value=await host.page(body); if(body.section==='manifest')tamper(value); return value;
+    }));
+    assert.equal(calls,1,"invalid manifest fails before data pages");
+  }
 });
 test("scoped pages never return private catalogs and reject alternate full reads or changed access", async (t) => {
   const local = await createLocalBackend();

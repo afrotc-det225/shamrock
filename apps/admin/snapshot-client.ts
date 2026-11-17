@@ -2,8 +2,9 @@ import {
   assembleFrontendSnapshotPages,
   FRONTEND_SECTIONS,
   FRONTEND_PAGE_MAX_BYTES,
+  FRONTEND_SECTION_BOUNDS,
 } from "../../packages/domain/src/frontend-transport";
-import { assemblePanelSnapshotPages } from "../../packages/domain/src/panel-read";
+import { assemblePanelSnapshotPages, PANEL_SECTIONS } from "../../packages/domain/src/panel-read";
 import {
   operationallyActive,
   directoryLeadershipRole,
@@ -128,7 +129,7 @@ async function mergeCatalogs(snapshot, people, contacts) {
   return { ...snapshot, people, leadership };
 }
 /** One page per HTTP request; never publish partial or mixed-revision state. */
-export async function loadSnapshot(state, request) {
+export async function loadSnapshot(state, request, progress = (_value) => {}) {
   const panel = state.manifest,
     full = panel.access.capabilities.fullSnapshot;
   let count = 0,
@@ -154,12 +155,38 @@ export async function loadSnapshot(state, request) {
     );
     return page;
   };
-  const manifest = full ? await get("manifest", 0, null) : panel,
-    pages = [];
-  const sections = full
-    ? FRONTEND_SECTIONS
-    : manifest.sections.map((x) => x.section);
-  for (const section of sections) {
+  const manifest = full ? await get("manifest", 0, null) : panel;
+  const sections = full ? FRONTEND_SECTIONS : PANEL_SECTIONS;
+  check(Array.isArray(manifest.sections) && manifest.sections.length === sections.length &&
+    manifest.sections.every((entry, index) => entry.section === sections[index] &&
+      Number.isSafeInteger(entry.count) && entry.count >= 0 && entry.count <= FRONTEND_SECTION_BOUNDS[entry.section]));
+  const sectionPages = new Map(), total = sections.length + (full ? 2 : 0);
+  let completed = 0;
+  progress({stage: "Loading records", completed, total});
+  // Two independent sections at most, with each section's cursor kept sequential.
+  // Request count and per-invocation limits are unchanged; assembly remains ordered.
+  async function bounded(items, work) {
+    let next = 0, failed = false;
+    await Promise.all(Array.from({length: Math.min(2, items.length)}, async () => {
+      while (!failed && next < items.length) {
+        const item = items[next++];
+        try { await work(item); }
+        catch (error) { failed = true; throw error; }
+      }
+    }));
+  }
+  await bounded(sections, async section => {
+    const pages = [];
+    if (manifest.sections.find(entry => entry.section === section).count === 0) {
+      // The authenticated manifest establishes emptiness. Final verification still
+      // rejects data/access changes; no incomplete section is presented as empty.
+      pages.push({contractVersion: manifest.contractVersion, environment: manifest.environment,
+        generation: manifest.generation, scope: manifest.scope, access: manifest.access,
+        revision: manifest.revision, section, offset: 0, nextOffset: null, rows: []});
+      sectionPages.set(section, pages);
+      progress({stage: "Loading records", completed: ++completed, total});
+      return;
+    }
     let offset = 0;
     do {
       const page = await get(section, offset, manifest.revision);
@@ -173,7 +200,10 @@ export async function loadSnapshot(state, request) {
       );
       offset = page.nextOffset;
     } while (true);
-  }
+    sectionPages.set(section, pages);
+    progress({stage: "Loading records", completed: ++completed, total});
+  });
+  const pages = sections.flatMap(section => sectionPages.get(section));
   let people, contacts;
   if (full) {
     const catalog = async (section) => {
@@ -191,9 +221,13 @@ export async function loadSnapshot(state, request) {
       } while (true);
       return rows;
     };
-    people = await catalog("directory-catalog");
-    contacts = await catalog("contacts-catalog");
+    await bounded(["directory-catalog", "contacts-catalog"], async section => {
+      const rows = await catalog(section);
+      if (section === "directory-catalog") people = rows; else contacts = rows;
+      progress({stage: "Loading records", completed: ++completed, total});
+    });
   }
+  progress({stage: "Verifying records", completed: total, total});
   const verified = await get("verify", 0, manifest.revision);
   if (!full) return assemblePanelSnapshotPages(manifest, pages, verified);
   const snapshot = await mergeCatalogs(

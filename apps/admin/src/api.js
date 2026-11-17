@@ -3,7 +3,7 @@ import { loadSnapshot } from "../snapshot-client";
 let csrf;
 let retainedCapture;
 let viewRevision;
-export async function api(path, body) {
+export async function api(path, body, options = {}) {
   const response = await fetch(`/api${path}`, {
     method: body === undefined ? "GET" : "POST",
     headers: {
@@ -11,6 +11,7 @@ export async function api(path, body) {
       ...(viewRevision && path !== "/state" ? { "x-shamrock-view-revision": viewRevision } : {}),
     },
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+    signal: options.signal,
   });
   const data = await response.json();
   if (!response.ok) {
@@ -34,7 +35,8 @@ export async function api(path, body) {
       if (retainedCapture?.key === key)
         data.snapshot = retainedCapture.snapshot;
       else {
-        data.snapshot = await loadSnapshot(data, api);
+        data.snapshot = await loadSnapshot(data,
+          (nextPath, nextBody) => api(nextPath, nextBody, {signal: options.signal}), options.onProgress);
         retainedCapture = { key, snapshot: data.snapshot };
       }
     }

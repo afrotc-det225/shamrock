@@ -47,6 +47,8 @@ function App() {
     [signIn, setSignIn] = useState(false),
     [sync, setSync] = useState("");
   const [preview, setPreview] = useState(null), [previewName, setPreviewName] = useState("");
+  const [readProgress, setReadProgress] = useState({stage: "Checking access"});
+  const pendingAbort = useRef(null);
   const pendingRead = useRef(null),
     lastRead = useRef(0),
     live = useRef({});
@@ -56,7 +58,10 @@ function App() {
       await pendingRead.current;
       if (!force) return;
     }
-    const task = api("/state").then((value) => {
+    const controller = new AbortController();
+    pendingAbort.current = controller;
+    setReadProgress({stage: "Checking access"});
+    const task = api("/state", undefined, {signal: controller.signal, onProgress: setReadProgress}).then((value) => {
       setData(value);
       setPreview(value.viewAs || null);
       if (
@@ -70,8 +75,13 @@ function App() {
     pendingRead.current = task;
     try {
       await task;
+    } catch (error) {
+      controller.abort();
+      if (error.name === "AbortError") throw new Error("Loading stopped.");
+      throw error;
     } finally {
       if (pendingRead.current === task) pendingRead.current = null;
+      if (pendingAbort.current === controller) pendingAbort.current = null;
     }
   };
   useEffect(() => {
@@ -281,7 +291,7 @@ function App() {
               </div>
             )}
             {blockedPreview ? <p>{viewAsStatus[preview.status] || "This account cannot be previewed."}</p> : !data ? (
-              <p aria-live="polite">
+              <section className="loading-panel" aria-busy={!error}>
                 {error ? (
                   <button
                     onClick={() =>
@@ -291,9 +301,15 @@ function App() {
                     Retry connection
                   </button>
                 ) : (
-                  "Loading SHAMROCK…"
+                  <>
+                    <h1>{page}</h1>
+                    <div className="loading-status"><span role="status">{readProgress.stage}…</span>
+                      <button onClick={() => pendingAbort.current?.abort()}>Cancel</button></div>
+                    {readProgress.total && <progress aria-label="Record groups loaded" value={readProgress.completed} max={readProgress.total} />}
+                    <div className="loading-table" aria-hidden="true">{Array.from({length:6},(_,i)=><div key={i}><i/><i/><i/></div>)}</div>
+                  </>
                 )}
-              </p>
+              </section>
             ) : (
               <React.Fragment key={preview?.entryAuditId || "own-account"}>
                 {!scoped && page === "Events" && <Events {...common} />}{" "}

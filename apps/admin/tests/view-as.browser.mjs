@@ -9,10 +9,12 @@ const browser=await chromium.launch(process.env.SHAMROCK_CHROMIUM_PATH?{executab
 try {
  const page=await browser.newPage({viewport:{width:1440,height:1000}}),errors=[];
  page.on('pageerror',e=>errors.push(e.message));
- let mode=null,nextStatus='ready';
+ let mode=null,nextStatus='ready', firstRead=true, releaseFirst;
+ const blockedRead=new Promise(resolve=>{releaseFirst=resolve;});
  const snapshot=await local.backend.snapshot(),person=snapshot.people[0],personName=[person.firstName,person.lastName].join(' ');
  await page.route('**/api/session',async route=>{const response=await route.fetch();await route.fulfill({response,json:{...await response.json(),viewAs:mode}});});
  await page.route('**/api/state',async route=>{
+  if(firstRead){firstRead=false;await blockedRead;}
   const response=await route.fetch(),data=await response.json();
   data.meta={...data.meta,hosted:true,viewAsEnabled:true};data.viewAs=mode;
   if(mode?.status!=='ready'&&mode){data.snapshot=null;delete data.reporting;}
@@ -23,6 +25,13 @@ try {
   await route.fulfill({json:{viewAs:mode}});
  });
  await page.goto(`http://127.0.0.1:${server.address().port}`);
+ await page.getByText('Checking access…',{exact:true}).waitFor();
+ assert.equal(await page.locator('.loading-table > div').count(),6);
+ await page.getByRole('button',{name:'Cancel',exact:true}).click();
+ await page.getByText('Loading stopped.',{exact:true}).waitFor();
+ releaseFirst();
+ await page.getByRole('button',{name:'Retry connection',exact:true}).click();
+ await page.getByRole('button',{name:'View as',exact:true}).waitFor();
  const enter=async()=>{await page.getByRole('button',{name:'View as',exact:true}).click();await page.getByRole('dialog').getByRole('button',{name:new RegExp(personName)}).click();await page.getByRole('button',{name:'Exit view',exact:true}).waitFor();};
  await enter();
  await page.getByRole('heading',{name:'Events',exact:true}).waitFor();
@@ -50,5 +59,5 @@ try {
  await page.getByRole('button',{name:'Exit view',exact:true}).click();
  await page.getByRole('button',{name:'View as',exact:true}).waitFor();
  assert.deepEqual(errors,[]);
- console.log('PASS: View as selector, readonly controls, working filters, reload retention, exit restores own view, explicit no-access, mobile layout, no runtime errors.');
+ console.log('PASS: loading skeleton/cancel/retry, View as selector, readonly controls, working filters, reload retention, exit restores own view, explicit no-access, mobile layout, no runtime errors.');
 }finally{await browser.close();await new Promise(r=>server.close(r));service.close();await local.dispose();}
