@@ -67,8 +67,9 @@ function fixture() {
 function assertOnlyPaused(f, expected) {
   const before = new Map(f.properties);
   assert.throws(() => f.run(), expected);
-  before.set(H.enabled, 'false'); before.set(F.paused, 'true'); before.set(M.paused, 'true'); before.set('SHAMROCK_V3_INPUT_PAUSED','true'); before.set('SHAMROCK_V3_PERMISSION_PAUSED','true'); before.set('SHAMROCK_V3_FORMS_PAUSED','true'); before.set('SHAMROCK_V3_FORM_INTAKE_PAUSED','true'); assert.deepEqual(f.properties, before);
-  assert.deepEqual(f.state.mutations, [['set', H.enabled], ['set', F.paused], ['set', M.paused], ['set','SHAMROCK_V3_INPUT_PAUSED'], ['set','SHAMROCK_V3_PERMISSION_PAUSED'], ['set','SHAMROCK_V3_FORMS_PAUSED'], ['set','SHAMROCK_V3_FORM_INTAKE_PAUSED']]);
+  const paused=[F.paused,M.paused,'SHAMROCK_V3_INPUT_PAUSED','SHAMROCK_V3_PERMISSION_PAUSED','SHAMROCK_V3_HISTORY_PAUSED','SHAMROCK_V3_OWNER_MAIL_PAUSED','SHAMROCK_V3_FORMS_PAUSED','SHAMROCK_V3_FORM_INTAKE_PAUSED'];
+  before.set(H.enabled,'false');for(const key of paused)before.set(key,'true');assert.deepEqual(f.properties,before);
+  assert.deepEqual(f.state.mutations,[['set',H.enabled],...paused.map(key=>['set',key])]);
   assert.equal(f.state.secretReads, 0);
 }
 
@@ -82,6 +83,16 @@ test('private owner-only configuration imports nonsecret bindings while paused a
   assert.equal(f.properties.get(H.secret), 'fixture-secret-untouched-never-read'); assert.equal(f.state.secretReads, 0);
   assert.equal(f.properties.get(N.projectionClaim), 'pending-claim-preserve'); assert.equal(f.properties.get('UNRELATED_SETTING'), 'preserve');
   assert.equal(f.state.calls.length, 3); assert.equal(f.state.mutations.filter(m => m[0] === 'batch').length, 1);
+});
+
+test('History, mail and credential pointers remain file-owned; a config import pauses every optional runtime',()=>{
+ const f=fixture();const additions={SHAMROCK_V3_OWNER_MAIL_CONFIG:{version:1,configFileId:'mail-config'},SHAMROCK_V3_CREDENTIAL_IMPORT:{version:1,fileId:'temporary-key-delivery',requestId:'review-key',sequence:1},SHAMROCK_V3_HISTORY_CONFIG:{version:1,environment:'staging',generation:1,enabled:true,resourceReview:'EXISTING_PRIVATE_HISTORY_REVIEWED_FOR_STAGING',principalId:'reader',stateFileId:'history-state',spreadsheetId:'history-book',expectedTitle:'History',api:{baseUrl:'https://history.example.invalid',keyId:'history-key',secretProperty:'SHAMROCK_V3_HISTORY_READER_SECRET'}}};
+ for(const[k,v]of Object.entries(additions)){f.map[k]=JSON.stringify(v);f.properties.set(k,'stale-private-override');}
+ f.properties.set('SHAMROCK_V3_OWNER_MAIL_SETUP','old-receipt');assert.equal(f.run().propertyCount,5);
+ for(const k of Object.keys(additions))assert.equal(f.properties.has(k),false);
+ assert.equal(f.properties.get('SHAMROCK_V3_HISTORY_PAUSED'),'true');assert.equal(f.properties.get('SHAMROCK_V3_OWNER_MAIL_PAUSED'),'true');assert.equal(f.properties.has('SHAMROCK_V3_OWNER_MAIL_SETUP'),false);assert.equal(f.state.secretReads,0);
+ const bad=fixture();bad.map.SHAMROCK_V3_CREDENTIAL_IMPORT=JSON.stringify({...additions.SHAMROCK_V3_CREDENTIAL_IMPORT,secret:'never in configuration'});assertOnlyPaused(bad,code('configuration_invalid'));
+ for(const override of [{api:null},{expectedTitle:'  '}]){const invalid=fixture();invalid.map.SHAMROCK_V3_HISTORY_CONFIG=JSON.stringify({...additions.SHAMROCK_V3_HISTORY_CONFIG,...override});assertOnlyPaused(invalid);}
 });
 
 test('optional frontend bindings stay in the private file and imports pause both planes without touching claims or secrets', () => {
@@ -210,7 +221,7 @@ test('a property provider failure is never reported as an atomic successful impo
 test('an unconfirmed pause stops before downloading or replacing any configuration', () => {
   const f = fixture(); const before = new Map(f.properties); f.state.discardPause = true;
   assert.throws(() => f.run(), code('configuration_write_failed'));
-  assert.deepEqual(f.properties, before); assert.equal(f.state.calls.length, 0); assert.equal(f.state.mutations.length, 7);
+  assert.deepEqual(f.properties, before); assert.equal(f.state.calls.length, 0); assert.equal(f.state.mutations.length, 9);
 });
 
 

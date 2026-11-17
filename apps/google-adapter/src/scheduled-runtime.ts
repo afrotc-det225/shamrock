@@ -1,4 +1,5 @@
 import { createNativeOwnerMailRuntime, type NativeOwnerMailServices } from './owner-mail-native.js';
+import { createNativeHistoryRuntime } from './history-native.js';
 import { createNativePermissionRuntime } from './permissions-host.js';
 import { PERMISSION_FENCE_PROPERTY } from './permissions-refresh.js';
 /** One cheap five-minute poll; full reconciliation and slower maintenance have explicit cadences. */
@@ -55,7 +56,8 @@ export function runScheduledStaging(input:Services,nowSeconds=()=>Math.floor(Dat
   }
   let ownerMail:unknown={status:'unbound'};
   if (services.MailApp) { const mail=createNativeOwnerMailRuntime({...services,MailApp:services.MailApp,nowSeconds}); mail.applyControl(); ownerMail=mail.flush(); }
+  const history=createNativeHistoryRuntime(services,nowSeconds).run();
   // Never mark a failed/incomplete pass reconciled; the next tick retries it.
   if(reconcile)props.setProperty(SCHEDULE_PROPERTIES.reconciled,hour);
-  return Object.assign({},intake,{frontend,maintenance,formIntake,forms:published,nativeInput:native,permissions:permissionResult,ownerMail,reconciled:reconcile});
+  return Object.assign({},intake,{frontend,maintenance,formIntake,forms:published,nativeInput:native,permissions:permissionResult,ownerMail,history,reconciled:reconcile});
 }

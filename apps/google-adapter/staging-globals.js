@@ -58,6 +58,7 @@ function shamrockV3StagingPauseBoth_(host) {
   try { if (typeof SHAMROCKV3 !== 'undefined' && SHAMROCKV3.createNativeFrontendInput) shamrockV3NativeInput_().pause(); } catch (error) { if (!failure) failure = error; }
   try { if(typeof SHAMROCKV3!== 'undefined' && SHAMROCKV3.createNativePermissionRuntime) shamrockV3NativePermissions_().pause(); } catch(error) { if(!failure)failure=error; }
   try { if (typeof SHAMROCKV3 !== 'undefined' && SHAMROCKV3.createNativeOwnerMailRuntime) shamrockV3OwnerMail_().pause(); } catch(error) { if(!failure)failure=error; }
+  try { if (typeof SHAMROCKV3 !== 'undefined' && SHAMROCKV3.createNativeHistoryRuntime) shamrockV3History_().pause(); } catch(error) { if(!failure)failure=error; }
   if (failure) throw failure;
   return result;
 }
@@ -126,3 +127,17 @@ function shamrockV3OwnerMailControl() { return shamrockV3OwnerMail_().applyContr
 function shamrockV3OwnerMailFlush() { return shamrockV3OwnerMail_().flush(); }
 function shamrockV3OwnerMailPause() { return shamrockV3OwnerMail_().pause(); }
 function shamrockV3OwnerMailStatus() { return shamrockV3OwnerMail_().status(); }
+function shamrockV3History_() { return SHAMROCKV3.createNativeHistoryRuntime({PropertiesService:PropertiesService,Utilities:Utilities,UrlFetchApp:UrlFetchApp,ScriptApp:ScriptApp,Session:Session,LockService:LockService}); }
+function shamrockV3HistorySetup() { return shamrockV3History_().setup(); }
+function shamrockV3HistoryPause() { return shamrockV3History_().pause(); }
+function shamrockV3HistoryContinue() {
+  var until=Date.now()+210000,result;
+  for(var i=0;i<40&&Date.now()<until;i++){result=shamrockV3History_().run();if(['paused','disabled','busy','complete'].indexOf(result.state)!==-1)break;}
+  return result;
+}
+function shamrockV3HistoryStart() {
+  var host=JSON.parse(PropertiesService.getScriptProperties().getProperty('SHAMROCK_V3_HOST_CONFIG'));
+  if(Session.getActiveUser().getEmail().trim().toLowerCase()!==host.expectedAutomationEmail)throw Error('Run historical publication as the configured automation owner.');
+  var runtime=shamrockV3History_();return runtime.resume(runtime.setup().bindingHash);
+}
+function shamrockV3StagingImportCredential() { return SHAMROCKV3.importStagingCredential({PropertiesService:PropertiesService,Utilities:Utilities,UrlFetchApp:UrlFetchApp,ScriptApp:ScriptApp,Session:Session,LockService:LockService}); }
