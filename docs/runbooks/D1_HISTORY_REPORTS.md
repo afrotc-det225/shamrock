@@ -22,7 +22,7 @@ A read is bounded to 500 rows, 128 event columns and 64,000 cells. Stored row pa
 Run `npm run build:v3 && node --test tests/v3/legacy-history.test.mjs`, then the repository checks before release. Synthetic tests cover historical policy differences, exact range exclusions, unresolved rows, changed/manual formulas, retained unknown codes, authenticated routing, revoked/insufficient grants, incomplete imports, generation binding and capacity limits. Real-data validation belongs only in ignored restricted local evidence; successful local reproduction does not establish hosted endpoint or Google presentation readiness.
 
 The paged Worker reader calculates at most four retained rows per request, or
-two when the retained report has more than 64 event columns, and
+two when the retained report has more than 32 event columns, and
 builds their shared report metadata once. Diagnostics remain attached to their
 exact source row, and source indexes, literal formulas/codes, the 128 KB page
 budget and continuation offsets are unchanged. This avoids rebuilding discarded
@@ -32,11 +32,18 @@ The SQL result uses the same two/four-row bound and does not return a discarded
 lookahead payload. An existing checkpoint resumes from its exact saved offset;
 changing page length does not restart, skip or repeat its committed rows.
 
-This trades throughput for CPU headroom on wide archives. For the six retained
-staging reports (510 rows, including two 80-row reports with 68 event columns),
-one complete row pass grows from 130 requests to 170. The native scan/write/verify
-sequence therefore grows from 390 to 510 row requests/continuations before
-manifest, verification, layout, retries or revision restarts: 120 additional
+The threshold includes ordinary 47-event retained semesters: the initial
+four-row hosted requests succeeded but recorded cold samples of 10.085 and
+10.529 ms CPU, above the Free tier's 10 ms request target. Six earlier two-row
+68-event requests succeeded with a recorded maximum of 8.576 ms. These are
+observations from the November 17 staging release, not a capacity guarantee
+for all reports or the new threshold. Re-measure the deployed artifact.
+
+This trades throughput for CPU headroom on semester archives. For the six retained
+staging reports (510 rows, with 47 or 68 event columns),
+one complete row pass grows from 130 requests to 256. The native scan/write/verify
+sequence therefore grows from 390 to 768 row requests/continuations before
+manifest, verification, layout, retries or revision restarts: 378 additional
 Worker requests and bridge URL Fetch calls. Each continuation also retains its
 Drive checkpoint and applicable Sheets checks; those provider calls must be
 included in the quota budget rather than counting only bridge requests. The

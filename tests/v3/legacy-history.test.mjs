@@ -90,13 +90,13 @@ test('wide archives use two-row pages at the database boundary and resume existi
   await db.batch([db.prepare("INSERT INTO legacy_source_occurrences VALUES('run-one',?,'fingerprint','matrix','evidence-only',?,?,NULL,'{}')").bind(value.row.occurrenceId,JSON.stringify({rowIndex:7-i}),JSON.stringify(value.sourceLabels.map(v=>({effectiveValue:{stringValue:v}})))),db.prepare("INSERT INTO legacy_matrix_snapshot_rows VALUES('archive-one',?,NULL,?)").bind(value.row.occurrenceId,JSON.stringify(value.row))]);
  }
  const original=(await db.prepare('SELECT source_occurrence_id,payload_json FROM legacy_matrix_snapshot_rows ORDER BY source_occurrence_id').all()).results;
- for(const count of [64,65]){
+ for(const count of [32,33,47,64,65]){
   const columns=Array.from({length:count},(_,i)=>f.metadata.columns[i]??{columnIndex:i+7,header:`Retained event ${i}`,snapshotEventId:`snapshot-event-${i}`,eventId:null});
   await db.batch([db.prepare('UPDATE legacy_matrix_snapshots SET metadata_json=?').bind(JSON.stringify({...f.metadata,columns})),...original.map(v=>{const row=JSON.parse(v.payload_json);row.events=columns.map((c,i)=>({...c,code:row.events[i]?.code??'P'}));return db.prepare('UPDATE legacy_matrix_snapshot_rows SET payload_json=? WHERE source_occurrence_id=?').bind(JSON.stringify(row),v.source_occurrence_id);})]);
   let fetchedRows=0;const tracked={prepare:sql=>db.prepare(sql),async batch(statements){const results=await db.batch(statements);fetchedRows=results[2]?.results.length??0;return results;}};
-  const page=await legacyHistoryPage({...env,DB:tracked},base),limit=count>64?2:4;
+  const page=await legacyHistoryPage({...env,DB:tracked},base),limit=count>32?2:4;
   assert.equal(page.rows.length,limit);assert.equal(fetchedRows,limit,'D1 must not return discarded wide payloads');assert.equal(page.nextOffset,limit);
   const resumed=await legacyHistoryPage(env,{...base,offset:4});assert.equal(resumed.rows.length,2);assert.equal(resumed.nextOffset,null);
-  const full=await readLegacyHistory(env,{...request,snapshotId:'archive-one'}),paged=await pagedHistory(env,request);assert.deepEqual(paged.report,full);assert.equal(paged.pages.filter(p=>p.section==='rows').length,count>64?3:2);
+  const full=await readLegacyHistory(env,{...request,snapshotId:'archive-one'}),paged=await pagedHistory(env,request);assert.deepEqual(paged.report,full);assert.equal(paged.pages.filter(p=>p.section==='rows').length,count>32?3:2);
  }
 });

@@ -22,7 +22,7 @@ export async function legacyHistoryPage(env:Env,input:unknown):Promise<HistoryPa
   // The coherent metadata row already supplies the total count; no extra lookahead
   // payload is needed. Bound the database response as well as the calculated page.
   if(r.section==='rows')statements.push(stmt(env.DB,`SELECT r.source_occurrence_id AS rowId,r.person_id AS personId,CASE WHEN length(CAST(r.payload_json AS BLOB))<=128000 THEN r.payload_json END AS payload,CAST(json_extract(o.locator_json,'$.rowIndex') AS INTEGER) AS sourceRowIndex,json_array(${[0,1,2,3,4].map(label).join(',')}) AS labels FROM legacy_matrix_snapshot_rows r JOIN legacy_matrix_snapshots m ON m.matrix_snapshot_id=r.matrix_snapshot_id JOIN legacy_source_occurrences o ON o.import_run_id=m.import_run_id AND o.occurrence_id=r.source_occurrence_id WHERE r.matrix_snapshot_id=? ORDER BY r.source_occurrence_id
-    LIMIT (SELECT CASE WHEN json_array_length(metadata_json,'$.columns')>64 THEN 2 ELSE 4 END FROM legacy_matrix_snapshots WHERE matrix_snapshot_id=?) OFFSET ?`,String(r.snapshotId),String(r.snapshotId),Number(r.offset)));
+    LIMIT (SELECT CASE WHEN json_array_length(metadata_json,'$.columns')>32 THEN 2 ELSE 4 END FROM legacy_matrix_snapshots WHERE matrix_snapshot_id=?) OFFSET ?`,String(r.snapshotId),String(r.snapshotId),Number(r.offset)));
   if(r.section==='roster')statements.push(stmt(env.DB,`SELECT j.value AS payload FROM legacy_matrix_snapshots m,json_each(m.roster_json) j WHERE m.matrix_snapshot_id=? ORDER BY CAST(j.key AS INTEGER) LIMIT 65 OFFSET ?`,String(r.snapshotId),Number(r.offset)));
   const results=await env.DB.batch<Record<string,unknown>>(statements);if(results[0].results[0]?.allowed!==1)fail(403,'NOT_AUTHORIZED');const meta=results[1].results[0];if(!meta)fail(404,'NOT_FOUND');
   if(typeof meta.metadata!=='string'||Number(meta.rowCount)>500||Number(meta.rosterCount)>500)fail(409,'LEGACY_HISTORY_CAPACITY');if(r.sourceSnapshotSha256!==null&&r.sourceSnapshotSha256!==meta.sourceSnapshotSha256)fail(409,'SNAPSHOT_CHANGED');
@@ -37,7 +37,7 @@ export async function legacyHistoryPage(env:Env,input:unknown):Promise<HistoryPa
       for(const row of report.sourceRoster){const size=new TextEncoder().encode(JSON.stringify(row)).length+1;if(bytes+size>128000){if(!rows.length)fail(409,'LEGACY_HISTORY_CAPACITY');break;}bytes+=size;rows.push(row);}
       if(!rows.length&&Number(r.offset)<Number(meta.rosterCount))fail(409,'INVALID_LEGACY_HISTORY');return {...binding,section:'roster',offset:Number(r.offset),nextOffset:Number(r.offset)+rows.length<Number(meta.rosterCount)?Number(r.offset)+rows.length:null,rows};
     }
-    const values=sourceRows.slice(0,base.metadata.columns.length>64?2:4);
+    const values=sourceRows.slice(0,base.metadata.columns.length>32?2:4);
     // Validate shared metadata and construct report columns once for this bounded
     // page. Keep each row's original source position and only its own diagnostics.
     const report=buildLegacyHistoryReport({...base,rows:values.map(value=>{
