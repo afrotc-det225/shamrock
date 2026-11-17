@@ -1,0 +1,135 @@
+import assert from "node:assert/strict";
+import { chromium } from "playwright";
+import { createLocalBackend } from "../backend.mjs";
+import { AdminService } from "../service.mjs";
+import { createPanelServer } from "../server.mjs";
+const local = await createLocalBackend(),
+  service = new AdminService(local.backend),
+  server = createPanelServer(service);
+await new Promise((r) => server.listen(0, "127.0.0.1", r));
+let browser;
+try {
+  browser = await chromium.launch(
+    process.env.SHAMROCK_CHROMIUM_PATH
+      ? { executablePath: process.env.SHAMROCK_CHROMIUM_PATH }
+      : {},
+  );
+  const page = await browser.newPage({
+      viewport: { width: 1488, height: 1056 },
+    }),
+    errors = [];
+  page.on("pageerror", (e) => errors.push(e.message));
+  page.on("response", async (r) => {
+    if (r.status() >= 400 && r.url().includes("/api/"))
+      console.error("Rejected request", r.status(), await r.text());
+  });
+  await page.goto(`http://127.0.0.1:${server.address().port}`);
+  const navigate = async (title) => {
+    await page
+      .getByRole("navigation")
+      .getByRole("button", { name: title, exact: true })
+      .click();
+    await page.getByRole("heading", { name: title, exact: true }).waitFor();
+  };
+  const apply = async () => {
+    await page
+      .getByRole("button", { name: "Review change", exact: true })
+      .click();
+    await page
+      .getByRole("button", { name: "Apply change", exact: true })
+      .click();
+    await page.locator("dialog").waitFor({ state: "detached" });
+  };
+  await page
+    .getByRole("button", { name: "Edit Veterans Day", exact: true })
+    .click();
+  await page
+    .getByLabel("Event name", { exact: true })
+    .fill("Veterans Day ceremony");
+  await apply();
+  assert.equal(
+    (await service.snapshot()).events.find((e) => e.eventId === "veterans")
+      .label,
+    "Veterans Day ceremony",
+  );
+  await navigate("Cadets");
+  await page
+    .getByRole("button", { name: "Edit Alex Morgan", exact: true })
+    .click();
+  await page.getByLabel("First Name", { exact: true }).fill("Alexis");
+  await apply();
+  assert.equal(
+    (await service.snapshot()).people.find((p) => p.personId === "cadet-1")
+      .firstName,
+    "Alexis",
+  );
+  await navigate("Attendance & excusals");
+  await page
+    .getByRole("button", { name: "Excusals (1 pending)", exact: true })
+    .click();
+  await page.getByRole("button", { name: "Review", exact: true }).click();
+  await page.getByLabel("Decision", { exact: true }).selectOption("Denied");
+  await page
+    .getByLabel("Reason for this change")
+    .fill("Fictional browser rehearsal");
+  await apply();
+  assert.equal((await service.snapshot()).requests[0].status, "Denied");
+  await page.getByRole("button", { name: "Attendance", exact: true }).click();
+  await page.getByLabel("Event", { exact: true }).selectOption("veterans");
+  await page
+    .getByRole("row")
+    .filter({ hasText: "Alexis Morgan" })
+    .getByRole("button", { name: "Correct" })
+    .click();
+  await page.getByLabel("Attendance code").selectOption("P");
+  await page
+    .getByLabel("Reason for this change")
+    .fill("Verified fictional presence");
+  await apply();
+  assert.equal((await service.snapshot()).corrections[0].code, "P");
+  await navigate("Semester");
+  await page.getByLabel("New semester name").fill("Spring 2027");
+  await page.getByLabel("First training-week Sunday").fill("2027-01-10");
+  await page.getByLabel("Training weeks", { exact: true }).fill("2");
+  await page
+    .getByLabel("Reason / semester preparation notes")
+    .fill("Browser rehearsal");
+  await page.getByRole("button", { name: "Review semester plan" }).click();
+  await page.getByRole("button", { name: "Apply change", exact: true }).click();
+  await page.locator("dialog").waitFor({ state: "detached" });
+  assert.equal(
+    (await service.snapshot()).terms.find((t) => t.isCurrent).termId,
+    "fall-2026",
+  );
+  await page
+    .getByRole("button", { name: "Spring 2027 · Check progress" })
+    .click();
+  await page.getByText("Status: proposed. Archive: pending.").waitFor();
+  for (const title of ["Overview", "Leadership", "System", "Events"])
+    await navigate(title);
+  await page.setViewportSize({ width: 390, height: 844 });
+  assert.equal(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth > innerWidth,
+    ),
+    false,
+  );
+  await page
+    .getByRole("button", { name: "Edit Veterans Day ceremony", exact: true })
+    .click();
+  assert.ok(
+    await page
+      .getByRole("button", { name: "Review change", exact: true })
+      .isVisible(),
+  );
+  await page.getByRole("button", { name: "Close editor" }).click();
+  assert.deepEqual(errors, []);
+  console.log(
+    "Browser checks passed: event and cadet changes, excusal decision, attendance correction, semester preparation, all screens, mobile layout, no runtime errors.",
+  );
+} finally {
+  await browser?.close();
+  await new Promise((r) => server.close(r));
+  service.close();
+  await local.dispose();
+}
