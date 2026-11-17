@@ -10,6 +10,7 @@ import { retainedHistorySummary } from './retained-history-summary.js';
 import { legacyHistoryPage } from './legacy-history-transport.js';
 import { frontendSnapshotPage } from './frontend-transport.js';
 import { panelSnapshotPage, preparePanelAuthorization } from './panel-read.js';
+import { authorizePanelViewAs, panelViewAsPage } from './panel-view-as.js';
 import type { CommandScopeGuard } from './command-scope.js';
 import { parseAttendanceCorrection } from '../../../packages/domain/src/corrections.js';
 import { prepareCloseout, advanceCloseout, closeoutStatus } from './closeout.js';
@@ -506,6 +507,8 @@ export default {
       if (url.pathname === '/v1/admin/effects/availability' && !url.search) return json(await adminEffectAvailability(env, input));
       if (url.pathname === '/v1/admin/snapshot/page' && !url.search) return json(await frontendSnapshotPage(env, input));
       if (url.pathname === '/v1/admin/panel/page' && !url.search) return json(await panelSnapshotPage(env, input));
+      if (url.pathname === '/v1/admin/panel/view-as/authorize' && !url.search) return json(await authorizePanelViewAs(env, input));
+      if (url.pathname === '/v1/admin/panel/view-as/page' && !url.search) return json(await panelViewAsPage(env, input));
       if (url.pathname === '/v1/admin/panel/authorize' && !url.search) return json((await preparePanelAuthorization(env, input)).authorization);
       if (url.pathname === '/v1/admin/panel/commands' && !url.search) {
         if (input && typeof input === 'object' && 'operation' in input && input.operation === 'attendance.correct') {

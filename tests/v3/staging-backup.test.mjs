@@ -32,11 +32,16 @@ test('current migration catalog exports and restores exact schema, typed rows, s
     const f = fixture();
     t.after(() => f.db.close());
     for (let index = 0; index < 80; index++) f.db.prepare('INSERT INTO people VALUES(?,?)').run('page-' + index, 'Fictional row ' + index);
+    f.db.exec("INSERT INTO principals VALUES('preview-actor',NULL,1),('preview-target','fictional',1)");
+    const previewAudit = f.db.prepare('INSERT INTO panel_view_as_audit VALUES(?,?,?,?,?,?,?,?,?,?,?)');
+    previewAudit.run('preview-entry','preview-entry','enter','staging',1,'preview-actor','fictional','preview-target','ready','d'.repeat(64),'2026-01-01T00:00:00.000Z');
+    previewAudit.run('preview-exit','preview-entry','exit','staging',1,'preview-actor','fictional','preview-target','exited','e'.repeat(64),'2026-01-01T00:01:00.000Z');
     const sql = dump(f.db), result = await captureStagingBackup({ query: f.query, exportSql: async () => 'https://download.example.invalid', download: async () => sql }, f.plan);
     assert.equal(result.proof.schemaVersion, sources.length);
     assert.equal(result.proof.sqlSha256, backupHash(sql));
     assert(result.proof.tables.some(t => t.table === 'sqlite_sequence'));
     assert.equal(result.proof.tables.find(t => t.table === 'people').rows, 81);
+    assert.equal(result.proof.tables.find(t => t.table === 'panel_view_as_audit').rows, 2);
     assert.equal((await proveBackupSql(sql, f.plan, { evidence: result.evidence, tables: result.proof.tables })).tableInventorySha256, result.proof.tableInventorySha256);
     const support = sanitizedBackupSupport(result.proof, commit);
     assert.equal(support.restoreKind, 'isolated-local-sqlite');

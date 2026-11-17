@@ -223,6 +223,10 @@ remain authoritative.
 
 ## Evidence and remaining acceptance
 
+Administrator account previews use the separate [read-only View-as contract](D1_PANEL_VIEW_AS.md).
+They preserve the target's real scope while retaining the actual actor and a
+dedicated entry/exit audit. Their BFF mutation fence is a separate integration gate.
+
 Local D1 tests cover real signed route dispatch, Flight/deputy redaction, preserved
 Wing spreadsheet reads, explicit owner/manager access, no approval inferred from
 Flight command, duplicate Squadron commanders, captured-Squadron reparenting,
