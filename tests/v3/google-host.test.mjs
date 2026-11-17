@@ -490,3 +490,36 @@ test('protection or journal sharing lost during lock wait prevents any decision 
     assert.throws(() => f.host.onDecisionEdit(event), /rejected/); assert.equal(f.state.commands.length, 0); assert.equal(f.decisions.rows[2][6], ''); assert.equal(f.journal.rows.length, 1); assert.equal(f.lock.held, false);
   }
 });
+
+function nativeOnlyFixture() {
+  const f=fixture();
+  for(const key of ['journal','attendance','excusal','decisionInput']) delete f.config[key];
+  f.config.mode='native-only';f.saveConfig();
+  for(const key of [P.principals,P.attendanceCatalog,P.excusalCatalog])f.properties.delete(key);
+  return f;
+}
+test('native-only host installs exactly one idempotent scheduler without legacy resources or catalogs',()=>{
+  const f=nativeOnlyFixture();
+  const result=f.host.setup();assert.deepEqual(result,{status:'ready-paused',mode:'native-only',triggers:1,verifiedForms:0});
+  const first=f.state.triggers[0].getUniqueId();f.host.setup();
+  assert.equal(f.state.created,1);assert.equal(f.state.triggers[0].getUniqueId(),first);assert.equal(f.state.deleted,0);
+  assert.equal(f.state.opened,0);assert.equal(f.state.getRequests.length,0);assert.equal(f.state.journalChecks,0);assert.equal(f.state.protectionChecks,0);
+  assert.equal(f.state.triggers[0].getHandlerFunction(),H.flush);assert.equal(f.properties.get(P.enabled),'false');
+  assert.throws(()=>f.host.resume(),code('native_only_host'));assert.equal(f.properties.get(P.enabled),'false');
+  // A stale transport enable flag cannot expose old event handlers or journal IO.
+  f.properties.set(P.enabled,'true');
+  for(const action of [()=>f.host.flush(),()=>f.host.onAttendanceSubmit(),()=>f.host.onExcusalSubmit(),()=>f.host.onDecisionEdit(),()=>f.host.replayAttendanceResponse('old'),()=>f.host.replayExcusalResponse('old')])assert.deepEqual(action(),{status:'paused'});
+  assert.equal(f.state.opened,0);assert.equal(f.state.commands.length,0);assert.equal(f.state.projections,0);
+});
+test('native-only setup requires the intended owner, secret and lock and retains old transport triggers',()=>{
+  for(const mutation of [f=>f.state.executor='other@example.invalid',f=>f.properties.delete(P.secret),f=>f.lock.held=true]){
+    const f=nativeOnlyFixture();mutation(f);assert.throws(()=>f.host.setup());assert.equal(f.state.created,0);assert.equal(f.state.opened,0);
+  }
+  const f=nativeOnlyFixture(),old=f.trigger(H.attendance,'form','submit','old-form');f.state.triggers.push(old);
+  assert.throws(()=>f.host.setup(),code('native_only_project_required'));assert.deepEqual(f.state.triggers,[old]);assert.equal(f.state.deleted,0);
+});
+test('native-only host parsing rejects mixed transport configuration, unknown mode and hidden fields',()=>{
+  const f=nativeOnlyFixture();assert.deepEqual(parseStagingHostConfig(f.config),f.config);
+  for(const extra of [{journal:{spreadsheetId:'old',sheetId:1}},{attendance:{}},{mode:'native'},{secret:'not configuration'}])assert.throws(()=>parseStagingHostConfig({...f.config,...extra}),code('invalid_host_config'));
+  const legacy=fixture();assert.deepEqual(parseStagingHostConfig(legacy.config),legacy.config);assert.equal('mode' in parseStagingHostConfig(legacy.config),false);
+});

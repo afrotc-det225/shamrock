@@ -6,7 +6,7 @@ import type {ScheduledHints} from './scheduled-runtime.js';
 import { AdapterError, type AdapterConfig, type SignedRequest, type Signer, type Transport } from './index.js';
 import { createGoogleSigner, createGoogleTransport, type ScriptLockPort, type UtilitiesPort } from './apps-script.js';
 import {createPagedFrontendTransport} from './frontend-page-client.js';
-import { HOST_PROPERTIES, parseStagingHostConfig } from './staging-host.js';
+import { HOST_PROPERTIES, parseStagingHostConfig, stagingTransportSpreadsheetIds } from './staging-host.js';
 import { CONFIG_FILE_ID_PROPERTY } from './staging-config.js';
 import { planFrontendProtections, verifyFrontendProtections, type FrontendProtectionAccess, type FrontendProtectionInput } from './frontend-protections.js';
 import { planFrontendPublication, assertFrontendPublicationPreconditions, verifyFrontendPublicationReadback,
@@ -544,7 +544,7 @@ export function consumeFrontendRefresh(runtime: FrontendRefreshPorts): { status:
 
 export interface NativeFrontendConfig {
   version: 1; environment: 'staging'; generation: number; enabled: boolean;
-  resourceReview: 'EXISTING_FICTIONAL_FRONTEND_REVIEWED_FOR_STAGING';
+  resourceReview: 'EXISTING_FICTIONAL_FRONTEND_REVIEWED_FOR_STAGING' | 'EXISTING_REAL_DATA_FRONTEND_REVIEWED_FOR_STAGING';
   workerId: string; principalId: string; stateFileId: string;
   resumeRequest?: { requestId: string; sequence: number; stateSha256: string };
   leaseRecovery?: { recoveryId: string; checkpointSha256: string; previousExpiry: string };
@@ -643,13 +643,14 @@ export function createNativeFrontendRuntime(services: NativeFrontendServices,
     if (typeof raw !== 'string' || bytes(raw) > 16000) fail('frontend_configuration', 'Frontend configuration is invalid or too large.');
     const f = record(JSON.parse(raw)) as NativeFrontendConfig;
     if (f.version !== 1 || f.environment !== 'staging' || f.generation !== host.generation || typeof f.enabled !== 'boolean'
-      || f.resourceReview !== 'EXISTING_FICTIONAL_FRONTEND_REVIEWED_FOR_STAGING' || !id(f.workerId) || !id(f.principalId)
+      || !['EXISTING_FICTIONAL_FRONTEND_REVIEWED_FOR_STAGING', 'EXISTING_REAL_DATA_FRONTEND_REVIEWED_FOR_STAGING'].includes(f.resourceReview) || !id(f.workerId) || !id(f.principalId)
       || !f.main || !f.main.sheets || typeof f.main.expectedTitle !== 'string' || f.main.expectedTitle.length > 200 || !/staging/i.test(f.main.expectedTitle)
       || !f.access || email(f.access.ownerEmail) !== host.expectedAutomationEmail
       || email(f.access.automationEmail) !== host.expectedAutomationEmail || !Array.isArray(f.allowedFileEditors)
       || f.allowedFileEditors.length > 50 || !Array.isArray(f.seeds) || f.seeds.length > 30) fail('frontend_configuration', 'Frontend bindings must match the reviewed isolated staging host.');
     fileId(f.stateFileId); fileId(f.main.spreadsheetId);
-    if (f.stateFileId === f.main.spreadsheetId || [host.journal.spreadsheetId, host.decisionInput?.spreadsheetId].includes(f.main.spreadsheetId)
+    const transportBooks = stagingTransportSpreadsheetIds(host);
+    if (f.stateFileId === f.main.spreadsheetId || transportBooks.includes(f.main.spreadsheetId)
       || f.stateFileId === properties.getProperty(CONFIG_FILE_ID_PROPERTY)) fail('frontend_configuration', 'Frontend state, user sheets and existing transport resources must stay separate.');
     if (new Set(f.allowedFileEditors.map(email)).size !== f.allowedFileEditors.length || f.allowedFileEditors.includes(host.expectedAutomationEmail)) fail('frontend_configuration', 'Frontend sharing must list distinct non-owner editors.');
     if (Object.keys(f.main.sheets).sort().join(',') !== KINDS.slice().sort().join(',') || new Set(KINDS.map(k => f.main.sheets[k]?.sheetId)).size !== 3) fail('frontend_configuration', 'Bind all three distinct frontend Tables.');
@@ -665,7 +666,7 @@ export function createNativeFrontendRuntime(services: NativeFrontendServices,
         || e.allowedFileEditors.includes(host.expectedAutomationEmail) || !Array.isArray(e.seeds) || e.seeds.length > 30
         || Object.keys(e.sheets ?? {}).sort().join(',') !== 'blue,gold') fail('frontend_configuration', 'Full visible-sheet publication bindings are incomplete.');
       fileId(e.spreadsheetId);
-      if ([f.main.spreadsheetId, f.stateFileId, host.journal.spreadsheetId, host.decisionInput?.spreadsheetId, properties.getProperty(CONFIG_FILE_ID_PROPERTY)].includes(e.spreadsheetId)
+      if ([f.main.spreadsheetId, f.stateFileId, ...transportBooks, properties.getProperty(CONFIG_FILE_ID_PROPERTY)].includes(e.spreadsheetId)
         || new Set(QUEUES.map(queue => e.sheets[queue]?.sheetId)).size !== 2 || new Set(QUEUES.map(queue => e.sheets[queue]?.squadronId)).size !== 2) fail('frontend_configuration', 'Excusals must bind its own reviewed workbook and distinct squadron queues.');
       for (const queue of QUEUES) if (!natural(e.sheets[queue].sheetId) || !id(e.sheets[queue].squadronId)
         || typeof e.sheets[queue].tableId !== 'string' || !/^[A-Za-z0-9_-]{1,200}$/.test(e.sheets[queue].tableId)) fail('frontend_configuration', 'A squadron Table binding is invalid.');

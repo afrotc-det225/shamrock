@@ -567,3 +567,12 @@ test('a Google 429 retains the durable projection claim without ACK or payload c
   throttled = false; assert.deepEqual(f.runtime.consumeProjection(context), { published: 1, idle: false });
   assert.equal(calls.filter(route => route.endsWith('/claim')).length, 1); assert.equal(calls.filter(route => route.endsWith('/ack')).length, 1); assert.equal(f.properties.has(N.projectionClaim), false); assert.deepEqual(f.journal.values, originalJournal);
 });
+
+test('native-only initialization, presentation repair and projection delivery never inspect legacy storage',()=>{
+  const f=fixture();for(const key of ['journal','attendance','decisionInput'])delete f.config[key];f.config.mode='native-only';f.saveConfig();
+  f.properties.set(N.projectionClaim,'retained-old-claim');f.properties.set(N.projectionConfig,'invalid-old-binding');
+  assert.deepEqual(f.runtime.initializeProjections(),{status:'native-only'});
+  assert.deepEqual(f.runtime.repairPresentation(),{status:'native-only'});
+  assert.deepEqual(f.runtime.consumeProjection({}),{status:'native-only'});
+  assert.equal(f.properties.get(N.projectionClaim),'retained-old-claim');assert.equal(f.state.calls.length,0);assert.equal(f.state.writes.length,0);assert.equal(f.state.formOpens,0);
+});

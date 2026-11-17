@@ -160,3 +160,10 @@ test('reviewed delayed response keeps its original event version after a new cat
  const f=pendingFixture();f.snapshot.events[0].version=2;f.snapshot.revision.operations++;f.fx.claim=true;f.runtime.refresh();
  assert.equal(f.runtime.reviewReplay(replayReview(f)).status,'queued');assert.equal(f.fx.files['intake-file'].value.entries[f.intakeId].commands[0].command.payload.events[0].expectedEventVersion,1);
 });
+
+test('native-only host independently installs managed Form triggers and publishes verified closed Forms',()=>{
+ const f=fixture(),host=JSON.parse(f.values[HOST_PROPERTIES.config]);delete host.journal;delete host.attendance;host.mode='native-only';f.values[HOST_PROPERTIES.config]=JSON.stringify(host);
+ assert.deepEqual(f.runtime.setup(),{status:'ready-paused',triggers:3});f.runtime.resumePublication();assert.equal(f.runtime.refresh().status,'published');assert(Object.values(f.fx.open).every(x=>!x));
+ assert.equal(f.runtime.resumeIntake().status,'intake-enabled');assert(Object.values(f.fx.open).every(Boolean));f.runtime.pause();assert(Object.values(f.fx.open).every(x=>!x));
+ assert.equal(f.fx.log.some(call=>/legacy-journal|legacy-attendance/.test(call.url)),false);
+});

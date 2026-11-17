@@ -89,3 +89,9 @@ test('shared permission fence prevents native edit dispatch and leaves the input
  assert.deepEqual(f.runtime.replayConfirmation('archived-response'),{status:'committed',editId:held.editId,archived:true});assert.equal(f.fx.commands.length,1);assert.equal(Object.keys(f.fx.journal.entries).length,0);
  f.fx.confirmationResponse.respondentEmail='outsider@example.invalid';assert.throws(()=>f.runtime.replayConfirmation('archived-response'));assert.equal(f.fx.commands.length,1);
 });
+
+test('native-only host preserves immutable native inputs and exact signed dispatch without transport storage',()=>{
+ const f=fixture(),host=JSON.parse(f.props[HOST_PROPERTIES.config]);delete host.journal;delete host.attendance;host.mode='native-only';f.props[HOST_PROPERTIES.config]=JSON.stringify(host);
+ f.runtime.setup();f.runtime.resume();f.fx.tables.attendance.rows[0][1]=cell('P');f.runtime.onEdit(f.edit());
+ assert.equal(f.fx.commands.length,1);assert.equal(f.fx.commands[0].operation,'attendance.correct');assert.equal(f.fx.triggers.length,3);assert.equal(Object.values(f.fx.journal.entries).length,1);
+});

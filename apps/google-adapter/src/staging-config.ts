@@ -2,7 +2,7 @@
  * This module never uploads files, installs triggers, enables processing or reads the bridge secret. */
 import { AdapterError } from './index.js';
 import { MAINTENANCE_PROPERTIES, parseNativeMaintenanceConfig } from './maintenance-config.js';
-import { HOST_PROPERTIES, parseStagingHostConfig, type StagingHostConfig } from './staging-host.js';
+import { HOST_PROPERTIES, parseStagingHostConfig, type TransportStagingHostConfig } from './staging-host.js';
 import { NATIVE_PROPERTIES, parseNativePresentationConfig, type NativeProjectionConfig } from './native-runtime.js';
 import { parseNativeHistoryConfig } from './history-native.js';
 
@@ -24,6 +24,7 @@ const HISTORY_CONFIG_PROPERTY='SHAMROCK_V3_HISTORY_CONFIG', OWNER_MAIL_CONFIG_PR
 const ALLOWED: readonly string[] = [HOST_PROPERTIES.config, HOST_PROPERTIES.principals, HOST_PROPERTIES.attendanceCatalog,
   HOST_PROPERTIES.excusalCatalog, NATIVE_PROPERTIES.projectionConfig, NATIVE_PROPERTIES.presentationConfig, FRONTEND_CONFIG_PROPERTY, MAINTENANCE_PROPERTIES.config, FORMS_CONFIG_PROPERTY, INPUT_CONFIG_PROPERTY, PERMISSION_CONFIG_PROPERTY, HISTORY_CONFIG_PROPERTY, OWNER_MAIL_CONFIG_PROPERTY, CREDENTIAL_IMPORT_PROPERTY];
 const REQUIRED = [HOST_PROPERTIES.config, HOST_PROPERTIES.principals, HOST_PROPERTIES.attendanceCatalog, NATIVE_PROPERTIES.projectionConfig];
+const TRANSPORT_ONLY: readonly string[] = [HOST_PROPERTIES.principals, HOST_PROPERTIES.attendanceCatalog, HOST_PROPERTIES.excusalCatalog, NATIVE_PROPERTIES.projectionConfig, NATIVE_PROPERTIES.presentationConfig];
 type Json = Record<string, unknown>;
 export interface StagingConfigurationServices {
   PropertiesService: { getScriptProperties(): {
@@ -111,7 +112,7 @@ function validateCatalog(value: Json) {
     } else fail('configuration_invalid', 'A choice reference has an unsupported kind.');
   }
 }
-function validateProjection(value: Json, host: StagingHostConfig) {
+function validateProjection(value: Json, host: TransportStagingHostConfig) {
   const kinds = ['attendance', 'decisions', 'cursors'] as const;
   keys(value, ['version', 'environment', 'generation', 'workerId', ...kinds]);
   if (value.version !== 1 || value.environment !== 'staging' || integer(value.generation) !== host.generation) fail('configuration_invalid', 'Projection configuration must match the staging generation.');
@@ -189,7 +190,7 @@ export function importStagingConfiguration(services: StagingConfigurationService
   const source = fetchText(`${fileUrl}?alt=media`, FILE_LIMIT);
   if (bytes(source) !== Number(metadata.size)) fail('configuration_changed', 'The configuration file changed during import; retry after saving it.');
   const map = json(source, FILE_LIMIT);
-  if (Object.keys(map).some(key => !ALLOWED.includes(key)) || REQUIRED.some(key => !Object.prototype.hasOwnProperty.call(map, key))) {
+  if (Object.keys(map).some(key => !ALLOWED.includes(key)) || !Object.prototype.hasOwnProperty.call(map, HOST_PROPERTIES.config)) {
     fail('configuration_keys', 'Import only the approved nonsecret staging property names.');
   }
   const pending: Record<string, string> = {}; const parsed: Record<string, Json> = {};
@@ -200,13 +201,24 @@ export function importStagingConfiguration(services: StagingConfigurationService
   }
   const host = parseStagingHostConfig(parsed[HOST_PROPERTIES.config]); sameShape(parsed[HOST_PROPERTIES.config], host);
   if (host.expectedAutomationEmail !== executor) fail('configuration_identity', 'The proposed staging configuration belongs to a different automation account.');
-  if (host.excusal && !pending[HOST_PROPERTIES.excusalCatalog]) fail('configuration_keys', 'The configured excusal Form requires its choice catalog.');
-  validatePrincipals(parsed[HOST_PROPERTIES.principals]); validateCatalog(parsed[HOST_PROPERTIES.attendanceCatalog]);
-  if (parsed[HOST_PROPERTIES.excusalCatalog]) validateCatalog(parsed[HOST_PROPERTIES.excusalCatalog]);
-  validateProjection(parsed[NATIVE_PROPERTIES.projectionConfig], host);
-  if (parsed[NATIVE_PROPERTIES.presentationConfig]) {
-    parseNativePresentationConfig(parsed[NATIVE_PROPERTIES.presentationConfig], host,
-      parsed[NATIVE_PROPERTIES.projectionConfig] as unknown as NativeProjectionConfig);
+  const previousHost = properties.getProperty(HOST_PROPERTIES.config);
+  let previousMode: 'native-only' | undefined;
+  try { previousMode = previousHost && JSON.parse(previousHost)?.mode === 'native-only' ? 'native-only' : undefined; } catch { /* A damaged transport config can still be repaired in place. */ }
+  if (previousHost && previousMode !== host.mode) {
+    fail('configuration_mode_change', 'Use a separate staging script for native-only operation; existing transport bindings and recovery state were retained.');
+  }
+  if (host.mode === 'native-only') {
+    if (TRANSPORT_ONLY.some(key => Object.prototype.hasOwnProperty.call(map, key))) fail('configuration_keys', 'Native-only configuration cannot include legacy transport properties.');
+  } else {
+    if (REQUIRED.some(key => !Object.prototype.hasOwnProperty.call(map, key))) fail('configuration_keys', 'The transport fixture requires its reviewed principal, catalog and projection properties.');
+    if (host.excusal && !pending[HOST_PROPERTIES.excusalCatalog]) fail('configuration_keys', 'The configured excusal Form requires its choice catalog.');
+    validatePrincipals(parsed[HOST_PROPERTIES.principals]); validateCatalog(parsed[HOST_PROPERTIES.attendanceCatalog]);
+    if (parsed[HOST_PROPERTIES.excusalCatalog]) validateCatalog(parsed[HOST_PROPERTIES.excusalCatalog]);
+    validateProjection(parsed[NATIVE_PROPERTIES.projectionConfig], host);
+    if (parsed[NATIVE_PROPERTIES.presentationConfig]) {
+      parseNativePresentationConfig(parsed[NATIVE_PROPERTIES.presentationConfig], host,
+        parsed[NATIVE_PROPERTIES.projectionConfig] as unknown as NativeProjectionConfig);
+    }
   }
   const permissions=parsed[PERMISSION_CONFIG_PROPERTY];
   if(permissions){keys(permissions,['version','configFileId']);if(permissions.version!==1)fail('configuration_invalid','Unsupported permission configuration.');id(permissions.configFileId,512);if(permissions.configFileId===fileId)fail('configuration_invalid','Permission config needs a separate owner-only file.');}
@@ -220,14 +232,14 @@ export function importStagingConfiguration(services: StagingConfigurationService
     if(frontend.resumeRequest){const r=object(frontend.resumeRequest);keys(r,['requestId','sequence','stateSha256']);id(r.requestId);integer(r.sequence);if(typeof r.stateSha256!=='string'||!/^[a-f0-9]{64}$/.test(r.stateSha256))fail('configuration_invalid','Frontend resume requires a reviewed state digest.');}
     if(frontend.leaseRecovery){const r=object(frontend.leaseRecovery);keys(r,['recoveryId','checkpointSha256','previousExpiry']);id(r.recoveryId);if(typeof r.checkpointSha256!=='string'||!/^[a-f0-9]{64}$/.test(r.checkpointSha256)||typeof r.previousExpiry!=='string'||!Number.isFinite(Date.parse(r.previousExpiry)))fail('configuration_invalid','Frontend lease recovery requires a reviewed checkpoint and expiry.');}
     if (frontend.version !== 1 || frontend.environment !== 'staging' || frontend.generation !== host.generation || typeof frontend.enabled !== 'boolean'
-      || frontend.resourceReview !== 'EXISTING_FICTIONAL_FRONTEND_REVIEWED_FOR_STAGING') fail('configuration_invalid', 'Frontend configuration must match the reviewed staging generation.');
+      || !['EXISTING_FICTIONAL_FRONTEND_REVIEWED_FOR_STAGING', 'EXISTING_REAL_DATA_FRONTEND_REVIEWED_FOR_STAGING'].includes(String(frontend.resourceReview))) fail('configuration_invalid', 'Frontend configuration must match the reviewed staging generation.');
     id(frontend.workerId); id(frontend.principalId); id(frontend.stateFileId, 512);
     const main = object(frontend.main); keys(main, ['spreadsheetId', 'expectedTitle', 'sheets']); id(main.spreadsheetId, 512);
     if (typeof main.expectedTitle !== 'string' || main.expectedTitle.length > 200 || !/staging/i.test(main.expectedTitle)
       || !Array.isArray(frontend.allowedFileEditors) || !Array.isArray(frontend.seeds)) fail('configuration_invalid', 'Frontend configuration requires an exact staging binding and bounded access/seed lists.');
     const access = object(frontend.access);
     if (email(access.ownerEmail) !== executor || email(access.automationEmail) !== executor) fail('configuration_identity', 'Frontend ownership must match the staging account.');
-    if (main.spreadsheetId === host.journal.spreadsheetId || main.spreadsheetId === host.decisionInput?.spreadsheetId
+    if (host.mode !== 'native-only' && (main.spreadsheetId === host.journal.spreadsheetId || main.spreadsheetId === host.decisionInput?.spreadsheetId)
       || frontend.stateFileId === main.spreadsheetId || frontend.stateFileId === fileId) fail('configuration_invalid', 'Frontend, private state and existing transport resources must remain separate.');
     // Full native binding, role and seed validation occurs before a refresh can write.
     // Import never copies this optional file-owned value into Script Properties.

@@ -239,3 +239,24 @@ test('permission config remains file-owned and import pauses it without erasing 
  f.properties.set('SHAMROCK_V3_PERMISSION_SETUP','old-setup');f.properties.set('SHAMROCK_V3_PERMISSION_CLAIM','retained-permission-claim');f.properties.set('SHAMROCK_V3_PERMISSION_CONTROL_RECEIPT','consumed-control');
  assert.equal(f.run().status,'imported-paused');assert.equal(f.properties.get('SHAMROCK_V3_PERMISSION_PAUSED'),'true');assert.equal(f.properties.has('SHAMROCK_V3_PERMISSION_CONFIG'),false);assert.equal(f.properties.has('SHAMROCK_V3_PERMISSION_SETUP'),false);assert.equal(f.properties.get('SHAMROCK_V3_PERMISSION_CLAIM'),'retained-permission-claim');assert.equal(f.properties.get('SHAMROCK_V3_PERMISSION_CONTROL_RECEIPT'),'consumed-control');
 });
+
+function nativeOnlyFixture(){
+  const f=fixture();for(const key of ['journal','attendance','excusal','decisionInput'])delete f.host[key];f.host.mode='native-only';
+  for(const key of Object.keys(f.map))delete f.map[key];f.updateHost();
+  for(const key of [H.config,H.principals,H.attendanceCatalog,H.excusalCatalog,N.projectionConfig,N.presentationConfig])f.properties.delete(key);
+  return f;
+}
+test('native-only bootstrap imports only host identity and keeps native private configuration file-owned',()=>{
+  const f=nativeOnlyFixture();
+  f.map[F.config]=JSON.stringify({version:1,environment:'staging',generation:1,enabled:false,resourceReview:'EXISTING_REAL_DATA_FRONTEND_REVIEWED_FOR_STAGING',workerId:'publisher',principalId:'reader',stateFileId:'frontend-state',main:{spreadsheetId:'frontend-main',expectedTitle:'Main Staging',sheets:{}},allowedFileEditors:[],access:{ownerEmail:automation,automationEmail:automation},seeds:[]});
+  for(const key of ['SHAMROCK_V3_INPUT_CONFIG','SHAMROCK_V3_FORMS_CONFIG','SHAMROCK_V3_PERMISSION_CONFIG'])f.map[key]=JSON.stringify({version:1,configFileId:`private-${key.toLowerCase()}`});
+  assert.deepEqual(f.run(),{status:'imported-paused',propertyCount:1,next:'setup-required'});
+  assert.equal(f.properties.get(H.config),f.map[H.config]);assert.equal(f.properties.has(H.principals),false);assert.equal(f.properties.has(N.projectionConfig),false);assert.equal(f.properties.has(F.config),false);
+  assert.equal(f.state.secretReads,0);assert.equal(f.properties.get(N.projectionClaim),'pending-claim-preserve');
+  assert.equal(f.run().status,'imported-paused','repeat import remains supported in the same mode');
+});
+test('native-only import rejects transport bindings and never converts an existing fixture in place',()=>{
+  for(const key of [H.principals,H.attendanceCatalog,H.excusalCatalog,N.projectionConfig,N.presentationConfig]){const f=nativeOnlyFixture();f.map[key]='{}';assertOnlyPaused(f,code('configuration_keys'));}
+  const f=nativeOnlyFixture();f.properties.set(H.config,JSON.stringify(fixture().host));assertOnlyPaused(f,code('configuration_mode_change'));
+  const reverse=fixture();reverse.properties.set(H.config,JSON.stringify(nativeOnlyFixture().host));assertOnlyPaused(reverse,code('configuration_mode_change'));
+});

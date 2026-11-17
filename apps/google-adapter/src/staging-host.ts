@@ -42,7 +42,7 @@ type DecisionInputBinding = ExistingSheetReference & (DynamicSlotBinding | {
   /** Frozen target mapping. No code infers identity from an edited/sorted display row. */
   slots: { row: number; slotId: string; requestId: string; baseVersion: number }[];
 });
-export interface StagingHostConfig {
+interface StagingHostIdentity {
   version: 1;
   environment: 'staging';
   resourceReview: 'EXISTING_RESOURCES_REVIEWED_FOR_STAGING';
@@ -50,10 +50,21 @@ export interface StagingHostConfig {
   keyId: string;
   generation: number;
   expectedAutomationEmail: string;
+}
+export interface NativeOnlyStagingHostConfig extends StagingHostIdentity {
+  mode: 'native-only';
+}
+/** Omitted mode preserves the original isolated transport fixture and its receipts. */
+export interface TransportStagingHostConfig extends StagingHostIdentity {
+  mode?: undefined;
   journal: ExistingSheetReference;
   attendance: AttendanceBinding;
   excusal?: ExcusalBinding;
   decisionInput?: DecisionInputBinding;
+}
+export type StagingHostConfig = NativeOnlyStagingHostConfig | TransportStagingHostConfig;
+export function stagingTransportSpreadsheetIds(config: StagingHostConfig): string[] {
+  return config.mode === 'native-only' ? [] : [config.journal.spreadsheetId, ...(config.decisionInput ? [config.decisionInput.spreadsheetId] : [])];
 }
 
 interface HostSheet extends SheetPort { getSheetId(): number }
@@ -108,7 +119,7 @@ export interface StagingHostRuntime {
 interface PrincipalEntry { email: string; principalId: string; personId?: string }
 interface Receipt { fingerprint: string; executor: string; triggers: Record<string, string>; scheduleMinutes: 5; verifiedAfter: number }
 interface Context {
-  config: StagingHostConfig;
+  config: TransportStagingHostConfig;
   adapter: AdapterConfig;
   signer: Signer;
   principals: PrincipalEntry[];
@@ -164,11 +175,19 @@ export function parseStagingHostConfig(value: unknown): StagingHostConfig {
   }
   const origin = string(v.workerOrigin);
   if (!/^https:\/\/[A-Za-z0-9.-]+(?::\d+)?$/.test(origin)) fail('invalid_host_config', 'The staging Worker must use an HTTPS origin.');
-  const attendance = record(v.attendance); const roles = record(attendance.itemRoles);
-  if (!Array.isArray(roles.present) || roles.present.length === 0 || roles.present.length > 30) fail('invalid_host_config', 'Attendance checkbox item bindings are required.');
-  const result: StagingHostConfig = {
+  const identity: StagingHostIdentity = {
     version: 1, environment: 'staging', resourceReview: 'EXISTING_RESOURCES_REVIEWED_FOR_STAGING',
     workerOrigin: origin, keyId: id(v.keyId), generation: integer(v.generation), expectedAutomationEmail: email(v.expectedAutomationEmail),
+  };
+  if (v.mode === 'native-only') {
+    if (Object.keys(v).some(key => ![...Object.keys(identity), 'mode'].includes(key))) fail('invalid_host_config', 'A native-only host cannot bind legacy transport resources.');
+    return { ...identity, mode: 'native-only' };
+  }
+  if (v.mode !== undefined) fail('invalid_host_config', 'The staging host mode is invalid.');
+  const attendance = record(v.attendance); const roles = record(attendance.itemRoles);
+  if (!Array.isArray(roles.present) || roles.present.length === 0 || roles.present.length > 30) fail('invalid_host_config', 'Attendance checkbox item bindings are required.');
+  const result: TransportStagingHostConfig = {
+    ...identity,
     journal: sheetReference(v.journal),
     attendance: { formId: id(attendance.formId), resourceKey: id(attendance.resourceKey), itemRoles: {
       event: id(roles.event), scope: id(roles.scope), present: roles.present.map(id), completeness: id(roles.completeness),
@@ -213,6 +232,7 @@ export function createStagingHost(runtime: StagingHostRuntime) {
   function context(requireReceipt: boolean): Context {
     const cfg = propertyJson(HOST_PROPERTIES.config);
     const config = parseStagingHostConfig(cfg.value);
+    if (config.mode === 'native-only') fail('native_only_host', 'Use the separate native Forms, spreadsheet input and frontend controls in this host.');
     let executor = '';
     try { executor = runtime.session.getEffectiveUser().getEmail().trim().toLowerCase(); } catch { /* fail closed below */ }
     if (!executor || executor !== config.expectedAutomationEmail) fail('wrong_automation_identity', 'Run this host under the configured staging automation account.');
@@ -337,6 +357,7 @@ export function createStagingHost(runtime: StagingHostRuntime) {
   }
   function ready(): Context | undefined {
     if (props.getProperty(HOST_PROPERTIES.enabled) !== 'true') return undefined;
+    if (parseStagingHostConfig(propertyJson(HOST_PROPERTIES.config).value).mode === 'native-only') return undefined;
     return context(true);
   }
   function resolver(ctx: Context) {
@@ -461,9 +482,44 @@ export function createStagingHost(runtime: StagingHostRuntime) {
     withJournalLock(openJournal(ctx), runtime.lockService.getScriptLock(), j => enqueueCommand(command, j, ctx.signer));
     return flushWith(ctx);
   }
+  function setupNativeOnly(config: NativeOnlyStagingHostConfig, raw: string) {
+    let executor = '';
+    try { executor = runtime.session.getEffectiveUser().getEmail().trim().toLowerCase(); } catch { /* fail closed */ }
+    if (executor !== config.expectedAutomationEmail) fail('wrong_automation_identity', 'Run this host under the configured staging automation account.');
+    const signer = createGoogleSigner(runtime.utilities, props.getProperty(HOST_PROPERTIES.secret) || '');
+    const fingerprint = signer.sha256(raw);
+    const lock = runtime.lockService.getScriptLock();
+    if (!lock.tryLock(100)) fail('setup_busy', 'Another staging operation is in progress.');
+    try {
+      const list = runtime.scriptApp.getProjectTriggers();
+      // A mode change is not a migration. Retain the old fixture and its receipts.
+      const transportHandlers: string[] = [STAGING_HANDLERS.attendance, STAGING_HANDLERS.excusal, STAGING_HANDLERS.decision];
+      if (list.some(t => transportHandlers.includes(t.getHandlerFunction()))) {
+        fail('native_only_project_required', 'Use a separate staging script; existing transport triggers were retained.');
+      }
+      let saved: Receipt | undefined;
+      try { saved = JSON.parse(props.getProperty(HOST_PROPERTIES.setupReceipt) || 'null') ?? undefined; } catch { /* repair only this scheduler below */ }
+      const spec = { handler: STAGING_HANDLERS.flush, source: runtime.scriptApp.TriggerSource.CLOCK, event: runtime.scriptApp.EventType.CLOCK, resource: null, kind: 'clock' };
+      let trigger: HostTrigger | undefined;
+      for (const current of list.filter(t => t.getHandlerFunction() === spec.handler)) {
+        if (!trigger && matches(current, spec) && saved?.fingerprint === fingerprint && saved.executor === executor
+          && saved.scheduleMinutes === 5 && saved.triggers?.[spec.handler] === current.getUniqueId()) trigger = current;
+        else runtime.scriptApp.deleteTrigger(current);
+      }
+      trigger ??= runtime.scriptApp.newTrigger(spec.handler).timeBased().everyMinutes(5).create();
+      const receipt: Receipt = { fingerprint, executor, scheduleMinutes: 5, verifiedAfter: integer(runtime.nowSeconds()), triggers: { [spec.handler]: trigger.getUniqueId() } };
+      props.setProperty(HOST_PROPERTIES.setupReceipt, JSON.stringify(receipt));
+      const after = runtime.scriptApp.getProjectTriggers().filter(t => t.getHandlerFunction() === spec.handler);
+      if (after.length !== 1 || !matches(after[0], spec) || after[0].getUniqueId() !== receipt.triggers[spec.handler]
+        || props.getProperty(HOST_PROPERTIES.setupReceipt) !== JSON.stringify(receipt)) fail('trigger_repair_required', 'The native staging scheduler could not be verified.');
+      return { status: 'ready-paused', mode: 'native-only', triggers: 1, verifiedForms: 0 };
+    } finally { lock.releaseLock(); }
+  }
   return {
     setup() {
       props.setProperty(HOST_PROPERTIES.enabled, 'false');
+      const saved = propertyJson(HOST_PROPERTIES.config), config = parseStagingHostConfig(saved.value);
+      if (config.mode === 'native-only') return setupNativeOnly(config, saved.text);
       const ctx = context(false);
       preflight(ctx);
       const desired = specs(ctx); const ownNames = Object.values(STAGING_HANDLERS) as string[];

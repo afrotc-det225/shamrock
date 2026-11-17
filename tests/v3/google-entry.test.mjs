@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import vm from 'node:vm';
 import test from 'node:test';
+import { createHash, createHmac } from 'node:crypto';
 
 test('staging bundle loads without Google IO and exposes native trigger entry points', async () => {
   const source = await readFile(new URL('../../.build/v3-artifacts/GoogleAdapter.js', import.meta.url), 'utf8');
@@ -100,4 +101,22 @@ test('bundled scheduled flush with no owner-mail config never invokes provider o
  properties.SHAMROCK_V3_OWNER_MAIL_PAUSED='false';
  assert.equal(context.shamrockV3StagingFlush().ownerMail.status,'disabled');
  assert.equal(providerCalls,0);assert.equal(networkCalls,0);
+});
+
+test('bundled native-only setup pauses every consumer and installs only the shared scheduler',async()=>{
+ const source=await readFile(new URL('../../.build/v3-artifacts/GoogleAdapter.js',import.meta.url),'utf8'),owner='owner@example.invalid';
+ const properties={SHAMROCK_V3_HOST_CONFIG:JSON.stringify({version:1,environment:'staging',mode:'native-only',generation:1,resourceReview:'EXISTING_RESOURCES_REVIEWED_FOR_STAGING',workerOrigin:'https://worker.example.invalid',keyId:'fixture',expectedAutomationEmail:owner}),SHAMROCK_V3_BRIDGE_SECRET:'fictional-native-bootstrap-secret-material',SHAMROCK_V3_ENABLED:'true'};
+ const triggers=[];let created=0;
+ const context=vm.createContext({
+  PropertiesService:{getScriptProperties:()=>({getProperty:k=>properties[k]??null,setProperty:(k,v)=>properties[k]=v,deleteProperty:k=>delete properties[k]})},
+  Utilities:{DigestAlgorithm:{SHA_256:'sha'},Charset:{UTF_8:'utf8'},computeDigest:(_,s)=>[...createHash('sha256').update(s).digest()],computeHmacSha256Signature:(s,k)=>[...createHmac('sha256',k).update(s).digest()]},
+  Session:{getEffectiveUser:()=>({getEmail:()=>owner})},FormApp:{openById(){assert.fail('legacy Form open');}},SpreadsheetApp:{openById(){assert.fail('legacy workbook open');}},
+  ScriptApp:{TriggerSource:{CLOCK:'clock'},EventType:{CLOCK:'clock'},getProjectTriggers:()=>triggers.slice(),deleteTrigger:t=>triggers.splice(triggers.indexOf(t),1),newTrigger(handler){return {timeBased:()=>({everyMinutes(minutes){assert.equal(minutes,5);return {create(){const id=`clock-${++created}`,t={getUniqueId:()=>id,getHandlerFunction:()=>handler,getTriggerSource:()=> 'clock',getEventType:()=> 'clock',getTriggerSourceId:()=>null};triggers.push(t);return t;}};}})};}},
+  LockService:{getScriptLock:()=>({tryLock:()=>true,releaseLock(){}})},
+  UrlFetchApp:{fetch(){assert.fail('paused native bootstrap must not read provider resources');}},MailApp:{}
+ });vm.runInContext(source,context);
+ assert.equal(context.shamrockV3StagingSetup().mode,'native-only');assert.equal(context.shamrockV3StagingSetup().triggers,1);assert.equal(created,1);assert.equal(triggers[0].getHandlerFunction(),'shamrockV3StagingFlush');
+ for(const key of ['FRONTEND','INPUT','PERMISSION','HISTORY','OWNER_MAIL','FORMS','FORM_INTAKE','MAINTENANCE'])assert.equal(properties[`SHAMROCK_V3_${key}_PAUSED`],'true');
+ assert.equal(properties.SHAMROCK_V3_ENABLED,'false');assert.equal(context.shamrockV3StagingFlush().status,'native-only');
+ assert.equal(context.shamrockV3StagingAttendanceSubmit().status,'paused');assert.equal(context.shamrockV3StagingDecisionEdit().status,'paused');
 });

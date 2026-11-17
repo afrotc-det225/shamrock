@@ -34,3 +34,8 @@ test('cleanup retry rejects a missing or changed installed key and a rebound hos
  for(const change of [f=>delete f.props.SHAMROCK_V3_BRIDGE_SECRET,f=>f.props.SHAMROCK_V3_BRIDGE_SECRET='replacement-credential-material-needs-review',f=>{const h=JSON.parse(f.props.SHAMROCK_V3_HOST_CONFIG);h.keyId='new-key';f.props.SHAMROCK_V3_HOST_CONFIG=JSON.stringify(h);},f=>{const h=JSON.parse(f.props.SHAMROCK_V3_HOST_CONFIG);h.workerOrigin='https://renamed.example.invalid';f.props.SHAMROCK_V3_HOST_CONFIG=JSON.stringify(h);}]){const f=fixture();f.run();change(f);assert.throws(()=>f.run());assert.equal(f.props.SHAMROCK_V3_ENABLED,'false');}
  const f=fixture();f.delivery.targetProperty='SHAMROCK_V3_HISTORY_READER_SECRET';f.root.SHAMROCK_V3_HISTORY_CONFIG=JSON.stringify({api:{secretProperty:f.delivery.targetProperty,baseUrl:f.delivery.workerOrigin,keyId:f.delivery.keyId}});f.run();delete f.root.SHAMROCK_V3_HISTORY_CONFIG;assert.throws(()=>f.run());
 });
+
+test('native-only host uses the same private credential delivery without legacy resource bindings',()=>{
+ const f=fixture(),host=JSON.parse(f.props.SHAMROCK_V3_HOST_CONFIG);delete host.journal;delete host.attendance;host.mode='native-only';f.props.SHAMROCK_V3_HOST_CONFIG=JSON.stringify(host);
+ assert.deepEqual(f.run(),{status:'imported-paused'});assert.equal(f.props.SHAMROCK_V3_BRIDGE_SECRET,f.secret);assert.equal(f.trashed,true);assert.equal(f.props.SHAMROCK_V3_ENABLED,'false');
+});

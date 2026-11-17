@@ -44,7 +44,9 @@ export function runScheduledStaging(input:Services,nowSeconds=()=>Math.floor(Dat
   const permissionResult=permissions.refresh();
   const accessFenced=props.getProperty(PERMISSION_FENCE_PROPERTY)!==null;
   forms.applyControl();if(!accessFenced)nativeInput.applyControl();
-  const intake=createNativeStagingHost(shared).flush();
+  const rawHost=props.getProperty(HOST_PROPERTIES.config);
+  const nativeOnly=rawHost!==null&&parseStagingHostConfig(JSON.parse(rawHost)).mode==='native-only';
+  const intake=nativeOnly?{status:'native-only'}:createNativeStagingHost(shared).flush();
   const formIntake=forms.flush();
   const eventRosters=createNativeMaintenanceRuntime(shared,nowSeconds).refreshEventRosters();
   if(['waiting-event-rosters','busy'].includes(eventRosters.status))return Object.assign({},intake,{eventRosters,formIntake,frontend:{status:'waiting-event-rosters'},forms:{status:'waiting-event-rosters'},nativeInput:{status:'waiting-event-rosters'},permissions:permissionResult,reconciled:false});

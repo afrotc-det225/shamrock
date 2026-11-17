@@ -1,3 +1,4 @@
+import { stagingTransportSpreadsheetIds } from './staging-host.js';
 import { parseCatalogCommand } from '../../../packages/domain/src/organizational-catalog.js';
 /** Opt-in native host for trusted access turnover. Private controls are consumed once; no import-time IO. */
 import { AdapterError } from './index.js';
@@ -62,7 +63,7 @@ export function createNativePermissionRuntime(services: NativeFrontendServices, 
         if (!session.protectionInput || !session.config.supplemental?.enabled || session.config.generation !== c.config.generation || session.automationEmail !== c.owner)
             fail('A complete isolated permission repair session is required.');
         const books: PermissionBook[] = [{ spreadsheetId: session.config.main.spreadsheetId, kind: 'main', fixedReaders: c.config.mainReaders, fixedAccess: session.config.access }, { spreadsheetId: session.config.supplemental.excusals.spreadsheetId, kind: 'excusals', fixedReaders: c.config.excusalReaders, fixedAccess: session.config.supplemental.excusals.access }];
-        if (books.some(b => [c.config.stateFileId, session.config.stateFileId, c.host.journal.spreadsheetId, c.host.decisionInput?.spreadsheetId].includes(b.spreadsheetId)))
+        if (books.some(b => [c.config.stateFileId, session.config.stateFileId, ...stagingTransportSpreadsheetIds(c.host)].includes(b.spreadsheetId)))
             fail('Permission books overlap private state or transport storage.');
         const api = createNativePermissionApi(services, id => { const input = session.protectionInput!(id); if (!input.metadata.sheets)
             fail('Complete native protection metadata is required.'); return { metadata: { sheets: input.metadata.sheets }, surfaces: [...input.surfaces] }; });

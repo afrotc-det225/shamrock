@@ -1,7 +1,7 @@
 /** Optional owner-only rehearsal host. Operational staging intents remain permanently suppressed. */
 import { AdapterError } from './index.js';
 import { createGoogleSigner } from './apps-script.js';
-import { HOST_PROPERTIES, parseStagingHostConfig } from './staging-host.js';
+import { HOST_PROPERTIES, parseStagingHostConfig, stagingTransportSpreadsheetIds } from './staging-host.js';
 import { CONFIG_FILE_ID_PROPERTY } from './staging-config.js';
 import { createPrivateCheckpoint } from './private-checkpoint.js';
 import { createMailAppProvider } from './notification-runtime.js';
@@ -142,7 +142,7 @@ export function createNativeOwnerMailRuntime(services: NativeOwnerMailServices) 
         if (Object.keys(pointer).sort().join(',') !== 'configFileId,version' || pointer.version !== 1 || !fileId(pointer.configFileId) || pointer.configFileId === root)
             fail('Bind a separate reviewed owner-mail configuration.');
         const config = parseNativeOwnerMailConfig(read(pointer.configFileId), host.generation);
-        if ([root, pointer.configFileId, host.journal.spreadsheetId, host.decisionInput?.spreadsheetId].includes(config.stateFileId))
+        if ([root, pointer.configFileId, ...stagingTransportSpreadsheetIds(host)].includes(config.stateFileId))
             fail('Use a separate private owner-mail checkpoint.');
         const signer = createGoogleSigner(services.Utilities, props.getProperty(HOST_PROPERTIES.secret) ?? '');
         const state = createPrivateCheckpoint<State>({ version: () => String(inspect(config.stateFileId).version), read: () => google(`${drive(config.stateFileId)}?alt=media`), write(value) { if (canonical(value).length > 128000)

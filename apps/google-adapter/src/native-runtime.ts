@@ -7,7 +7,7 @@ import { planPresentationRepair, planPresentationGrowth, verifyPresentation, chu
   type PresentationInput, type PresentationSurface, type SheetsMetadata } from './presentation.js';
 import {
   createStagingHost, HOST_PROPERTIES, parseStagingHostConfig,
-  type ExistingSheetReference, type StagingHostConfig, type StagingHostRuntime,
+  type ExistingSheetReference, type TransportStagingHostConfig, type StagingHostRuntime,
 } from './staging-host.js';
 import {
   consumeProjectionJobs, initializeProjectionSheets, upgradeRecordedDecisionLabels, PROJECTION_HEADERS,
@@ -99,7 +99,7 @@ function columnName(column: number): string {
 }
 
 /** Optional presentation binds only an existing, separate tab in the reviewed operator workbook. */
-export function parseNativePresentationConfig(value: unknown, host: StagingHostConfig, projection: NativeProjectionConfig): NativePresentationConfig {
+export function parseNativePresentationConfig(value: unknown, host: TransportStagingHostConfig, projection: NativeProjectionConfig): NativePresentationConfig {
   const v = object(value);
   if (Object.keys(v).sort().join(',') !== 'environment,generation,legend,version'
     || v.version !== 1 || v.environment !== 'staging' || positive(v.generation) !== host.generation
@@ -147,8 +147,10 @@ export function createNativeStagingRuntime(services: NativeStagingServices): Sta
     let executor = '';
     try { executor = canonicalEmail(services.Session.getEffectiveUser().getEmail()); } catch { /* fail closed */ }
     if (executor !== config.expectedAutomationEmail) fail('wrong_automation_identity', 'Run this host under the configured staging automation account.');
+    if (config.mode === 'native-only') fail('native_only_host', 'Legacy transport resources are unavailable in this native-only host.');
     return { config, raw: saved.raw };
   }
+  function nativeOnly() { return parseStagingHostConfig(readJson(HOST_PROPERTIES.config).value).mode === 'native-only'; }
   function api(url: string, body?: unknown): Json {
     const cached = body === undefined && lockHeld ? reads.get(url) : undefined;
     if (cached !== undefined) return object(JSON.parse(cached));
@@ -414,7 +416,7 @@ export function createNativeStagingRuntime(services: NativeStagingServices): Sta
       },
     };
   }
-  function dynamicContext(binding: NonNullable<StagingHostConfig['decisionInput']> & { mode: 'projection' }) {
+  function dynamicContext(binding: NonNullable<TransportStagingHostConfig['decisionInput']> & { mode: 'projection' }) {
     const { config } = host();
     return { binding, config: { baseUrl: config.workerOrigin, keyId: config.keyId, environment: 'staging' as const, generation: config.generation },
       signer: createGoogleSigner(services.Utilities, properties.getProperty(HOST_PROPERTIES.secret) ?? '') };
@@ -598,6 +600,7 @@ export function createNativeStagingRuntime(services: NativeStagingServices): Sta
       assertDecisionProtection(ref, protectedHeaders);
     },
     consumeProjection(context: { config: AdapterConfig; signer: Signer; transport: Transport; nowSeconds: () => number }) {
+      if (nativeOnly()) return { status: 'native-only' };
       if (!properties.getProperty(NATIVE_PROPERTIES.projectionConfig)) return { status: 'not-configured' };
       const bound = projectionBinding();
       if (context.config.environment !== 'staging' || context.config.generation !== bound.config.generation
@@ -618,6 +621,7 @@ export function createNativeStagingRuntime(services: NativeStagingServices): Sta
       });
     },
     initializeProjections() {
+      if (nativeOnly()) return { status: 'native-only' };
       if (properties.getProperty(HOST_PROPERTIES.enabled) === 'true') fail('pause_required', 'Pause staging before initializing projection outputs.');
       const bound = projectionBinding();
       if (!sharedLock.tryLock(100)) fail('projection_busy', 'Another staging operation is in progress.');
@@ -644,6 +648,7 @@ export function createNativeStagingRuntime(services: NativeStagingServices): Sta
       } finally { sharedLock.releaseLock(); }
     },
     repairPresentation() {
+      if (nativeOnly()) return { status: 'native-only' };
       if (properties.getProperty(HOST_PROPERTIES.enabled) === 'true') fail('pause_required', 'Pause staging before repairing spreadsheet presentation.');
       const bound = projectionBinding();
       if (!presentationBinding(bound)) return { status: 'presentation-not-configured' };

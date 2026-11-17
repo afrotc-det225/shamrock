@@ -1,7 +1,7 @@
 /** Private, opt-in staging host for retained historical attendance. No production writes or mail binding. */
 import { AdapterError } from './index.js';
 import { createGoogleSigner, createGoogleTransport, type UtilitiesPort, type ScriptLockPort } from './apps-script.js';
-import { HOST_PROPERTIES, parseStagingHostConfig } from './staging-host.js';
+import { HOST_PROPERTIES, parseStagingHostConfig, stagingTransportSpreadsheetIds } from './staging-host.js';
 import { CONFIG_FILE_ID_PROPERTY } from './staging-config.js';
 import { createPrivateCheckpoint } from './private-checkpoint.js';
 import { continueHistoryPublication, validateHistoryState, type HistoryPublicationState, type HistoryPorts, type HistoryCatalogEntry } from './history-runtime.js';
@@ -51,7 +51,7 @@ export function createNativeHistoryRuntime(services:NativeHistoryServices,nowSec
     const host=parseStagingHostConfig(JSON.parse(rawHost));if(services.Session.getEffectiveUser().getEmail().trim().toLowerCase()!==host.expectedAutomationEmail)fail('Run history publication under the configured automation account.');
     const configMeta=inspect(configId,host.expectedAutomationEmail);if(configMeta.mimeType!=='application/json'||Number(configMeta.size)>65536)fail('The private configuration file is not a bounded JSON file.');
     const map=google(`${drive(configId)}?alt=media`,'get',undefined,65536),raw=map[HISTORY_PROPERTIES.config];if(typeof raw!=='string'||bytes(raw)>8000)fail('Add the reviewed private history configuration first.');
-    const config=parseNativeHistoryConfig(JSON.parse(raw),host.generation),denied=[configId,host.journal.spreadsheetId,host.decisionInput?.spreadsheetId];
+    const config=parseNativeHistoryConfig(JSON.parse(raw),host.generation),denied=[configId,...stagingTransportSpreadsheetIds(host)];
     for(const key of ['SHAMROCK_V3_FRONTEND_CONFIG','SHAMROCK_V3_MAINTENANCE_CONFIG'])if(typeof map[key]==='string'){const existing=JSON.parse(map[key]);denied.push(existing.stateFileId,existing.main?.spreadsheetId,existing.supplemental?.excusals?.spreadsheetId,existing.archiveSpreadsheetId);}
     if(denied.includes(config.stateFileId)||denied.includes(config.spreadsheetId))fail('History must use separate state and workbook bindings.');
     const secret=properties.getProperty(config.api?.secretProperty??HOST_PROPERTIES.secret)??'',signer=createGoogleSigner(services.Utilities,secret),bindingHash=signer.sha256(canonical(config));

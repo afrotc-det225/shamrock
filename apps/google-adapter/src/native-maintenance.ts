@@ -1,7 +1,7 @@
 /** Owner-account native host. Planning is suppressed; no MailApp service is accepted or bound. */
 import { AdapterError } from './index.js';
 import { createGoogleSigner, createGoogleTransport, type ScriptLockPort, type UtilitiesPort } from './apps-script.js';
-import { HOST_PROPERTIES, parseStagingHostConfig } from './staging-host.js';
+import { HOST_PROPERTIES, parseStagingHostConfig, stagingTransportSpreadsheetIds } from './staging-host.js';
 import { CONFIG_FILE_ID_PROPERTY } from './staging-config.js';
 import { MAINTENANCE_PROPERTIES, parseNativeMaintenanceConfig } from './maintenance-config.js';
 import { callMaintenance, planNotificationWork, advanceSundayCloseout, type MaintenanceApi } from './notification-runtime.js';
@@ -176,7 +176,7 @@ export function createNativeMaintenanceRuntime(services: NativeMaintenanceServic
         if (typeof raw !== 'string' || bytes(raw) > 8000)
             fail('maintenance_config', 'Maintenance configuration is invalid or oversized.');
         const config = parseNativeMaintenanceConfig(JSON.parse(raw), host.generation);
-        const denied = [configId, host.journal.spreadsheetId, host.decisionInput?.spreadsheetId];
+        const denied = [configId, ...stagingTransportSpreadsheetIds(host)];
         const frontend = map.SHAMROCK_V3_FRONTEND_CONFIG ? JSON.parse(map.SHAMROCK_V3_FRONTEND_CONFIG) : undefined;
         if (frontend)
             denied.push(frontend.stateFileId, frontend.main?.spreadsheetId, frontend.supplemental?.excusals?.spreadsheetId);

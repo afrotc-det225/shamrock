@@ -62,3 +62,13 @@ test('unresolved managed future rosters defer publication and retain the hourly 
  const out=runScheduledStaging(f.services,()=>f.now);assert.equal(out.eventRosters.reviewRequired,true);assert.equal(out.frontend.status,'waiting-event-rosters');assert.equal(out.forms.status,'waiting-event-rosters');assert.equal(out.nativeInput.status,'waiting-event-rosters');assert.equal(f.props[SCHEDULE_PROPERTIES.reconciled],'older');assert.equal(out.reconciled,false);
  assert.equal(f.fx.calls.some(c=>/frontend-state|form-state|input-journal/.test(c.url)),false);
 });
+
+test('native-only scheduler runs modern controls without a legacy host, journal or projection binding',()=>{
+ for(const enabled of [false,true]){
+  const f=fixture(enabled),host=JSON.parse(f.props.SHAMROCK_V3_HOST_CONFIG);delete host.journal;delete host.attendance;host.mode='native-only';f.props.SHAMROCK_V3_HOST_CONFIG=JSON.stringify(host);
+  const frontend=JSON.parse(f.root.SHAMROCK_V3_FRONTEND_CONFIG);frontend.resourceReview='EXISTING_REAL_DATA_FRONTEND_REVIEWED_FOR_STAGING';f.root.SHAMROCK_V3_FRONTEND_CONFIG=JSON.stringify(frontend);
+  const out=runScheduledStaging(f.services,()=>f.now);assert.equal(out.status,'native-only');assert.equal(out.frontend.status,enabled?'idle':'disabled');assert.equal(out.forms.status,enabled?'idle':'disabled');
+  assert.equal(f.fx.calls.length,enabled?7:6);assert.equal(f.fx.calls.some(c=>/legacy-journal|legacy-attendance/.test(c.url)),false);
+  f.props.SHAMROCK_V3_ENABLED='true';assert.equal(runScheduledStaging(f.services,()=>f.now+300).status,'native-only');
+ }
+});

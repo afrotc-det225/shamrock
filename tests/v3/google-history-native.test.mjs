@@ -121,3 +121,8 @@ test('wide History Tables are created minimally and configured in the same atomi
  const requests=batches[0].body.requests,index=requests.findIndex(r=>r.addTable?.table.range.sheetId===plan.sheetId),created=requests[index].addTable.table,configured=requests[index+1].updateTable;
  assert.deepEqual(Object.keys(created).sort(),['name','range','tableId']);assert.equal(configured.table.tableId,created.tableId);assert.equal(configured.fields,'rowsProperties,columnProperties');assert.equal(configured.table.columnProperties.length,78);
 });
+
+test('native-only host supports separate private historical publication without legacy bindings',()=>{
+ const f=fixture(),host=JSON.parse(f.properties.SHAMROCK_V3_HOST_CONFIG);delete host.journal;delete host.attendance;host.mode='native-only';f.properties.SHAMROCK_V3_HOST_CONFIG=JSON.stringify(host);
+ f.enable();assert.equal(f.finish().completed,1);assert.ok(f.sheets.some(sheet=>sheet.tables.length===1));
+});

@@ -70,3 +70,9 @@ test('permission controls cannot replay old resumes, bypass generation/ACL or si
  assert.throws(()=>parseNativePermissionConfig({...f.config,generation:2},1));assert.throws(()=>parseNativePermissionConfig({...f.config,untrusted:true},1));
  f.config.stateFileId='changed-private-state';f.files['changed-private-state']={version:1,environment:'staging',generation:1};assert.throws(()=>f.control('resume'),/exact permission setup/);
 });
+
+test('native-only host preserves reviewed native permission setup and rejects overlapping private storage',()=>{
+ const f=fixture(),host=JSON.parse(f.props[HOST_PROPERTIES.config]);delete host.journal;delete host.attendance;host.mode='native-only';f.props[HOST_PROPERTIES.config]=JSON.stringify(host);
+ assert.equal(f.control('setup').status,'setup-paused');assert.equal(f.control('resume').status,'ready');
+ f.config.stateFileId='main';assert.throws(()=>f.control('setup'));
+});
