@@ -1,3 +1,4 @@
+import { assertPublishedResponderAccess, assertNamedResponder, type NativeResponderAccess } from './form-responder-access.js';
 import type {ScheduledHints} from './scheduled-runtime.js';
 import {createNativeRetention,type NativeRetentionConfig} from './private-retention-native.js';
 import {createFormCatalogArchive,compactFormsIntake} from './forms-retention.js';
@@ -22,6 +23,8 @@ export interface NativeFormsConfig {
   resourceReview: 'EXISTING_FORMS_REVIEWED_FOR_STAGING'; principalId: string; workerId: string;
   stateFileId: string; intakeFileId: string; reviewResourceKey: string; principals: FormPrincipal[];
   retention?:NativeRetentionConfig;
+  /** Required for enabled publication/intake; separate from trigger bindings and editor sharing. */
+  responderAccess?: Record<ManagedFormBinding['key'], NativeResponderAccess>;
   controlRequest?: { requestId: string; sequence: number; action: 'setup' | 'resume-publication' | 'resume-intake' | 'pause' | 'review-replay'; stateSha256: string; intakeSha256: string; replay?: FormReplayReview };
   forms: (ManagedFormBinding & { allowedEditors: string[]; intake: FormIntakeBinding })[];
 }
@@ -41,7 +44,7 @@ export interface NativeFormsServices {
   Utilities: Parameters<typeof createGoogleSigner>[0] & { getUuid(): string };
   ScriptApp: any; Session: { getEffectiveUser(): { getEmail(): string }; getActiveUser(): { getEmail(): string } };
   UrlFetchApp: { fetch(url: string, options: Record<string, unknown>): { getResponseCode(): number; getContentText(): string } };
-  FormApp: { PageNavigationType?: { SUBMIT: unknown }; openById(id: string): { isAcceptingResponses(): boolean; setAcceptingResponses(enabled: boolean): unknown; getItems?(): any[] } };
+  FormApp: { PageNavigationType?: { SUBMIT: unknown }; openById(id: string): { isAcceptingResponses(): boolean; setAcceptingResponses(enabled: boolean): unknown; setPublished?(enabled: boolean): unknown; getItems?(): any[] } };
   LockService: { getScriptLock(): { tryLock(ms: number): boolean; releaseLock(): void } };
   now?: () => number;
 }
@@ -157,8 +160,19 @@ export function createNativeFormsRuntime(services: NativeFormsServices) {
       if (index < 0 || !['CONTINUE', 'SUBMIT'].includes(response.pageBreakNavigation?.[sectionId]?.action ?? '')) fail('forms_layout', 'A new section has unexpected continuation state.');
       nativeItems(binding, response)[index].asPageBreakItem().setGoToPage(services.FormApp.PageNavigationType.SUBMIT);
     }
-    function isolation() {
+    function isolation(requireResponders = false) {
       for (const b of config.forms) { const info = file(b.formId, owner, b.allowedEditors); if (info.name !== b.expectedTitle || info.mimeType !== 'application/vnd.google-apps.form') fail('forms_isolation', 'The bound staging Form changed.'); }
+      if (requireResponders || enabled() || intakeEnabled()) {
+        try {
+          if (!config.responderAccess || Object.keys(config.responderAccess).sort().join(',') !== 'attendance,directory,excusals') fail('form_responder_access', 'Review all three named Form responder lists before resuming.');
+          for (const b of config.forms) assertPublishedResponderAccess({formId:b.formId,ownerEmail:owner,policy:config.responderAccess[b.key],read:url=>api(url)});
+        } catch (error) {
+          paused(FORMS_PROPERTIES.pause); paused(FORMS_PROPERTIES.intakePause);
+          // Ownership/editor isolation was verified for every bound Form above.
+          for (const b of config.forms) { try { const form=services.FormApp.openById(b.formId);form.setAcceptingResponses(false);form.setPublished?.(false); } catch { /* Preserve the access failure; never dispatch or acknowledge. */ } }
+          throw error;
+        }
+      }
       privateJson(config.stateFileId, owner); privateJson(config.intakeFileId, owner);
       retention?.get('retention-health-v1');
     }
@@ -201,6 +215,7 @@ export function createNativeFormsRuntime(services: NativeFormsServices) {
       ...Object.entries(journal.enrollments ?? {}).filter(([email]) => !ctx.config.principals.some(p => p.personId && p.email.toLowerCase() === email)).map(([email,p]) => ({email,...p}))];
   }
   function interpretation(ctx: FormsContext, journal: IntakeState, binding: NativeFormsConfig['forms'][number], source: VerifiedFormSubmission) {
+    assertNamedResponder(ctx.config.responderAccess?.[binding.key],ctx.owner,source.respondentEmail);
     const catalog = ctx.storage<FormsState>(ctx.config.stateFileId).load();
     return { submission:source, binding:binding.intake, editions:ctx.catalogArchive ? ctx.catalogArchive.forSubmission(catalog,source,binding.intake) : catalog.editions,
       principals:principals(ctx,journal), config:ctx.adapter, signer:ctx.signer };
@@ -335,9 +350,9 @@ export function createNativeFormsRuntime(services: NativeFormsServices) {
       try { const ctx = context(); if (ctx) for (const b of ctx.config.forms) { services.FormApp.openById(b.formId).setAcceptingResponses(false); if (ctx.read(b).acceptingResponses) fail('forms_pause', 'A managed Form did not close.'); } } catch (e) { failure ??= e; }
       if (failure) throw failure; return { status: 'paused' }; },
     resumePublication() { const ctx = context(); if (!ctx || !ctx.config.enabled) fail('forms_configuration', 'Enable the reviewed private publication configuration first.');
-      return lock(() => { ctx.isolation(); props.setProperty(FORMS_PROPERTIES.pause, 'false'); if (props.getProperty(FORMS_PROPERTIES.pause) !== 'false') fail('forms_pause', 'The publication gate did not persist.'); return { status: 'enabled' }; }); },
+      return lock(() => { ctx.isolation(true); props.setProperty(FORMS_PROPERTIES.pause, 'false'); if (props.getProperty(FORMS_PROPERTIES.pause) !== 'false') fail('forms_pause', 'The publication gate did not persist.'); return { status: 'enabled' }; }); },
     resumeIntake() { const ctx = context(); if (!ctx || !ctx.config.intakeEnabled || props.getProperty(HOST_PROPERTIES.enabled) === 'true') fail('forms_configuration', 'Review the new intake gate and pause the original adapter before resuming.');
-      return lock(() => { ctx.isolation(); const state = ctx.storage<FormsState>(ctx.config.stateFileId).load();
+      return lock(() => { ctx.isolation(true); const state = ctx.storage<FormsState>(ctx.config.stateFileId).load();
         const setup = JSON.parse(props.getProperty(FORMS_PROPERTIES.setup) ?? 'null');
         if (state.pending || state.claim || !setup || setup.bindings !== ctx.signer.sha256(formsCanonical(ctx.config.forms))) fail('forms_setup', 'Finish publication and verified trigger setup before resuming intake.');
         for (const b of ctx.config.forms) if (!state.current[b.key] || state.published?.[b.key] !== formReadFingerprint(ctx.read(b))) fail('forms_setup', 'Publish and verify all configured Form choices before resuming intake.');

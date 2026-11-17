@@ -98,3 +98,22 @@ Local tests cover pure target/version binding, complete-map reorder rejection, o
 Before enabling direct edits, record real non-owner ordinary-sort denial, FilterView sorted editing with identical adjacent values, delayed trigger/publication overlap, paste/clear, changed authority, unknown-user confirmation, duplicate confirmation, ambiguous network recovery and all five surfaces. Verify original colors, native chip/arrow/plain controls, row heights, filters and photos remain unchanged. Keep production triggers/resources untouched until the separate cutover review passes.
 
 The scheduled consumer uses a durable private work marker to avoid rereading an empty journal every five minutes. Journal writes mark work pending before persistence; only verified reconciliation marks the same generation/file idle. A published draft forces input recovery even after an idle marker. Hourly reconciliation checks private state again. Direct edits/confirmation triggers remain immediate; the marker is a polling hint, never human identity, authority, a command receipt or permission to discard a draft.
+
+
+## Confirmation responder access
+
+Before enabling native input, add top-level
+`confirmationResponderAccess: { "version": 1, "allowedEmails": ["automation@example.invalid"] }`
+to its private config, with the owner and every explicitly approved confirmation
+respondent. Keep it outside `confirmation`: changing audience must not rebind
+physical spreadsheet slots or erase pending edits. This policy is independent of
+Form editor sharing and of the `principals` mapping/backend capabilities.
+
+Input resume and enabled confirmation reads verify all published-view Drive
+permission pages, require the exact named audience, and reject broad/unreviewed
+permissions. The owner is an inherent responder and must be listed explicitly.
+A verified native confirmation email must also belong to the current reviewed
+list. Failure pauses input, attempts to close/unpublish the ownership-verified
+confirmation Form and preserves the original journal/drafts without dispatch.
+Paused setup/status/pause remain available for older configs lacking this policy.
+See [managed Form responder access](D1_MANAGED_FORMS.md#reviewed-responder-access).

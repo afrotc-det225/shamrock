@@ -1,3 +1,4 @@
+import { assertPublishedResponderAccess, assertNamedResponder, type NativeResponderAccess } from './form-responder-access.js';
 import { createNativeRetention, type NativeRetentionConfig } from './private-retention-native.js';
 import { archivedInputEntry, archivedInputReceipt, compactInputJournal } from './input-retention.js';
 import { createPermissionContext } from './permissions-context.js';
@@ -18,6 +19,8 @@ export const INPUT_HANDLERS={edit:'shamrockV3NativeFrontendEdit',confirmation:'s
 export interface NativeInputConfig {
   version:1;environment:'staging';generation:number;enabled:boolean;resourceReview:'EXISTING_INPUT_SURFACES_REVIEWED_FOR_STAGING';
   retention?:NativeRetentionConfig;
+  /** Kept outside confirmation binding so responder review does not rebind physical slots. */
+  confirmationResponderAccess?:NativeResponderAccess;
   journalFileId:string;principals:InputPrincipal[];surfaces:InputSurfaceBinding[];
   controlRequest?:{requestId:string;sequence:number;action:'setup'|'resume'|'pause';frontendSha256:string;journalSha256:string};
   providerReview?:{reviewId:string;bindingsSha256:string;filterViewCoordinatesVerified:true;protectedSortDenied:true};
@@ -82,12 +85,15 @@ export function createNativeFrontendInput(services:NativeInputServices,frontend=
       if(previous===undefined||inputCanonical(privateRead(config.journalFileId,owner))!==previous)fail('input_state','The private input journal changed outside this lock.');
       api(`https://www.googleapis.com/upload/drive/v3/files/${encodeURIComponent(config.journalFileId)}?uploadType=media&fields=id`,value,'patch');if(inputCanonical(privateRead(config.journalFileId,owner))!==text)fail('input_state','The private input journal did not persist.');previous=text;
     }};}
-    function confirmationRead(){const b=config.confirmation,metadata=inspect(b.formId,owner,b.allowedEditors),read=api(form(b.formId));
+    function confirmationRead(requireResponders=false){const b=config.confirmation,metadata=inspect(b.formId,owner,b.allowedEditors),read=api(form(b.formId));
       if(metadata.mimeType!=='application/vnd.google-apps.form'||metadata.name!==b.expectedTitle||read.info?.title!==b.expectedTitle||read.settings?.emailCollectionType!=='VERIFIED')fail('input_confirmation','The staging confirmation Form must collect verified identity.');
       for(const field of ['reference','summary','action'] as const){const item=read.items?.find((i:any)=>i.itemId===b[field].itemId);if(item?.questionItem?.question?.questionId!==b[field].questionId)fail('input_confirmation','A bound confirmation question changed.');}
       const question=(name:'reference'|'summary'|'action')=>read.items.find((i:any)=>i.itemId===b[name].itemId).questionItem.question;
       if(!question('reference').textQuestion||question('reference').textQuestion.paragraph||question('summary').textQuestion?.paragraph!==true
         ||!['RADIO','DROP_DOWN'].includes(question('action').choiceQuestion?.type)||inputCanonical(question('action').choiceQuestion.options)!==inputCanonical([{value:'Confirm these changes'}]))fail('input_confirmation','Use the reviewed reference, summary and explicit confirmation controls.');
+      if(requireResponders||enabled())try{assertPublishedResponderAccess({formId:b.formId,ownerEmail:owner,policy:config.confirmationResponderAccess,read:url=>api(url)});}catch(error){
+        pause();try{const form=services.FormApp.openById(b.formId);form.setAcceptingResponses(false);form.setPublished?.(false);}catch{/* Preserve the access failure and pending input. */}throw error;
+      }
       return read;
     }
     function setupReceipt(){const setup=JSON.parse(properties.getProperty(INPUT_PROPERTIES.setup)??'null');if(!setup||setup.fingerprint!==fingerprint)fail('input_setup','Verify the native input triggers before processing edits.');return setup;}
@@ -175,7 +181,7 @@ export function createNativeFrontendInput(services:NativeInputServices,frontend=
       const finalShape=ctx.confirmationRead();if(inputCanonical({items:confirmation.items,settings:confirmation.settings})!==inputCanonical({items:finalShape.items,settings:finalShape.settings}))fail('input_confirmation','The confirmation Form changed during setup.');
       properties.setProperty(INPUT_PROPERTIES.setup,JSON.stringify({fingerprint:ctx.fingerprint,ids,confirmationNativeItems,confirmationShape:ctx.signer.sha256(inputCanonical({items:confirmation.items,settings:confirmation.settings}))}));ctx.setupReceipt();return{status:'ready-paused',triggers:Object.keys(ids).length};
     }finally{lock.releaseLock();}},
-    resume(){const ctx=context();if(!ctx||!ctx.config.enabled)fail('input_configuration','Enable the reviewed private input configuration first.');ctx.confirmationRead();ctx.setupReceipt();let verified=false;frontend.inputSession(session=>{checkSession(ctx,session);verified=true;});if(!verified)fail('input_configuration','The frontend is paused or unavailable.');properties.deleteProperty(INPUT_PROPERTIES.pause);if(properties.getProperty(INPUT_PROPERTIES.pause)!==null)fail('input_pause','Input did not resume.');return{status:'enabled'};},
+    resume(){const ctx=context();if(!ctx||!ctx.config.enabled)fail('input_configuration','Enable the reviewed private input configuration first.');ctx.confirmationRead(true);ctx.setupReceipt();let verified=false;frontend.inputSession(session=>{checkSession(ctx,session);verified=true;});if(!verified)fail('input_configuration','The frontend is paused or unavailable.');properties.deleteProperty(INPUT_PROPERTIES.pause);if(properties.getProperty(INPUT_PROPERTIES.pause)!==null)fail('input_pause','Input did not resume.');return{status:'enabled'};},
     onEdit(event:any){const evidence=snapshotNativeEdit(event);return sessionRun((ctx,session)=>{
       const b=ctx.config.surfaces.find(s=>s.spreadsheetId===evidence.spreadsheetId&&s.sheetId===evidence.sheetId);if(!b)return{status:'ignored'};
       if(ctx.setupReceipt().ids[b.spreadsheetId]!==evidence.triggerUid)fail('input_identity','Unexpected native edit trigger.');const io=ports(ctx,session);
@@ -194,6 +200,7 @@ export function createNativeFrontendInput(services:NativeInputServices,frontend=
     confirm(event:any){const sourceId=String(event.source.getId()),responseId=String(event.response.getId()),trigger=String(event.triggerUid??'');return sessionRun((ctx,session)=>{
       const b=ctx.config.confirmation;if(sourceId!==b.formId||ctx.setupReceipt().ids[sourceId]!==trigger)fail('input_identity','Unexpected confirmation trigger.');
       const native=api(`${form(b.formId)}/responses/${encodeURIComponent(responseId)}`);if(native.formId!==b.formId||native.responseId!==responseId||!native.respondentEmail||!Number.isFinite(Date.parse(native.lastSubmittedTime)))fail('input_confirmation','Verified native confirmation identity is missing.');
+      assertNamedResponder(ctx.config.confirmationResponderAccess,ctx.owner,native.respondentEmail);
       const answer=(id:string)=>{const a=native.answers?.[id];if(a?.questionId!==id||a.textAnswers?.answers?.length!==1||typeof a.textAnswers.answers[0].value!=='string')fail('input_confirmation','A frozen confirmation answer is missing.');return a.textAnswers.answers[0].value;};
       const reference=answer(b.reference.questionId),summary=answer(b.summary.questionId),action=answer(b.action.questionId),io=ports(ctx,session),entry=io.journal.entries[reference]??(ctx.retention?archivedInputEntry(ctx.retention,reference):undefined);
       if(!entry||entry.superseded)fail('input_confirmation','The referenced frozen edit is unavailable or was replaced before dispatch.');

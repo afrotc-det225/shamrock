@@ -69,7 +69,13 @@ Do not manually remove the old host property to bypass this separation.
    closed and review the existing baseline/physical slot readback before any
    explicit consumer resume. Setup does not resume frontend, input, Forms, mail,
    permissions, maintenance or History.
-6. Verify the intended staging Worker, generation, registered sources, explicit
+6. Before any resume/publish, explicitly review the separate published responder
+   permission view of all four Forms. Owner-only editor sharing does not rule out
+   a latent `anyone` responder grant. Configure the managed Forms `responderAccess`
+   and input `confirmationResponderAccess` policies, remove only reviewed unwanted
+   published grants while closed, and verify exact named audiences through the
+   Drive API. The owner has inherent access. These reviews do not enable gates.
+7. Verify the intended staging Worker, generation, registered sources, explicit
    principals and private checkpoint ownership. Keep notifications suppressed
    until their separate owner-only rehearsal. Run the native workflow and failure
    tests, then pause every consumer between rehearsals.

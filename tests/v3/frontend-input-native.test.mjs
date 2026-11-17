@@ -16,7 +16,7 @@ function fixture(){
   fx.tables[b.surface]={sheetId:b.sheetId,tableId:b.tableId,gridRowCount:10,gridColumnCount:3,headers:['last_name',header,keyHeader],labels:['Last Name',header,'ID'],rows:[[cell('Example'),{},cell(key)]],range:{sheetId:b.sheetId,startRowIndex:1,endRowIndex:3,startColumnIndex:0,endColumnIndex:3},hiddenColumns:[2],machineRowHidden:true};
   (b.surface==='blue'||b.surface==='gold'?excusals:main).sheets[b.surface]={sheetId:b.sheetId,tableId:b.tableId};
  }
- const config={version:1,environment:'staging',generation:1,enabled:true,resourceReview:'EXISTING_INPUT_SURFACES_REVIEWED_FOR_STAGING',journalFileId:'input-journal',principals:[{email,principalId:'editor'}],surfaces,
+ const config={confirmationResponderAccess:{version:1,allowedEmails:[owner,email]},version:1,environment:'staging',generation:1,enabled:true,resourceReview:'EXISTING_INPUT_SURFACES_REVIEWED_FOR_STAGING',journalFileId:'input-journal',principals:[{email,principalId:'editor'}],surfaces,
   providerReview:{reviewId:'fixture-review',bindingsSha256:sha(inputCanonical(surfaces)),filterViewCoordinatesVerified:true,protectedSortDenied:true},confirmation:{formId:'confirmation',expectedTitle:'Input confirmation Staging',allowedEditors:[],reference:{itemId:'ref-api',questionId:'ref-q'},summary:{itemId:'summary-api',questionId:'summary-q'},action:{itemId:'action-api',questionId:'action-q'}}};
  const form={formId:'confirmation',info:{title:config.confirmation.expectedTitle},settings:{emailCollectionType:'VERIFIED'},items:[{itemId:'ref-api',title:'Reference',questionItem:{question:{questionId:'ref-q',textQuestion:{},required:true}}},{itemId:'summary-api',title:'Frozen changes',questionItem:{question:{questionId:'summary-q',textQuestion:{paragraph:true},required:true}}},{itemId:'action-api',title:'Action',questionItem:{question:{questionId:'action-q',choiceQuestion:{type:'RADIO',options:[{value:'Confirm these changes'}]},required:true}}}]};
  const host={version:1,environment:'staging',generation:1,resourceReview:'EXISTING_RESOURCES_REVIEWED_FOR_STAGING',workerOrigin:'https://worker.example.invalid',keyId:'fixture',expectedAutomationEmail:owner,journal:{spreadsheetId:'legacy-journal',sheetId:1},attendance:{formId:'legacy-form',resourceKey:'legacy',itemRoles:{event:'event',scope:'scope',present:['present'],completeness:'complete'}}};
@@ -34,6 +34,7 @@ function fixture(){
    assert.equal(options.headers.Authorization,'Bearer fixture-oauth');
    if(u.host==='sheets.googleapis.com'){fx.notes.push(body);assert(body.requests.every(r=>r.repeatCell.fields==='note'));return response({});}
    if(u.host==='forms.googleapis.com')return response(u.pathname.includes('/responses/')?fx.confirmationResponse:copy(form));
+   if(u.pathname.endsWith('/permissions'))return response({permissions:fx.publishedPermissions??[{id:'editor',type:'user',role:'reader',view:'published',emailAddress:email}]});
    const id=u.pathname.split('/').at(-1);if(fx.retentionFiles&&['retention-folder',...Object.keys(fx.retentionFiles)].includes(id)){
     assert.equal(options.method,'get');if(u.searchParams.get('alt')==='media')return response(fx.retentionFiles[id]);
     return response({id,mimeType:id==='retention-folder'?'application/vnd.google-apps.folder':'application/json',parents:id==='retention-folder'?[]:['retention-folder'],size:JSON.stringify(fx.retentionFiles[id]??{}).length,version:'1',owners:[{emailAddress:owner}],permissions:[{type:'user',role:'owner',emailAddress:owner}]});
@@ -94,4 +95,13 @@ test('native-only host preserves immutable native inputs and exact signed dispat
  const f=fixture(),host=JSON.parse(f.props[HOST_PROPERTIES.config]);delete host.journal;delete host.attendance;host.mode='native-only';f.props[HOST_PROPERTIES.config]=JSON.stringify(host);
  f.runtime.setup();f.runtime.resume();f.fx.tables.attendance.rows[0][1]=cell('P');f.runtime.onEdit(f.edit());
  assert.equal(f.fx.commands.length,1);assert.equal(f.fx.commands[0].operation,'attendance.correct');assert.equal(f.fx.triggers.length,3);assert.equal(Object.values(f.fx.journal.entries).length,1);
+});
+
+test('paused native setup allows an absent responder review but resume refuses it',()=>{
+ const f=fixture();delete f.config.confirmationResponderAccess;f.config.enabled=false;f.update();assert.equal(f.runtime.setup().status,'ready-paused');f.config.enabled=true;f.update();
+ assert.throws(()=>f.runtime.resume(),{code:'form_responder_access'});assert.equal(f.props[INPUT_PROPERTIES.pause],'true');assert.equal(f.fx.commands.length,0);
+});
+test('new broad confirmation access pauses native edits before capture or dispatch',()=>{
+ const f=fixture();f.runtime.setup();f.runtime.resume();const journal=copy(f.fx.journal);f.fx.publishedPermissions=[{id:'public',type:'anyone',role:'reader',view:'published'}];f.fx.tables.attendance.rows[0][1]=cell('P');
+ assert.throws(()=>f.runtime.onEdit(f.edit()),{code:'form_responder_access'});assert.equal(f.props[INPUT_PROPERTIES.pause],'true');assert.deepEqual(f.fx.journal,journal);assert.equal(f.fx.commands.length,0);
 });

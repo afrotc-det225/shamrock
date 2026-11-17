@@ -200,3 +200,38 @@ an otherwise unchanged checkpoint. Changed content still stops the operation.
 The shared five-minute scheduler discovers private setup controls every tick. It checks current backend queue availability before full publication and uses generation/file-bound work markers to avoid rereading empty intake/publication checkpoints. Writes mark pending before persistence; an interrupted publication retains its pending marker. An hourly pass reconciles state even after an idle result. Direct native Form submission remains immediate. Configuration caching lasts one invocation only and excludes journals, Form content and provider write/readback results. See the [free-tier forecast](D1_FREE_TIER_FORECAST.md) for measured local idle-call counts and remaining hosted CPU/runtime gates.
 
 Optional owner-private `retention` now archives exact old catalogs with shared profile/reference blocks before active catalogs are compacted. Old response choices resolve through the archive after restart; token collisions and missing or changed evidence stop intake/publication. Verified completed intake can be archived without replaying it, while pending/conflicted/rejected entries remain active. Setup verifies the configured archive owner, folder and index. See [Private retention](D1_PRIVATE_RETENTION.md) for provisioning, interrupted-write recovery and reviewed volume rollover. Missing retention configuration retains the existing capacity stop; it never purges history.
+
+
+## Reviewed responder access
+
+Form editor sharing and published responder access are separate Google permission
+views. Before resuming publication or intake, add a top-level `responderAccess`
+to the private managed Forms config. Each of `attendance`, `excusals` and
+`directory` requires `{ "version": 1, "allowedEmails": ["automation@example.invalid"] }`,
+including the verified owner, every Form editor with inherent responder access,
+and every explicitly reviewed responder. These named
+responder lists do not grant D1 capabilities or establish cadet identity.
+
+Read the complete Drive permissions list with `includePermissionsForView=published`,
+including every bounded page. Remove only reviewed `anyone`, domain, group or
+unexpected named responder grants while the isolated Forms are closed. Add named
+reader permissions with `view:published`, and suppress notification emails unless
+separately authorized. The owner has inherent responder access; Google can return
+its existing owner permission instead of creating a duplicate published reader.
+See [Google's responder access API](https://developers.google.com/workspace/forms/api/guides/publish-form).
+
+Resume and enabled native publication/intake require exact published-view readback
+against those lists. Broad, extra, missing, duplicated or ambiguous permissions
+stop processing. On a responder review failure, the runtime pauses both consumers,
+attempts to close/unpublish the ownership-verified Forms, and retains all journals,
+claims and drafts. The underlying provider error remains a failure if closing is
+unavailable. No command or publication acknowledgment is inferred. A native response
+outside its currently reviewed audience is retained for review without interpreting
+it as new enrollment or dispatching a new command.
+
+Existing disabled/paused configurations can still set up triggers, report status
+and pause without this optional field. They must add it before resuming on the
+updated artifact. Changing a responder list does not change the trigger binding
+fingerprint or require clearing a journal. Repair the named access while paused,
+then issue a new reviewed monotonic control if the failed resume was consumed.
+No provider permissions are created, deleted or widened by this runtime guard.
