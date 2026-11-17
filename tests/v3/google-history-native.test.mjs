@@ -44,6 +44,7 @@ function fixture({reports=[source()]}={}){
     if(f.gridMode==='reverse')data.reverse();if(f.gridMode==='missing')data.pop();if(f.gridMode==='duplicate')data.push(copy(data[0]));if(f.gridMode==='unexpected')data[0].startRow=999;
     if(f.gridMode==='coalesced'){data.sort((a,b)=>a.startRow-b.startRow);assert.equal(data.at(-1).startRow-data[0].startRow+1,data.length);data=[{startRow:data[0].startRow,startColumn:0,rowData:data.flatMap(d=>d.rowData)}];}
     if(f.gridMode==='wrong-column')data[0].startColumn=1;
+    if(f.gridMode==='revision-during-read'){f.bookVersion++;f.gridMode=undefined;}
     result={sheets:[{properties:{sheetId:f.gridMode==='wrong-sheet'?s.properties.sheetId+1:s.properties.sheetId},data}]};
    }
    else if(u.searchParams.has('ranges')){const m=/^'(.*)'!A(\d+):[A-Z]+(\d+)$/.exec(u.searchParams.get('ranges'));assert.ok(m);const s=f.sheets.find(s=>s.properties.title===m[1]),start=Number(m[2])-1,end=Number(m[3]);const rowData=Array.from({length:end-start},(_,i)=>({values:copy(s.cells[start+i]??[])}));if(f.formula&&s.properties.sheetId!==0)rowData[0].values[0]={userEnteredValue:{formulaValue:'="forged"'}};result={sheets:[{data:[{startRow:start,startColumn:0,rowData}]}]};}
@@ -70,8 +71,25 @@ test('history resumes ambiguous sheet writes without duplicate Tables and only p
 test('a lost final publication response resumes by rechecking every literal page before confirming completion',()=>{
  const f=fixture();f.enable();f.losePublish=true;assert.throws(()=>f.finish(),/unknown result/);assert.equal(f.state.phase,'publish');assert.equal(f.state.completed,0);const calls=f.calls.length;assert.equal(f.finish().completed,1);const rows=f.calls.slice(calls).filter(c=>c.body?.section==='rows');assert.equal(rows.length,2);assert.equal(f.sheets.length,2);assert.ok(f.sheets.every(s=>s.tables.length===1));
 });
-test('history pauses on reader revocation, changed source hash, a formula, or content changes during verification',()=>{
- for(const mode of ['revoke','wrongHash','formula','version']){const f=fixture();f.enable();while(f.state.phase!=='verify')f.runtime.run();if(mode==='version')f.bookVersion++;else f[mode]=true;assert.throws(()=>f.runtime.run());assert.equal(f.state.phase,'verify');assert.equal(f.sheets.filter(s=>s.properties.hidden).length,1);}
+test('history pauses on reader revocation, changed source hash or a formula during verification',()=>{
+ for(const mode of ['revoke','wrongHash','formula']){const f=fixture();f.enable();while(f.state.phase!=='verify')f.runtime.run();f[mode]=true;assert.throws(()=>f.runtime.run());assert.equal(f.state.phase,'verify');assert.equal(f.sheets.filter(s=>s.properties.hidden).length,1);}
+});
+test('a delayed provider revision restarts every literal page before publishing and never rewrites report values',()=>{
+ const f=fixture();f.enable();while(f.state.phase!=='verify')f.runtime.run();f.runtime.run();assert.equal(f.state.offset,8);
+ const writes=f.requests.length;f.bookVersion++;f.runtime.run();assert.equal(f.state.offset,0);assert.equal(f.state.verificationRestarts,1);assert.equal(f.requests.length,writes);
+ const before=f.calls.length;assert.equal(f.finish().completed,1);assert.deepEqual(f.calls.slice(before).filter(c=>c.body?.section==='rows').map(c=>c.body.offset),[0,8]);
+});
+test('revision changes during read reset verification and changed earlier cells remain rejected',()=>{
+ const f=fixture();f.enable();while(f.state.phase!=='verify')f.runtime.run();f.gridMode='revision-during-read';f.runtime.run();assert.equal(f.state.offset,0);assert.equal(f.state.verificationRestarts,1);assert.equal(f.finish().completed,1);
+ const g=fixture();g.enable();while(g.state.phase!=='verify')g.runtime.run();g.runtime.run();g.bookVersion++;
+ const sheet=g.sheets.find(s=>s.properties.hidden);sheet.cells[3][0].userEnteredValue={stringValue:'changed saved name'};
+ g.runtime.run();assert.equal(g.state.offset,0);assert.throws(()=>g.runtime.run(),/differs from its retained source row/);assert.equal(g.state.completed,0);assert.equal(sheet.properties.hidden,true);
+});
+test('continuous provider revision changes stop after three durable restarts',()=>{
+ const f=fixture();f.enable();while(f.state.phase!=='verify')f.runtime.run();
+ for(let i=1;i<=3;i++){f.bookVersion++;f.runtime.run();assert.equal(f.state.verificationRestarts,i);assert.equal(f.state.offset,0);}
+ const checkpoint=copy(f.state);f.bookVersion++;assert.throws(()=>f.runtime.run(),/keeps changing/);assert.deepEqual(f.state,checkpoint);assert.equal(f.sheets.filter(s=>s.properties.hidden).length,1);
+ f.state.verificationRestarts=4;assert.throws(()=>f.runtime.run(),/restart count/);
 });
 test('history preserves external checkpoint edits and rejects sharing changes before continuing',()=>{
  const f=fixture();f.enable();f.externalState=true;assert.throws(()=>f.runtime.run(),e=>e.code==='private_checkpoint_changed');assert.equal(f.state.operatorNote,'keep');assert.equal(f.sheets.length,1);

@@ -3,7 +3,7 @@ import { AdapterError, type AdapterConfig, type Signer, type Transport } from '.
 import type { ScriptLockPort } from './apps-script.js';
 import { HISTORY_PAGE_VERSION, type HistoryPageManifest, type HistoryRowsPage } from '../../../packages/domain/src/legacy-history-transport.js';
 export interface HistoryCatalogEntry {snapshotId:string;title:string;periodLabel:string|null;sourceSnapshotSha256:string;importedAt:string;rowCount:number;eventCount:number;unresolvedRows:number;}
-export interface HistoryPublicationState {version:1;environment:'staging';generation:number;bindingHash:string;catalog:HistoryCatalogEntry[];completed:number;phase:'scan'|'write'|'verify'|'publish'|'complete';offset:number;positions:{rowId:string;sourceRowIndex:number}[];manifest?:HistoryPageManifest;verificationVersion?:string;}
+export interface HistoryPublicationState {version:1;environment:'staging';generation:number;bindingHash:string;catalog:HistoryCatalogEntry[];completed:number;phase:'scan'|'write'|'verify'|'publish'|'complete';offset:number;positions:{rowId:string;sourceRowIndex:number}[];manifest?:HistoryPageManifest;verificationVersion?:string;verificationRestarts?:number;}
 export interface HistoryPorts {
   config:AdapterConfig;principalId:string;signer:Signer;transport:Transport;nowSeconds():number;lock:ScriptLockPort;bindingHash:string;
   enabled():boolean;assertPrivate():void;state:{load():HistoryPublicationState;save(state:HistoryPublicationState):void};
@@ -19,6 +19,7 @@ const sha=(v:unknown)=>typeof v==='string'&&/^[a-f0-9]{64}$/.test(v);
 const bytes=(v:string)=>encodeURIComponent(v).replace(/%[A-F0-9]{2}/g,'x').length;
 export function validateHistoryState(input:unknown,generation:number,bindingHash:string):HistoryPublicationState {
   if(!object(input)||input.version!==1||input.environment!=='staging'||input.generation!==generation||input.bindingHash!==bindingHash||!Array.isArray(input.catalog)||input.catalog.length>100||!integer(input.completed,input.catalog.length)||!['scan','write','verify','publish','complete'].includes(input.phase)||!integer(input.offset,500)||!Array.isArray(input.positions)||input.positions.length>500||bytes(JSON.stringify(input))>128000)fail('The private history cursor is invalid or belongs to a different binding.');
+  if(input.verificationRestarts!==undefined&&!integer(input.verificationRestarts,3))fail('The historical verification restart count is invalid.');
   for(const c of input.catalog)if(!object(c)||!id(c.snapshotId)||!sha(c.sourceSnapshotSha256)||typeof c.importedAt!=='string'||!Number.isFinite(Date.parse(c.importedAt))||typeof c.title!=='string'||c.title.length>512||!(c.periodLabel===null||typeof c.periodLabel==='string'&&c.periodLabel.length<=512)||!integer(c.rowCount,500)||!integer(c.eventCount,128)||!integer(c.unresolvedRows,c.rowCount))fail('The historical source catalog is invalid.');
   if(new Set(input.catalog.map((c:any)=>c.snapshotId)).size!==input.catalog.length||new Set(input.positions.map((p:any)=>p.rowId)).size!==input.positions.length||new Set(input.positions.map((p:any)=>p.sourceRowIndex)).size!==input.positions.length||input.positions.some((p:any)=>!object(p)||!id(p.rowId)||!Number.isSafeInteger(p.sourceRowIndex)||p.sourceRowIndex<2))fail('Historical row identities are missing or duplicated.');
   if(input.phase==='complete'&&(input.completed!==input.catalog.length||input.manifest||input.positions.length||input.offset))fail('History completion has an unfinished source report.');
@@ -56,9 +57,18 @@ export function continueHistoryPublication(ports:HistoryPorts):{state:string;com
       ports.report.ensure(manifest);const rows=read();ports.report.write(manifest,rows,state.positions);
       if(rows.nextOffset!==null)state.offset=rows.nextOffset;else{state.offset=0;state.phase='verify';state.verificationVersion=ports.report.version();}save();
     }else if(state.phase==='verify'){
-      if(!state.verificationVersion||ports.report.version()!==state.verificationVersion)fail('The report changed during verification. Retain the checkpoint for review.');
+      // Drive can publish a delayed revision after our own Sheets writes. A new
+      // revision invalidates every prior read; it never authorizes new values.
+      const restart=(version:string)=>{
+        if((state.verificationRestarts??0)>=3)fail('The report keeps changing during verification. Retain the checkpoint for review.');
+        state={...state,offset:0,verificationVersion:version,verificationRestarts:(state.verificationRestarts??0)+1};save();
+        return {state:state.phase,completed:state.completed,reports:state.catalog.length};
+      };
+      const before=ports.report.version();
+      if(before!==state.verificationVersion)return restart(before);
       ports.report.verifyHeaders(manifest);const rows=read();ports.report.verify(manifest,rows,state.positions);
-      if(ports.report.version()!==state.verificationVersion)fail('The report changed during literal-value verification.');
+      const after=ports.report.version();
+      if(after!==state.verificationVersion)return restart(after);
       if(rows.nextOffset!==null)state.offset=rows.nextOffset;else{
         if(page('verify').verified!==true)fail('Final immutable source verification failed.');
         // Persist before exposing the report. A lost final write response re-verifies every
