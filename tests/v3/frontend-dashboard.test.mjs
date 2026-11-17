@@ -14,7 +14,7 @@ test('Dashboard starts with its title and actions, without rehearsal banners or 
   assert.equal(writes.find(w => w.start.rowIndex === 0).rows[0].values[0].userEnteredValue.stringValue, 'SHAMROCK Dashboard');
   assert.equal(writes.find(w => w.start.rowIndex === 1).rows[0].values[0].userEnteredValue.stringValue, 'Quick actions');
   assert.equal(writes.filter(w => w.rows[0].values[0].userEnteredValue.formulaValue?.startsWith('=HYPERLINK')).length, 1);
-  assert.match(writes.find(w => w.start.columnIndex === 11).rows[0].values[0].userEnteredValue.formulaValue, /^=IMAGE\("https:\/\/onmessage\.nd\.edu\//);
+  assert.match(writes.find(w => w.start.columnIndex === 11).rows[0].values[0].userEnteredValue.formulaValue, /^=IMAGE\("https:\/\/raw\.githubusercontent\.com\/afrotc-det225\/shamrock\/[a-f0-9]{40}\/assets\/brand\/shamrock\.png",4,36,35\)$/);
   assert.doesNotMatch(JSON.stringify(requests), /preview|fictional|test only/i);
   const charts = requests.flatMap(r => r.addChart ? [r.addChart.chart] : []);
   assert.deepEqual(charts.map(c => c.position.overlayPosition.anchorCell.rowIndex), [9, 9, 22, 22]);

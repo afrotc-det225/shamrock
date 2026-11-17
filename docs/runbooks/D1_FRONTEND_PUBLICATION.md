@@ -103,8 +103,9 @@ The Dashboard uses the production-width canvas, distinct metric-card borders,
 shaded action links and four readable 560-by-280-pixel charts. Semester history
 uses a line chart; roster counts use horizontal bars. Percentage scales focus on
 80–100% when appropriate, expanding downward when actual values would be clipped.
-The title contains the official plain Notre Dame shamrock artwork, without an ND
-monogram or a generic clover. The removed subtitle/spacer rows remain removed.
+The title contains a transparent rendering of the repository's Notre Dame style
+shamrock vector, without a monogram, registration symbol or white tile. The
+removed subtitle/spacer rows remain removed.
 
 `buildDashboardLayoutRepair` is an explicit paused maintenance planner. Apply it
 only under the verified edit fence, after reading the managed Dashboard, retaining
@@ -115,5 +116,8 @@ resize an operator's charts or reorder populated input rows. No native Table,
 validation rule, filter view or input protection is recreated by this repair.
 
 Artwork source: [Notre Dame shamrock reference](https://onmessage.nd.edu/athletics-branding/logos/shamrock/).
-The displayed image is a fixed public asset; the image formula cannot choose a
-user-supplied URL or send spreadsheet contents to an external endpoint.
+The canonical editable asset is `assets/brand/shamrock.svg`. Google Sheets uses its
+transparent PNG render from an immutable public repository commit, independent
+of the staging application. The fixed image formula cannot choose a user-supplied
+URL or send spreadsheet contents to an external endpoint. Publish that asset
+commit before deploying a renderer that references it.

@@ -8,9 +8,9 @@ export interface DashboardChart {
   percentage?: boolean;
   minimum?: number;
 }
-/** Official plain shamrock artwork, without the ND monogram. */
-export const SHAMROCK_MARK_URL = 'https://onmessage.nd.edu/assets/189127/300x/shamrock_1.jpg';
-export const SHAMROCK_MARK_FORMULA = `=IMAGE("${SHAMROCK_MARK_URL}",4,36,36)`;
+/** Transparent render of the repository's vector mark, pinned to its reviewed asset commit. */
+export const SHAMROCK_MARK_URL = 'https://raw.githubusercontent.com/afrotc-det225/shamrock/a3925c35ba08a50c3d5bfb78af539ed0c7698d52/assets/brand/shamrock.png';
+export const SHAMROCK_MARK_FORMULA = `=IMAGE("${SHAMROCK_MARK_URL}",4,36,35)`;
 export interface DashboardInput {
   sheetId: number; dataSheetId: number;
   actions: DashboardAction[]; metrics: DashboardMetric[]; charts: DashboardChart[];
@@ -73,7 +73,7 @@ export function buildFrontendDashboard(input: DashboardInput): Request[] {
   merge(0, 1, 0, 11); write(0, 0, 'SHAMROCK Dashboard');
   format(r(d, 0, 1, 0, 12), { backgroundColor: rgb(C.dark), textFormat: { fontSize: 20, bold: true, foregroundColor: rgb('#FFFFFF') } });
   write(0, 11, SHAMROCK_MARK_FORMULA, true);
-  format(r(d, 0, 1, 11, 12), { backgroundColor: rgb('#FFFFFF'), horizontalAlignment: 'CENTER' });
+  format(r(d, 0, 1, 11, 12), { backgroundColor: rgb(C.dark), horizontalAlignment: 'CENTER' });
   const border = (range: ReturnType<typeof r>) => requests.push({ updateBorders: { range,
     ...Object.fromEntries(['top', 'bottom', 'left', 'right'].map(side => [side, { style: 'SOLID', colorStyle: { rgbColor: rgb('#D5DEDA') } }])) } });
   const section = (row: number, col: number, right: number, title: string) => {
