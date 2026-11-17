@@ -293,7 +293,8 @@ test('domain snapshot mapping keeps explicit unknown eligibility and requires re
     lastName: p.lastName, firstName: p.firstName, rank: p.rank, role: 'Alpha Flight Commander', email: '', cellPhone: '', reportsTo: '', officePhone: '', officeLocation: '', active: true },
     { contactId: 'contact-manual', contactVersion: 4, profileVersion: null, publicationVersion: 4, personId: null,
       lastName: 'Fictional', firstName: 'Cadre', rank: 'Capt', role: 'Instructor', email: '', cellPhone: '', reportsTo: '', officePhone: '', officeLocation: '', active: true }];
-  const linkedModel = buildFrontendPublicationModel(args).tables[1], linked = linkedModel.rows[0], manual = linkedModel.rows[1];
+  const linkedModel = buildFrontendPublicationModel(args).tables[1], linkedIndex = linkedModel.rows.findIndex(row => row.key === 'contact-linked'), linked = linkedModel.rows[linkedIndex], manual = linkedModel.rows.find(row => row.key === 'contact-manual');
+  assert.deepEqual(linkedModel.rows.map(row => row.key), ['contact-manual', 'contact-linked']);
   assert.deepEqual(linked.readonlyHeaders, ['last_name', 'first_name', 'rank', 'role', 'email', 'cell_phone']);
   assert.deepEqual(Object.keys(linked.commandBindings), ['reports_to', 'office_phone', 'office_location']);
   assert.equal(linked.versions.office_phone, 1); assert.equal(linked.commandBindings.office_phone.expectedVersion, 0);
@@ -303,14 +304,14 @@ test('domain snapshot mapping keeps explicit unknown eligibility and requires re
     baseline: { generation: 1, revision: snapshot.revision, rows: structuredClone(linkedModel.rows) }, drafts: [], seeds: [], editFenceVerified: true };
   linked.values.last_name = 'Updated Directory name'; linked.versions = Object.fromEntries(Object.keys(linked.versions).map(h => [h, 2]));
   const refreshed = planFrontendPublication(publication); assert.equal(refreshed.changedCells, 1);
-  baseRead.rows[0][7].userEnteredValue = { stringValue: '555-0100' };
+  baseRead.rows[linkedIndex][7].userEnteredValue = { stringValue: '555-0100' };
   const pendingPlan = planFrontendPublication(publication), pending = pendingPlan.retainedDrafts[0];
   assert.equal(pending.command.operation, 'leadership.upsert'); assert.equal(pending.command.expectedVersion, 0); assert.equal(pending.baseVersion, 1);
   assert.equal(pendingPlan.diagnostics.find(d => d.header === 'office_phone').code, 'unsent-edit');
   const acknowledged = applyFrontendReceipt({ baseline: publication.baseline, drafts: [pending], draft: pending, receiptVerified: true,
     receipt: { key: pending.key, header: pending.header, baseVersion: 1, committedVersion: 3, value: pending.value, command: { ...pending.command, committedVersion: 1 } } });
-  assert.equal(acknowledged.baseline.rows[0].versions.office_phone, 3); assert.equal(acknowledged.baseline.rows[0].commandBindings.office_phone.expectedVersion, 1);
-  baseRead.rows[0][0].userEnteredValue = { stringValue: 'Edit on wrong sheet' }; assert.throws(() => planFrontendPublication(publication));
+  assert.equal(acknowledged.baseline.rows.find(row => row.key === 'contact-linked').versions.office_phone, 3); assert.equal(acknowledged.baseline.rows.find(row => row.key === 'contact-linked').commandBindings.office_phone.expectedVersion, 1);
+  baseRead.rows[linkedIndex][0].userEnteredValue = { stringValue: 'Edit on wrong sheet' }; assert.throws(() => planFrontendPublication(publication));
   snapshot.terms[0].roster = [{ personId: p.personId, lastName: p.lastName, firstName: p.firstName, asYear: p.asYear, flightId: p.flightId, flightPathStatus: p.flightPathStatus, dateOfBirth: p.dateOfBirth }];
   snapshot.people[0].active = false;
   assert.equal(buildFrontendReporting(snapshotToFrontendReportingInput(snapshot, '2027-01-12')).dashboard.totalCadets, 0);
@@ -347,4 +348,27 @@ test('immutable slot retirement retains outstanding drafts instead of silently c
   assert.equal(plan.nextBaseline.rows.find(r => r.key === 'cadet-b').retired, undefined);
   assert.equal(plan.retainedDrafts[0].key, 'cadet-b');
   assert.ok(plan.diagnostics.some(d => d.code === 'retired-row-with-edit'));
+});
+
+
+test('Directory and Attendance use the same seniority and names without changing keyed versions', () => {
+  const people = [
+    ['junior', 'AS100', 'Aardvark', 'Amy'], ['senior-z', 'AS400', 'Zulu', 'Bob'],
+    ['gmc', 'AS500', 'Alpha', 'Chris'], ['poc', 'AS300', 'Zulu', 'Dana'],
+    ['senior-b', 'AS400', 'Able', 'Bob'], ['senior-a', 'AS400', 'able', 'Alice'],
+  ].map(([personId, asYear, lastName, firstName], i) => ({ personId, asYear, lastName, firstName, version: i + 1, active: true, flightId: 'flight-alpha', rank: '', role: '', university: '', email: '', phone: '', dorm: '', cipBroadArea: '', cipCode: '', afsc: '', homeTown: '', homeState: '', classYear: '', dateOfBirth: null, flightPathStatus: 'Active 3/4', photoLink: '' }));
+  const snapshot = { contractVersion: 1, environment: 'local', generation: 1, revision: { operations: 1, administration: 1 }, people, leadership: [],
+    flights: [{ flightId: 'flight-alpha', label: 'Alpha', squadronId: 'squadron-blue', rosterVersion: 1 }], squadrons: [{ squadronId: 'squadron-blue', label: 'Blue' }],
+    terms: [{ termId: 'term-current', label: 'Spring 2027', sortOrder: 1, isCurrent: true }], events: [], eventFlights: [], observations: [], corrections: [], attendanceVersions: [], requests: [], diagnostics: [] };
+  const original = structuredClone(snapshot), result = buildFrontendReporting(snapshotToFrontendReportingInput(snapshot, '2027-01-12'));
+  const model = buildFrontendPublicationModel({ snapshot, reporting: { revision: snapshot.revision, result }, attendanceVersions: [] });
+  const expected = ['senior-a', 'senior-b', 'senior-z', 'poc', 'gmc', 'junior'];
+  assert.deepEqual(model.tables[0].rows.map(row => row.key), expected);
+  assert.deepEqual(model.tables[2].rows.map(row => row.key), expected);
+  for (const row of model.tables[0].rows) {
+    const source = people.find(person => person.personId === row.key);
+    assert.equal(row.versions.role, source.version);
+    assert.equal(row.commandBindings.role.entityId, source.personId);
+  }
+  assert.deepEqual(snapshot, original);
 });

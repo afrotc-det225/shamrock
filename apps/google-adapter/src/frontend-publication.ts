@@ -4,6 +4,7 @@ import { DIRECTORY_EDIT_FIELDS, LEADERSHIP_EDIT_FIELDS } from './frontend-protec
 import { planFrontendFlightViews, sameFrontendViews, type NativeFilterView } from './frontend-views.js';
 import { buildAttendanceGrowthLayout, buildAttendanceLayout } from './frontend-layout.js';
 import type { FrontendSnapshot, SnapshotRevision } from '../../../packages/domain/src/admin.js';
+import { compareCadetsForDisplay, compareLeadershipForDisplay } from '../../../packages/domain/src/cadet-display-order.js';
 import { REPORTING_POLICY_VERSION } from '../../../packages/domain/src/frontend-reporting.js';
 import type { FrontendReportingInput, ReportingMatrix, buildFrontendReporting } from '../../../packages/domain/src/frontend-reporting.js';
 import type { ExcusalStatus, RequestedOutcome } from '../../../packages/domain/src/index.js';
@@ -612,7 +613,7 @@ export function buildFrontendPublicationModel(input: {
   const columns = (fields: readonly (readonly [string, string, string])[], edits: readonly string[], seeds: Set<string>): FrontendColumn[] => fields.map(([header, label]) => ({ header, label, editable: edits.includes(header), ...(seeds.has(header) ? { seedKey: `directory:${header}` } : {}), ...(header === 'photo_link' ? { fileChip: true } : {}) }));
   const directoryColumns = [...columns(DIRECTORY, DIRECTORY_EDIT_FIELDS, DIRECTORY_VALIDATED), { header: 'person_id', label: 'Person ID', editable: false }];
   const directory: FrontendPublicationTable = { kind: 'directory', keyHeader: 'person_id', columns: directoryColumns, flightViews: snapshot.flights.map(f => f.label),
-    rows: snapshot.people.filter(p => p.active).map(p => {
+    rows: snapshot.people.filter(p => p.active).sort(compareCadetsForDisplay).map(p => {
       const flight = p.flightId ? flights.get(p.flightId) : null, squadron = flight?.squadronId ? squadrons.get(flight.squadronId) : null;
       const profile = { ...p, flight: flight?.label ?? '', squadron: squadron?.label ?? '' };
       const values = Object.fromEntries(DIRECTORY.map(([header, _label, field]) => [header, header === 'photo_link' ? photoValue(p.photoLink) : header === 'dob' ? (p.dateOfBirth === null ? null : (Date.parse(`${p.dateOfBirth}T00:00:00Z`) - Date.UTC(1899, 11, 30)) / 86400000) : profile[field] as FrontendValue]));
@@ -624,7 +625,7 @@ export function buildFrontendPublicationModel(input: {
   const leadershipColumns = [...columns(LEADERSHIP, LEADERSHIP_EDIT_FIELDS, new Set()), { header: 'contact_id', label: 'Contact ID', editable: false }];
   leadershipColumns.find(c => c.header === 'rank')!.seedKey = 'leadership:rank';
   const leadership: FrontendPublicationTable = { kind: 'leadership', keyHeader: 'contact_id', columns: leadershipColumns,
-    rows: snapshot.leadership.filter(p => p.active).map(p => ({ key: p.contactId,
+    rows: snapshot.leadership.filter(p => p.active).sort(compareLeadershipForDisplay).map(p => ({ key: p.contactId,
       values: { ...Object.fromEntries(LEADERSHIP.map(([header, _label, field]) => [header, p[field]])), contact_id: p.contactId },
       versions: Object.fromEntries(leadershipColumns.filter(c => c.editable).map(c => [c.header, p.publicationVersion])),
       readonlyHeaders: p.personId ? ['last_name', 'first_name', 'rank', 'role', 'email', 'cell_phone'] : [],

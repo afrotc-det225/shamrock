@@ -1,6 +1,7 @@
 /** Pure, versioned reporting projections. No database, Sheets, clock or AI IO. */
 import { ATTENDANCE_CODES, REQUESTED_OUTCOMES, EXCUSAL_DECISIONS } from './index.js';
 import type { AttendanceCode, ExcusalStatus, RequestedOutcome } from './index.js';
+import { AS_YEAR_DISPLAY_ORDER as YEARS, compareCadetsForDisplay, normalizeDisplayAsYear as normalizedYear } from './cadet-display-order.js';
 
 export const REPORTING_POLICY_VERSION = 'legacy-shamrock-credit-v1' as const;
 export const MAX_REPORTING_CELLS = 100_000;
@@ -8,7 +9,6 @@ const CREDIT = new Set<AttendanceCode>(['P', 'T', 'E', 'ES', 'MED']);
 const COUNTED = new Set<AttendanceCode>(['P', 'T', 'A', 'U', 'E', 'ES', 'MED']);
 const GMC = ['AS100', 'AS150', 'AS200', 'AS250', 'AS500'];
 const POC = ['AS300', 'AS400', 'AS700', 'AS800', 'AS900'];
-const YEARS = ['AS900', 'AS800', 'AS700', 'AS400', 'AS300', 'AS500', 'AS250', 'AS200', 'AS150', 'AS100', 'AF Civ'];
 const INACTIVE = new Set(['inactive', 'commissioned', 'dropped']);
 const TYPES = ['mando', 'secondary', 'llab', 'other', 'third-hour'] as const;
 
@@ -146,7 +146,6 @@ export class ReportingInputError extends Error {
   constructor(public readonly path: string, message = 'Invalid reporting input.') { super(message); this.name = 'ReportingInputError'; }
 }
 const fail = (path: string): never => { throw new ReportingInputError(path); };
-const normalizedYear = (value: string) => value.trim().toUpperCase().replace(/\s+/g, '');
 const compareText = (a: string, b: string) => a.localeCompare(b, 'en', { sensitivity: 'base' }) || a.localeCompare(b, 'en');
 const isoDay = (date: Date) => date.toISOString().slice(0, 10);
 const pairKey = (personId: string, eventId: string) => JSON.stringify([personId, eventId]);
@@ -342,15 +341,11 @@ export function buildFrontendReporting(input: FrontendReportingInput) {
     group(requestsByPair, r);
   }
   const diagnostics: ReportingDiagnostic[] = [];
-  const comparePeople = (a: ReportingPerson, b: ReportingPerson) => {
-    const rank = (p: ReportingPerson) => { const i = YEARS.map(normalizedYear).indexOf(normalizedYear(p.asYear)); return i < 0 ? YEARS.length : i; };
-    return rank(a) - rank(b) || (rank(a) === YEARS.length ? compareText(normalizedYear(b.asYear), normalizedYear(a.asYear)) : 0) || compareText(a.lastName, b.lastName) || compareText(a.firstName, b.firstName) || compareText(a.personId, b.personId);
-  };
   let cellsPlanned = 0;
   const plan = [...terms.values()].sort((a, b) => a.sortOrder - b.sortOrder).map(term => {
     const termEvents = input.events.filter(e => e.termId === term.termId && e.type !== 'third-hour').sort((a, b) => (a.trainingWeek ?? Number.MAX_SAFE_INTEGER) - (b.trainingWeek ?? Number.MAX_SAFE_INTEGER) || TYPES.indexOf(a.type) - TYPES.indexOf(b.type) || a.displayOrder - b.displayOrder || compareText(a.eventId, b.eventId));
     const isCurrent = term.termId === input.currentTermId;
-    const roster = (term.roster ?? (isCurrent ? input.people.filter(p => !INACTIVE.has(p.flightPathStatus.trim().toLowerCase())) : [])).filter(inScope).slice().sort(comparePeople);
+    const roster = (term.roster ?? (isCurrent ? input.people.filter(p => !INACTIVE.has(p.flightPathStatus.trim().toLowerCase())) : [])).filter(inScope).slice().sort(compareCadetsForDisplay);
     const rosterSource = term.roster ? 'snapshot' as const : isCurrent ? 'current' as const : 'unavailable' as const;
     if (rosterSource === 'unavailable') diagnostics.push({ code: 'missing-historical-roster', termId: term.termId });
     cellsPlanned += termEvents.length * roster.length;

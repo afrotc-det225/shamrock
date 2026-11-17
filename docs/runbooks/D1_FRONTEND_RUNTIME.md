@@ -98,6 +98,70 @@ An ambiguous write keeps its frozen plans and human-edit fences. On a deliberate
 
 Ordinary unsent edits and queued drafts are preserved by the keyed publisher. A projection acknowledgement does not acknowledge those human commands. A verified command receipt must advance the corresponding baseline/version and retire only its exact matching frozen draft. Input capture, authenticated confirmation and receipt reconciliation are separate adapter responsibilities.
 
+## Canonical Directory, Attendance and Leadership order
+
+The shared `cadet-display-order.ts` comparator preserves the supported production
+Directory/Attendance order from `src/utils/arrays.ts`, `src/services/directory.ts`
+and `src/services/attendance.ts`: **AS900, AS800, AS700, AS400, AS300, AS500,
+AS250, AS200, AS150, AS100, AF Civ**. Within each year, compare last name and then
+first name without case sensitivity, followed by stable person ID for a
+repeatable tie. AS500 remains below AS300; sorting numeric AS values descending
+would change the detachment's established order. Unknown years follow the known
+years in descending normalized label order, with the same name/ID tie rules.
+Directory and calculated Attendance now use this one comparator. Dashboard
+AS-year series uses the same year sequence.
+
+Leadership retains its separate production precedence: military/honorific
+contacts, cadets, then unknown ranks; operational role, descending rank, role
+name, last name, first name and stable contact ID. Cadet AS year does not override
+the Leadership role/rank order. Excusals remain chronological, birthdays remain
+calendar-ordered, and retained source History reports preserve their source
+order. Stable-ID ordering used by API pagination is unchanged.
+
+Canonical model ordering controls initial allocation. Ordinary publication
+preserves existing physical rows, pending drafts and published versions;
+it does not silently move people after a name/year edit or a new enrollment.
+For an already populated native workbook, inspect the actual protected row keys
+before claiming its physical order matches the model.
+
+### Explicit physical reorder helper
+
+`frontend-reorder.ts` provides a **pure maintenance planner and exact readback
+verifier**, separate from ordinary publication and `bindImmutableInputSlots`.
+It cannot perform a sort or authorize a provider write by itself. The host must
+execute the following reviewed sequence under the shared native lock:
+
+1. Pause native input and publication, verify the human edit fence, and retain
+   exact private checkpoint/review digests. Require zero drafts, no held events,
+   and only fully applied committed or superseded entries in the input journal.
+   Verify every current cell against its existing baseline and physical slots.
+2. Invalidate the native setup receipt, remove **every** old workbook edit
+   trigger, and install a fresh trigger with a different ID while still paused.
+   Pass the verified old/new IDs and pause/fence state to `planFrontendReorder`.
+   Pausing or waiting alone is insufficient: after resume the native handler
+   must reject delayed events carrying any prior trigger ID.
+3. Apply the returned whole-record permutation atomically through a reviewed
+   native Sheets operation. Preserve cell values, chips, notes, native
+   validation/style, headers, Table identity/extent and filter definitions.
+   The helper supplies zero-based body row source indices and the exact expected
+   readback; it does not reconstruct validation or issue provider requests.
+4. Call `verifyFrontendReorderReadback` with fresh native readback, unchanged
+   baseline/journal and the same trigger barrier. Only its verified result may
+   replace the slot binding. Domain versions, command bindings, retired identities
+   and keyed row contents remain unchanged. The journal SHA-256 binds the review.
+5. Save and verify the new checkpoint; restore exact protection grants by the
+   current protected row identities; record only the new trigger IDs in the
+   setup receipt. Keep input/publication paused until the complete result is
+   reviewed. If any stage is ambiguous, retain the fence and resolve the exact
+   original plan rather than rerunning an ordinary refresh over it.
+
+Do not reorder Attendance or Blue/Gold merely because Directory needs sorting.
+A shared workbook trigger rotation still needs to preserve all untouched surface
+bindings. The pure helper has local value, chip/metadata, draft, journal, trigger
+barrier and readback tests; those tests do not establish native Sheets sort
+behavior or an implemented host control. Fresh provider readback and delayed
+trigger rejection remain required before accepting an actual rebind.
+
 ## Scope and remaining release checks
 
 Full mode publishes the three Main data tables, Dashboard metrics/charts/birthdays and Blue/Gold recorded requests/decisions. The optional [native input runtime](D1_NATIVE_INPUT.md) separately captures and delivers their edits under the shared publisher lock and checkpoint. Managed Forms and notification effects have independent consumers. The existing technical decision-input path remains isolated; installing a native consumer does not authorize both handlers on the same cells.
