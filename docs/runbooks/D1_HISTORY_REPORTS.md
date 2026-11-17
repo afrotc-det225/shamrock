@@ -21,12 +21,32 @@ A read is bounded to 500 rows, 128 event columns and 64,000 cells. Stored row pa
 
 Run `npm run build:v3 && node --test tests/v3/legacy-history.test.mjs`, then the repository checks before release. Synthetic tests cover historical policy differences, exact range exclusions, unresolved rows, changed/manual formulas, retained unknown codes, authenticated routing, revoked/insufficient grants, incomplete imports, generation binding and capacity limits. Real-data validation belongs only in ignored restricted local evidence; successful local reproduction does not establish hosted endpoint or Google presentation readiness.
 
-The paged Worker reader calculates at most four retained rows per request and
+The paged Worker reader calculates at most four retained rows per request, or
+two when the retained report has more than 64 event columns, and
 builds their shared report metadata once. Diagnostics remain attached to their
 exact source row, and source indexes, literal formulas/codes, the 128 KB page
 budget and continuation offsets are unchanged. This avoids rebuilding discarded
 report columns four times; it does not relax authentication, source bindings or
 capacity checks. Hosted CPU and quota measurements remain release-specific.
+The SQL result uses the same two/four-row bound and does not return a discarded
+lookahead payload. An existing checkpoint resumes from its exact saved offset;
+changing page length does not restart, skip or repeat its committed rows.
+
+This trades throughput for CPU headroom on wide archives. For the six retained
+staging reports (510 rows, including two 80-row reports with 68 event columns),
+one complete row pass grows from 130 requests to 170. The native scan/write/verify
+sequence therefore grows from 390 to 510 row requests/continuations before
+manifest, verification, layout, retries or revision restarts: 120 additional
+Worker requests and bridge URL Fetch calls. Each continuation also retains its
+Drive checkpoint and applicable Sheets checks; those provider calls must be
+included in the quota budget rather than counting only bridge requests. The
+five-minute scheduler remains paced, and the owner's bounded Continue action
+still stops after 40 continuations or 210 seconds. Do not infer completion time
+from row count alone. Google currently documents consumer-account limits of
+20,000 URL Fetch calls/day, 90 minutes/day of trigger runtime and six minutes per
+execution; account-wide usage from the operational system shares those limits.
+See [Apps Script quotas](https://developers.google.com/apps-script/guides/services/quotas).
+No paid tier or new scheduler is introduced.
 
 ## Bounded native History workbook
 
