@@ -1,7 +1,7 @@
 import { createRemoteJWKSet, jwtVerify } from "jose";
 import { PanelError } from "../errors.mjs";
 import { boundedJson, originCheck, json } from "./http.mjs";
-import { getPreview, previewResponse } from "./view-as.mjs";
+import { previewFromSession, previewResponse } from "./view-as.mjs";
 const encoder = new TextEncoder();
 const keys = createRemoteJWKSet(
   new URL("https://www.googleapis.com/oauth2/v3/certs"),
@@ -61,7 +61,7 @@ export async function session(request, env) {
   if (!/^[A-Za-z0-9_-]{43}$/.test(token))
     throw new PanelError("SIGN_IN_REQUIRED", "Sign in to SHAMROCK.", 401);
   const row = await env.PANEL_DB.prepare(
-    "SELECT s.token_hash,s.google_sub,s.csrf,s.expires,b.principal_id FROM sessions s JOIN identity_bindings b ON b.google_sub=s.google_sub WHERE s.token_hash=? AND s.expires>? AND b.active=1",
+    "SELECT s.token_hash,s.google_sub,s.csrf,s.expires,b.principal_id,p.person_id AS preview_person_id,p.entry_audit_id AS preview_entry_audit_id,p.status AS preview_status FROM sessions s JOIN identity_bindings b ON b.google_sub=s.google_sub LEFT JOIN session_previews p ON p.token_hash=s.token_hash WHERE s.token_hash=? AND s.expires>? AND b.active=1",
   )
     .bind(await sha(token), Date.now())
     .first();
@@ -256,7 +256,7 @@ export async function authRoute(
   if (url.pathname === "/api/session" && request.method === "POST") {
     originCheck(request, env.APP_ORIGIN);
     const current = await session(request, env);
-    return json({ csrf: current.csrf, viewAs: previewResponse(await getPreview(env, current)) });
+    return json({ csrf: current.csrf, viewAs: previewResponse(previewFromSession(current)) });
   }
   if (url.pathname === "/auth/logout" && request.method === "POST") {
     const current = await session(request, env);

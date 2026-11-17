@@ -67,6 +67,8 @@ the actual deployed Worker through the hosted acceptance checks.
   and subject. Only the subject maps to the operational principal.
 - Eight-hour opaque sessions are hashed in D1; cookies are Secure, HttpOnly,
   host-only and SameSite=Lax. Every request rechecks the active identity binding.
+  The same indexed query reads the session's preview mode, avoiding a second D1
+  round trip without caching authorization between requests.
   Logout deletes the session. Removing a binding immediately blocks later requests.
 - Same-origin checks and a constant-time CSRF check protect writes. The Worker
   never trusts a browser-supplied principal, email, operation grant or bridge key.

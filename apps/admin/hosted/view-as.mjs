@@ -1,5 +1,15 @@
 import { PanelError } from "../errors.mjs";
 
+// The authenticated read captures identity and preview mode in one indexed query.
+// Mutations below still reread the current preview after changing session state.
+export function previewFromSession(user) {
+  return user.preview_person_id === null ? null : {
+    person_id: user.preview_person_id,
+    entry_audit_id: user.preview_entry_audit_id,
+    status: user.preview_status,
+  };
+}
+
 export async function getPreview(env, user) {
   return env.PANEL_DB.prepare("SELECT person_id,entry_audit_id,status FROM session_previews WHERE token_hash=?")
     .bind(user.token_hash).first();
