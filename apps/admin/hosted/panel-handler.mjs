@@ -178,20 +178,17 @@ export default {
             },
           }),
         );
-      return secure(
-        json(
-          {
-            error: {
-              code,
-              message:
-                error instanceof PanelError || error.name === "DomainError"
-                  ? error.message
-                  : "The request could not be completed. Reload before trying again.",
-            },
-          },
-          status,
-        ),
-      );
+      const response = json({ error: {
+        code,
+        message: error instanceof PanelError || error.name === "DomainError"
+          ? error.message
+          : "The request could not be completed. Reload before trying again.",
+      } }, status);
+      if (error instanceof PanelError && status >= 500 &&
+          Number.isSafeInteger(error.retryAfterSeconds) &&
+          error.retryAfterSeconds >= 1 && error.retryAfterSeconds <= 86400)
+        response.headers.set("Retry-After", String(error.retryAfterSeconds));
+      return secure(response);
     }
   },
   async scheduled(_event, env, controlStoreFactory) {

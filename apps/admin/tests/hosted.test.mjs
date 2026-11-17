@@ -830,3 +830,31 @@ test('a delayed entry reply cannot restore preview after Exit',async t=>{
  await assert.rejects(entering,e=>e.code==='VIEW_AS_CANCELLED');
  assert.equal(await getPreview(env,user),null);
 });
+
+
+test("operational database quota retains a bounded retry deadline through the panel", async t => {
+  const script = `export default {fetch(request){const input=new URL(request.url).pathname;
+    return Response.json({error:{code:'SERVICE_LIMIT_REACHED',message:'Database daily allowance reached.'}},
+      {status:503,headers:{'Retry-After':'3600','x-private-provider':'never-forward'}});
+  }};`;
+  const f=await fixture(t,script),token=random();
+  await f.run("INSERT INTO identity_bindings VALUES('quota-sub','operator',1)");
+  await f.run("INSERT INTO sessions VALUES(?,?,?,?)",await sha(token),'quota-sub',random(),Date.now()+60000);
+  const headers={cookie:'__Host-shamrock-v2='+token};
+  const response=await f.mf.dispatchFetch(origin+'/api/state',{headers});
+  assert.equal(response.status,503);
+  assert.equal(response.headers.get('retry-after'),'3600');
+  assert.equal(response.headers.get('x-private-provider'),null);
+  assert.equal((await response.json()).error.code,'SERVICE_LIMIT_REACHED');
+  assert.equal((await f.mf.dispatchFetch(origin+'/api/session',{method:'POST',headers:{...headers,origin}})).status,200);
+});
+
+test("backend retry deadlines reject unbounded or malformed provider values", async () => {
+  const {HostedBackend}=await import('../hosted/backend.mjs');
+  for(const [header,expected] of [['1',1],['86400',86400],['0',undefined],['86401',undefined],['1.5',undefined],['tomorrow',undefined],['',undefined]]) {
+    const backend=new HostedBackend({ENVIRONMENT:'staging',GENERATION:'1',BACKEND_ORIGIN:'https://backend-staging.example.invalid',
+      BACKEND:{fetch:async()=>Response.json({error:{code:'SERVICE_LIMIT_REACHED',message:'Unavailable'}},{status:503,headers:{'Retry-After':header}})},
+      BRIDGE_SECRET:'fictional-bridge-secret-with-more-than-thirty-two-chars',BRIDGE_KEY_ID:'test-key',SOURCE_KIND:'test',SOURCE_RESOURCE:'fixture'},'operator');
+    await assert.rejects(backend.send('/v1/admin/panel/access',backend.identity()),error=>error.retryAfterSeconds===expected&&error.status===503);
+  }
+});

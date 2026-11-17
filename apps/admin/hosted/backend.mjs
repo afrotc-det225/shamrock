@@ -163,12 +163,18 @@ export class HostedBackend {
       );
     }
     const result = await boundedJson(response, 150000);
-    if (!response.ok)
-      throw new PanelError(
+    if (!response.ok) {
+      const error = new PanelError(
         result.error?.code || "BACKEND_ERROR",
         result.error?.message || "The operation could not be completed.",
         response.status,
       );
+      const retryAfter = response.headers.get("retry-after");
+      if (response.status >= 500 && /^\d+$/.test(retryAfter || "") &&
+          Number(retryAfter) >= 1 && Number(retryAfter) <= 86400)
+        error.retryAfterSeconds = Number(retryAfter);
+      throw error;
+    }
     return result;
   }
   async authorizeOperation(operation, payload) {

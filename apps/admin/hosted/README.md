@@ -233,8 +233,11 @@ grant. The operational backend still checks current authority on every data read
 or write. This separation does not bypass access revocation.
 
 If operational D1 reaches its daily read/write limit, signed-in API requests
-return HTTP 503 with `SERVICE_LIMIT_REACHED` and a bounded `Retry-After`. The
-panel retains a signed-in shell and stops automatic/focus-triggered data refreshes
+return HTTP 503 with `SERVICE_LIMIT_REACHED` and a bounded `Retry-After`.
+The operational Worker must classify the original D1 failure before sanitizing
+it, and the hosted bridge preserves only an integer retry delay of 1–86,400
+seconds. An ordinary SQL or network failure must not be mislabeled as a daily
+limit. The panel retains a signed-in shell and stops automatic/focus-triggered data refreshes
 until that delay or the next midnight UTC reset. The operator can still sign out
 and sign in. There is no automatic repeated polling, billing upgrade, identity
 cache or bypass. An unavailable control object returns `AUTH_STORE_UNAVAILABLE`
