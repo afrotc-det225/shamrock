@@ -144,6 +144,18 @@ Interactive reports have a 500-member domain limit and a 64 KiB Worker request l
 
 ## Retry and publication behavior
 
+The operational Worker returns `503 SERVICE_LIMIT_REACHED` with `Retry-After`
+until the next midnight UTC when D1 reports its explicit daily row read/write
+limit. It does not retry or log the provider error. This classification happens
+before the raw error is sanitized, so the panel can pause automatic reads without
+confusing database capacity with Google sign-in. Storage limits, SQL failures and
+transient connection errors are not classified as daily exhaustion. See
+[Cloudflare's D1 error reference](https://developers.cloudflare.com/d1/observability/debug-d1/).
+Other unexpected record-read failures use loading guidance; mutation failures
+retain receipt-check guidance. A quota response is not proof that an earlier
+step of a resumable operation did not commit: retain the saved command ID and
+reconcile its receipt before retrying after capacity returns.
+
 The Google journal persists a command before dispatch. A timeout retains the same command for retry with a fresh signature. Conflicts and authorization failures become visible states requiring attention. Journal capacity exhaustion does not delete unsent work. Only trusted script maintainers may edit the journal workbook. The newer Forms/input journals support [reviewed private retention](D1_PRIVATE_RETENTION.md) of verified terminal work while retaining pending/conflicting entries. The original projection journal is a separate bounded transport and must not be cleared as if it used that compactor; deployment and live recovery evidence remain separate checks.
 
 Projection jobs serialize by event/flight. An adapter must claim a job, fetch current D1 facts, write only the designated output cells, verify the published state and then acknowledge its claim. A receipt's `pendingEffects` flag describes the state at acceptance time; it is not a live indicator of whether the sheet has caught up.

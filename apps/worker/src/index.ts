@@ -21,6 +21,7 @@ import { planNotifications, notificationStatus, processNotificationTask, notific
 import { acceptAttendanceCorrection } from './corrections.js';
 import { acceptAdminCommand, adminEffect, authorizeDirectoryReview, frontendSnapshot, getAdminReceipt } from './admin.js';
 import { HttpError } from './http-error.js';
+import { dailyD1LimitResponse, isDailyD1Limit, isRecordRead } from './provider-errors.js';
 import {
   buildAttendanceReport, createExcusalRequest, createExcusalRequests, decideExcusalRequest,
   DomainError, parseCommand,
@@ -329,6 +330,9 @@ async function acceptCommand(env: Env, command: Command, panelScope?: CommandSco
   ];
   try { await env.DB.batch(batch); }
   catch (error) {
+    // A daily limit also prevents the receipt read. Preserve the classification
+    // without adding another failed query; the retained command remains retryable.
+    if (isDailyD1Limit(error)) throw error;
     // Another identical request may have committed while our batch was waiting.
     const committed = await priorReceipt(env, command, ctx, hash, panelScope);
     if (committed) return committed;
@@ -539,8 +543,12 @@ export default {
     } catch (error) {
       if (error instanceof HttpError) return json({ error: { code: error.code, message: error.message } }, error.status);
       if (error instanceof DomainError) return json({ error: { code: error.code, message: error.message, path: error.path } }, error.code === 'VERSION_CONFLICT' ? 409 : 400);
+      const limited = dailyD1LimitResponse(error);
+      if (limited) return limited;
       // Do not expose SQL, input, credentials, or raw exception details.
-      return json({ error: { code: 'INTERNAL_ERROR', message: 'The operation failed; check its receipt before retrying.' } }, 500);
+      return json({ error: { code: 'INTERNAL_ERROR', message: isRecordRead(request)
+        ? 'Records could not be loaded. Please try again shortly.'
+        : 'The operation failed; check its receipt before retrying.' } }, 500);
     }
   },
 };

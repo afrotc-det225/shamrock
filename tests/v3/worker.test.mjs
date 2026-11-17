@@ -94,6 +94,21 @@ test('public health is minimal; domain operations require valid signed adapter r
   assert.equal(await f.count('operation_commands'), 0);
 });
 
+test('a write-batch daily limit does not trigger another failed receipt query', async t => {
+  const f = await fixture(t);
+  let batchFailed = false, readsAfterFailure = 0;
+  const env = { ...f.env, DB: {
+    prepare(sql) { if (batchFailed) readsAfterFailure++; return f.db.prepare(sql); },
+    async batch() { batchFailed = true; throw new Error('D1_ERROR: daily write quota exhausted'); },
+  } };
+  const response = await worker.fetch(signedNativeRequest(command()), env);
+  assert.equal(batchFailed, true);
+  assert.equal(response.status, 503);
+  assert.equal((await response.json()).error.code, 'SERVICE_LIMIT_REACHED');
+  assert.equal(readsAfterFailure, 0);
+  assert.equal(await f.count('operation_commands'), 0);
+});
+
 test('attendance saves evidence, audit, receipt and outbox together without inferring absences', async t => {
   const f = await fixture(t);
   const response = await f.send(command());
