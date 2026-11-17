@@ -686,10 +686,26 @@ test('term catalog pages retain all semesters without adding them to the ordinar
 });
 test('all live and historical page reads wait for pending future event roster refresh work',async t=>{
  const f=await fixture(t);await f.send(command('event.upsert'));await f.db.batch([
-  f.db.prepare("INSERT INTO event_roster_policies VALUES('event-one',1,'current-active-flight-v1',1,'event.upsert','admin','2026-01-01T00:00:00Z',NULL)"),
+  f.db.prepare("INSERT INTO event_roster_policies(event_id,version,policy,enabled,selected_flight_ids_json,approved_command_id,approved_actor_id,approved_at,last_refreshed_at) VALUES('event-one',1,'current-active-flight-v1',1,'[\"alpha\"]','event.upsert','admin','2026-01-01T00:00:00Z',NULL)"),
   f.db.prepare("INSERT INTO event_roster_refresh_work VALUES('event-one','event.upsert','2026-01-01T00:00:00Z')")]);
- for(const extra of [{section:'manifest',offset:0,revision:null},{section:'manifest',offset:0,revision:null,termId:'term-prior'},{section:'term-catalog',offset:0,revision:null}]){
+ for(const extra of [{section:'manifest',offset:0,revision:null},{section:'manifest',offset:0,revision:null,termId:'term-prior'},{section:'term-catalog',offset:0,revision:null},{section:'directory-catalog',offset:0,revision:null},{section:'contacts-catalog',offset:0,revision:null}]){
   const r=await f.send(read(extra),'/v1/admin/snapshot/page');assert.equal(r.status,409);assert.equal(r.body.error.code,'EVENT_ROSTERS_PENDING');
  }
  await f.db.prepare('DELETE FROM event_roster_refresh_work').run();assert.equal((await pagedSnapshot(f)).snapshot.events.length,1);
+});
+test('Directory and contact catalogs export inactive unreferenced records beyond live limits without expanding ordinary pages',async t=>{
+ const f=await fixture(t);await f.send(command());await f.send(command('leadership.upsert'));
+ const records=JSON.stringify(Array.from({length:501},(_,i)=>i));
+ await f.db.batch([
+  f.db.prepare("INSERT INTO people SELECT 'alumnus-'||printf('%03d',value),'Fictional Alumnus' FROM json_each(?)").bind(records),
+  f.db.prepare("INSERT INTO directory_profiles SELECT 'alumnus-'||printf('%03d',j.value),d.version,d.flight_id,d.last_name,d.first_name,d.as_year,d.rank,d.role,d.university,'alumnus-'||j.value||'@example.invalid',d.phone,d.dorm,d.cip_broad_area,d.cip_code,d.afsc,d.home_town,d.home_state,d.class_year,d.date_of_birth,'Commissioned',d.photo_link,d.updated_at FROM directory_profiles d,json_each(?) j WHERE d.person_id='person-a'").bind(records),
+  f.db.prepare("INSERT INTO leadership_contacts SELECT 'old-contact-'||printf('%03d',j.value),c.version,NULL,c.last_name,c.first_name,c.rank,c.role,'contact-'||j.value||'@example.invalid',c.cell_phone,c.reports_to,c.office_phone,c.office_location,0,c.updated_at FROM leadership_contacts c,json_each(?) j WHERE c.contact_id='manual-cadre'").bind(JSON.stringify(Array.from({length:201},(_,i)=>i))),
+ ]);
+ const current=await pagedSnapshot(f);assert.equal(current.snapshot.people.length,1);assert.equal(current.snapshot.leadership.length,2);
+ const capture=async section=>{const rows=[];let offset=0;do{const response=await f.send(read({section,offset,revision:current.manifest.revision}),'/v1/admin/snapshot/page');assert.equal(response.status,200,JSON.stringify(response.body));assert(response.body.rows.length<=32);assert(Buffer.byteLength(JSON.stringify(response.body))<=128000);rows.push(...response.body.rows);offset=response.body.nextOffset;}while(offset!==null);return rows;};
+ const directory=await capture('directory-catalog'),contacts=await capture('contacts-catalog');assert.equal(directory.length,502);assert.equal(new Set(directory.map(p=>p.personId)).size,502);assert.equal(directory.filter(p=>!p.active).length,501);assert.equal(contacts.length,202);assert.equal(contacts.filter(c=>!c.active).length,201);assert.equal(directory[0].virtualContactId,undefined);assert.equal(contacts[0].version,1);
+ assert.equal(await f.count('directory_profiles'),502);assert.equal(await f.count('leadership_contacts'),202);
+ const path='/v1/admin/snapshot/page';assert.equal((await f.send(read({section:'directory-catalog',offset:32,revision:null}),path)).status,400);assert.equal((await f.send(read({section:'directory-catalog',termId:'term-prior',offset:0,revision:null}),path)).status,400);
+ await f.send(revised(command()));for(const section of ['directory-catalog','contacts-catalog'])assert.equal((await f.send(read({section,offset:32,revision:current.manifest.revision}),path)).body.error.code,'SNAPSHOT_CHANGED');
+ await f.db.prepare("DELETE FROM admin_grants WHERE capability='frontend.read'").run();for(const section of ['directory-catalog','contacts-catalog'])assert.equal((await f.send(read({section,offset:0,revision:null}),path)).status,403);
 });
