@@ -9,12 +9,19 @@ export function captureExcusalScopes(db: D1Database, requestIds: string[], fligh
 }
 /** Explicit grants retain their explicit scope. Derived commanders use the request's retained Squadron. */
 export function excusalDecisionPermission(principalId: string, requestId: string, flightId: string) {
-    return { sql: `EXISTS(SELECT 1 FROM principals p WHERE p.principal_id=? AND p.active=1 AND (
-    EXISTS(SELECT 1 FROM access_grants g WHERE g.principal_id=p.principal_id AND g.capability='excusal.decide' AND g.unit_id=? AND g.subject_scope='unit')
+    return { sql: decisionPredicate('?', '?', '?'), values: [principalId, flightId, requestId] };
+}
+/** Same authorization as mutation, correlated to the trusted excusal_records SQL alias r. */
+export function excusalDecisionRowPermission(principalId: string) {
+    return { sql: decisionPredicate('?', 'r.unit_id', 'r.request_id'), values: [principalId] };
+}
+function decisionPredicate(principal: string, flight: string, request: string): string {
+    return `EXISTS(SELECT 1 FROM principals p WHERE p.principal_id=${principal} AND p.active=1 AND (
+    EXISTS(SELECT 1 FROM access_grants g WHERE g.principal_id=p.principal_id AND g.capability='excusal.decide' AND g.unit_id=${flight} AND g.subject_scope='unit')
     OR EXISTS(SELECT 1 FROM permission_policy_control pc JOIN principal_accounts a ON a.principal_id=p.principal_id
       JOIN ${effectivePermissionMembers} member ON member.principal_id=p.principal_id
       JOIN json_each(pc.policy_json,'$.google.squadronCommanders') commander
       WHERE pc.singleton=1 AND pc.enabled=1 AND json_extract(commander.value,'$.email')=a.email
-      AND json_extract(commander.value,'$.squadronId')=(SELECT sc.squadron_id FROM excusal_records r
-        LEFT JOIN excusal_request_scopes sc ON sc.request_id=r.request_id WHERE r.request_id=?))))`, values: [principalId, flightId, requestId] };
+      AND json_extract(commander.value,'$.squadronId')=(SELECT sc.squadron_id FROM excusal_records decision_request
+        LEFT JOIN excusal_request_scopes sc ON sc.request_id=decision_request.request_id WHERE decision_request.request_id=${request}))))`;
 }

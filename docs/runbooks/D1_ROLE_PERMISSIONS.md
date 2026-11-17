@@ -21,6 +21,12 @@ Mission Support/Abroad Squadron Commander text does not create operational Squad
 
 Explicit `admin_grants` and `access_grants` remain independent. Migration never guesses which old grants were role-based. Before enabling a deployment, review and remove obsolete explicit role grants privately, otherwise they intentionally remain authorized independently of Leadership. The existing owner/automation identities and specifically retained support/viewer baseline remain explicit. Groups, domains and anyone sharing are not substitutes for named policy membership.
 
+The new administration panel has a separate [scoped read contract](D1_PANEL_READS.md).
+It derives Flight/Deputy scope from fresh trusted role assignments rather than
+Leadership's deliberately broad spreadsheet grants. Blue/Gold decisions still
+use the exact request-level authority described here. This does not narrow
+existing Sheets permissions or authorize production cutover.
+
 ## Changes and revocation
 
 A trusted Directory Role, email, Flight/Squadron scope or Flight Path change, a Leadership role/email/person-link/activation change, or transition acceptance requires explicit permission-manager authority in addition to the existing command capability. Ordinary Leadership editors can change harmless contact fields, such as office location and phone. Linked profile fields still belong to Directory, not the contact record. Directory self-service Forms cannot set Role, operational status, scope or verified email; automatic enrollment uses the fixed initial cadet policy.

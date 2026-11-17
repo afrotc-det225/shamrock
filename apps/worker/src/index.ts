@@ -8,6 +8,7 @@ import { permissionCommand, permissionRefresh, attestPermissionFence, recoverPer
 import { effectiveAccessGrants } from './permission-grants.js';
 import { legacyHistoryPage } from './legacy-history-transport.js';
 import { frontendSnapshotPage } from './frontend-transport.js';
+import { panelSnapshotPage } from './panel-read.js';
 import { prepareCloseout, advanceCloseout, closeoutStatus } from './closeout.js';
 import { listLegacyHistory, readLegacyHistory, listLegacyRequestHistory } from './legacy-history.js';
 import { recoverAdminEffect } from './effect-recovery.js';
@@ -500,6 +501,7 @@ export default {
       if (url.pathname === '/v1/admin/history/read' && !url.search) return json(await readLegacyHistory(env, input));
       if (url.pathname === '/v1/admin/effects/availability' && !url.search) return json(await adminEffectAvailability(env, input));
       if (url.pathname === '/v1/admin/snapshot/page' && !url.search) return json(await frontendSnapshotPage(env, input));
+      if (url.pathname === '/v1/admin/panel/page' && !url.search) return json(await panelSnapshotPage(env, input));
       if (url.pathname === '/v1/admin/effects/project/page' && !url.search) return json(await frontendSnapshotPage(env, input, true));
       if (url.pathname === '/v1/admin/snapshot' && !url.search) return json(await frontendSnapshot(env, input));
       if (url.pathname === '/v1/admin/effects/recover' && !url.search) return json(await recoverAdminEffect(env, input));
