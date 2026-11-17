@@ -62,7 +62,7 @@ authority and return the same receipt without duplicate effects.
   current `Flight Commander` / `Deputy Flight Commander` titles prefixed by the old
   Flight label follow the new label in that Flight's Directory profiles and
   matching manual Leadership contacts; optional `Cadet` prefixes are preserved.
-  Changed profile/contact versions advance, and the catalog audit lists each
+  Every affected Directory profile advances once when its Flight label or Squadron assignment changes, including retained inactive profiles. Role rewrites share that same increment; changed manual contacts advance their own version. The catalog audit lists each
   before/after role label. Generic role titles and arbitrary prose remain intact.
 - A Squadron can be created or renamed without reassigning its Flights. Blue and
   Gold are the existing operational queue/policy names and cannot be renamed by
@@ -116,7 +116,7 @@ use their already-frozen catalog; they are not reinterpreted with a new live one
 
 Historical source reports remain the original label evidence. Catalog operations
 do not rewrite event-version/person/Flight identities or retained semester/archive
-snapshots. Current Directory labels are intentionally current catalog values.
+snapshots. Current Directory labels are intentionally current catalog values. Their profile version tokens advance atomically on Flight rename/reparent or a parent Squadron rename, so the native publisher can update labels and retain stale human drafts as conflicts. Unrelated profiles and no-op catalog updates do not change profile versions. Trusted role membership is rebuilt against those same advanced versions inside the catalog transaction.
 
 ## Verification and recovery
 
@@ -139,7 +139,7 @@ commit leaves durable pending work and the saved receipt.
 Focused tests include stable identity/version conflicts, retirement restrictions,
 revocation/audit rollback, role-title changes, future roster refresh, old/new
 Squadron authorization, exact legacy-source/fallback backfill, delayed messages and
-missing-capture failure. The enabled fenced catalog fixture uses 36 prepared D1
+missing-capture failure. The enabled fenced catalog fixture uses 37 prepared D1
 statements, below the repository's reviewed 50-statement comparison limit. This
 is local SQL evidence, not hosted CPU or daily billing evidence. No paid service
 or additional provider resource is required by these commands.

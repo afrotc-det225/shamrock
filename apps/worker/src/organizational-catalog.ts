@@ -68,7 +68,10 @@ export async function acceptCatalogCommand(env: Env, input: unknown): Promise<un
     const auth = authority(env, c.actor.principalId, true);
     auth.sql += ' AND EXISTS(SELECT 1 FROM adapter_sources WHERE source_kind=? AND resource_key=? AND active=1)';
     auth.values.push(c.source.kind, c.source.resourceKey);
-    const permission = await prepareCatalogPermissions(env, c, now, digest, before?.label);
+    const affectedFlightIds = !before ? [] : flight
+      ? (before as OrganizationalCatalog['flights'][number]).active && c.payload.active && (before.label !== c.payload.label || (before as OrganizationalCatalog['flights'][number]).squadronId !== c.payload.squadronId) ? [id] : []
+      : before.label !== c.payload.label ? catalog.flights.filter(f => f.active && f.squadronId === id).map(f => f.flightId) : [];
+    const permission = await prepareCatalogPermissions(env, c, now, digest, before?.label, affectedFlightIds);
     if (permission) {
         auth.sql += ` AND (${permission.assertion.sql})`;
         auth.values.push(...permission.assertion.values);
@@ -121,7 +124,7 @@ export async function acceptCatalogCommand(env: Env, input: unknown): Promise<un
             stmt(env.DB, `INSERT INTO command_assertions VALUES(?,(${auth.sql}) AND (${condition}))`, c.commandId, ...auth.values, ...values), stmt(env.DB, "INSERT INTO command_registry VALUES(?,'admin')", c.commandId),
             stmt(env.DB, 'INSERT INTO admin_commands VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)', c.commandId, digest, c.actor.principalId, c.operation, id, 'directory.manage', '[]', c.source.kind, c.source.resourceKey, c.source.submissionId, c.source.revision, now, JSON.stringify(result)), ...(flight && !c.payload.active ? (permission?.writes ?? []) : []), ...writes,
             stmt(env.DB, 'INSERT INTO organizational_catalog_versions VALUES(?,?,?,?,?,?) ON CONFLICT(kind,target_id) DO UPDATE SET version=excluded.version,value_json=excluded.value_json,command_id=excluded.command_id,updated_at=excluded.updated_at', key, id, version, JSON.stringify(value), c.commandId, now),
-            ...(flight && !c.payload.active ? [] : (permission?.writes ?? [])), markManagedFutureRosters(env.DB, c.commandId, now, flight ? [id] : catalog.flights.filter(f => f.squadronId === id && f.active).map(f => f.flightId)), stmt(env.DB, 'INSERT INTO admin_audit_events(command_id,actor_id,actor_evidence,operation,target_id,accepted_at,before_json,after_json) VALUES(?,?,?,?,?,?,?,?)', c.commandId, c.actor.principalId, c.actor.evidence, c.operation, id, now, JSON.stringify({ catalog: before ?? null, roleLabels: (permission?.roleLabels ?? []).map(r => ({ source: r.source, id: r.id, role: r.before })) }), JSON.stringify({ ...c.payload, roleLabels: permission?.roleLabels ?? [] })),
+            ...(flight && !c.payload.active ? [] : (permission?.writes ?? [])), markManagedFutureRosters(env.DB, c.commandId, now, flight ? [id] : catalog.flights.filter(f => f.squadronId === id && f.active).map(f => f.flightId)), stmt(env.DB, 'INSERT INTO admin_audit_events(command_id,actor_id,actor_evidence,operation,target_id,accepted_at,before_json,after_json) VALUES(?,?,?,?,?,?,?,?)', c.commandId, c.actor.principalId, c.actor.evidence, c.operation, id, now, JSON.stringify({ catalog: before ?? null, roleLabels: (permission?.roleLabels ?? []).map(r => ({ source: r.source, id: r.id, role: r.before })) }), JSON.stringify({ ...c.payload, roleLabels: permission?.roleLabels ?? [], profileVersions: permission?.profileVersions ?? [] })),
             stmt(env.DB, "INSERT INTO admin_effects(effect_id,command_id,kind,state,created_at) VALUES(?,?,'frontend.refresh','pending',?),(?,?,'forms.refresh','pending',?)", crypto.randomUUID(), c.commandId, now, crypto.randomUUID(), c.commandId, now), stmt(env.DB, 'DELETE FROM command_assertions WHERE command_id=?', c.commandId)
         ]);
     }

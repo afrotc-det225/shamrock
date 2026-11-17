@@ -142,22 +142,30 @@ export async function preparePermissionMutation(env: Env, c: AdminCommand, now: 
     return { managerRequired, assertion, writes: [...extra, ...await policyWrites(env, f, c.commandId, c.actor.principalId, now), ...(managerRequired ? [stmt(env.DB, 'INSERT INTO permission_command_requirements VALUES(?)', c.commandId)] : [])] };
 }
 /** Catalog scope changes use the same native fence and atomic policy publication as role changes. */
-export async function prepareCatalogPermissions(env:Env,c:CatalogCommand,now:string,payloadHash:string,oldLabel?:string):Promise<(PermissionMutation & {roleLabels:{source:string;id:string;before:string;after:string}[]})|null> {
+export async function prepareCatalogPermissions(env:Env,c:CatalogCommand,now:string,payloadHash:string,oldLabel?:string,affectedFlightIds:readonly string[]=[]):Promise<(PermissionMutation & {roleLabels:{source:string;id:string;before:string;after:string}[];profileVersions:{personId:string;before:number;after:number}[]})|null> {
     const enabled=await stmt(env.DB,'SELECT enabled FROM permission_policy_control WHERE singleton=1').first<{enabled:number}>();
     const rename=c.operation==='flight.upsert'&&!!oldLabel&&oldLabel!==c.payload.label;
-    if(!enabled?.enabled&&!rename)return null;
-    const f=await facts(env),assertion=sourceGuard(f),roleLabels:{source:string;id:string;before:string;after:string}[]=[],roleWrites:D1PreparedStatement[]=[];
+    if(!enabled?.enabled&&!rename&&!affectedFlightIds.length)return null;
+    const f=await facts(env),assertion=sourceGuard(f),roleLabels:{source:string;id:string;before:string;after:string}[]=[],roleWrites:D1PreparedStatement[]=[],profileVersions:{personId:string;before:number;after:number}[]=[];
     if(f.people.length>500||f.contacts.length>200)throw new HttpError(409,'CATALOG_TOO_LARGE','The catalog role change exceeds its reviewed bounds.');
+    // The editable Flight label is projected from this catalog, but its optimistic
+    // token belongs to the Directory profile. Advance every affected profile once,
+    // including ordinary cadets and inactive retained records, before rebuilding policy.
+    f.people=f.people.map(p=>{
+      if(!p.flightId||!affectedFlightIds.includes(p.flightId))return p;
+      const role=rename?renamedFlightRole(p.role,oldLabel!,c.payload.label):p.role;
+      if(role!==p.role)roleLabels.push({source:'directory',id:p.personId,before:p.role,after:role});
+      profileVersions.push({personId:p.personId,before:p.version,after:p.version+1});return {...p,role,version:p.version+1};
+    });
+    const changedPeople=f.people.filter(p=>profileVersions.some(v=>v.personId===p.personId)).map(p=>({id:p.personId,role:p.role}));
+    if(changedPeople.length)roleWrites.push(stmt(env.DB,`UPDATE directory_profiles SET role=(SELECT json_extract(value,'$.role') FROM json_each(?) WHERE json_extract(value,'$.id')=person_id),version=version+1,updated_at=? WHERE person_id IN(SELECT json_extract(value,'$.id') FROM json_each(?))`,JSON.stringify(changedPeople),now,JSON.stringify(changedPeople)));
     if(rename){
-      f.people=f.people.map(p=>{const role=p.flightId===(c as Extract<CatalogCommand,{operation:'flight.upsert'}>).payload.flightId?renamedFlightRole(p.role,oldLabel!,c.payload.label):p.role;
-        if(role===p.role)return p;roleLabels.push({source:'directory',id:p.personId,before:p.role,after:role});return {...p,role,version:p.version+1};});
       f.contacts=f.contacts.map(p=>{const role=p.personId===null?renamedFlightRole(p.role,oldLabel!,c.payload.label):p.role;
         if(role===p.role)return p;roleLabels.push({source:'leadership',id:p.contactId,before:p.role,after:role});return {...p,role,version:p.version+1};});
-      const directory=roleLabels.filter(r=>r.source==='directory'),contacts=roleLabels.filter(r=>r.source==='leadership');
-      if(directory.length)roleWrites.push(stmt(env.DB,`UPDATE directory_profiles SET role=(SELECT json_extract(value,'$.after') FROM json_each(?) WHERE json_extract(value,'$.id')=person_id),version=version+1,updated_at=? WHERE person_id IN(SELECT json_extract(value,'$.id') FROM json_each(?))`,JSON.stringify(directory),now,JSON.stringify(directory)));
+      const contacts=roleLabels.filter(r=>r.source==='leadership');
       if(contacts.length)roleWrites.push(stmt(env.DB,`UPDATE leadership_contacts SET role=(SELECT json_extract(value,'$.after') FROM json_each(?) WHERE json_extract(value,'$.id')=contact_id),version=version+1,updated_at=? WHERE contact_id IN(SELECT json_extract(value,'$.id') FROM json_each(?))`,JSON.stringify(contacts),now,JSON.stringify(contacts)));
     }
-    if(!enabled?.enabled)return {managerRequired:false,assertion,writes:roleWrites,roleLabels};
+    if(!enabled?.enabled)return {managerRequired:false,assertion,writes:roleWrites,roleLabels,profileVersions};
     const manager=await stmt(env.DB,`SELECT (${permissionManagerSql}) AS allowed`,c.actor.principalId).first<{allowed:number}>();
     if(!manager?.allowed)throw new HttpError(403,'NOT_AUTHORIZED','Current permission-manager authority is required.');
     const fence=await stmt(env.DB,`SELECT (${fenceSql}) AS allowed`,c.commandId,payloadHash,f.version,now).first<{allowed:number}>();
@@ -167,7 +175,7 @@ export async function prepareCatalogPermissions(env:Env,c:CatalogCommand,now:str
     if(c.operation==='flight.upsert'){
         const p=c.payload;f.flights=f.flights.filter(x=>x.flightId!==p.flightId);if(p.active)f.flights.push({flightId:p.flightId,label:p.label,squadronId:p.squadronId});
     }else{const p=c.payload;f.squadrons=f.squadrons.filter(x=>x.squadronId!==p.squadronId);f.squadrons.push({squadronId:p.squadronId,label:p.label});}
-    return {managerRequired:true,assertion,roleLabels,writes:[...roleWrites,stmt(env.DB,'UPDATE permission_change_fences SET consumed_at=? WHERE command_id=?',now,c.commandId),...await policyWrites(env,f,c.commandId,c.actor.principalId,now),stmt(env.DB,'INSERT INTO permission_command_requirements VALUES(?)',c.commandId)]};
+    return {managerRequired:true,assertion,roleLabels,profileVersions,writes:[...roleWrites,stmt(env.DB,'UPDATE permission_change_fences SET consumed_at=? WHERE command_id=?',now,c.commandId),...await policyWrites(env,f,c.commandId,c.actor.principalId,now),stmt(env.DB,'INSERT INTO permission_command_requirements VALUES(?)',c.commandId)]};
 }
 /** Transition acceptance changes role/scope/status in one batch and must refresh the same policy. */
 export async function prepareTransitionPermissions(env: Env, input: {
