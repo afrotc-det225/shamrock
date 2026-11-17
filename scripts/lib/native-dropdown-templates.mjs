@@ -18,9 +18,14 @@ function rule(value) {
   requireValue(keys(value.condition, ['type', 'values']) && value.condition.type === 'ONE_OF_RANGE'
     && Array.isArray(value.condition.values) && value.condition.values.length === 1
     && keys(value.condition.values[0], ['userEnteredValue'])
-    && /^=?'(?:[^']|'')+'!\$[A-Z]+\$[1-9]\d*:\$[A-Z]+\$[1-9]\d*$/.test(value.condition.values[0].userEnteredValue),
+    && typeof value.condition.values[0].userEnteredValue === 'string',
   'the validation must use an explicit absolute legend range');
   const source = value.condition.values[0].userEnteredValue;
+  const range = /^=?'((?:[^'\r\n]|'')+)'!\$([A-Z]{1,3})\$([1-9]\d*):\$([A-Z]{1,3})(?:\$([1-9]\d*))?$/.exec(source);
+  const col = letters => [...letters].reduce((n, c) => n * 26 + c.charCodeAt(0) - 64, 0);
+  requireValue(range && col(range[2]) <= col(range[4]) && col(range[4]) <= 512 && Number(range[3]) <= 10002
+    && (range[5] ? Number(range[5]) >= Number(range[3]) && Number(range[5]) <= 10002 : range[2] === range[4]),
+  'the validation must use an explicit absolute legend range');
   return { ...value, showCustomUi: value.showCustomUi === true,
     condition: { ...value.condition, values: [{ userEnteredValue: source.startsWith('=') ? source : `=${source}` }] } };
 }

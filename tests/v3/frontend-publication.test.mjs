@@ -138,6 +138,25 @@ function attendanceInput(rows = 2, events = 1) {
   return { generation: 1, revision: { operations: 1, administration: 1 }, table: { kind: 'attendance', keyHeader: 'person_id', columns: cols, rows: structuredClone(records) }, current: read(records, cols), baseline: { generation: 1, revision: { operations: 1, administration: 1 }, rows: records }, drafts: [], seeds: [seed], editFenceVerified: true };
 }
 
+test('production open-ended legends preserve the exact native control and reject ambiguous references', () => {
+  for (const reference of ["'Data Legend'!$M$3:$M", "='Cadet''s Legend'!$D$3:$F$21"]) {
+    const input = attendanceInput(0); input.table.rows = attendanceInput(1).table.rows;
+    const original = { strict: true, condition: { type: 'ONE_OF_RANGE', values: [{ userEnteredValue: reference }] } };
+    input.seeds = [{ ...seed, expectedRule: original, observedRule: original }];
+    const plan = planFrontendPublication(input);
+    assert.deepEqual(plan.validationExpectations[0].expectedRule, original);
+    assert.ok(plan.requests.some(r => r.copyPaste?.pasteType === 'PASTE_DATA_VALIDATION'));
+    assert.ok(!plan.requests.some(r => r.setDataValidation));
+    assert.equal(verifyFrontendValidationReadback(plan, plan.validationExpectations.map(({expectedRule, ...range}) => ({...range, rows: [[expectedRule]]}))), true);
+  }
+  for (const reference of ["'Data Legend'!$A$3:$B", "'Data Legend'!$A$4:$A$3", "'Data Legend'!$B$3:$A$5", "'Data Legend'!A3:A", "INDIRECT(A1)"]) {
+    const input = attendanceInput(0); input.table.rows = attendanceInput(1).table.rows;
+    const invalid = { strict: true, condition: { type: 'ONE_OF_RANGE', values: [{ userEnteredValue: reference }] } };
+    input.seeds = [{ ...seed, expectedRule: invalid, observedRule: invalid }];
+    assert.throws(() => planFrontendPublication(input), /absolute legend range/);
+  }
+});
+
 test('new rows and events use protected native seeds without changing existing validation or moving identity', () => {
   const input = attendanceInput(); const oldKeyColumn = input.current.headers.indexOf('person_id');
   input.table.columns.splice(2, 0, { header: 'event:additional', label: 'Additional', editable: true, seedKey: 'attendance:code' });

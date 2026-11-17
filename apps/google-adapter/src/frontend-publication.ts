@@ -203,9 +203,15 @@ function normalizeRule(input: unknown): unknown {
   if (!input || typeof input !== 'object') fail('Native validation seed metadata is missing.');
   const rule = input as { strict?: boolean; showCustomUi?: boolean; condition?: { type?: string; values?: { userEnteredValue?: string }[] } };
   const reference = rule.condition?.values?.[0]?.userEnteredValue;
-  if (rule.strict !== true || rule.condition?.type !== 'ONE_OF_RANGE' || rule.condition.values?.length !== 1 || typeof reference !== 'string' || !/^=?'[^']+'!\$[A-Z]+\$[1-9]\d*:\$[A-Z]+\$[1-9]\d*$/.test(reference)) fail('Native validation must have a strict, bounded legend source.');
+  const range = typeof reference === 'string' && /^=?'((?:[^'\r\n]|'')+)'!\$([A-Z]{1,3})\$([1-9]\d*):\$([A-Z]{1,3})(?:\$([1-9]\d*))?$/.exec(reference);
+  const column = (letters: string) => [...letters].reduce((n, c) => n * 26 + c.charCodeAt(0) - 64, 0);
+  // Production's single-column legends intentionally grow to the bottom of the
+  // sheet. Copy the exact reviewed native rule; reconstructing it loses styling.
+  if (rule.strict !== true || (rule.showCustomUi !== undefined && typeof rule.showCustomUi !== 'boolean') || rule.condition?.type !== 'ONE_OF_RANGE' || rule.condition.values?.length !== 1 || !range
+    || column(range[2]) > column(range[4]) || column(range[4]) > 512 || Number(range[3]) > 10_002
+    || (range[5] ? Number(range[5]) < Number(range[3]) || Number(range[5]) > 10_002 : range[2] !== range[4])) fail('Native validation must use an explicit local absolute legend range.');
   return { ...clone(rule), showCustomUi: rule.showCustomUi === true,
-    condition: { ...rule.condition, values: [{ userEnteredValue: reference.replace(/^=/, '') }] } };
+    condition: { ...rule.condition, values: [{ userEnteredValue: (reference as string).replace(/^=/, '') }] } };
 }
 function keyed(rows: readonly FrontendPublicationRow[], columns: readonly FrontendColumn[], keyHeader: string): Map<string, FrontendPublicationRow> {
   if (!Array.isArray(rows) || rows.length > MAX_ROWS) fail('Frontend row capacity exceeded.');

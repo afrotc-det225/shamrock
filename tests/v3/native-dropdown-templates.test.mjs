@@ -82,3 +82,13 @@ test('plain validation copies native appearance with omitted or false dropdown v
     assert.throws(() => nativeDropdownRuleFingerprint(seed), /strict validation rule/);
   }
 });
+
+test('current production open-ended single-column rules are copied without rewriting native validation', () => {
+  const input = fixture(), open = copy(rule); open.condition.values[0].userEnteredValue = "'Data Legend'!$A$3:$A";
+  input.source.rule = open; input.spreadsheet.sheets[0].data[0].rowData[2].values[0].dataValidation = copy(open);
+  assert.equal(planNativeDropdownCopy(input).requests[0].copyPaste.pasteType, 'PASTE_DATA_VALIDATION');
+  for (const reference of ["'Data Legend'!$A$3:$B", "'Data Legend'!$A$4:$A$3", "'Data Legend'!$C$3:$B$9"]) {
+    const invalid = copy(open); invalid.condition.values[0].userEnteredValue = reference;
+    assert.throws(() => nativeDropdownRuleFingerprint(invalid), /absolute legend range/);
+  }
+});
