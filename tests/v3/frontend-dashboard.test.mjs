@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { buildFrontendDashboard } from '../../.build/v3/apps/google-adapter/src/frontend-dashboard.js';
+import { buildFrontendDashboard, buildDashboardLayoutRepair } from '../../.build/v3/apps/google-adapter/src/frontend-dashboard.js';
 
 const input = () => ({ sheetId: 101, dataSheetId: 106,
   actions: [{ label: 'Attendance', url: '#gid=104' }],
@@ -13,7 +13,8 @@ test('Dashboard starts with its title and actions, without rehearsal banners or 
   const writes = requests.flatMap(r => r.updateCells ? [r.updateCells] : []);
   assert.equal(writes.find(w => w.start.rowIndex === 0).rows[0].values[0].userEnteredValue.stringValue, 'SHAMROCK Dashboard');
   assert.equal(writes.find(w => w.start.rowIndex === 1).rows[0].values[0].userEnteredValue.stringValue, 'Quick actions');
-  assert.equal(writes.filter(w => w.rows[0].values[0].userEnteredValue.formulaValue).length, 1);
+  assert.equal(writes.filter(w => w.rows[0].values[0].userEnteredValue.formulaValue?.startsWith('=HYPERLINK')).length, 1);
+  assert.match(writes.find(w => w.start.columnIndex === 11).rows[0].values[0].userEnteredValue.formulaValue, /^=IMAGE\("https:\/\/onmessage\.nd\.edu\//);
   assert.doesNotMatch(JSON.stringify(requests), /preview|fictional|test only/i);
   const charts = requests.flatMap(r => r.addChart ? [r.addChart.chart] : []);
   assert.deepEqual(charts.map(c => c.position.overlayPosition.anchorCell.rowIndex), [9, 9, 22, 22]);
@@ -27,4 +28,13 @@ test('Dashboard rejects formula/link injection and nonnumeric or unbounded chart
   }
   assert.throws(() => buildFrontendDashboard({ ...input(), metrics: [{ label: 'Bad', value: NaN }, ...input().metrics.slice(1)] }));
   assert.throws(() => buildFrontendDashboard({ ...input(), charts: [{ ...input().charts[0], sourceEndRow: 0 }, ...input().charts.slice(1)] }));
+});
+
+test('paused Dashboard repair preserves chart identities and excludes values and input structures', () => {
+  const x = input(), original = buildFrontendDashboard(x);
+  const current = { merges: original.flatMap(r => r.mergeCells ? [r.mergeCells.range] : []), chartIds: [401, 402, 403, 404] };
+  const repair = buildDashboardLayoutRepair(x, current);
+  assert.deepEqual(repair.flatMap(r => r.updateEmbeddedObjectPosition ? [r.updateEmbeddedObjectPosition.objectId] : []), current.chartIds);
+  assert.equal(repair.some(r => r.updateCells || r.addChart || r.deleteEmbeddedObject || r.updateTable || r.setDataValidation || r.addProtectedRange), false);
+  assert.throws(() => buildDashboardLayoutRepair(x, { ...current, merges: [{ sheetId: x.sheetId, startRowIndex: 46, endRowIndex: 49, startColumnIndex: 0, endColumnIndex: 2 }] }));
 });

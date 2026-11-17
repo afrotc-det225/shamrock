@@ -37,7 +37,7 @@ Changed adjacent cells are coalesced into rectangles without spanning dirty gaps
 
 Existing formatting, notes, native validation and file chips are not cleared during normal refresh. Row/event growth copies `PASTE_DATA_VALIDATION` from protected hidden seeds, including Plain and Arrow cells whose option colors are also opaque. A public validation rule is checked against the expected local absolute legend reference. Fixed rectangles and production's open-ended single-column ranges are supported; relative references, formulas, reversed ranges and open-ended multi-column ranges are rejected. The copy target remains explicitly bounded. Its native style version comes from a separately reviewed seed registry. Public metadata cannot prove native option colors or Chip-versus-Arrow appearance.
 
-New Attendance rows and event columns receive the measured production layout: 21-pixel body rows, 10-point Roboto body text and uniformly 75-pixel event columns. New event headers use bold 5-point wrapped text. Attendance codes and percentages are bold and centered; identity fields align left. Only new rows/columns are formatted. Existing dimensions, hidden columns, colors, values and validations remain unchanged by the growth layout.
+New Attendance rows and event columns receive the measured production layout: 30-pixel body rows, 10-point Roboto body text and uniformly 75-pixel event columns. New event headers use bold 5-point wrapped text. Attendance codes and percentages are bold and centered; identity fields align left. Only new rows/columns are formatted. Existing dimensions, hidden columns, colors, values and validations remain unchanged by the growth layout.
 
 Ordinary data publication changes native Table `range`. Catalog publication additionally updates an existing `DROPDOWN` column's explicit choice list while retaining its column type and other properties. After validation copying, the planner reasserts the intended Table range because Google may expand it. Identity columns and the machine-header row are hidden. The host must additionally verify native Table column names/types, filter views, formatting, protections and visual presentation; the value read-back helper does not claim those checks.
 
@@ -63,7 +63,7 @@ There is no production adoption shortcut. Migrating a populated operational Tabl
 
 ## Dashboard and Blue/Gold supplemental plans
 
-`frontend-supplemental.ts` supplies pure plans, with no provider access or deployment. Dashboard refresh reuses the existing native Dashboard planner's anchors and chart styling. It keeps the compact six-card/four-chart layout, chart IDs and positions, publishes real report-derived chart sources to the hidden Dashboard Data sheet, and adds the birthday calendar below the existing layout. It does not recreate Tables or validations. Empty birthdays display “No birthdays recorded.” Empty group averages remain blank, and no-counted-attendance/review notes explain the numerical reporting state. Birthday dates display month/day in the compact calendar; no date of birth is fabricated.
+`frontend-supplemental.ts` supplies pure plans, with no provider access or deployment. Dashboard refresh reuses the existing native Dashboard planner's anchors and chart styling. It keeps the six-card/four-chart layout, chart IDs and positions, publishes real report-derived chart sources to the hidden Dashboard Data sheet, and adds the birthday calendar below the existing layout. It does not recreate Tables or validations. Empty birthdays display “No birthdays recorded.” Empty group averages remain blank, and no-counted-attendance/review notes explain the numerical reporting state. Birthday dates display month/day in the compact calendar; no date of birth is fabricated.
 
 The Dashboard plan requires the approved existing canvas, explicit chart identities, a coherent reporting revision and a verified edit fence. Its private read fingerprint and `expectedAfter` data support read-back/recovery. Chart IDs/specifications, merges, visible values, hidden source state and source values are checked. Live rendering remains a separate check; the pure tests are not provider visual evidence.
 
@@ -96,3 +96,24 @@ The native publisher manages the standard named Flight views on Directory and At
 The source columns and any existing native Table `DROPDOWN` choice lists are frozen in the same pending plan and atomic Main transaction as business values, views and Dashboard. Explicit Table dropdowns use the supported `ONE_OF_LIST` rule; plain/untyped columns retain their existing types. See [Google's native Table dropdown contract](https://developers.google.com/workspace/sheets/api/guides/tables#dropdown_column_type). The publisher does not reconstruct private chip-color metadata. It recopies each changed Directory control with `PASTE_DATA_VALIDATION` from the reviewed seed, preserving the native chip/arrow/plain display mode, then reasserts the Table extent. New labels use the native provider's treatment of an expanded source list; exact custom colors for new labels still require a reviewed native template.
 
 Readback checks every literal source value, cleared tail, and managed Table choices before reopening edits or acknowledging D1. Existing noncatalog Table types/rules must remain intact; core publication independently verifies any header/extent growth. Lost responses reuse the frozen catalog plan, including during photo or lease recovery. A mixed or changed source retains the fence. Pending drafts, stable keys, frozen base versions and filter views keep the existing publication rules; changing a catalog never silently retargets an unsent edit. Local tests establish request/readback/retry behavior, while a real Google rename/add-Flight rehearsal remains a separate release gate.
+
+### Presentation repair baseline
+
+The Dashboard uses the production-width canvas, distinct metric-card borders,
+shaded action links and four readable 560-by-280-pixel charts. Semester history
+uses a line chart; roster counts use horizontal bars. Percentage scales focus on
+80–100% when appropriate, expanding downward when actual values would be clipped.
+The title contains the official plain Notre Dame shamrock artwork, without an ND
+monogram or a generic clover. The removed subtitle/spacer rows remain removed.
+
+`buildDashboardLayoutRepair` is an explicit paused maintenance planner. Apply it
+only under the verified edit fence, after reading the managed Dashboard, retaining
+its four chart IDs. It replaces only the owned layout merges, styling, dimensions
+and chart positions. Then use normal coherent Dashboard publication for values
+and chart sources, and verify the exact result. Routine refresh does not silently
+resize an operator's charts or reorder populated input rows. No native Table,
+validation rule, filter view or input protection is recreated by this repair.
+
+Artwork source: [Notre Dame shamrock reference](https://onmessage.nd.edu/athletics-branding/logos/shamrock/).
+The displayed image is a fixed public asset; the image formula cannot choose a
+user-supplied URL or send spreadsheet contents to an external endpoint.

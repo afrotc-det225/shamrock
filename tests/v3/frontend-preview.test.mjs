@@ -17,7 +17,7 @@ test('Attendance presentation matches uniform production dimensions and preserve
     for (let index = d.range.startIndex; index < d.range.endIndex; index++) target.set(index, d.properties.pixelSize);
   }
   assert.deepEqual(Array.from({ length: 13 }, (_, i) => columns.get(i)), [115, 115, 100, 75, 75, 75, 75, 75, 75, 75, 75, 75, 75]);
-  assert.equal(rows.get(1), 21); assert.equal(rows.get(2), 21); assert.equal(rows.get(17), 21);
+  assert.equal(rows.get(1), 30); assert.equal(rows.get(2), 30); assert.equal(rows.get(17), 30);
   const selectedStyle = (row, column) => {
     const style = {};
     for (const { repeatCell: r } of main.requests) {

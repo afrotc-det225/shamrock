@@ -18,7 +18,7 @@ import type { FrontendSnapshot } from '../../../packages/domain/src/admin.js';
 import { buildCoherentFrontendReporting } from './frontend-history-summary.js';
 import { buildExcusalPublicationTables, planExcusalPublication, planDashboardPublication, verifyDashboardPublicationReadback, dashboardReadFingerprint,
   type DashboardPublicationPlan, type DashboardPublicationRead } from './frontend-supplemental.js';
-import type { DashboardAction } from './frontend-dashboard.js';
+import { SHAMROCK_MARK_FORMULA, type DashboardAction } from './frontend-dashboard.js';
 import { createPrivateCheckpoint } from './private-checkpoint.js';
 import { freezeFrontendPhotos, inspectFrontendPhotoPhase, splitFrontendPhotos, type FrozenPhotoCell } from './frontend-photos.js';
 import type { SnapshotRevision } from '../../../packages/domain/src/admin.js';
@@ -306,8 +306,8 @@ export function assertNativeAttendanceLayoutRequest(request: Record<string, any>
       || !natural(r.startIndex) || !natural(r.endIndex) || r.endIndex <= r.startIndex) fail('frontend_request', 'Attendance size update is invalid.');
     const pixels = body.properties.pixelSize;
     const allowed = r.dimension === 'ROWS'
-      ? (r.startIndex === 1 && r.endIndex === 2 && (pixels === 21 || natural(pixels) && pixels >= 40 && pixels <= 76))
-        || (r.startIndex >= 2 && r.endIndex <= 502 && [21, 23].includes(pixels))
+      ? (r.startIndex === 1 && r.endIndex === 2 && ([21, 30].includes(pixels) || natural(pixels) && pixels >= 40 && pixels <= 76))
+        || (r.startIndex >= 2 && r.endIndex <= 502 && [21, 23, 30].includes(pixels))
       : r.dimension === 'COLUMNS' && r.endIndex <= 160 && r.endIndex === r.startIndex + 1 && [60, 75, 80, 85, 90, 95, 100, 110, 115].includes(pixels);
     if (!allowed) fail('frontend_request', 'Attendance dimension size exceeds the approved compact layout.');
     return;
@@ -885,8 +885,11 @@ export function createNativeFrontendRuntime(services: NativeFrontendServices,
           if (operation === 'updateCells') {
             if (!inRange(body.range) || body.fields !== 'userEnteredValue' || !Array.isArray(body.rows)
               || body.rows.length !== body.range.endRowIndex - (body.range.startRowIndex ?? 0)
-              || body.rows.some((row: any) => !Array.isArray(row.values) || row.values.length !== body.range.endColumnIndex - (body.range.startColumnIndex ?? 0)
-                || row.values.some((cell: any) => cell.userEnteredValue?.formulaValue && !dashboard.actions.some(a => cell.userEnteredValue.formulaValue === `=HYPERLINK("${a.url}","Open →")`)))) fail('frontend_request', 'Dashboard cell write is outside its approved bounds or links.');
+              || body.rows.some((row: any, rowOffset: number) => !Array.isArray(row.values) || row.values.length !== body.range.endColumnIndex - (body.range.startColumnIndex ?? 0)
+                || row.values.some((cell: any, columnOffset: number) => cell.userEnteredValue?.formulaValue
+                  && !(dashboardSheet === dashboard.sheetId && (body.range.startRowIndex ?? 0) + rowOffset === 0
+                    && (body.range.startColumnIndex ?? 0) + columnOffset === 11 && cell.userEnteredValue.formulaValue === SHAMROCK_MARK_FORMULA)
+                  && !dashboard.actions.some(a => cell.userEnteredValue.formulaValue === `=HYPERLINK("${a.url}","Open →")`)))) fail('frontend_request', 'Dashboard cell write is outside its approved bounds or links.');
           } else if (operation === 'updateChartSpec') {
             if (!dashboard.chartIds.includes(body.chartId) || !body.spec?.basicChart) fail('frontend_request', 'An unbound Dashboard chart update was retained.');
             const chart = body.spec.basicChart;
@@ -897,7 +900,7 @@ export function createNativeFrontendRuntime(services: NativeFrontendServices,
           } else if (operation === 'repeatCell') {
             if (!inRange(body.range) || !['userEnteredFormat.textFormat.fontFamily,userEnteredFormat.textFormat.fontSize,userEnteredFormat.wrapStrategy,userEnteredFormat.verticalAlignment', 'userEnteredFormat.textFormat.bold', 'userEnteredFormat.numberFormat'].includes(body.fields)) fail('frontend_request', 'Dashboard formatting exceeds the approved field masks.');
           } else if (operation === 'updateDimensionProperties') {
-            if (isData || body.range.dimension !== 'ROWS' || !natural(body.range.startIndex) || body.range.startIndex < 51 || !natural(body.range.endIndex) || body.range.endIndex > 602 || body.fields !== 'pixelSize' || body.properties?.pixelSize !== 48) fail('frontend_request', 'Dashboard birthday layout exceeds its bounds.');
+            if (isData || body.range.dimension !== 'ROWS' || !natural(body.range.startIndex) || body.range.startIndex < 51 || !natural(body.range.endIndex) || body.range.endIndex > 602 || body.fields !== 'pixelSize' || body.properties?.pixelSize !== 30) fail('frontend_request', 'Dashboard birthday layout exceeds its bounds.');
           } else if (operation === 'updateSheetProperties') {
             if (body.fields === 'hidden') { if (!isData || body.properties.hidden !== true) fail('frontend_request', 'Only the Dashboard data sheet may be hidden.'); }
             else if (body.fields !== 'gridProperties.rowCount,gridProperties.columnCount' || !natural(body.properties.gridProperties?.rowCount) || body.properties.gridProperties.rowCount > maxRows || body.properties.gridProperties.columnCount !== maxColumns) fail('frontend_request', 'Dashboard grid update exceeds its approved bounds.');

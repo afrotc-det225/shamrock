@@ -11,6 +11,9 @@ const WIDTHS: Record<string, number> = {
   last_name: 115, first_name: 115, as_year: 100, flight: 75, squadron: 75,
   overall_attendance_pct: 75, llab_attendance_pct: 75,
 };
+// The reference renders at 30px although its API reports a nominal 21px.
+// Pin the rendered baseline explicitly instead of relying on implicit sizing.
+export const ATTENDANCE_ROW_HEIGHT = 30;
 function validate(input: AttendanceLayoutInput): void {
   if (!Number.isSafeInteger(input.sheetId) || input.sheetId < 0 || !Number.isSafeInteger(input.dataEndRow)
     || input.dataEndRow < 3 || input.dataEndRow > 10002 || input.headers.length !== input.labels.length
@@ -47,7 +50,7 @@ function columns(input: AttendanceLayoutInput, headers: readonly string[]): Requ
 }
 function rows(input: AttendanceLayoutInput, startRow: number): Request[] {
   if (startRow >= input.dataEndRow) return [];
-  const requests = [dimension(input.sheetId, 'ROWS', startRow, input.dataEndRow, 21),
+  const requests = [dimension(input.sheetId, 'ROWS', startRow, input.dataEndRow, ATTENDANCE_ROW_HEIGHT),
     format(input, startRow, input.dataEndRow, 0, input.headers.length, {
       textFormat: { fontFamily: 'Roboto', fontSize: 10, bold: false }, verticalAlignment: 'MIDDLE', wrapStrategy: 'CLIP', horizontalAlignment: 'LEFT',
     }, 'userEnteredFormat.textFormat.fontFamily,userEnteredFormat.textFormat.fontSize,userEnteredFormat.textFormat.bold,userEnteredFormat.verticalAlignment,userEnteredFormat.wrapStrategy,userEnteredFormat.horizontalAlignment')];
@@ -72,7 +75,8 @@ export function buildAttendanceLayout(input: AttendanceLayoutInput, collapseIden
   const requests: Request[] = [{ updateSheetProperties: { properties: { sheetId: input.sheetId,
     gridProperties: { frozenRowCount: 2, frozenColumnCount: 2, hideGridlines: false } },
   fields: 'gridProperties.frozenRowCount,gridProperties.frozenColumnCount,gridProperties.hideGridlines' } },
-  dimension(input.sheetId, 'ROWS', 0, 2, 21), ...rows(input, 2), ...columns(input, input.headers),
+  dimension(input.sheetId, 'ROWS', 0, 1, 21), dimension(input.sheetId, 'ROWS', 1, 2, ATTENDANCE_ROW_HEIGHT),
+  ...rows(input, 2), ...columns(input, input.headers),
   { updateDimensionProperties: { range: { sheetId: input.sheetId, dimension: 'ROWS', startIndex: 0, endIndex: 1 },
     properties: { hiddenByUser: true }, fields: 'hiddenByUser' } }];
   if (collapseIdentityDetails) for (const header of ['as_year', 'flight', 'squadron']) {

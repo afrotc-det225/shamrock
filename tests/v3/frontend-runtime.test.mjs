@@ -394,7 +394,7 @@ test('native Attendance growth accepts exact production geometry and keeps rejec
   assert(formats.some(f => f.textFormat?.bold === true && f.horizontalAlignment === 'CENTER'));
   assert.deepEqual([...new Set(requests.filter(r => r.updateDimensionProperties?.range.dimension === 'COLUMNS').map(r => r.updateDimensionProperties.properties.pixelSize))].sort((a, b) => a - b), [75, 100, 115]);
   const row = copy(requests.find(r => r.updateDimensionProperties?.range.dimension === 'ROWS'));
-  assert.equal(row.updateDimensionProperties.properties.pixelSize, 21);
+  assert.equal(row.updateDimensionProperties.properties.pixelSize, 30);
   const header = copy(row); header.updateDimensionProperties.range.startIndex = 1; header.updateDimensionProperties.range.endIndex = 2;
   assert.doesNotThrow(() => assertNativeAttendanceLayoutRequest(header, 100));
   for (const pixels of [20, 22, 24, 500]) {

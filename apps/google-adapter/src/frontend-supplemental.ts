@@ -176,11 +176,14 @@ export function planDashboardPublication(input: {
   dashboard.attendanceByFlight.forEach((f, r) => { setSource(r + 1, 8, f.flight); setSource(r + 1, 9, f.percentage); });
   ['AS Year', 'Cadets'].forEach((v, c) => setSource(0, c + 11, v));
   dashboard.rosterByYear.forEach((year, r) => { setSource(r + 1, 11, year.asYear); setSource(r + 1, 12, year.cadets); });
+  // Focus percentage comparisons without clipping a cadet group below 80%.
+  const minimum = (values: (number | null)[]) => Math.max(0, Math.min(0.8,
+    Math.floor((Math.min(1, ...values.filter((v): v is number => v !== null)) - 0.02) * 20) / 20));
   const definitions = [
-    { title: 'Attendance by AS year', axis: 'AS Year', sourceColumn: 0, sourceEndRow: Math.max(2, dashboard.attendanceByYear.length + 1) },
-    { title: 'Attendance by term', axis: 'Term', sourceColumn: 5, sourceEndRow: Math.max(2, dashboard.termTrend.length + 1) },
-    { title: 'Current attendance by flight', axis: 'Flight', sourceColumn: 8, sourceEndRow: Math.max(2, dashboard.attendanceByFlight.length + 1) },
-    { title: 'Cadet roster by AS year', axis: 'AS Year', sourceColumn: 11, sourceEndRow: Math.max(2, dashboard.rosterByYear.length + 1) },
+    { title: 'Overall Attendance by AS Year — Current vs Historical', axis: 'AS Year', sourceColumn: 0, sourceEndRow: Math.max(2, dashboard.attendanceByYear.length + 1), percentage: true, minimum: minimum(dashboard.attendanceByYear.flatMap(y => y.terms.map(t => t.percentage))) },
+    { title: 'Wing Attendance Trend by Term', axis: 'Term', sourceColumn: 5, sourceEndRow: Math.max(2, dashboard.termTrend.length + 1), kind: 'LINE' as const, percentage: true, minimum: minimum(dashboard.termTrend.map(t => t.percentage)) },
+    { title: 'Current Overall Attendance by Flight', axis: 'Flight', sourceColumn: 8, sourceEndRow: Math.max(2, dashboard.attendanceByFlight.length + 1), percentage: true, minimum: minimum(dashboard.attendanceByFlight.map(f => f.percentage)) },
+    { title: 'Current Roster by AS Year', axis: 'AS Year', sourceColumn: 11, sourceEndRow: Math.max(2, dashboard.rosterByYear.length + 1), kind: 'BAR' as const },
   ];
   const metricValues = [dashboard.totalCadets, dashboard.gmcCadets, dashboard.pocCadets, dashboard.averageOverall, dashboard.averageLlab, dashboard.belowEighty];
   const metrics = ['Total cadets', 'GMC cadets', 'POC cadets', 'Average overall', 'Average LLAB', 'Below 80%'].map((label, i) => ({ label, value: metricValues[i] ?? 0, format: (i === 3 || i === 4 ? 'percent' : 'count') as 'percent' | 'count' }));
@@ -237,10 +240,9 @@ export function planDashboardPublication(input: {
   writeChanged(current.sheetId, current.canvas, expected.canvas); writeChanged(current.dataSheetId, current.data, expected.data);
   const baseCharts = layout.filter(r => r.addChart).map(r => r.addChart.chart.spec);
   baseCharts.forEach((spec: Record<string, any>, i: number) => {
-    if (i < 3) spec.basicChart.axis[1] = { position: 'LEFT_AXIS', title: 'Attendance', viewWindowOptions: { viewWindowMin: 0, viewWindowMax: 1 } };
     if (i === 0 && comparisons.length > 1) {
       const base = spec.basicChart.series[0]; spec.basicChart.legendPosition = 'BOTTOM_LEGEND';
-      spec.basicChart.series = comparisons.map((_t, j) => ({ ...copy(base), colorStyle: { rgbColor: [{ red: 43 / 255, green: 110 / 255, blue: 85 / 255 }, { red: 64 / 255, green: 122 / 255, blue: 179 / 255 }, { red: 184 / 255, green: 140 / 255, blue: 43 / 255 }][j] }, series: { sourceRange: { sources: [range(current.dataSheetId, 0, definitions[i].sourceEndRow, j + 1, j + 2)] } } }));
+      spec.basicChart.series = comparisons.map((_t, j) => ({ ...copy(base), colorStyle: { rgbColor: [{ red: 43 / 255, green: 110 / 255, blue: 85 / 255 }, { red: 128 / 255, green: 157 / 255, blue: 145 / 255 }, { red: 187 / 255, green: 199 / 255, blue: 193 / 255 }][j] }, series: { sourceRange: { sources: [range(current.dataSheetId, 0, definitions[i].sourceEndRow, j + 1, j + 2)] } } }));
     }
     const chart = expected.charts.find(c => c.chartId === input.chartIds[i])!;
     if (!equivalentDashboardChart(chart.spec, spec)) requests.push({ updateChartSpec: { chartId: chart.chartId, spec } }); chart.spec = spec;
@@ -248,7 +250,7 @@ export function planDashboardPublication(input: {
   requests.push({ repeatCell: { range: range(current.sheetId, 49, expected.canvas.length, 0, 5), cell: { userEnteredFormat: { textFormat: { fontFamily: 'Roboto', fontSize: 10 }, wrapStrategy: 'WRAP', verticalAlignment: 'MIDDLE' } }, fields: 'userEnteredFormat.textFormat.fontFamily,userEnteredFormat.textFormat.fontSize,userEnteredFormat.wrapStrategy,userEnteredFormat.verticalAlignment' } },
     { repeatCell: { range: range(current.sheetId, 49, 51, 0, 5), cell: { userEnteredFormat: { textFormat: { bold: true } } }, fields: 'userEnteredFormat.textFormat.bold' } },
     { repeatCell: { range: range(current.sheetId, 51, expected.canvas.length, 2, 3), cell: { userEnteredFormat: { numberFormat: { type: 'DATE', pattern: 'M/d' } } }, fields: 'userEnteredFormat.numberFormat' } },
-    { updateDimensionProperties: { range: { sheetId: current.sheetId, dimension: 'ROWS', startIndex: 51, endIndex: expected.canvas.length }, properties: { pixelSize: 48 }, fields: 'pixelSize' } });
+    { updateDimensionProperties: { range: { sheetId: current.sheetId, dimension: 'ROWS', startIndex: 51, endIndex: expected.canvas.length }, properties: { pixelSize: 30 }, fields: 'pixelSize' } });
   for (const [left, right] of [[1, Math.max(2, comparisons.length + 1)], [6, 7], [9, 10]]) requests.push({ repeatCell: { range: range(current.dataSheetId, 1, expected.data.length, left, right), cell: { userEnteredFormat: { numberFormat: { type: 'PERCENT', pattern: '0.0%' } } }, fields: 'userEnteredFormat.numberFormat' } });
   if (!current.dataHidden) requests.push({ updateSheetProperties: { properties: { sheetId: current.dataSheetId, hidden: true }, fields: 'hidden' } }); expected.dataHidden = true;
   if (requests.length > 1000 || JSON.stringify({ requests }).length * 3 > 1_800_000) fail('Dashboard publication exceeds the conservative atomic request budget.');

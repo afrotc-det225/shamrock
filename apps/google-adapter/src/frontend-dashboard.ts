@@ -4,7 +4,13 @@ export interface DashboardAction { label: string; url: string }
 export interface DashboardMetric { label: string; value: number; format?: 'count' | 'percent' }
 export interface DashboardChart {
   title: string; axis: string; sourceColumn: number; sourceEndRow: number;
+  kind?: 'COLUMN' | 'LINE' | 'BAR';
+  percentage?: boolean;
+  minimum?: number;
 }
+/** Official plain shamrock artwork, without the ND monogram. */
+export const SHAMROCK_MARK_URL = 'https://onmessage.nd.edu/assets/189127/300x/shamrock_1.jpg';
+export const SHAMROCK_MARK_FORMULA = `=IMAGE("${SHAMROCK_MARK_URL}",4,36,36)`;
 export interface DashboardInput {
   sheetId: number; dataSheetId: number;
   actions: DashboardAction[]; metrics: DashboardMetric[]; charts: DashboardChart[];
@@ -42,6 +48,8 @@ export function buildFrontendDashboard(input: DashboardInput): Request[] {
     text(c.title); text(c.axis);
     if (!Number.isSafeInteger(c.sourceColumn) || c.sourceColumn < 0 || c.sourceColumn > 24
       || !Number.isSafeInteger(c.sourceEndRow) || c.sourceEndRow < 2 || c.sourceEndRow > 1002) throw Error('Invalid Dashboard chart source.');
+    if (c.kind !== undefined && !['COLUMN', 'LINE', 'BAR'].includes(c.kind)
+      || c.minimum !== undefined && (!c.percentage || !Number.isFinite(c.minimum) || c.minimum < 0 || c.minimum >= 1)) throw Error('Invalid Dashboard chart scale.');
   });
   const { sheetId: d, dataSheetId: source } = input, requests: Request[] = [];
   const format = (range: ReturnType<typeof r>, style: Record<string, unknown>) => {
@@ -57,13 +65,17 @@ export function buildFrontendDashboard(input: DashboardInput): Request[] {
     range: { sheetId: d, dimension: 'ROWS', startIndex, endIndex }, properties: { pixelSize }, fields: 'pixelSize' } });
   format(r(d, 0, 70, 0, 12), { backgroundColor: rgb(C.canvas), verticalAlignment: 'MIDDLE',
     textFormat: { fontSize: 10, foregroundColor: rgb(C.text) } });
-  // 740px canvas: the two chart columns and all six cards fit an ordinary
-  // laptop/browser pane at 100% zoom without horizontal scrolling.
-  [90, 90, 50, 90, 60, 10, 70, 46, 47, 47, 70, 70].forEach((pixelSize, startIndex) => requests.push({ updateDimensionProperties: {
+  // Match the production canvas: wide enough for horizontal AS-year labels,
+  // term comparisons and readable metric cards at the normal Sheets zoom.
+  [115, 115, 90, 190, 70, 18, 95, 95, 95, 120, 95, 95].forEach((pixelSize, startIndex) => requests.push({ updateDimensionProperties: {
     range: { sheetId: d, dimension: 'COLUMNS', startIndex, endIndex: startIndex + 1 }, properties: { pixelSize }, fields: 'pixelSize' } }));
-  height(0, 1, 40); height(1, 2, 28); height(2, 8, 29); height(9, 48, 22);
-  merge(0, 1, 0, 12); write(0, 0, 'SHAMROCK Dashboard');
+  height(0, 1, 44); height(1, 2, 26); height(2, 8, 28); height(8, 9, 10); height(9, 48, 22);
+  merge(0, 1, 0, 11); write(0, 0, 'SHAMROCK Dashboard');
   format(r(d, 0, 1, 0, 12), { backgroundColor: rgb(C.dark), textFormat: { fontSize: 20, bold: true, foregroundColor: rgb('#FFFFFF') } });
+  write(0, 11, SHAMROCK_MARK_FORMULA, true);
+  format(r(d, 0, 1, 11, 12), { backgroundColor: rgb('#FFFFFF'), horizontalAlignment: 'CENTER' });
+  const border = (range: ReturnType<typeof r>) => requests.push({ updateBorders: { range,
+    ...Object.fromEntries(['top', 'bottom', 'left', 'right'].map(side => [side, { style: 'SOLID', colorStyle: { rgbColor: rgb('#D5DEDA') } }])) } });
   const section = (row: number, col: number, right: number, title: string) => {
     merge(row, row + 1, col, right); write(row, col, title);
     format(r(d, row, row + 1, col, right), { backgroundColor: rgb('#DFE9E4'), textFormat: { bold: true, fontSize: 11, foregroundColor: rgb(C.dark) } });
@@ -73,6 +85,8 @@ export function buildFrontendDashboard(input: DashboardInput): Request[] {
     merge(i + 2, i + 3, 0, 2); merge(i + 2, i + 3, 2, 4);
     write(i + 2, 0, action.label); write(i + 2, 2, `=HYPERLINK("${action.url}","Open →")`, true);
     format(r(d, i + 2, i + 3, 0, 4), { backgroundColor: rgb('#FFFFFF'), textFormat: { bold: true, foregroundColor: rgb(C.dark) } });
+    format(r(d, i + 2, i + 3, 2, 4), { backgroundColor: rgb('#EDF3F0'), horizontalAlignment: 'CENTER' });
+    border(r(d, i + 2, i + 3, 0, 4));
   });
   input.metrics.forEach((metric, i) => {
     const row = i < 3 ? 2 : 5, col = [4, 7, 10][i % 3], right = [7, 10, 12][i % 3];
@@ -82,14 +96,19 @@ export function buildFrontendDashboard(input: DashboardInput): Request[] {
     format(r(d, row, row + 1, col, right), { textFormat: { bold: true, foregroundColor: rgb('#53635C') } });
     format(r(d, row + 1, row + 3, col, right), { textFormat: { fontSize: 20, bold: true, foregroundColor: rgb(C.dark) },
       numberFormat: metric.format === 'percent' ? { type: 'PERCENT', pattern: '0.0%' } : { type: 'NUMBER', pattern: '0' } });
+    border(r(d, row, row + 3, col, right));
   });
   input.charts.forEach((chart, i) => requests.push({ addChart: { chart: {
     spec: { title: chart.title, fontName: 'Roboto', backgroundColor: rgb('#FFFFFF'), hiddenDimensionStrategy: 'SHOW_ALL',
-      titleTextFormat: { fontSize: 12, bold: true, foregroundColor: rgb(C.dark) }, basicChart: { chartType: 'COLUMN', legendPosition: 'NO_LEGEND', headerCount: 1,
-        axis: [{ position: 'BOTTOM_AXIS', title: chart.axis }, { position: 'LEFT_AXIS', title: 'Count', viewWindowOptions: { viewWindowMin: 0 } }],
+      titleTextFormat: { fontSize: 12, bold: true, foregroundColor: rgb(C.dark) }, basicChart: { chartType: chart.kind ?? 'COLUMN', legendPosition: 'NO_LEGEND', headerCount: 1,
+        axis: [{ position: chart.kind === 'BAR' ? 'LEFT_AXIS' : 'BOTTOM_AXIS', title: '' },
+          { position: chart.kind === 'BAR' ? 'BOTTOM_AXIS' : 'LEFT_AXIS', title: '', viewWindowOptions: {
+            viewWindowMin: chart.percentage ? chart.minimum ?? 0 : 0,
+            ...(chart.percentage ? { viewWindowMax: 1, viewWindowMode: 'EXPLICIT' } : {}) } }],
         domains: [{ domain: { sourceRange: { sources: [r(source, 0, chart.sourceEndRow, chart.sourceColumn, chart.sourceColumn + 1)] } } }],
-        series: [{ series: { sourceRange: { sources: [r(source, 0, chart.sourceEndRow, chart.sourceColumn + 1, chart.sourceColumn + 2)] } }, targetAxis: 'LEFT_AXIS', colorStyle: { rgbColor: rgb(C.green) } }] } },
-    position: { overlayPosition: { anchorCell: { sheetId: d, rowIndex: i < 2 ? 9 : 22, columnIndex: i % 2 ? 6 : 0 }, widthPixels: 350, heightPixels: 245 } },
+        series: [{ series: { sourceRange: { sources: [r(source, 0, chart.sourceEndRow, chart.sourceColumn + 1, chart.sourceColumn + 2)] } }, targetAxis: chart.kind === 'BAR' ? 'BOTTOM_AXIS' : 'LEFT_AXIS',
+          ...(chart.kind === 'LINE' ? { lineStyle: { width: 3 }, pointStyle: { shape: 'CIRCLE', size: 6 } } : {}), colorStyle: { rgbColor: rgb(C.green) } }] } },
+    position: { overlayPosition: { anchorCell: { sheetId: d, rowIndex: i < 2 ? 9 : 22, columnIndex: i % 2 ? 6 : 0 }, widthPixels: 560, heightPixels: 280 } },
   } } }));
   section(36, 0, 5, 'Using SHAMROCK'); section(36, 6, 12, 'Attendance codes');
   merge(37, 42, 0, 5);
@@ -103,4 +122,25 @@ export function buildFrontendDashboard(input: DashboardInput): Request[] {
     write(37 + i, 6, code); write(37 + i, 8, label);
   });
   return requests;
+}
+
+/** Explicit paused presentation repair. Keep the four existing chart IDs and
+ * all managed values; the normal publication planner refreshes their contents.
+ * Caller must verify the workbook fence and re-read the exact source first. */
+export function buildDashboardLayoutRepair(input: DashboardInput, current: {
+  merges: { sheetId: number; startRowIndex: number; endRowIndex: number; startColumnIndex: number; endColumnIndex: number }[];
+  chartIds: readonly number[];
+}): Request[] {
+  if (current.chartIds.length !== 4 || new Set(current.chartIds).size !== 4
+    || current.chartIds.some(id => !Number.isSafeInteger(id) || id < 0)) throw Error('Invalid Dashboard chart identities.');
+  const managed = current.merges.filter(m => m.startRowIndex < 47);
+  if (managed.some(m => m.sheetId !== input.sheetId || m.endRowIndex > 47 || m.startColumnIndex < 0 || m.endColumnIndex > 12)) throw Error('A merge crosses the Dashboard layout boundary.');
+  const layout = buildFrontendDashboard(input) as Record<string, any>[];
+  let chart = 0;
+  return [
+    ...managed.map(range => ({ unmergeCells: { range } })),
+    ...layout.flatMap(request => request.addChart ? [{ updateEmbeddedObjectPosition: {
+      objectId: current.chartIds[chart++], newPosition: request.addChart.chart.position, fields: 'overlayPosition',
+    } }] : request.updateCells ? [] : [request]),
+  ];
 }
