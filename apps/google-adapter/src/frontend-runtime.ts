@@ -7,6 +7,7 @@ import type {ScheduledHints} from './scheduled-runtime.js';
 import { AdapterError, type AdapterConfig, type SignedRequest, type Signer, type Transport } from './index.js';
 import { createGoogleSigner, createGoogleTransport, type ScriptLockPort, type UtilitiesPort } from './apps-script.js';
 import {createPagedFrontendTransport} from './frontend-page-client.js';
+import { parseReviewedRetainedHistory, type ReviewedRetainedHistory } from '../../../packages/domain/src/retained-history-summary.js';
 import { HOST_PROPERTIES, parseStagingHostConfig, stagingTransportSpreadsheetIds } from './staging-host.js';
 import { CONFIG_FILE_ID_PROPERTY } from './staging-config.js';
 import { planFrontendProtections, verifyFrontendProtections, type FrontendProtectionAccess, type FrontendProtectionInput } from './frontend-protections.js';
@@ -555,7 +556,7 @@ export interface NativeFrontendConfig {
   seeds: { key: string; sheetId: number; rowIndex: number; columnIndex: number; nativeStyleVersion: string; expectedRule: unknown }[];
   supplemental?: { enabled: false } | {
     enabled: true;
-    dashboard: { sheetId: number; dataSheetId: number; chartIds: number[]; actions: DashboardAction[] };
+    dashboard: { sheetId: number; dataSheetId: number; chartIds: number[]; actions: DashboardAction[]; reviewedRetainedHistory?: ReviewedRetainedHistory };
     excusals: { spreadsheetId: string; expectedTitle: string; allowedFileEditors: string[]; access: FrontendProtectionAccess;
       sheets: Record<SquadronQueue, { sheetId: number; tableId: string; squadronId: string }>;
       seeds: NativeFrontendConfig['seeds']; };
@@ -659,6 +660,7 @@ export function createNativeFrontendRuntime(services: NativeFrontendServices,
     if (f.supplemental !== undefined && typeof f.supplemental?.enabled !== 'boolean') fail('frontend_configuration', 'Supplemental publication requires an explicit gate.');
     if (f.supplemental?.enabled) {
       const { dashboard: d, excusals: e } = f.supplemental;
+      if (d?.reviewedRetainedHistory !== undefined) parseReviewedRetainedHistory(d.reviewedRetainedHistory);
       if (!d || !natural(d.sheetId) || !natural(d.dataSheetId) || new Set([d.sheetId, d.dataSheetId, ...KINDS.map(k => f.main.sheets[k].sheetId)]).size !== 5
         || !Array.isArray(d.chartIds) || d.chartIds.length !== 4 || new Set(d.chartIds).size !== 4 || d.chartIds.some(v => !natural(v))
         || !Array.isArray(d.actions) || d.actions.length > 6 || !e || typeof e.expectedTitle !== 'string' || e.expectedTitle.length > 200 || !/staging/i.test(e.expectedTitle)
@@ -964,7 +966,7 @@ export function createNativeFrontendRuntime(services: NativeFrontendServices,
     const runtime: FrontendRefreshPorts = {
       config: { baseUrl: host.workerOrigin, keyId: host.keyId, environment: 'staging', generation: host.generation }, workerId: config.workerId, principalId: config.principalId,
       recovery: config.leaseRecovery,
-      signer, transport: createPagedFrontendTransport(createGoogleTransport(services.UrlFetchApp), {environment:'staging',generation:config.generation,baseUrl:host.workerOrigin,keyId:host.keyId},signer,now), lock: services.LockService.getScriptLock(), nowSeconds: now,
+      signer, transport: createPagedFrontendTransport(createGoogleTransport(services.UrlFetchApp), {environment:'staging',generation:config.generation,baseUrl:host.workerOrigin,keyId:host.keyId},signer,now,supplemental?.dashboard.reviewedRetainedHistory), lock: services.LockService.getScriptLock(), nowSeconds: now,
       enabled: () => config.enabled && properties.getProperty(FRONTEND_PROPERTIES.pause) !== 'true',
       assertIsolation() {
         if (account() !== host.expectedAutomationEmail) fail('frontend_identity', 'Frontend execution identity changed.');

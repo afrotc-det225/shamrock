@@ -280,6 +280,9 @@ test('native frontend has its own explicit gate and can run while legacy Form in
   assert.equal(props.SHAMROCK_V3_ENABLED, 'false');
   props.SHAMROCK_V3_FRONTEND_CONFIG = JSON.stringify({ ...frontend, enabled: true, supplemental: { enabled: true } });
   assert.throws(() => native.refresh(), e => e.code === 'frontend_configuration'); assert.equal(calls, 1, 'Incomplete full-mode bindings fail before Google writes or reads');
+  props.SHAMROCK_V3_FRONTEND_CONFIG = JSON.stringify({ ...frontend, enabled: true, supplemental: { enabled: true, dashboard: { reviewedRetainedHistory: { version: 1, terms: [] } } } });
+  assert.throws(() => native.refresh(), /INVALID_RETAINED_HISTORY_SUMMARY/);
+  assert.equal(calls, 1, 'Malformed retained selections fail at configuration load before provider access');
 });
 
 test('coherent model uses authoritative sparse pair versions and never invents missing roster eligibility', () => {

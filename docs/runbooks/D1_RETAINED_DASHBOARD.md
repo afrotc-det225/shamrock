@@ -50,7 +50,7 @@ preserves the reviewed term-array order. The paged transport calls the same
 parser with the configured signer's SHA-256 function before using the selection.
 Changing a source, label, order or review ID requires a new digest and review.
 
-The native runtime must validate the optional field and pass it as the fifth
+The native runtime validates the optional field and passes it as the fifth
 argument to `createPagedFrontendTransport`. This module is not an automatic
 provider configuration migration. Deploy the Worker endpoint and adapter
 integration, add the reviewed private selection, and verify a full staging
