@@ -302,3 +302,8 @@ The actual administrator remains the audit actor throughout. Local tests cover
 real backend full/scoped transfers, wrong-entry tokens, revocation, pending entry,
 interrupted entry/exit retries and delayed-entry cancellation. They do not prove
 hosted CPU or another cadet's Google sign-in.
+
+The Cadets table and View as selector use the same seniority, last-name,
+first-name ordering as the spreadsheet Directory. Leadership keeps its separate
+cadre, operational-role and rank ordering. Sorting is local to the displayed
+list and never changes stable record IDs, snapshot paging or authorization.

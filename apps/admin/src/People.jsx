@@ -12,6 +12,7 @@ import {
   FlightLabel,
 } from "./components";
 import { name, label, years, statuses, profileFields } from "./api";
+import { compareCadetsForDisplay, compareLeadershipForDisplay } from "../../../packages/domain/src/cadet-display-order";
 export default function People({
   snapshot: s,
   propose,
@@ -74,7 +75,7 @@ export default function People({
       `${name(p)} ${p.email} ${p.role}`
         .toLowerCase()
         .includes(query.toLowerCase()),
-  );
+  ).sort(leadership ? compareLeadershipForDisplay : compareCadetsForDisplay);
   const basic = leadership
     ? ["firstName", "lastName", "rank", "role", "email", "cellPhone"]
     : [
