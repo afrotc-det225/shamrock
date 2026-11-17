@@ -37,7 +37,7 @@ test("API quota failure is unavailable until next UTC reset without provider det
   assert.equal(response.headers.get("retry-after"), "43200");
   assert.deepEqual(await response.json(), { error: {
     code: "SERVICE_LIMIT_REACHED",
-    message: "SHAMROCK has reached today's service limit. Please try again after midnight UTC.",
+    message: "SHAMROCK's database has reached its daily limit. Please try again after midnight UTC.",
   } });
   assert.equal(dailyLimitResponse(quotaError(), url, atNoon + 43199999).headers.get("retry-after"), "1");
   assert.equal(dailyLimitResponse(quotaError(), url, atNoon + 43200000).headers.get("retry-after"), "86400");

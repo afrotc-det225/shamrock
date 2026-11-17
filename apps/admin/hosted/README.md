@@ -149,6 +149,13 @@ reset; do not upgrade billing or rotate working OAuth credentials to bypass this
 limit. An ordinary SQL, token-exchange or identity error is not classified as a
 daily limit. Free-tier exhaustion prevents authenticating and reading records;
 health/static-page success alone cannot establish that sign-in is working.
+Workers request allowance and D1 row-read/write allowance are separate. This
+sign-in flow uses D1 for its request limit, OAuth state, authorized identity
+binding and session, so unused Workers requests do not make sign-in available
+when D1 rejects the required operations. Do not skip identity or session checks
+to work around a database limit. A constant `SELECT 1` can report zero rows read;
+even a successful small table read does not establish that the complete OAuth
+state and session flow has recovered.
 The panel pauses automatic and focus-triggered refreshes until the bounded
 `Retry-After` delay or the next UTC reset, and shows that time in the user's locale.
 

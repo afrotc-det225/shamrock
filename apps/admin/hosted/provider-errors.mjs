@@ -27,6 +27,6 @@ export function dailyLimitResponse(error, url, now = Date.now()) {
   }
   return Response.json({ error: {
     code: "SERVICE_LIMIT_REACHED",
-    message: "SHAMROCK has reached today's service limit. Please try again after midnight UTC.",
+    message: "SHAMROCK's database has reached its daily limit. Please try again after midnight UTC.",
   } }, { status: 503, headers });
 }

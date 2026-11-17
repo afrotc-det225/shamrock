@@ -68,7 +68,7 @@ function App() {
     const reset = new Date(); reset.setUTCHours(24, 0, 0, 0);
     capacityRetryAt.current = error.retryAfterSeconds
       ? Date.now() + error.retryAfterSeconds * 1000 : reset.getTime();
-    setSync("Daily service limit reached. Automatic updates will resume after the allowance resets.");
+    setSync("Database daily limit reached. Automatic updates will resume after the allowance resets.");
     return true;
   };
   live.current = { busy, proposal, data, preview, page };
@@ -266,7 +266,7 @@ function App() {
     const resetTime = new Intl.DateTimeFormat(undefined, {hour:"numeric",minute:"2-digit",timeZoneName:"short"}).format(reset);
     const message =
       code === "SERVICE_LIMIT_REACHED"
-        ? `SHAMROCK has reached today's free service limit. Please try again after ${resetTime}.`
+        ? `SHAMROCK's database has reached its daily limit. Please try signing in again after ${resetTime}.`
         : code === "ACCESS_NOT_GRANTED"
         ? "This account does not have SHAMROCK access. Contact your administrator."
         : code === "SIGN_IN_LIMIT"
