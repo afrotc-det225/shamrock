@@ -195,6 +195,30 @@ test('cheap authority matches manifest scope/revision, omits counts and rejects 
     await assert.rejects(panelReadAuthority({...f.env,DB:racing},identity),{code:'SNAPSHOT_CHANGED'});
 });
 
+test('selected panel manifests count only requested scopes and keep authority and native full contracts', async t => {
+    const f = await fixture(t); await f.request('cadet', 'visible-request'); await f.request('other', 'hidden-request');
+    const full = await panelSnapshotPage(f.env, base('flight'));
+    const selected = await panelSnapshotPage(f.env, { ...base('flight'), sections: ['events', 'people'] });
+    assert.deepEqual(selected, { ...full, sections: full.sections.filter(s => ['people', 'events'].includes(s.section)), partial: true });
+    assert.deepEqual(await panelSnapshotPage(f.env, { ...base('flight'), sections: [...PANEL_SECTIONS].reverse() }), full);
+    let statements = 0;
+    const DB = { prepare: sql => f.db.prepare(sql), batch: async batch => { statements += batch.length; return f.db.batch(batch); } };
+    const empty = await panelSnapshotPage({ ...f.env, DB }, { ...base('flight'), sections: [] });
+    assert.deepEqual(empty, { ...full, sections: [], partial: true }); assert.equal(statements, 18, 'no count statement for access-only state');
+    assert.throws(() => assemblePanelSnapshotPages(selected, [], { ...selected, section: 'verify', verified: true }), /INVALID_PANEL_PAGE_SEQUENCE/);
+    for (const sections of [null, 'events', ['events', 'events'], ['contacts'], ['events', {}]]) {
+        assert.equal((await f.send({ ...base('flight'), sections })).status, 400);
+    }
+    assert.equal((await f.send({ ...base('flight'), section: 'verify', revision: full.revision, sections: [] })).status, 400);
+    assert.equal((await f.send({ ...base('cadet'), sections: [] })).status, 403, 'empty selection does not establish authority');
+    let batches = 0;
+    const racing = { prepare: sql => f.db.prepare(sql), batch: async batch => {
+        if (++batches === 2) await f.db.prepare("UPDATE principals SET active=0 WHERE principal_id='flight'").run();
+        return f.db.batch(batch);
+    } };
+    await assert.rejects(panelSnapshotPage({ ...f.env, DB: racing }, { ...base('flight'), sections: [] }), { code: 'SNAPSHOT_CHANGED' });
+});
+
 test('request-only Squadron manifest reuses transaction scopes while counts match every paged section', async t => {
     const f=await fixture(t);
     for(let i=0;i<24;i++)await f.request('cadet',`retained-${String(i).padStart(2,'0')}`);

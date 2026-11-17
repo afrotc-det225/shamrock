@@ -27,7 +27,7 @@ try {
   const host = Object.create(HostedBackend.prototype);
   host.identity = () => local.backend.identity();
   host.post = (path, body) => local.backend.post(path, body);
-  await page.route("**/api/state", async (route) => {
+  await page.route("**/api/state*", async (route) => {
     stateReads++;
     const response = await route.fetch(),
       data = await response.json();
@@ -70,7 +70,7 @@ try {
   assert.equal(initialPageReads,4,"Events opens without loading attendance, roster or Directory");
   assert.deepEqual(requestedSections.slice().sort(),["events","manifest","terms","verify"]);
   const beforeEdit = await service.snapshot();
-  const refreshed = page.waitForResponse((r) => r.url().endsWith("/api/state"));
+  const refreshed = page.waitForResponse((r) => r.url().split("?")[0].endsWith("/api/state"));
   await page.clock.fastForward(61000);
   await refreshed;
   assert.equal(

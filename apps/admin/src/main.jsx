@@ -109,7 +109,7 @@ function App() {
     const controller = new AbortController();
     pendingAbort.current = controller;
     setReadProgress({stage: "Checking access"});
-    profile ||= live.current.page === "History" ? "access" : live.current.page === "Events" ? "events" : "full";
+    profile ||= ["History", "Assistant"].includes(live.current.page) ? "access" : live.current.page === "Events" ? "events" : "full";
     const task = api("/state", undefined, {profile, signal: controller.signal, onProgress: value => {
       if (!controller.signal.aborted && pendingAbort.current === controller) setReadProgress(value);
     }}).then((value) => {
@@ -257,8 +257,8 @@ function App() {
     setPage(value);
     setError("");
     setNotice("");
-    if (!data?.snapshot && (value !== "History" || !data))
-      void run(() => reload(true, value === "Events" ? "events" : value === "History" ? "access" : "full"));
+    if (!data?.snapshot && (!["History", "Assistant"].includes(value) || !data))
+      void run(() => reload(true, value === "Events" ? "events" : ["History", "Assistant"].includes(value) ? "access" : "full"));
   };
   const cancelRead = () => {
     readIntent.current++;
@@ -430,7 +430,7 @@ function App() {
               </div>
             )}
             {blockedPreview ? <div><p>{viewAsStatus[preview.status] || "This account cannot be previewed."}</p>
-              {preview.status === "starting" && <button disabled={busy} onClick={()=>viewAs({personId:preview.personId})}>Retry view</button>}</div> : !data || (!data.snapshot && page !== "History" && !(page === "Events" && data.eventsList)) ? (
+              {preview.status === "starting" && <button disabled={busy} onClick={()=>viewAs({personId:preview.personId})}>Retry view</button>}</div> : !data || (!data.snapshot && !["History", "Assistant"].includes(page) && !(page === "Events" && data.eventsList)) ? (
               <section className="loading-panel" aria-busy={!error}>
                 {error ? (
                   <button

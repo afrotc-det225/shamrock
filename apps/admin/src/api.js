@@ -6,7 +6,8 @@ let retainedEvents;
 let retainedState;
 export async function api(path, body, options = {}) {
   const previous = path === "/state" ? retainedState : null;
-  const response = await fetch(`/api${path}`, {
+  const profile = options.profile || "full";
+  const response = await fetch(`/api${path}${path === "/state" ? `?profile=${encodeURIComponent(profile)}` : ""}`, {
     method: body === undefined ? "GET" : "POST",
     headers: {
       ...(body === undefined ? {} : { "content-type": "application/json", "x-shamrock-csrf": csrf || "" }),
@@ -47,9 +48,12 @@ export async function api(path, body, options = {}) {
     }
     if (data.transport === "paged-v1") {
       retainedState = data;
-      const key = JSON.stringify([data.captureKey, data.manifest, data.viewAsRevision]);
+      // Section counts differ between lightweight state and a complete capture.
+      // Cache identity is the authenticated capture, authority, scope and revision.
+      const key = JSON.stringify([data.captureKey, data.manifest.environment, data.manifest.generation,
+        data.manifest.revision, data.manifest.access, data.manifest.scope, data.viewAsRevision]);
       if (options.profile === "access" && data.manifest.access.capabilities.fullSnapshot) return data;
-      if (options.profile === "events" && data.manifest.access.capabilities.fullSnapshot && retainedCapture?.key !== key) {
+      if (options.profile === "events" && !data.viewAs && data.manifest.access.capabilities.fullSnapshot && retainedCapture?.key !== key) {
         data.eventsList = retainedEvents?.key === key ? retainedEvents.eventsList :
           await loadEventsList(data, (nextPath,nextBody)=>api(nextPath,nextBody,{signal:options.signal}),options.onProgress);
         options.signal?.throwIfAborted();

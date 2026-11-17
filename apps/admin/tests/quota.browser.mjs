@@ -22,7 +22,7 @@ try {
  await page.screenshot({path:'/tmp/shamrock-signin-limit-mobile.png',animations:'disabled'});
  await page.unroute('**/api/session');
  let reads=0;
- await page.route('**/api/state',async r=>{reads++;if(reads===1){await r.continue();return;}await r.fulfill({status:503,headers:{'Retry-After':'3600'},json:{error:{code:'SERVICE_LIMIT_REACHED',message:'Daily allowance exhausted.'}}});});
+ await page.route('**/api/state*',async r=>{reads++;if(reads===1){await r.continue();return;}await r.fulfill({status:503,headers:{'Retry-After':'3600'},json:{error:{code:'SERVICE_LIMIT_REACHED',message:'Daily allowance exhausted.'}}});});
  await page.goto(`http://127.0.0.1:${server.address().port}/`);
  await page.getByRole('button',{name:'Add event',exact:true}).waitFor({timeout:10000});
  await page.clock.fastForward(61000);
@@ -40,10 +40,10 @@ try {
  assert.equal(reads,3,'automatic refresh resumes when Retry-After expires');
  assert.deepEqual(errors,[]);
  // First-load outage keeps successful authentication and recovers without another session request.
- await page.unroute('**/api/state');
+ await page.unroute('**/api/state*');
  let sessions=0,unavailable=true,initialReads=0;
  await page.route('**/api/session',async route=>{sessions++;await route.continue();});
- await page.route('**/api/state',async route=>{initialReads++;if(!unavailable)return route.continue();await route.fulfill({status:503,headers:{'Retry-After':'60'},json:{error:{code:'SERVICE_LIMIT_REACHED',message:'Daily allowance exhausted.'}}});});
+ await page.route('**/api/state*',async route=>{initialReads++;if(!unavailable)return route.continue();await route.fulfill({status:503,headers:{'Retry-After':'60'},json:{error:{code:'SERVICE_LIMIT_REACHED',message:'Daily allowance exhausted.'}}});});
  await page.reload();
  await page.getByRole('heading',{name:"You're signed in",exact:true}).waitFor({timeout:10000});
  assert.equal(sessions,1);assert.equal(initialReads,1);

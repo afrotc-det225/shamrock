@@ -35,16 +35,19 @@ export async function loadEventsList(state, request, progress = (_value) => {}) 
   check(state.manifest.access.capabilities.fullSnapshot);
   let transfer = state.manifest.viewRevision ?? null;
   const get = async (section, offset, revision, viewRevision = transfer) => {
-    const page = await request("/page", {surface:"full",section,offset,revision,accessRevision:state.manifest.revision,...(state.viewAs ? {viewRevision} : {})});
+    const page = await request("/page", {surface:"full",section,offset,revision,accessRevision:state.manifest.revision,
+      ...(section === "manifest" && !state.viewAs ? {sections:["terms","events"]} : {}), ...(state.viewAs ? {viewRevision} : {})});
     check(new TextEncoder().encode(JSON.stringify(page)).length <= FRONTEND_PAGE_MAX_BYTES);
     check(page.contractVersion === "frontend-pages-v1" && page.section === section &&
       (revision === null || same(page.revision, revision)));
     return page;
   };
-  const manifest = state.snapshotManifest || await get("manifest",0,null,null);
+  const selected = state.viewAs ? FRONTEND_SECTIONS : ["terms", "events"];
+  const manifest = state.snapshotManifest?.sections?.length === selected.length
+    ? state.snapshotManifest : await get("manifest",0,null,null);
   transfer = manifest.viewRevision ?? null;
-  check(Array.isArray(manifest.sections) && manifest.sections.length === FRONTEND_SECTIONS.length &&
-    manifest.sections.every((entry,index)=>entry.section===FRONTEND_SECTIONS[index] &&
+  check(Array.isArray(manifest.sections) && manifest.sections.length === selected.length &&
+    manifest.sections.every((entry,index)=>entry.section===selected[index] &&
       Number.isSafeInteger(entry.count) && entry.count >= 0 && entry.count <= FRONTEND_SECTION_BOUNDS[entry.section]));
   const read = async section => {
     const count=manifest.sections.find(entry=>entry.section===section).count, rows=[];
@@ -199,7 +202,9 @@ export async function loadSnapshot(state, request, progress = (_value) => {}) {
     );
     return page;
   };
-  const manifest = full ? state.snapshotManifest || await get("manifest", 0, null, null) : panel;
+  const manifest = full ? state.snapshotManifest?.sections?.length === FRONTEND_SECTIONS.length
+    ? state.snapshotManifest : await get("manifest", 0, null, null)
+    : panel.sections?.length === PANEL_SECTIONS.length ? panel : await get("manifest", 0, null, null);
   transfer = manifest.viewRevision ?? null;
   const sections = full ? FRONTEND_SECTIONS : PANEL_SECTIONS;
   check(Array.isArray(manifest.sections) && manifest.sections.length === sections.length &&

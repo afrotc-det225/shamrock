@@ -25,7 +25,11 @@ function proxy(backend) {
 test("Events list uses four bounded pages, never reads rosters, and stays distinct from a full snapshot", async t => {
   const local=await createLocalBackend();t.after(()=>local.dispose());
   const host=proxy(local.backend),manifest=await host.panelManifest(),calls=[];
-  const list=await loadEventsList({manifest},async(_path,body)=>{calls.push(body.section);return host.page(body);});
+  const list=await loadEventsList({manifest},async(_path,body)=>{
+    calls.push(body.section);
+    if(body.section==='manifest')assert.deepEqual(body.sections,['terms','events'],'Events requests counts only for its list sections');
+    return host.page(body);
+  });
   assert.equal(list.contractVersion,"events-list-v1");
   assert.equal(list.people,undefined);assert.equal(list.observations,undefined);
   assert.equal(list.events[0].eligiblePersonIds,undefined);

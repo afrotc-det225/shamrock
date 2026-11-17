@@ -71,8 +71,14 @@ function queries() {
 export async function panelSnapshotPage(env: Env, input: unknown, authorityOnly = false): Promise<PanelPage> {
     if (!input || typeof input !== 'object' || Array.isArray(input)) fail(400, 'INVALID_PANEL_REQUEST');
     const req = input as Row;
-    if (Object.keys(req).sort().join(',') !== 'environment,generation,offset,principalId,revision,section' || !identifier(req.principalId)
+    const selected = Object.hasOwn(req, 'sections');
+    if (Object.keys(req).sort().join(',') !== `environment,generation,offset,principalId,revision,section${selected ? ',sections' : ''}` || !identifier(req.principalId)
         || !['manifest', 'verify', ...PANEL_SECTIONS].includes(String(req.section)) || !Number.isSafeInteger(req.offset) || Number(req.offset) < 0) fail(400, 'INVALID_PANEL_REQUEST');
+    if (selected && (authorityOnly || req.section !== 'manifest' || !Array.isArray(req.sections)
+        || req.sections.length > PANEL_SECTIONS.length || new Set(req.sections).size !== req.sections.length
+        || req.sections.some(s => !PANEL_SECTIONS.includes(s as PanelSection)))) fail(400, 'INVALID_PANEL_REQUEST');
+    const selectedSections = selected ? PANEL_SECTIONS.filter(s => (req.sections as unknown[]).includes(s)) : PANEL_SECTIONS;
+    const partial = selectedSections.length !== PANEL_SECTIONS.length;
     if (req.environment !== env.ENVIRONMENT || req.generation !== Number(env.GENERATION)) fail(409, 'WRONG_GENERATION');
     const section = req.section as PanelPage['section'], offset = Number(req.offset), expected = req.revision as PanelRevision | null, principal = String(req.principalId);
     if (section === 'manifest' ? expected !== null || offset !== 0 : !expected || typeof expected !== 'object' || Array.isArray(expected)
@@ -112,7 +118,7 @@ export async function panelSnapshotPage(env: Env, input: unknown, authorityOnly 
           OR EXISTS(SELECT 1 FROM legacy_attendance_baselines b WHERE b.event_id=d.event_id AND b.person_id IN(SELECT person_id FROM scoped_people))) `;
     const bind = [JSON.stringify(access.flightIds), ...decision.values];
     const allQueries = queries(), statements = authorityStatements(env, principal), dataIndex = statements.length;
-    if (!authorityOnly && section === 'manifest') statements.push(env.DB.prepare(`${cte} SELECT ${PANEL_SECTIONS.map(s => `(SELECT COUNT(*) ${allQueries[s].countFrom ?? allQueries[s].from}) AS ${s}`).join(',')}`).bind(...bind));
+    if (!authorityOnly && section === 'manifest' && selectedSections.length) statements.push(env.DB.prepare(`${cte} SELECT ${selectedSections.map(s => `(SELECT COUNT(*) ${allQueries[s].countFrom ?? allQueries[s].from}) AS ${s}`).join(',')}`).bind(...bind));
     else if (!authorityOnly && section !== 'verify' && section !== 'manifest') {
         const q = allQueries[section];
         statements.push(env.DB.prepare(`${cte} SELECT ${q.select} ${q.from} ORDER BY ${q.order} LIMIT ? OFFSET ?`).bind(...bind, q.limit + 1, offset));
@@ -122,9 +128,9 @@ export async function panelSnapshotPage(env: Env, input: unknown, authorityOnly 
     const response: PanelPage = { contractVersion: PANEL_PAGE_VERSION, environment: env.ENVIRONMENT as PanelPage['environment'], generation: Number(env.GENERATION), section, revision, scope: { termId: String(control.termId), currentTermId: String(control.termId) }, access };
     if (authorityOnly || section === 'verify') return { ...response, section: 'verify', verified: true };
     if (section === 'manifest') {
-        const counts = second[dataIndex].results[0], sections = PANEL_SECTIONS.map(section => ({ section, count: Number(counts[section]) }));
+        const counts = second[dataIndex]?.results[0] ?? {}, sections = selectedSections.map(section => ({ section, count: Number(counts[section]) }));
         if (sections.some(s => s.count > FRONTEND_SECTION_BOUNDS[s.section])) fail(409, 'SNAPSHOT_TOO_LARGE');
-        return { ...response, sections };
+        return { ...response, sections, ...(partial ? { partial: true as const } : {}) };
     }
     const q = allQueries[section], source = second[dataIndex].results, rows: Row[] = [];
     let bytes = new TextEncoder().encode(JSON.stringify(response)).length + 100;

@@ -63,11 +63,15 @@ interface CatalogPage {contractVersion:typeof FRONTEND_PAGE_VERSION;section:'ter
 /** Every page uses one D1 transaction for authorization, revision and bounded rows. No provider writes. */
 export async function frontendSnapshotPage(env:Env,input:unknown,forEffect=false):Promise<FrontendPage|CatalogPage>{
   if(!input||typeof input!=='object'||Array.isArray(input))fail(400,'INVALID_PAGE_REQUEST');const req=input as Record<string,unknown>;
-  const keys=['environment','generation','principalId','section','offset','revision',...(Object.hasOwn(req,'termId')?['termId']:[]),...(forEffect?['workerId','effectId','claimToken']:[])];
+  const selected=Object.hasOwn(req,'sections');
+  const keys=['environment','generation','principalId','section','offset','revision',...(Object.hasOwn(req,'termId')?['termId']:[]),...(selected?['sections']:[]),...(forEffect?['workerId','effectId','claimToken']:[])];
   const termId=req.termId??null;if(termId!==null&&!identifier(termId))fail(400,'INVALID_PAGE_REQUEST');
   if(Object.keys(req).length!==keys.length||keys.some(k=>!Object.hasOwn(req,k))||!identifier(req.principalId)||forEffect&&['workerId','effectId','claimToken'].some(k=>!identifier(req[k])))fail(400,'INVALID_PAGE_REQUEST');
   if(req.environment!==env.ENVIRONMENT||req.generation!==Number(env.GENERATION))fail(409,'WRONG_GENERATION');
   const section=req.section;if(typeof section!=='string'||!['manifest','verify',...catalogs,...FRONTEND_SECTIONS].includes(section)||!Number.isSafeInteger(req.offset)||Number(req.offset)<0)fail(400,'INVALID_PAGE_REQUEST');
+  if(selected&&(forEffect||section!=='manifest'||!Array.isArray(req.sections)||req.sections.length>FRONTEND_SECTIONS.length||new Set(req.sections).size!==req.sections.length||req.sections.some(s=>!FRONTEND_SECTIONS.includes(s as FrontendSection))))fail(400,'INVALID_PAGE_REQUEST');
+  const selectedSections=selected?FRONTEND_SECTIONS.filter(s=>(req.sections as unknown[]).includes(s)):FRONTEND_SECTIONS;
+  const partial=selectedSections.length!==FRONTEND_SECTIONS.length;
   if(section==='manifest'?req.revision!==null||req.offset!==0:catalogs.includes(String(section))&&req.revision===null?req.offset!==0:!req.revision||typeof req.revision!=='object'||Array.isArray(req.revision)||Object.keys(req.revision).sort().join(',')!=='administration,operations'||Object.values(req.revision).some(v=>!Number.isSafeInteger(v)||Number(v)<0))fail(400,'INVALID_PAGE_REQUEST');
   if(catalogs.includes(String(section))&&(forEffect||termId!==null||Number(req.offset)>1000000)||section==='verify'&&req.offset!==0||!['manifest','verify',...catalogs].includes(String(section))&&Number(req.offset)>FRONTEND_SECTION_BOUNDS[section as FrontendSection])fail(400,'INVALID_PAGE_REQUEST');
   const guard=`EXISTS(SELECT 1 FROM system_control WHERE singleton=1 AND environment=? AND generation=?${forEffect?' AND accepting_commands=1':''}) AND EXISTS(SELECT 1 FROM principals p JOIN ${effectiveAdminGrants} g ON g.principal_id=p.principal_id WHERE p.principal_id=? AND p.active=1 AND g.capability='frontend.read' AND g.scope_kind='wing' AND g.scope_key='*')`;
@@ -76,9 +80,11 @@ export async function frontendSnapshotPage(env:Env,input:unknown,forEffect=false
   const scopeIndex=statements.length;statements.push(stmt(env.DB,`SELECT (SELECT COUNT(*) FROM terms WHERE is_current=1) AS currentCount,(SELECT term_id FROM terms WHERE is_current=1) AS currentTermId,(SELECT term_id FROM terms WHERE term_id=COALESCE(?,(SELECT term_id FROM terms WHERE is_current=1))) AS termId`,termId as string|null));
   const resultIndex=statements.length;
   if(section==='manifest'){
-    statements.push(stmt(env.DB,`${scopeCte} SELECT ${FRONTEND_SECTIONS.map(s=>`(SELECT COUNT(*) ${semesterQueries[s].from}) AS ${s}`).join(',')}`,termId as string|null));
-    statements.push(stmt(env.DB,`${scopeCte} SELECT (SELECT COUNT(*) FROM scoped_people p WHERE NOT EXISTS(SELECT 1 FROM directory_profiles d WHERE d.person_id=p.person_id)) AS peopleMissingProfiles,(SELECT COUNT(*) FROM events e WHERE e.active=1 AND NOT EXISTS(SELECT 1 FROM event_details d WHERE d.event_id=e.event_id)) AS eventsMissingDetails`,termId as string|null));
-    statements.push(stmt(env.DB,"SELECT term_id AS termId,label,sort_order AS sortOrder FROM terms WHERE sort_order<(SELECT sort_order FROM terms WHERE is_current=1) ORDER BY sort_order DESC,term_id LIMIT 2"));
+    if(selectedSections.length)statements.push(stmt(env.DB,`${scopeCte} SELECT ${selectedSections.map(s=>`(SELECT COUNT(*) ${semesterQueries[s].from}) AS ${s}`).join(',')}`,termId as string|null));
+    if(!partial){
+      statements.push(stmt(env.DB,`${scopeCte} SELECT (SELECT COUNT(*) FROM scoped_people p WHERE NOT EXISTS(SELECT 1 FROM directory_profiles d WHERE d.person_id=p.person_id)) AS peopleMissingProfiles,(SELECT COUNT(*) FROM events e WHERE e.active=1 AND NOT EXISTS(SELECT 1 FROM event_details d WHERE d.event_id=e.event_id)) AS eventsMissingDetails`,termId as string|null));
+      statements.push(stmt(env.DB,"SELECT term_id AS termId,label,sort_order AS sortOrder FROM terms WHERE sort_order<(SELECT sort_order FROM terms WHERE is_current=1) ORDER BY sort_order DESC,term_id LIMIT 2"));
+    }
   }else if(section==='term-catalog'){statements.push(stmt(env.DB,'SELECT term_id AS termId,label,sort_order AS sortOrder,is_current AS isCurrent FROM terms ORDER BY sort_order DESC,term_id LIMIT 33 OFFSET ?',Number(req.offset)));}
   else if(section==='directory-catalog'||section==='contacts-catalog'){const q=queries[section==='directory-catalog'?'people':'contacts'];statements.push(stmt(env.DB,`SELECT ${q.select} ${q.from} ORDER BY ${q.order} LIMIT 33 OFFSET ?`,Number(req.offset)));}
   else if(section!=='verify'){const q=semesterQueries[section as FrontendSection];statements.push(stmt(env.DB,`${scopeCte} SELECT ${q.select} ${q.from} ORDER BY ${q.order} LIMIT ? OFFSET ?`,termId as string|null,q.limit+1,Number(req.offset)));}
@@ -91,8 +97,10 @@ export async function frontendSnapshotPage(env:Env,input:unknown,forEffect=false
   let effect:FrontendPageManifest['effect'];
   if(forEffect){const lease=results[2].results[0];if(!lease)fail(409,'LEASE_CONFLICT');if(lease.kind==='frontend.refresh'&&(lease.operationsFloor===null||lease.administrationFloor===null||revision.operations<Number(lease.operationsFloor)||revision.administration<Number(lease.administrationFloor)))fail(409,'SNAPSHOT_BEHIND_CLAIM');effect={effectId:String(lease.effectId),kind:String(lease.kind)};if(termId!==null)fail(400,'HISTORICAL_EFFECT_SCOPE_FORBIDDEN');}
   if(section==='manifest'){
-    const counts=results[resultIndex].results[0],diagnostics=results[resultIndex+1].results[0];
-    const sections=FRONTEND_SECTIONS.map(section=>({section,count:Number(counts[section])}));if(sections.some(s=>s.count>FRONTEND_SECTION_BOUNDS[s.section]))fail(409,'SNAPSHOT_TOO_LARGE');
+    const counts=results[resultIndex]?.results[0]??{};
+    const sections=selectedSections.map(section=>({section,count:Number(counts[section])}));if(sections.some(s=>s.count>FRONTEND_SECTION_BOUNDS[s.section]))fail(409,'SNAPSHOT_TOO_LARGE');
+    if(partial)return {contractVersion:FRONTEND_PAGE_VERSION,section:'manifest',environment:req.environment as 'local'|'staging',generation:Number(req.generation),revision,scope,sections,diagnostics:[],partial:true};
+    const diagnostics=results[resultIndex+1].results[0];
     return {contractVersion:FRONTEND_PAGE_VERSION,section:'manifest',environment:req.environment as 'local'|'staging',generation:Number(req.generation),revision,scope,previousTerms:results[resultIndex+2].results as unknown as NonNullable<FrontendPageManifest['previousTerms']>,sections,diagnostics:[{code:'PEOPLE_MISSING_PROFILES',count:Number(diagnostics.peopleMissingProfiles)},{code:'EVENTS_MISSING_DETAILS',count:Number(diagnostics.eventsMissingDetails)}].filter(d=>d.count>0),...(effect?{effect}:{})};
   }
   if(catalogs.includes(String(section))){

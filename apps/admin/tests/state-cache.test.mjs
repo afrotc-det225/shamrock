@@ -11,6 +11,7 @@ test('conditional access refresh reuses only the captured in-memory state and cl
   const state={transport:'paged-v1',captureKey:'binding-one',viewAs:null,viewAsRevision:null,manifest,reportingTime:1};
   let requests=[];globalThis.fetch=async(path,init)=>{requests.push({path,init});return Response.json(state)};
   assert.equal((await api('/state',undefined,{profile:'access'})).captureKey,'binding-one');
+  assert.equal(requests[0].path,'/api/state?profile=access','state carries the lightweight read profile to the server');
   assert.equal(requests[0].init.headers['x-shamrock-capture'],undefined);
   globalThis.fetch=async(path,init)=>{requests.push({path,init});assert.deepEqual(JSON.parse(decodeURIComponent(init.headers['x-shamrock-capture'])),{captureKey:'binding-one',revision:manifest.revision,viewAsRevision:null});return Response.json({captureUnchanged:true,captureKey:'binding-one',viewAs:null,viewAsRevision:null,reportingTime:2})};
   const reused=await api('/state',undefined,{profile:'access'});assert.deepEqual(reused.manifest,manifest);assert.equal(reused.reportingTime,2);

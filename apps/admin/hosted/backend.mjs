@@ -225,7 +225,7 @@ export class HostedBackend {
         : "/v1/admin/commands";
     return this.post(path, command);
   }
-  async panelManifest() {
+  async panelManifest(sections) {
     if (this.preview) {
       const authority = await this.send("/v1/admin/panel/view-as/authorize", {
         ...this.identity(), action: "enter", auditId: this.preview.entry_audit_id,
@@ -246,6 +246,7 @@ export class HostedBackend {
       section: "manifest",
       offset: 0,
       revision: null,
+      ...(sections === undefined ? {} : { sections }),
     });
   }
   async panelAuthority() {
@@ -317,12 +318,18 @@ export class HostedBackend {
     )
       throw new PanelError("INVALID_REQUEST", "This page is unavailable.");
     if (this.preview) {
+      if (input.sections !== undefined)
+        throw new PanelError("INVALID_REQUEST", "Reload the selected view.");
       return this.previewPage(input.surface === "full" ? "snapshot" : "panel", {
         section:input.section,offset:input.offset,revision:input.revision,
       }, input.viewRevision ?? null);
     }
     if (input.surface === "scoped") {
-      if (
+      if (input.section === "manifest" && input.revision === null) {
+        const authority = await this.panelAuthority();
+        if (JSON.stringify(authority.revision) !== JSON.stringify(input.accessRevision))
+          throw new PanelError("SNAPSHOT_CHANGED", "Access changed. Reload SHAMROCK.", 409);
+      } else if (
         JSON.stringify(input.revision) !== JSON.stringify(input.accessRevision)
       )
         throw new PanelError(
@@ -335,6 +342,7 @@ export class HostedBackend {
         section: input.section,
         offset: input.offset,
         revision: input.revision,
+        ...(input.sections === undefined ? {} : { sections: input.sections }),
       });
     }
     const manifest = await this.panelAuthority();
@@ -357,6 +365,7 @@ export class HostedBackend {
       section: input.section,
       offset: input.offset,
       revision: input.revision,
+      ...(input.sections === undefined ? {} : { sections: input.sections }),
     });
     const verified = await this.panelAuthority();
     if (

@@ -19,7 +19,7 @@ try{
  page.on('request',request=>{if(request.url().endsWith('/api/page')){active.add(request);maximum=Math.max(maximum,active.size);requests.push(request.postDataJSON().section);}});
  page.on('requestfinished',request=>active.delete(request));page.on('requestfailed',request=>active.delete(request));
  await page.route('**/api/session',async route=>{if(holdSession)await sessionGate;const response=await route.fetch();await route.fulfill({response});});
- await page.route('**/api/state',async route=>{stateCalls++;
+ await page.route('**/api/state*',async route=>{stateCalls++;
   if(await host.captureUnchanged(route.request().headers()['x-shamrock-capture']))return route.fulfill({json:{captureUnchanged:true,captureKey:host.binding,viewAs:null,viewAsRevision:null,reportingTime:Date.now()}});
   return route.fulfill({json:{manifest:await host.panelManifest(),captureKey:host.binding,viewAs:null,viewAsRevision:null,transport:'paged-v1',reportingTime:Date.now(),history:[],meta:{hosted:true}}});});
  await page.route('**/api/history/list',route=>route.fulfill({json:{snapshots:[]}}));
@@ -64,7 +64,7 @@ try{
  assert.equal(await page.locator('.error').count(),0,'superseded bootstrap navigation stays silent');
  assert(maximum<=2,`maximum page concurrency was ${maximum}`);
  const beforeRefresh=requests.length;
- const refreshResponse=page.waitForResponse(response=>response.url().endsWith('/api/state'));
+ const refreshResponse=page.waitForResponse(response=>response.url().split('?')[0].endsWith('/api/state'));
  await page.clock.fastForward(61000);
  assert.equal((await(await refreshResponse).json()).captureUnchanged,true);
  await page.waitForTimeout(80);assert.equal(requests.length,beforeRefresh,'unchanged background refresh never reloads record pages');

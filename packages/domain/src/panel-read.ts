@@ -26,6 +26,8 @@ export interface PanelPage {
     scope: { termId: string; currentTermId: string; };
     access: PanelAccess;
     sections?: { section: PanelSection; count: number; }[];
+    /** A selected manifest cannot be assembled as a complete attendance snapshot. */
+    partial?: true;
     offset?: number;
     nextOffset?: number | null;
     rows?: Record<string, unknown>[];
@@ -96,6 +98,7 @@ const assertPage: (condition: unknown) => asserts condition = condition => { if 
 const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
 /** A panel snapshot intentionally has no Directory/contact payload. Never cast it to FrontendSnapshot. */
 export function assemblePanelSnapshotPages(manifest: PanelPage, pages: PanelPage[], verified: PanelPage): PanelSnapshot {
+    assertPage(manifest?.partial !== true);
     const coherent = (page: PanelPage) => page?.contractVersion === PANEL_PAGE_VERSION && page.environment === manifest.environment && page.generation === manifest.generation
         && same(page.revision, manifest.revision) && same(page.scope, manifest.scope) && same(page.access, manifest.access);
     assertPage(manifest?.contractVersion === PANEL_PAGE_VERSION && manifest.section === 'manifest' && coherent(verified) && verified.section === 'verify' && verified.verified === true);

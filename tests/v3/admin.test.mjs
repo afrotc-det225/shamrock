@@ -6,6 +6,7 @@ import test from 'node:test';
 import {Miniflare,Log,LogLevel} from 'miniflare';
 import worker from '../../.build/v3/apps/worker/src/index.js';
 import {frontendSnapshotPage} from '../../.build/v3/apps/worker/src/frontend-transport.js';
+import {FRONTEND_SECTIONS} from '../../.build/v3/packages/domain/src/frontend-transport.js';
 import {parseAdminCommand,operationallyActive} from '../../.build/v3/packages/domain/src/admin.js';
 const secret='fictional-admin-test-secret-never-for-deployment';
 const keyId='admin-fixture';
@@ -634,6 +635,27 @@ test('each page and final verification recheck revision, authority, environment 
   const input={...base,section:'people',offset:0,revision:manifest.revision};assert.equal((await f.send({...input,extra:true},'/v1/admin/snapshot/page')).status,400);assert.equal((await f.send({...input,generation:2},'/v1/admin/snapshot/page')).status,409);
   await f.send(revised(command()));assert.equal((await f.send(input,'/v1/admin/snapshot/page')).body.error.code,'SNAPSHOT_CHANGED');assert.equal((await f.send({...input,section:'verify'},'/v1/admin/snapshot/page')).body.error.code,'SNAPSHOT_CHANGED');
   await f.db.prepare("DELETE FROM admin_grants WHERE capability='frontend.read'").run();assert.equal((await f.send({...base,section:'manifest',offset:0,revision:null},'/v1/admin/snapshot/page')).status,403);
+});
+test('selected frontend manifests skip unrelated scans without changing complete native publication',async t=>{
+  const f=await fixture(t);await f.send(command());await f.send(command('event.upsert'));
+  const input=read({section:'manifest',offset:0,revision:null}),full=await frontendSnapshotPage(f.env,input);
+  let statements=0,queries=[];
+  const DB={prepare:sql=>{queries.push(sql);return f.db.prepare(sql)},batch:async batch=>{statements+=batch.length;return f.db.batch(batch)}};
+  const selected=await frontendSnapshotPage({...f.env,DB},{...input,sections:['events','terms']});
+  assert.deepEqual(selected.sections,full.sections.filter(s=>['terms','events'].includes(s.section)));
+  assert.equal(selected.partial,true);assert.deepEqual(selected.revision,full.revision);assert.deepEqual(selected.scope,full.scope);
+  assert.deepEqual(selected.diagnostics,[]);assert.equal(selected.previousTerms,undefined);assert.equal(statements,4);
+  const count=queries.find(q=>q.startsWith('WITH selected_term'));
+  assert(count.endsWith('AS events'));assert(!count.includes('AS observations'));assert(!count.includes('AS eventRosters'));
+  assert.deepEqual(await frontendSnapshotPage(f.env,{...input,sections:[...FRONTEND_SECTIONS].reverse()}),full);
+  statements=0;const empty=await frontendSnapshotPage({...f.env,DB},{...input,sections:[]});
+  assert.equal(statements,3);assert.deepEqual(empty.sections,[]);assert.equal(empty.partial,true);
+  assert.throws(()=>assembleFrontendSnapshotPages(selected,[],{contractVersion:full.contractVersion,section:'verify',revision:full.revision,scope:full.scope,verified:true}),/INVALID_FRONTEND_PAGE_SEQUENCE/);
+  for(const sections of [null,'events',['events','events'],['unknown'],['events',{}]])assert.equal((await f.send({...input,sections},'/v1/admin/snapshot/page')).status,400);
+  for(const section of ['events','verify','directory-catalog'])assert.equal((await f.send({...input,section,revision:full.revision,sections:[]},'/v1/admin/snapshot/page')).status,400);
+  assert.equal((await f.send({...input,sections:[],workerId:'adapter-one',effectId:'effect',claimToken:'claim'},'/v1/admin/effects/project/page')).status,400,'native effect projection cannot become partial');
+  await f.db.prepare("DELETE FROM admin_grants WHERE capability='frontend.read'").run();
+  assert.equal((await f.send({...input,sections:[]},'/v1/admin/snapshot/page')).status,403);
 });
 test('paged effect projection preserves claim floors and cannot verify after pause, lease expiry or stolen token',async t=>{
   const f=await fixture(t);await f.send(command());const claim=(await f.send(effect({kind:'frontend.refresh'}),'/v1/admin/effects/claim')).body.effect;

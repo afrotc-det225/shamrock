@@ -79,6 +79,9 @@ export default {
       ].includes(`${request.method} ${url.pathname}`))
         throw new PanelError("VIEW_AS_READ_ONLY", "Exit View as before making changes.", 403);
       if (url.pathname === "/api/state" && request.method === "GET") {
+        const profile = url.searchParams.get("profile");
+        if (profile !== null && !["events", "access", "full"].includes(profile))
+          throw new PanelError("INVALID_REQUEST", "Reload SHAMROCK.");
         if (preview && preview.status !== "ready")
           return secure(json({ viewAs: previewResponse(preview), snapshot: null,
             meta: { hosted: true, viewAsEnabled: true } }));
@@ -86,7 +89,7 @@ export default {
           return secure(json({captureUnchanged:true,captureKey:backend.binding,
             viewAs:previewResponse(preview),viewAsRevision:backend.viewRevision,
             reportingTime:Date.now()}));
-        const manifest = await backend.panelManifest();
+        const manifest = await backend.panelManifest(profile === null ? undefined : []);
         return secure(
           json({
             manifest,

@@ -13,7 +13,7 @@ try {
  const blockedRead=new Promise(resolve=>{releaseFirst=resolve;});
  const snapshot=await local.backend.snapshot(),person=snapshot.people[0],personName=[person.firstName,person.lastName].join(' ');
  await page.route('**/api/session',async route=>{const response=await route.fetch();await route.fulfill({response,json:{...await response.json(),viewAs:mode}});});
- await page.route('**/api/state',async route=>{
+ await page.route('**/api/state*',async route=>{
   if(firstRead){firstRead=false;await blockedRead;}
   const response=await route.fetch(),data=await response.json();
   data.meta={...data.meta,hosted:true,viewAsEnabled:true};data.viewAs=mode;

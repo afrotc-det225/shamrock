@@ -19,7 +19,7 @@ try {
   await page.clock.install({ time: new Date('2026-11-17T18:00:00Z') });
   await page.clock.pauseAt(new Date('2026-11-17T18:00:01Z'));
   await page.route('**/api/session', async route => { sessions++; await route.continue(); });
-  await page.route('**/api/state', async route => { stateReads++; await route.continue(); });
+  await page.route('**/api/state*', async route => { stateReads++; await route.continue(); });
   await page.route('**/api/proposals', async route => {
     submitted.push(route.request().postDataJSON());
     if (submitted.length > 1) return route.continue();
@@ -67,7 +67,7 @@ try {
   await page.screenshot({ path: '/tmp/shamrock-outage-draft-mobile.png', animations: 'disabled' });
   await page.clock.fastForward(59000);
   assert.equal(stateReads, beforeReads, 'quota cooldown starts no record reads while a draft is retained');
-  const recovery = page.waitForResponse(response => response.url().endsWith('/api/state'));
+  const recovery = page.waitForResponse(response => response.url().split('?')[0].endsWith('/api/state'));
   await page.clock.fastForward(2000);
   await recovery;
   await page.getByRole('heading', { name: 'Edit event', exact: true }).waitFor();

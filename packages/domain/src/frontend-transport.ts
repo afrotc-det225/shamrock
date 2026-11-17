@@ -10,6 +10,8 @@ export interface FrontendReadScope {termId:string;currentTermId:string;}
 export interface FrontendPageManifest {
   contractVersion:typeof FRONTEND_PAGE_VERSION;section:'manifest';environment:'local'|'staging';generation:number;revision:SnapshotRevision;
   sections:{section:FrontendSection;count:number}[];diagnostics:{code:string;count:number}[];
+  /** A page-specific manifest is not a complete publication snapshot. */
+  partial?:true;
   effect?:{effectId:string;kind:string};
   scope?:FrontendReadScope;previousTerms?:{termId:string;label:string;sortOrder:number}[];
 }
@@ -20,6 +22,7 @@ const check=(condition:unknown):void=>{if(!condition)throw new Error('INVALID_FR
 const sameRevision=(a:SnapshotRevision,b:SnapshotRevision)=>a?.operations===b?.operations&&a?.administration===b?.administration;
 /** Reject missing/duplicate/torn pages. Version zero is derived only from actual imported facts, never guessed. */
 export function assembleFrontendSnapshotPages(manifest:FrontendPageManifest,pages:FrontendDataPage[],verified:FrontendVerifyPage):FrontendSnapshot {
+  check(manifest?.partial!==true);
   check(manifest?.contractVersion===FRONTEND_PAGE_VERSION&&manifest.section==='manifest'&&verified?.contractVersion===FRONTEND_PAGE_VERSION&&verified.section==='verify'&&verified.verified===true&&sameRevision(manifest.revision,verified.revision));
   check(['local','staging'].includes(manifest.environment)&&Number.isSafeInteger(manifest.generation)&&manifest.generation>0);
   check(Number.isSafeInteger(manifest.revision.operations)&&manifest.revision.operations>=0&&Number.isSafeInteger(manifest.revision.administration)&&manifest.revision.administration>=0);

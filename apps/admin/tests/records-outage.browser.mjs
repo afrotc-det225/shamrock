@@ -17,7 +17,7 @@ try {
   await page.clock.install({ time: new Date('2026-11-17T18:00:00Z') });
   await page.clock.pauseAt(new Date('2026-11-17T18:00:01Z'));
   await page.route('**/api/session', async route => { sessions++; await route.continue(); });
-  await page.route('**/api/state', async route => {
+  await page.route('**/api/state*', async route => {
     reads++;
     if (!unavailable) return route.continue();
     await route.fulfill({ status: 500, headers: retryAfter ? { 'Retry-After': String(retryAfter) } : {}, json: { error: {
@@ -39,7 +39,7 @@ try {
     if (bursts) await focusBurst();
     await page.waitForTimeout(30);
     assert.equal(reads, expected - 1, 'focus/online bursts cannot bypass or reset the retry deadline');
-    const response = page.waitForResponse(value => value.url().endsWith('/api/state'));
+    const response = page.waitForResponse(value => value.url().split('?')[0].endsWith('/api/state'));
     await page.clock.fastForward(1);
     await response;
     await page.waitForTimeout(30);

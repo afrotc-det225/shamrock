@@ -20,7 +20,7 @@ try {
   let receiptCalls = 0, failReceipt = true, release;
   const held = new Promise(resolve => { release = resolve; });
   page.on("pageerror", error => errors.push(error.message));
-  await page.route("**/api/state", async route => route.fulfill({ json: {
+  await page.route("**/api/state*", async route => route.fulfill({ json: {
     manifest: await host.panelManifest(), transport: "paged-v1", reportingTime: Date.now(), receiptsDeferred: true, meta: { hosted: true },
   } }));
   await page.route("**/api/page", async route => route.fulfill({ json: await host.page(route.request().postDataJSON()) }));
