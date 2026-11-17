@@ -4,6 +4,8 @@
 
 The runner uses Node's built-in SQLite support and the repository's migration verifier. It supports every exact known migration prefix through the current checked-in migration directory; schema versions are not hardcoded. Unknown schema, unpaused control, a mismatched generation, integrity errors or foreign-key failures stop capture.
 
+For connected-plugin access without a separate local Cloudflare token, use the [hosted restore rehearsal](D1_HOSTED_RESTORE.md) and its offline native-export verifier.
+
 ## Private setup
 
 Keep configuration, pause evidence, exports and journals in an owner-private directory outside Git or under an ignored directory. Directories must have mode 0700 and files mode 0600, belong to the current operator, and not be symlinks. The tool never overwrites a prior export. Choose a new capture directory for each backup.
