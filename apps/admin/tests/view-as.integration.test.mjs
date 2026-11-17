@@ -6,6 +6,8 @@ import {createLocalBackend} from '../backend.mjs';
 import {HostedBackend} from '../hosted/backend.mjs';
 await build({absWorkingDir:resolve(import.meta.dirname,'../../..'),entryPoints:['apps/admin/snapshot-client.ts'],outfile:'.build/admin/view-as-client.mjs',bundle:true,format:'esm',platform:'browser'});
 const {loadSnapshot,loadEventsList}=await import('../../../.build/admin/view-as-client.mjs');
+await build({absWorkingDir:resolve(import.meta.dirname,'../../..'),entryPoints:['apps/admin/history-client.ts'],outfile:'.build/admin/view-as-history-client.mjs',bundle:true,format:'esm',platform:'browser'});
+const {loadHistory}=await import('../../../.build/admin/view-as-history-client.mjs');
 async function fixture(t,full){
  const local=await createLocalBackend();t.after(()=>local.dispose());
  const source=await local.backend.snapshot(),person=source.people[0],principal='preview-target';
@@ -44,4 +46,24 @@ test('actual backend scoped View as preserves Flight privacy and rejects actor r
  await assert.rejects(()=>host.historyPage(null),e=>e.status===403);
  await local.db.prepare("DELETE FROM admin_grants WHERE principal_id='panel-owner' AND capability='frontend.read'").run();
  await assert.rejects(()=>host.page({surface:'scoped',section:'people',offset:0,revision:manifest.revision,viewRevision:manifest.viewRevision}),e=>e.status===403);
+});
+
+
+test('actual backend historical preview pages retain a separate archive token and saved values',async t=>{
+ const {host,local}=await fixture(t,true),at='2026-01-01T00:00:00Z';
+ const insert=(table,row)=>local.db.prepare(`INSERT INTO ${table}(${Object.keys(row).join(',')}) VALUES(${Object.keys(row).map(()=>'?').join(',')})`).bind(...Object.values(row));
+ const column={columnIndex:7,header:'Fictional LLAB',snapshotEventId:'old-event',eventId:null};
+ const row={occurrenceId:'old-row',personId:null,identityLabels:['Historical','Cadet','AS400','Alpha','Blue'],events:[{...column,code:'UR'}],overall:.75,llab:1,creditFormulaEvidence:{overall:null,llab:null,arrayAnchorRowIndex:2},personEvidence:null};
+ await local.db.batch([
+  insert('legacy_import_runs',{import_run_id:'preview-history',snapshot_sha256:'a'.repeat(64),plan_sha256:'b'.repeat(64),reconciliation_sha256:'c'.repeat(64),review_reference:'fictional-review',environment:'local',generation:1,state:'complete',expected_occurrences:1,expected_profiles:1,expected_events:1,expected_baselines:1,expected_batches:1,manifest_json:'{}',started_at:at,completed_at:at}),
+  insert('legacy_source_occurrences',{import_run_id:'preview-history',occurrence_id:'old-row',fingerprint:'d'.repeat(64),source_kind:'matrix',disposition:'evidence-only',locator_json:'{"rowIndex":2}',raw_json:JSON.stringify(row.identityLabels.map(v=>({effectiveValue:{stringValue:v}}))),normalized_json:null,diagnostics_json:'{}'}),
+  insert('legacy_matrix_snapshots',{matrix_snapshot_id:'preview-archive',import_run_id:'preview-history',source_resource_key:'fictional-archive',source_sheet_id:1,metadata_json:JSON.stringify({sourceTitle:'Fictional archive',periodLabel:'Fictional term',isCurrent:false,authority:'retained-source-copy',companionDirectoryFound:false,columns:[column]}),roster_json:'[]'}),
+  insert('legacy_matrix_snapshot_rows',{matrix_snapshot_id:'preview-archive',source_occurrence_id:'old-row',person_id:null,payload_json:JSON.stringify(row)}),
+ ]);
+ const normal=await host.panelManifest(),calls=[];
+ const report=await loadHistory('preview-archive',(_path,body)=>{calls.push(body);return host.historyPage(body);});
+ assert.equal(report.rows[0].overall.stored,.75);assert.equal(report.rows[0].cells[0].code,'UR');
+ assert(calls.slice(1).every(body=>body.viewRevision===calls[1].viewRevision));
+ assert.notEqual(calls[1].viewRevision,normal.viewRevision);
+ await assert.rejects(()=>host.historyPage({...calls[1],viewRevision:normal.viewRevision}),e=>e.code==='VIEW_AS_CHANGED');
 });
