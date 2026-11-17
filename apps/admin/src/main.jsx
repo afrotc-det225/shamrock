@@ -61,7 +61,16 @@ function App() {
   };
   const pendingRead = useRef(null),
     lastRead = useRef(0),
+    capacityRetryAt = useRef(0),
     live = useRef({});
+  const pauseAtServiceLimit = (error) => {
+    if (error.code !== "SERVICE_LIMIT_REACHED") return false;
+    const reset = new Date(); reset.setUTCHours(24, 0, 0, 0);
+    capacityRetryAt.current = error.retryAfterSeconds
+      ? Date.now() + error.retryAfterSeconds * 1000 : reset.getTime();
+    setSync("Daily service limit reached. Automatic updates will resume after the allowance resets.");
+    return true;
+  };
   live.current = { busy, proposal, data, preview, page };
   const reload = async (force = false, profile) => {
     if (!force && pendingRead.current) return pendingRead.current;
@@ -112,6 +121,7 @@ function App() {
     reload()
       .catch((e) => {
         if (e.code === "SUPERSEDED") return;
+        pauseAtServiceLimit(e);
         if (e.code === "SIGN_IN_REQUIRED") setSignIn(true);
         else setError(e.message);
       });
@@ -123,13 +133,14 @@ function App() {
     const schedule = () => {
       clearTimeout(timer);
       if (!stopped)
-        timer = setTimeout(tick, Math.min(300000, 60000 * 2 ** failures));
+        timer = setTimeout(tick, Math.max(capacityRetryAt.current - Date.now(), Math.min(300000, 60000 * 2 ** failures)));
     };
     const tick = async () => {
       const current = live.current;
       if (
         document.visibilityState === "visible" &&
         navigator.onLine &&
+        Date.now() >= capacityRetryAt.current &&
         current.data &&
         !current.busy &&
         !current.proposal &&
@@ -144,6 +155,7 @@ function App() {
           failures = 0;
         } catch (e) {
           if (e.code === "SUPERSEDED") { schedule(); return; }
+          if (pauseAtServiceLimit(e)) { schedule(); return; }
           failures = Math.min(failures + 1, 3);
           if (e.code === "SIGN_IN_REQUIRED" || e.status === 403) {
             setData(null);
@@ -176,6 +188,7 @@ function App() {
       await fn();
     } catch (e) {
       if (e.code === "SUPERSEDED") return;
+      pauseAtServiceLimit(e);
       if (e.code === "SIGN_IN_REQUIRED" || e.status === 403) {
         setData(null);
         setProposal(null);
@@ -249,8 +262,12 @@ function App() {
   const common = { ...data, propose, busy, readOnly: !!preview, notify: setNotice, refresh: reload, withFullData };
   if (signIn) {
     const code = new URLSearchParams(location.search).get("signin");
+    const reset = new Date(); reset.setUTCHours(24, 0, 0, 0);
+    const resetTime = new Intl.DateTimeFormat(undefined, {hour:"numeric",minute:"2-digit",timeZoneName:"short"}).format(reset);
     const message =
-      code === "ACCESS_NOT_GRANTED"
+      code === "SERVICE_LIMIT_REACHED"
+        ? `SHAMROCK has reached today's free service limit. Please try again after ${resetTime}.`
+        : code === "ACCESS_NOT_GRANTED"
         ? "This account does not have SHAMROCK access. Contact your administrator."
         : code === "SIGN_IN_LIMIT"
           ? "Please wait a few minutes before trying again."
