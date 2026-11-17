@@ -1421,9 +1421,9 @@ html:has(dialog[open]) {
   width: 38px;
   height: 38px;
   object-fit: contain;
-  background: #fff;
-  border-radius: 3px;
-  padding: 2px;
+  background: transparent;
+  border-radius: 0;
+  padding: 0;
 }
 @media (max-width: 640px) {
   .brand .brand-mark {
