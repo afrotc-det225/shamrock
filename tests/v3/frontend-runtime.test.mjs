@@ -5,6 +5,7 @@ import { consumeFrontendRefresh, consumeFrontendResume, buildSignedFrontendReque
 import { frontendLiteralCell, planFrontendPublication } from '../../.build/v3/apps/google-adapter/src/frontend-publication.js';
 import { dashboardReadFingerprint } from '../../.build/v3/apps/google-adapter/src/frontend-supplemental.js';
 import { buildAttendanceGrowthLayout } from '../../.build/v3/apps/google-adapter/src/frontend-layout.js';
+import {planCatalogLegend} from '../../.build/v3/apps/google-adapter/src/frontend-catalog-legend.js';
 
 const copy = value => structuredClone(value);
 const signer = { sha256: value => createHash('sha256').update(value).digest('hex'), hmacSha256: value => createHmac('sha256', 'fictional-signing-material').update(value).digest('hex') };
@@ -79,6 +80,25 @@ test('full-roster photos resume ten-chip batches after lost responses and reject
     assert.equal(consumeFrontendRefresh(runtime).status,'published');assert.equal(fx.ack,1);assert.equal(fx.fenced,false);
     assert.deepEqual(chipCounts.filter(n=>n>0),[10,10,6]);assert.equal(fx.state.pending,undefined);
   }
+});
+
+test('catalog publication shares the frozen Main transaction, preserves pending inputs and verifies exact retry state',()=>{
+ for(const mode of ['write-after','bad-catalog-readback']){
+  const {fx,runtime}=fixture();let plans=0;
+  const seed=(field,columnIndex,letter,chip)=>({key:`directory:${field}`,sheetId:7,rowIndex:2,columnIndex,protected:true,hidden:true,nativeStyleVersion:'reviewed',expectedRule:{strict:true,...(chip?{showCustomUi:true}:{}),condition:{type:'ONE_OF_RANGE',values:[{userEnteredValue:`='Data Legend'!$${letter}$3:$${letter}`}]}}});
+  const seeds=[seed('flight',18,'B',true),seed('squadron',19,'C',false)].map(s=>({...s,observedRule:copy(s.expectedRule)}));runtime.readSeeds=()=>copy(seeds);
+  const columns=[{header:'flight',label:'Flight',editable:true,seedKey:'directory:flight'},{header:'squadron',label:'Squadron',editable:false,seedKey:'directory:squadron'}];fx.model.tables[0].columns.push(...columns);
+  for(const row of [fx.state.baselines.directory.rows[0],fx.model.tables[0].rows[0]]){row.values.flight='Alpha';row.values.squadron='Blue';row.versions.flight=1;}
+  fx.current.directory.headers.push('flight','squadron');fx.current.directory.labels.push('Flight','Squadron');fx.current.directory.gridColumnCount=4;fx.current.directory.range.endColumnIndex=4;fx.current.directory.rows[0].push(frontendLiteralCell('Alpha'),frontendLiteralCell('Blue'));fx.current.directory.rows[0][1]=frontendLiteralCell('pending human input');
+  let observed={columns:['flight','squadron'].map((field,i)=>({field,title:'Data Legend',range:{sheetId:7,startRowIndex:2,endRowIndex:70,startColumnIndex:i+1,endColumnIndex:i+2},values:i?['Blue','Gold']:['Alpha']})),tables:[]};
+  let choices={flights:[{label:'Alpine'},{label:'Bravo'}],squadrons:[{label:'Blue'},{label:'Gold'}]};
+  runtime.catalog={plan(){plans++;return planCatalogLegend(choices,observed);},read:()=>copy(observed)};
+  const write=runtime.writeAtomic;runtime.writeAtomic=requests=>{assert.ok(requests.some(r=>r.updateCells?.range?.sheetId===7),'catalog is in the same atomic Main write');try{write(requests);}finally{observed=copy(fx.state.pending.catalog.expectedAfter);if(mode==='bad-catalog-readback')observed.columns[0].values.push('unexpected stale label');}};
+  fx.mode=mode;assert.throws(()=>consumeFrontendRefresh(runtime));assert.equal(fx.fenced,true);assert.equal(fx.ack,0);assert.equal(fx.restores,0);assert.equal(plans,1);assert.equal(fx.state.pending.plans.directory.retainedDrafts[0].value,'pending human input');
+  fx.enabled=true;fx.mode='normal';choices.flights=[{label:'Future catalog change'}];
+  if(mode==='bad-catalog-readback'){assert.throws(()=>consumeFrontendRefresh(runtime));assert.equal(fx.writes,1);assert.equal(fx.ack,0);continue;}
+  assert.equal(consumeFrontendRefresh(runtime).status,'published-with-drafts');assert.equal(fx.writes,1);assert.equal(plans,1);assert.equal(fx.ack,1);assert.deepEqual(observed.columns[0].values,['Alpine','Bravo']);assert.equal(fx.state.drafts.directory[0].value,'pending human input');
+ }
 });
 
 function fullFixture() {

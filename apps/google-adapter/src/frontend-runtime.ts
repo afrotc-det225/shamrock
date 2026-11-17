@@ -22,6 +22,8 @@ import type { DashboardAction } from './frontend-dashboard.js';
 import { createPrivateCheckpoint } from './private-checkpoint.js';
 import { freezeFrontendPhotos, inspectFrontendPhotoPhase, splitFrontendPhotos, type FrozenPhotoCell } from './frontend-photos.js';
 import type { SnapshotRevision } from '../../../packages/domain/src/admin.js';
+import { readCatalogLegend, planCatalogLegend, catalogLegendMatches, assertCatalogLegendPlan, refreshCatalogValidation,
+  type CatalogLegendPlan, type CatalogLegendRead } from './frontend-catalog-legend.js';
 
 export const FRONTEND_PROPERTIES = { config: 'SHAMROCK_V3_FRONTEND_CONFIG', claim: 'SHAMROCK_V3_FRONTEND_CLAIM', pause: 'SHAMROCK_V3_FRONTEND_PAUSED', resumeReceipt: 'SHAMROCK_V3_FRONTEND_RESUME_RECEIPT' } as const;
 
@@ -72,7 +74,7 @@ export interface FrontendPublicationState {
   drafts: Record<Kind, FrontendDraft[]>;
   supplemental?: FrontendSupplementalState;
   /** Frozen before Google writes. Large photo updates retain their exact original cells. */
-  pending?: { claim: FrontendRefreshClaim; plans: Record<Kind, FrontendPublicationPlan>; supplemental?: FrontendSupplementalPlans; photos?: FrozenPhotoCell[] };
+  pending?: { claim: FrontendRefreshClaim; plans: Record<Kind, FrontendPublicationPlan>; supplemental?: FrontendSupplementalPlans; photos?: FrozenPhotoCell[]; catalog?: CatalogLegendPlan };
   completedClaim?: { effectId: string; claimToken: string };
   /** Exact committed input receipts applied to this checkpoint, for cross-file recovery. */
   inputReceipts?: Record<string, string>;
@@ -98,6 +100,7 @@ export interface FrontendRefreshPorts {
   readSeeds(): FrontendValidationSeed[];
   /** Read only newly copied validation intervals, checking every destination rule. */
   verifyValidation(plan: FrontendPublicationPlan): boolean;
+  catalog?: { plan(snapshot: FrontendSnapshot): CatalogLegendPlan; read(): CatalogLegendRead };
   supplemental?: {
     plan(snapshot: FrontendSnapshot, state: FrontendSupplementalState): FrontendSupplementalPlans;
     readDashboard(): DashboardPublicationRead;
@@ -364,16 +367,21 @@ export function consumeFrontendRefresh(runtime: FrontendRefreshPorts): { status:
       if (state.completedClaim && (state.completedClaim.effectId !== claim.effectId || state.completedClaim.claimToken !== claim.claimToken)) fail('frontend_claim', 'Completed publication belongs to another claim.');
       if (state.pending) {
         const { plans, supplemental } = state.pending;
+        const catalog = state.pending.catalog;
+        if (catalog && !runtime.catalog) fail('frontend_state', 'Retained catalog publication requires its native reader.');
+        const catalogRead = catalog ? runtime.catalog!.read() : undefined;
+        const catalogAfter = !catalog || catalogLegendMatches(catalog, catalogRead!, 'after');
         const reads = Object.fromEntries(KINDS.map(kind => [kind, runtime.readTable(kind)])) as Record<Kind, FrontendTableRead>;
         const dashboard = supplemental ? runtime.supplemental!.readDashboard() : undefined;
         const mainAfter = KINDS.every(k => verifyFrontendPublicationReadback(plans[k], reads[k]))
-          && (!supplemental || verifyDashboardPublicationReadback(supplemental.dashboard, dashboard!));
+          && (!supplemental || verifyDashboardPublicationReadback(supplemental.dashboard, dashboard!)) && catalogAfter;
         const photoIntermediate = !mainAfter && state.pending.photos
           && inspectFrontendPhotoPhase(plans, state.pending.photos, reads).ready
-          && (!supplemental || verifyDashboardPublicationReadback(supplemental.dashboard, dashboard!));
+          && (!supplemental || verifyDashboardPublicationReadback(supplemental.dashboard, dashboard!)) && catalogAfter;
         if (!mainAfter && !photoIntermediate) {
           KINDS.forEach(k => assertFrontendPublicationPreconditions(plans[k], reads[k]));
           if (supplemental && dashboardReadFingerprint(dashboard!) !== supplemental.dashboard.expectedRead) fail('frontend_readback', 'Recovery found mixed Main state.');
+          if (catalog && !catalogLegendMatches(catalog, catalogRead!, 'before')) fail('frontend_readback', 'Recovery found changed catalog source values.');
         } else if (KINDS.some(k => !runtime.verifyValidation(plans[k]))) fail('frontend_validation', 'Recovery must verify copied Main controls.');
         let queuesAfter = mainAfter;
         if (supplemental) {
@@ -431,6 +439,10 @@ export function consumeFrontendRefresh(runtime: FrontendRefreshPorts): { status:
             current: initialReads[kind], baseline: state.baselines[kind], drafts: state.drafts[kind], seeds, editFenceVerified: true });
         }
         state.pending = { claim: clone(claim), plans };
+        if (runtime.catalog) {
+          state.pending.catalog = runtime.catalog.plan(projected.snapshot as FrontendSnapshot);
+          refreshCatalogValidation(state.pending.catalog, plans.directory, seeds);
+        }
         const photos = freezeFrontendPhotos(plans, initialReads);
         if (photos) state.pending.photos = photos;
         if (runtime.supplemental) {
@@ -439,27 +451,32 @@ export function consumeFrontendRefresh(runtime: FrontendRefreshPorts): { status:
             || !equal(extra.excusals[queue].nextBaseline.revision, model.revision))) fail('frontend_contract', 'Every visible frontend surface must use the same coherent snapshot.');
           state.pending.supplemental = extra;
         }
-        boundedRequests([...KINDS.flatMap(kind => plans[kind].requests), ...(state.pending.supplemental?.dashboard.requests ?? [])]);
+        boundedRequests([...(state.pending.catalog?.requests ?? []), ...KINDS.flatMap(kind => plans[kind].requests), ...(state.pending.supplemental?.dashboard.requests ?? [])]);
         if (state.pending.supplemental) boundedRequests(QUEUES.flatMap(queue => state.pending!.supplemental!.excusals[queue].requests));
         runtime.state.save(validState(state, runtime.config.generation));
         if (!equal(runtime.state.load(), state)) fail('frontend_state', 'The pending publication did not persist.');
       }
       const plans = state.pending!.plans;
       const supplemental = state.pending!.supplemental;
+      const catalog = state.pending!.catalog;
+      if (catalog && !runtime.catalog) fail('frontend_state', 'Retained catalog publication requires its native reader.');
       if (Boolean(runtime.supplemental) !== Boolean(supplemental)) fail('frontend_state', 'The retained publication has a different visible-surface contract.');
       runtime.refreshReads?.();
       const reads = Object.fromEntries(KINDS.map(kind => [kind, runtime.readTable(kind)])) as Record<Kind, FrontendTableRead>;
       const dashboardRead = supplemental ? runtime.supplemental!.readDashboard() : undefined;
+      const catalogRead = catalog ? runtime.catalog!.read() : undefined;
+      const catalogAfter = !catalog || catalogLegendMatches(catalog, catalogRead!, 'after');
       const alreadyWritten = KINDS.every(kind => verifyFrontendPublicationReadback(plans[kind], reads[kind]))
-        && (!supplemental || verifyDashboardPublicationReadback(supplemental.dashboard, dashboardRead!));
+        && (!supplemental || verifyDashboardPublicationReadback(supplemental.dashboard, dashboardRead!)) && catalogAfter;
       const photos = state.pending!.photos;
       const photoIntermediate = !alreadyWritten && photos && inspectFrontendPhotoPhase(plans, photos, reads).ready
-        && (!supplemental || verifyDashboardPublicationReadback(supplemental.dashboard, dashboardRead!));
+        && (!supplemental || verifyDashboardPublicationReadback(supplemental.dashboard, dashboardRead!)) && catalogAfter;
       if (!alreadyWritten && !photoIntermediate) {
         for (const kind of KINDS) assertFrontendPublicationPreconditions(plans[kind], reads[kind]);
         if (supplemental && dashboardReadFingerprint(dashboardRead!) !== supplemental.dashboard.expectedRead) fail('frontend_readback', 'Main is neither the frozen original nor the complete planned publication.');
+        if (catalog && !catalogLegendMatches(catalog, catalogRead!, 'before')) fail('frontend_readback', 'Data Legend is neither the frozen original nor the complete planned catalog.');
         runtime.assertFenced(); checkLease();
-        const requests = boundedRequests([...(photos ? splitFrontendPhotos(plans).core : KINDS.flatMap(kind => plans[kind].requests)), ...(supplemental?.dashboard.requests ?? [])]);
+        const requests = boundedRequests([...(catalog?.requests ?? []), ...(photos ? splitFrontendPhotos(plans).core : KINDS.flatMap(kind => plans[kind].requests)), ...(supplemental?.dashboard.requests ?? [])]);
         if (requests.length) runtime.writeAtomic(requests);
       }
       if (photos && !alreadyWritten) {
@@ -469,7 +486,8 @@ export function consumeFrontendRefresh(runtime: FrontendRefreshPorts): { status:
           runtime.assertFenced(); checkLease(); runtime.refreshReads?.();
           const fresh = Object.fromEntries(KINDS.map(kind => [kind, runtime.readTable(kind)])) as Record<Kind, FrontendTableRead>;
           const phase = inspectFrontendPhotoPhase(plans, photos, fresh);
-          if (!phase.ready || supplemental && !verifyDashboardPublicationReadback(supplemental.dashboard, runtime.supplemental!.readDashboard())) fail('frontend_photos', 'Photo publication requires the complete frozen Main values and identities.');
+          if (!phase.ready || supplemental && !verifyDashboardPublicationReadback(supplemental.dashboard, runtime.supplemental!.readDashboard())
+            || catalog && !catalogLegendMatches(catalog, runtime.catalog!.read(), 'after')) fail('frontend_photos', 'Photo publication requires the complete frozen Main values and identities.');
           if (!phase.batches.length) break;
           runtime.writeAtomic(boundedRequests(phase.batches[0]));
         }
@@ -477,6 +495,7 @@ export function consumeFrontendRefresh(runtime: FrontendRefreshPorts): { status:
       runtime.assertFenced(); runtime.refreshReads?.();
       for (const kind of KINDS) if (!verifyFrontendPublicationReadback(plans[kind], runtime.readTable(kind))) fail('frontend_readback', 'Published frontend cells did not read back exactly; the edit fence is retained.');
       for (const kind of KINDS) if (!runtime.verifyValidation(plans[kind])) fail('frontend_validation', 'Copied native validation did not read back exactly; the edit fence is retained.');
+      if (catalog && !catalogLegendMatches(catalog, runtime.catalog!.read(), 'after')) fail('frontend_readback', 'Published catalog values or Table choices did not read back exactly; the edit fence is retained.');
       if (supplemental) {
         const extra = runtime.supplemental!;
         if (!verifyDashboardPublicationReadback(supplemental.dashboard, extra.readDashboard())) fail('frontend_readback', 'Dashboard publication did not verify; both workbook fences are retained.');
@@ -692,9 +711,10 @@ export function createNativeFrontendRuntime(services: NativeFrontendServices,
     }
     let publishedBaselines: FrontendPublicationState['baselines'] | undefined;
     let publishedSupplemental: FrontendSupplementalState | undefined;
+    let pendingCatalog: CatalogLegendPlan | undefined, catalogCache: CatalogLegendRead | undefined;
     let metadataCache: Record<string, any> | undefined, cellsCache: Record<string, any> | undefined;
     let excusalMetadataCache: Record<string, any> | undefined, excusalCellsCache: Record<string, any> | undefined, dashboardCache: DashboardPublicationRead | undefined;
-    const invalidateReads = () => { metadataCache = undefined; cellsCache = undefined; excusalMetadataCache = undefined; excusalCellsCache = undefined; dashboardCache = undefined; };
+    const invalidateReads = () => { metadataCache = undefined; cellsCache = undefined; excusalMetadataCache = undefined; excusalCellsCache = undefined; dashboardCache = undefined; catalogCache = undefined; };
     const readMetadata = () => metadataCache ??= api(`${sheetsUrl(config.main.spreadsheetId)}?fields=${encodeURIComponent('spreadsheetId,sheets(properties,tables,protectedRanges,merges,charts,filterViews)')}`);
     const readExcusalMetadata = () => excusalMetadataCache ??= api(`${sheetsUrl(supplemental!.excusals.spreadsheetId)}?fields=${encodeURIComponent('spreadsheetId,sheets(properties,tables,protectedRanges)')}`);
     const column = (index: number) => { let result = ''; for (let n = index + 1; n > 0; n = Math.floor((n - 1) / 26)) result = String.fromCharCode(65 + (n - 1) % 26) + result; return result; };
@@ -781,6 +801,14 @@ export function createNativeFrontendRuntime(services: NativeFrontendServices,
         return { ...seed, hidden: sheet.properties.hidden === true, protected: true, observedRule: block?.rowData?.[0]?.values?.[0]?.dataValidation };
       });
     }
+    function readNativeCatalog(): CatalogLegendRead {
+      return catalogCache ??= readCatalogLegend({ seeds: config.seeds, metadata: readMetadata(), tables: KINDS.map(readTable),
+        businessSheetIds: [...KINDS.map(k => config.main.sheets[k].sheetId), ...(supplemental ? [supplemental.dashboard.sheetId, supplemental.dashboard.dataSheetId] : [])],
+        readCells(bindings) {
+          const ranges = bindings.map(({ title, range: r }) => `${quoted(title)}!${column(r.startColumnIndex)}${r.startRowIndex + 1}:${column(r.endColumnIndex - 1)}${r.endRowIndex}`);
+          return api(`${sheetsUrl(config.main.spreadsheetId)}?${ranges.map(a1 => `ranges=${encodeURIComponent(a1)}`).join('&')}&includeGridData=true&fields=${encodeURIComponent('sheets(properties(sheetId),data(startRow,startColumn,rowData(values(userEnteredValue,chipRuns))))')}`, undefined, false, MAX_GOOGLE_BYTES);
+        } });
+    }
     function verifyNativeValidation(plan: FrontendPublicationPlan, bookId: string, metadata: Record<string, any>, sheetIds: number[]): boolean {
       const observations = readFrontendValidationRanges(plan.validationExpectations, {
         sheetTitle(sheetId) {
@@ -840,6 +868,12 @@ export function createNativeFrontendRuntime(services: NativeFrontendServices,
       for (const request of requests) {
         const entries = Object.entries(request); if (entries.length !== 1) fail('frontend_request', 'A retained frontend request is invalid.');
         const [operation, raw] = entries[0], body = record(raw);
+        if (!excusals && pendingCatalog?.requests.some(r => equal(r, request))) {
+          assertCatalogLegendPlan(pendingCatalog);
+          const actual = readNativeCatalog();
+          if (!catalogLegendMatches(pendingCatalog, actual, 'before') && !catalogLegendMatches(pendingCatalog, actual, 'after')) fail('frontend_request', 'Retained catalog writes do not match the protected native source.');
+          continue;
+        }
         const dashboard = !excusals ? supplemental?.dashboard : undefined;
         const dashboardSheet = body.range?.sheetId ?? body.properties?.sheetId;
         if (dashboard && (operation === 'updateChartSpec' || [dashboard.sheetId, dashboard.dataSheetId].includes(dashboardSheet))) {
@@ -944,9 +978,11 @@ export function createNativeFrontendRuntime(services: NativeFrontendServices,
       },
       state: {
         load() { const verified = checkpoint.load();
-          publishedBaselines = clone(verified.baselines); publishedSupplemental = verified.supplemental ? clone(verified.supplemental) : undefined; return verified; },
+          publishedBaselines = clone(verified.baselines); publishedSupplemental = verified.supplemental ? clone(verified.supplemental) : undefined;
+          pendingCatalog = verified.pending?.catalog ? clone(verified.pending.catalog) : undefined; return verified; },
         save(value) { checkpoint.save(value); publishedBaselines = clone(value.baselines);
-          publishedSupplemental = value.supplemental ? clone(value.supplemental) : undefined; },
+          publishedSupplemental = value.supplemental ? clone(value.supplemental) : undefined;
+          pendingCatalog = value.pending?.catalog ? clone(value.pending.catalog) : undefined; },
       },
       buildModel: modelBuilder ?? (snapshot => {
         if (!services.Utilities.formatDate) fail('frontend_configuration', 'A detachment-local calendar date provider is required.');
@@ -956,6 +992,9 @@ export function createNativeFrontendRuntime(services: NativeFrontendServices,
       verifyValidation: plan => verifyNativeValidation(plan, config.main.spreadsheetId, readMetadata(), KINDS.map(kind => config.main.sheets[kind].sheetId)),
       writeAtomic: requests => writeContent(requests), restoreEditPolicy: () => setPolicy(false), assertEditPolicy: () => assertPolicy(false),
       pause: pauseFrontend,
+    };
+    if (config.seeds.some(s => ['directory:flight', 'directory:squadron'].includes(s.key))) runtime.catalog = {
+      plan: snapshot => planCatalogLegend(snapshot, readNativeCatalog()), read: readNativeCatalog,
     };
     if (supplemental) runtime.supplemental = {
       plan(snapshot, state) {

@@ -125,7 +125,7 @@ count, provenance counts, absence of unresolved mapping diagnostics and exact
 private native permission binding. Review the command and any canonical role
 label changes. After acceptance verify its audit/receipt, derived policy revision,
 future roster queue, Forms choices, current Directory/Leadership labels and
-Main/Excusals publication readback. For a reparent rehearsal, submit one request
+Main/Excusals publication readback, including the protected Data Legend source choices and existing native dropdown types. The [catalog publisher](D1_FRONTEND_PUBLICATION.md#dynamic-flight-and-squadron-choices) updates those choices programmatically through the normal fenced refresh. For a reparent rehearsal, submit one request
 before and one after; verify distinct original queues, decision permissions and
 notification recipes. Keep mail suppressed unless the separate reviewed owner
 rehearsal is active.

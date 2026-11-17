@@ -199,7 +199,7 @@ export function frontendLiteralCell(input: FrontendValue): NativeCellData {
   if (typeof parsed === 'number') return { userEnteredValue: { numberValue: parsed } };
   return { userEnteredValue: { boolValue: parsed } };
 }
-function normalizeRule(input: unknown): unknown {
+export function normalizeFrontendValidationRule(input: unknown): unknown {
   if (!input || typeof input !== 'object') fail('Native validation seed metadata is missing.');
   const rule = input as { strict?: boolean; showCustomUi?: boolean; condition?: { type?: string; values?: { userEnteredValue?: string }[] } };
   const reference = rule.condition?.values?.[0]?.userEnteredValue;
@@ -418,7 +418,7 @@ export function planFrontendPublication(input: FrontendPublicationInput): Fronte
     const destinationRows = c >= current.headers.length ? finalRows.map((_, i) => i) : [...growthRows].filter(i => i < finalRows.length);
     if (!destinationRows.length) continue;
     const seed = seeds.get(column.seedKey);
-    if (!seed || !seed.protected || !seed.hidden || !seed.nativeStyleVersion || !integer(seed.sheetId, 0, 2147483647) || seed.sheetId === current.sheetId || !integer(seed.rowIndex, 2, 10_001) || !integer(seed.columnIndex, 0, 511) || !same(normalizeRule(seed.expectedRule), normalizeRule(seed.observedRule))) fail('A fresh protected native validation seed is required for growth.');
+    if (!seed || !seed.protected || !seed.hidden || !seed.nativeStyleVersion || !integer(seed.sheetId, 0, 2147483647) || seed.sheetId === current.sheetId || !integer(seed.rowIndex, 2, 10_001) || !integer(seed.columnIndex, 0, 511) || !same(normalizeFrontendValidationRule(seed.expectedRule), normalizeFrontendValidationRule(seed.observedRule))) fail('A fresh protected native validation seed is required for growth.');
     destinationRows.sort((a, b) => a - b);
     const blocks: { start: number; end: number }[] = [];
     for (const r of destinationRows) { const previous = blocks.at(-1); if (previous?.end === r) previous.end++; else blocks.push({ start: r, end: r + 1 }); }
@@ -460,8 +460,8 @@ export function verifyFrontendValidationReadback(plan: Pick<FrontendPublicationP
     for (const expected of plan.validationExpectations) {
       const actual = found.get(rangeKey(expected));
       if (!actual || actual.rows.length !== expected.endRowIndex - expected.startRowIndex || actual.rows.some(row => row.length !== expected.endColumnIndex - expected.startColumnIndex)) return false;
-      const normalized = normalizeRule(expected.expectedRule);
-      if (!actual.rows.every(row => row.every(rule => same(normalizeRule(rule), normalized)))) return false;
+      const normalized = normalizeFrontendValidationRule(expected.expectedRule);
+      if (!actual.rows.every(row => row.every(rule => same(normalizeFrontendValidationRule(rule), normalized)))) return false;
     }
     return true;
   } catch { return false; }
