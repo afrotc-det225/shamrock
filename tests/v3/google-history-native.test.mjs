@@ -6,8 +6,8 @@ import {historySheetPlan,historyPresentationRequests} from '../../.build/v3/apps
 import {buildLegacyHistoryReport,legacyHistoryTable} from '../../.build/v3/packages/domain/src/legacy-history.js';
 const hash=v=>createHash('sha256').update(v).digest('hex'),copy=v=>structuredClone(v),owner='automation@example.invalid';
 const config={version:1,environment:'staging',generation:1,enabled:true,resourceReview:'EXISTING_PRIVATE_HISTORY_REVIEWED_FOR_STAGING',principalId:'history-reader',stateFileId:'history-state',spreadsheetId:'history-book',expectedTitle:'SHAMROCK History',api:{baseUrl:'https://history.example.invalid',keyId:'history-key',secretProperty:'SHAMROCK_V3_HISTORY_READER_SECRET'}};
-function source(count=9,snapshotId='archive-one'){
- const columns=['Repeated event','Repeated event'].map((header,i)=>({columnIndex:7+i,header,snapshotEventId:`event-${i}`,eventId:null}));
+function source(count=9,snapshotId='archive-one',events=2){
+ const columns=Array.from({length:events},()=> 'Repeated event').map((header,i)=>({columnIndex:7+i,header,snapshotEventId:`event-${i}`,eventId:null}));
  const input={snapshotId,sourceSnapshotSha256:'a'.repeat(64),importedAt:'2026-11-06T12:00:00.000Z',metadata:{sourceTitle:'Retained Attendance',periodLabel:'Fall term',isCurrent:false,authority:'retained-source-copy',companionDirectoryFound:false,columns},sourceRoster:[],rows:Array.from({length:count},(_,i)=>({sourceLabels:['=literal source name',String(i),'AS100','Alpha','Blue'],row:{occurrenceId:`source-row-${i}`,personId:null,identityLabels:['=literal source name',String(i),'as100','alpha','blue'],events:columns.map((c,j)=>({...c,code:j?'MUR':'=literal code'})),overall:i===0?'=literal saved percentage':.75,llab:1,creditFormulaEvidence:{overall:null,llab:null,arrayAnchorRowIndex:2},personEvidence:null}}))};
  const report=buildLegacyHistoryReport(input),{rows,sourceRoster,summary,diagnostics,...head}=report,binding={contractVersion:'legacy-history-pages-v1',snapshotId,sourceSnapshotSha256:input.sourceSnapshotSha256,importedAt:input.importedAt};
  return {report,binding,manifest:{...binding,section:'manifest',report:head,rowCount:rows.length,rosterCount:0},entry:{snapshotId,title:report.title,periodLabel:report.periodLabel,isCurrentCapture:false,authority:report.authority,rowCount:rows.length,eventCount:columns.length,unresolvedRows:rows.length,sourceSnapshotSha256:input.sourceSnapshotSha256,importedAt:input.importedAt},page(offset){const entries=rows.slice(offset,offset+8).map(row=>({sourceRowIndex:count-Number(row.rowId.split('-').at(-1))+2,row,diagnostics:diagnostics.filter(d=>d.rowId===row.rowId)}));return {...binding,section:'rows',offset,nextOffset:offset+entries.length<rows.length?offset+entries.length:null,rows:entries};}};
@@ -32,9 +32,20 @@ function fixture({reports=[source()]}={}){
     if(req.addSheet)f.sheets.push({properties:copy(req.addSheet.properties),protectedRanges:[],tables:[],cells:[]});
     if(req.updateSheetProperties){const p=req.updateSheetProperties.properties,s=f.sheets.find(s=>s.properties.sheetId===p.sheetId);Object.assign(s.properties,copy(p));}
     if(req.addProtectedRange){const p=req.addProtectedRange.protectedRange;f.sheets.find(s=>s.properties.sheetId===p.range.sheetId).protectedRanges.push(copy(p));}
-    if(req.addTable){const t=req.addTable.table;f.sheets.find(s=>s.properties.sheetId===t.range.sheetId).tables.push({...copy(t),tableId:'native-'+f.sheets.length});}
+    if(req.addTable){const t=req.addTable.table;if(f.rejectWideAdd&&t.range.endColumnIndex>50)assert.ok(!t.columnProperties&&!t.rowsProperties,'wide native Table needs separate configuration');f.sheets.find(s=>s.properties.sheetId===t.range.sheetId).tables.push({...copy(t),tableId:t.tableId??'native-'+f.sheets.length});}
+    if(req.updateTable){const t=req.updateTable.table;const target=f.sheets.flatMap(s=>s.tables).find(old=>old.tableId===t.tableId);assert.ok(target);Object.assign(target,copy(t));}
     if(req.updateCells){const r=req.updateCells,s=f.sheets.find(s=>s.properties.sheetId===r.start.sheetId);r.rows.forEach((row,i)=>{const out=s.cells[r.start.rowIndex+i]??=[];row.values.forEach((cell,j)=>{out[r.start.columnIndex+j]={...out[r.start.columnIndex+j],...copy(cell)};});});}
    }f.bookVersion++;result={};if(f.loseWrite||f.losePublish&&body.requests.some(r=>r.updateSheetProperties?.properties.hidden===false)){f.loseWrite=false;f.losePublish=false;throw Error('ambiguous provider write');}}
+   else if(u.pathname.endsWith(':getByDataFilter')){
+    assert.equal(options.method,'post');assert.equal(body.includeGridData,true);assert.ok(body.dataFilters.length<=8);const ranges=body.dataFilters.map(f=>f.gridRange),s=f.sheets.find(s=>s.properties.sheetId===ranges[0].sheetId);
+    assert.ok(ranges.every(r=>r.sheetId===s.properties.sheetId&&r.startColumnIndex===0&&r.endRowIndex===r.startRowIndex+1));
+    let data=ranges.map(r=>({startRow:r.startRowIndex,startColumn:0,rowData:[{values:copy(s.cells[r.startRowIndex]??[])}]}));
+    if(f.formula||f.gridMode==='batch-formula')data[0].rowData[0].values[0]={userEnteredValue:{formulaValue:'="forged"'}};
+    if(f.gridMode==='reverse')data.reverse();if(f.gridMode==='missing')data.pop();if(f.gridMode==='duplicate')data.push(copy(data[0]));if(f.gridMode==='unexpected')data[0].startRow=999;
+    if(f.gridMode==='coalesced'){data.sort((a,b)=>a.startRow-b.startRow);assert.equal(data.at(-1).startRow-data[0].startRow+1,data.length);data=[{startRow:data[0].startRow,startColumn:0,rowData:data.flatMap(d=>d.rowData)}];}
+    if(f.gridMode==='wrong-column')data[0].startColumn=1;
+    result={sheets:[{properties:{sheetId:f.gridMode==='wrong-sheet'?s.properties.sheetId+1:s.properties.sheetId},data}]};
+   }
    else if(u.searchParams.has('ranges')){const m=/^'(.*)'!A(\d+):[A-Z]+(\d+)$/.exec(u.searchParams.get('ranges'));assert.ok(m);const s=f.sheets.find(s=>s.properties.title===m[1]),start=Number(m[2])-1,end=Number(m[3]);const rowData=Array.from({length:end-start},(_,i)=>({values:copy(s.cells[start+i]??[])}));if(f.formula&&s.properties.sheetId!==0)rowData[0].values[0]={userEnteredValue:{formulaValue:'="forged"'}};result={sheets:[{data:[{startRow:start,startColumn:0,rowData}]}]};}
    else result={spreadsheetId:'history-book',sheets:f.sheets.map(({cells,...s})=>copy(s))};
   }else throw Error('Unexpected resource');return {getResponseCode:()=>status,getContentText:()=>JSON.stringify(result)};
@@ -69,4 +80,26 @@ test('history preserves external checkpoint edits and rejects sharing changes be
 test('six distinct source reports remain separate despite reused period labels and empty reports retain a native Table',()=>{
  const reports=Array.from({length:6},(_,i)=>source(i===0?0:1,`archive-${i}`)),f=fixture({reports});f.enable();assert.deepEqual(f.finish(),{state:'complete',completed:6,reports:6});assert.equal(f.sheets.length,7);assert.equal(new Set(f.sheets.map(s=>s.properties.title)).size,7);assert.ok(f.sheets.every(s=>s.tables.length===1));assert.equal(f.sheets.filter(s=>s.properties.hidden).length,0);
  const requests=historyPresentationRequests(reports[0].manifest,historySheetPlan(reports[0].manifest,hash),owner);assert.ok(requests.some(r=>r.addTable?.table.range.endRowIndex===3));
+});
+
+test('eight-row History verification uses one bounded numeric-grid read and binds unordered blocks by source position',()=>{
+ for(const gridMode of ['reverse','coalesced']){
+  const f=fixture();f.enable();while(f.state.phase!=='verify')f.runtime.run();f.gridMode=gridMode;const before=f.calls.length;f.runtime.run();
+  const reads=f.calls.slice(before).filter(c=>c.url.includes(':getByDataFilter'));assert.equal(reads.length,1);assert.equal(reads[0].body.dataFilters.length,8);assert.equal(f.state.offset,8);
+  assert.ok(!reads[0].url.includes('Retained'));assert.equal(f.finish().completed,1);
+ }
+});
+test('batched History reads retain their cursor on missing, duplicate, unrelated or misaligned grid blocks',()=>{
+ for(const gridMode of ['missing','duplicate','unexpected','wrong-sheet','wrong-column','batch-formula']){
+  const f=fixture();f.enable();while(f.state.phase!=='verify')f.runtime.run();f.gridMode=gridMode;const checkpoint=copy(f.state);
+  assert.throws(()=>f.runtime.run(),e=>e.code==='history_native');assert.deepEqual(f.state,checkpoint);assert.equal(f.sheets.filter(s=>s.properties.hidden).length,1);
+ }
+});
+
+test('wide History Tables are created minimally and configured in the same atomic native batch',()=>{
+ const report=source(1,'wide-source',68),f=fixture({reports:[report]});f.rejectWideAdd=true;f.enable();assert.equal(f.finish().completed,1);
+ const plan=historySheetPlan(report.manifest,hash),table=f.sheets.find(s=>s.properties.sheetId===plan.sheetId).tables[0];assert.equal(plan.columnCount,78);assert.equal(table.tableId,`shamrock_${plan.tableName}`);assert.equal(table.columnProperties.length,78);assert.ok(table.rowsProperties.headerColorStyle);
+ const batches=f.calls.filter(c=>c.body?.requests?.some(r=>r.addTable?.table.range.sheetId===plan.sheetId));assert.equal(batches.length,1);
+ const requests=batches[0].body.requests,index=requests.findIndex(r=>r.addTable?.table.range.sheetId===plan.sheetId),created=requests[index].addTable.table,configured=requests[index+1].updateTable;
+ assert.deepEqual(Object.keys(created).sort(),['name','range','tableId']);assert.equal(configured.table.tableId,created.tableId);assert.equal(configured.fields,'rowsProperties,columnProperties');assert.equal(configured.table.columnProperties.length,78);
 });

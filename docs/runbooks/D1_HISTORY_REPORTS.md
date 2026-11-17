@@ -65,3 +65,14 @@ Saved Overall/LLAB values and attendance codes remain literal, including old cod
 Unknown page/write results retain the cursor and retry the same immutable target. A lost final unhide/index response triggers complete literal re-verification before confirming that report. Changed source digest, revoked reader authority, changed sharing, unexpected native Table/protection or a formula discovered during readback stops progress. An external workbook revision change during verification also stops progress; retain the private checkpoint for review instead of discarding it or accepting partial work. Private checkpoint saves compare content and read back the result; Drive metadata drift alone is not an atomic compare-and-swap. The script lock coordinates this host, not arbitrary owner edits in the Google UI.
 
 The seven native mock regressions in `google-history-native.test.mjs` exercise a separate read-only API binding, six independent reports, source-order preservation, literal formula-like text, native Tables/protections, compact layout, interrupted creation/final publication, missing authority, changed sharing/source content and tampered checkpoint/content. A local read-only rehearsal of the six imported real-data reports preserved all **510 rows**, including **6 unresolved source rows**, with exact saved row order and values. The largest eight-row response was **111,765 bytes**. This establishes local import/presentation-plan parity only; the actual Google workbook and account quotas still require hosted staging verification. Page reads, Sheets writes and Drive checkpoint calls use existing free-tier APIs; pace the scheduler and measure total account usage during that rehearsal.
+
+Native literal verification reads each page's at most eight rows in one
+[`spreadsheets.getByDataFilter`](https://developers.google.com/workspace/sheets/api/reference/rest/v4/spreadsheets/getByDataFilter)
+request using exact numeric sheet/row/column ranges. Numeric ranges avoid repeating
+long source titles in a URL. Returned grid blocks are matched by sheet ID and
+`startRow`, independent of response order; missing, duplicate, unexpected or
+misaligned blocks and formulas stop before advancing the saved verification
+cursor. This reduces an eight-row page's row reads from eight provider requests
+to one while retaining separate header, source-digest and workbook-revision checks.
+Local provider-port tests cover reordered and coalesced blocks; native Google
+behavior and the resulting quota use still need release-specific readback.

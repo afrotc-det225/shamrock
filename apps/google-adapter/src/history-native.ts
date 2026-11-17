@@ -73,6 +73,27 @@ export function createNativeHistoryRuntime(services:NativeHistoryServices,nowSec
       if(!data||(data.startRow??0)!==start||(data.startColumn??0)!==0)fail('The historical grid read-back did not match its requested range.');
       return Array.from({length:count},(_,r)=>Array.from({length:cols},(_,c)=>{const v=data.rowData?.[r]?.values?.[c]?.userEnteredValue??{};if(Object.hasOwn(v,'formulaValue'))fail('Retained historical values must never become live formulas.');return v.stringValue??v.numberValue??v.boolValue??null;}));
     }
+    /** One bounded provider read for a page; numeric ranges avoid long repeated A1 titles. */
+    function readBoundRows(sheetId:number,rows:number[],cols:number):Map<number,HistoryScalar[]> {
+      const selected=new Set(rows),found=new Map<number,HistoryScalar[]>();
+      if(rows.length>8||selected.size!==rows.length||rows.some(row=>!Number.isSafeInteger(row)||row<2))fail('Historical verification row bindings are invalid.');
+      if(!rows.length)return found;
+      const result=google(`${sheets(config.spreadsheetId)}:getByDataFilter?fields=sheets(properties(sheetId),data(startRow,startColumn,rowData(values(userEnteredValue))))`,'post',{
+        dataFilters:rows.map(startRowIndex=>({gridRange:{sheetId,startRowIndex,endRowIndex:startRowIndex+1,startColumnIndex:0,endColumnIndex:cols}})),includeGridData:true,
+      });
+      if(!Array.isArray(result.sheets)||result.sheets.length!==1||result.sheets[0].properties?.sheetId!==sheetId||!Array.isArray(result.sheets[0].data)||!result.sheets[0].data.length)fail('Historical verification returned an unexpected sheet or missing grid.');
+      for(const data of result.sheets[0].data){
+        const start=data.startRow??0,values=data.rowData??[];
+        if(!Number.isSafeInteger(start)||(data.startColumn??0)!==0||!Array.isArray(values)||values.length>rows.length)fail('Historical verification returned an unexpected grid range.');
+        for(let offset=0;offset<Math.max(1,values.length);offset++){
+          const row=start+offset,cells=values[offset]?.values??[];
+          if(!selected.has(row)||found.has(row)||!Array.isArray(cells)||cells.length>cols)fail('Historical verification rows are missing, duplicated or outside their binding.');
+          found.set(row,Array.from({length:cols},(_,column)=>{const value=cells[column]?.userEnteredValue??{};if(Object.hasOwn(value,'formulaValue'))fail('Retained historical values must never become live formulas.');return value.stringValue??value.numberValue??value.boolValue??null;}));
+        }
+      }
+      if(found.size!==rows.length)fail('Historical verification omitted a bound source row.');
+      return found;
+    }
     function index(manifest:HistoryPageManifest,index:number,catalog:HistoryCatalogEntry[]){
       const book=metadata();let sheet=book.sheets?.find((s:any)=>s.properties.sheetId===0);const requests:Record<string,unknown>[]=[];
       if(!sheet){requests.push({addSheet:{properties:{sheetId:0,title:'History',gridProperties:{rowCount:Math.max(10,catalog.length+2),columnCount:5,frozenRowCount:2,hideGridlines:true}}}});}
@@ -100,7 +121,8 @@ export function createNativeHistoryRuntime(services:NativeHistoryServices,nowSec
         write(manifest,page,positions){batch(historyPageWrites(manifest,historySheetPlan(manifest,signer.sha256),page,positions));},
         version:()=>String(inspect(config.spreadsheetId,host.expectedAutomationEmail).version),
         verifyHeaders(manifest){const plan=reportMetadata(manifest);if(!sameCells(readRows(plan.title,0,2,plan.columnCount),[plan.headers,plan.labels]))fail('Historical report headers do not match the retained source.');},
-        verify(manifest,page,positions){const plan=historySheetPlan(manifest,signer.sha256),expected=historyPageRows(manifest,page);page.rows.forEach((entry,i)=>{const at=positions.findIndex(p=>p.rowId===entry.row.rowId&&p.sourceRowIndex===entry.sourceRowIndex);if(at<0||!sameCells(readRows(plan.title,at+2,1,plan.columnCount)[0],expected[i]))fail('Historical literal read-back differs from its retained source row.');});},
+        verify(manifest,page,positions){const plan=historySheetPlan(manifest,signer.sha256),expected=historyPageRows(manifest,page),indices=page.rows.map(entry=>{const at=positions.findIndex(p=>p.rowId===entry.row.rowId&&p.sourceRowIndex===entry.sourceRowIndex);if(at<0)fail('Historical literal read-back has no retained source row binding.');return at+2;});
+          const actual=readBoundRows(plan.sheetId,indices,plan.columnCount);indices.forEach((row,i)=>{if(!sameCells(actual.get(row),expected[i]))fail('Historical literal read-back differs from its retained source row.');});},
         publish:index}};
     return {config,bindingHash,ports};
   }
