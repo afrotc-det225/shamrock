@@ -9,12 +9,14 @@ import {
   Layers,
   Settings,
   Sparkles,
+  History as HistoryIcon,
 } from "lucide-react";
 import { api, startSession, label, logout } from "./api";
 import { Drawer, EditorError } from "./components";
 import Events from "./Events";
 import People from "./People";
 import Attendance from "./Attendance";
+import History from "./History";
 import Semester from "./Semester";
 import { Overview, System, Assistant } from "./Secondary";
 import "@fontsource/libre-franklin/latin-400.css";
@@ -30,6 +32,7 @@ const pages = [
   ["Leadership", ChevronsUp],
   ["Events", CalendarDays],
   ["Attendance & excusals", ClipboardList],
+  ["History", HistoryIcon],
   ["Semester", Layers],
   ["System", Settings],
 ];
@@ -168,7 +171,7 @@ function App() {
     data?.snapshot.access && !data.snapshot.access.capabilities.fullSnapshot;
   const visiblePages = scoped
     ? pages.filter(([title]) => title === "Attendance & excusals")
-    : pages;
+    : pages.filter(([title]) => title !== "History" || data?.meta.hosted);
   const common = { ...data, propose, busy, notify: setNotice, refresh: reload };
   if (signIn) {
     const code = new URLSearchParams(location.search).get("signin");
@@ -284,6 +287,7 @@ function App() {
                   <People key="leadership" leadership {...common} />
                 )}{" "}
                 {page === "Attendance & excusals" && <Attendance {...common} />}{" "}
+                {!scoped && page === "History" && <History />}
                 {!scoped && page === "Semester" && <Semester {...common} />}{" "}
                 {!scoped && page === "Overview" && (
                   <Overview {...common} navigate={navigate} />

@@ -2,6 +2,8 @@ import { createHash, createHmac } from "node:crypto";
 import { PanelError } from "../errors.mjs";
 import { boundedJson } from "./http.mjs";
 const paths = new Set([
+  "/v1/admin/history/list",
+  "/v1/admin/history/page",
   "/v1/admin/snapshot/page",
   "/v1/admin/panel/page",
   "/v1/admin/panel/authorize",
@@ -187,6 +189,30 @@ export class HostedBackend {
       offset: 0,
       revision: null,
     });
+  }
+  async historyPage(input) {
+    const before = await this.panelManifest();
+    if (!before.access.capabilities.fullSnapshot)
+      throw new PanelError("FORBIDDEN", "This page is outside your access.", 403);
+    let result;
+    if (input === null) {
+      result = await this.post("/v1/admin/history/list", this.identity());
+    } else {
+      if (!input || typeof input.snapshotId !== "string" ||
+          !["manifest", "roster", "rows", "verify"].includes(input.section) ||
+          !Number.isSafeInteger(input.offset) || input.offset < 0)
+        throw new PanelError("INVALID_REQUEST", "This report is unavailable.");
+      result = await this.post("/v1/admin/history/page", {
+        ...this.identity(), snapshotId: input.snapshotId,
+        section: input.section, offset: input.offset,
+        sourceSnapshotSha256: input.sourceSnapshotSha256,
+      });
+    }
+    const after = await this.panelManifest();
+    if (!after.access.capabilities.fullSnapshot ||
+        JSON.stringify(before.revision) !== JSON.stringify(after.revision))
+      throw new PanelError("SNAPSHOT_CHANGED", "Records or access changed. Reload SHAMROCK.", 409);
+    return result;
   }
   async page(input) {
     if (

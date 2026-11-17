@@ -157,9 +157,31 @@ interface. All controls are native HTML/React elements.
 
 This first panel does not yet expose Flight/Squadron catalog administration,
 permission grants, notification routing and closeout controls, bulk CSV operations,
-photo-fetch recovery, or full historical report browsing. Those backend workflows
+photo-fetch recovery, or historical excusal request browsing. Those backend workflows
 must gain reviewed UI controls before calling the panel a complete replacement for
 all administration. Source-code bug fixes still require a development workflow.
+
+### Historical attendance
+
+Hosted administrators can open **History**, select a retained report, and filter
+by cadet or Flight. Each source copy remains separate, including copies for the
+same semester. The table preserves literal attendance codes and saved Overall/LLAB
+percentages; it does not recalculate old records using current policy. Historical
+identities without a current Directory link remain visible. The panel reports
+saved-percentage mismatches without overwriting their evidence.
+
+Reports load through bounded authenticated pages and appear only after the whole
+archive has passed its hash/binding verification. Leaving the page or selecting
+another report stops subsequent requests. Both sides of every hosted read check
+current administrator access; scoped Flight/Squadron readers cannot fetch Wing
+archives. Retained reports do not poll while open. This is separate from current
+data's automatic refresh and does not expose historical excusal details.
+
+Local acceptance on the retained November 6 capture covered all six reports
+(510 rows), with every displayed attendance code matching its source report.
+That loopback-browser check does not establish hosted CPU capacity or completeness
+against later production updates. The hosted real-data binding remains a separate
+release gate.
 
 The presentation now takes its navy, gold and Libre Franklin inspiration from
 [Notre Dame AFROTC](https://afrotc.nd.edu/). Fonts are self-hosted open-license

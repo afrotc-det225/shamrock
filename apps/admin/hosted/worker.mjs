@@ -87,6 +87,10 @@ export default {
       }
       if (request.method === "POST" && url.pathname === "/api/page")
         return secure(json(await backend.page(body)));
+      if (request.method === "GET" && url.pathname === "/api/history/list")
+        return secure(json(await backend.historyPage(null)));
+      if (request.method === "POST" && url.pathname === "/api/history/page")
+        return secure(json(await backend.historyPage(body)));
       if (request.method === "POST" && url.pathname === "/api/proposals")
         return secure(
           json(await service.propose(body.operation, body.payload)),

@@ -220,8 +220,8 @@ export function Table({ headers, children }) {
       <table>
         <thead>
           <tr>
-            {headers.map((h) => (
-              <th key={h}>{h}</th>
+            {headers.map((h, index) => (
+              <th key={`${index}:${h}`}>{h}</th>
             ))}
           </tr>
         </thead>

@@ -906,6 +906,9 @@ h1 {
   color: #ae9142;
   overflow: visible;
 }
+.history-caption { color: var(--muted); font-size: 13px; }
+.history-unlinked { display: block; color: var(--muted); font-size: 11px; }
+.history-code { text-align: center; font-variant-numeric: tabular-nums; }
 .brand-stem {
   fill: none;
   stroke: #ae9142;
