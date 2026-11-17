@@ -9,6 +9,7 @@ export { createNativeFrontendRuntime, FRONTEND_PROPERTIES } from './frontend-run
 export { flushNotificationDelivery, createMailAppProvider, planNotificationWork } from './notification-runtime.js';
 export { continueTransitionArchive } from './transition-runtime.js';
 export { createNativeMaintenanceRuntime } from './native-maintenance.js';
+export { createNativeHistoryRuntime, HISTORY_PROPERTIES } from './history-native.js';
 
 export { createNativeFormsRuntime, FORMS_PROPERTIES, MANAGED_FORM_HANDLERS } from './forms-native.js';
 
