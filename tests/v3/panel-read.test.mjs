@@ -9,6 +9,7 @@ import { PANEL_SECTIONS, resolvePanelAccess, assemblePanelSnapshotPages, panelSn
 import { buildFrontendReporting } from '../../.build/v3/packages/domain/src/frontend-reporting.js';
 import { panelSnapshotPage } from '../../.build/v3/apps/worker/src/panel-read.js';
 import { excusalDecisionPermission } from '../../.build/v3/apps/worker/src/excusal-scope.js';
+import worker from '../../.build/v3/apps/worker/src/index.js';
 
 const secret = 'fictional-panel-test-secret-not-for-deployment', keyId = 'fixture';
 const directory = new URL('../../database/migrations/', import.meta.url);
@@ -59,10 +60,11 @@ async function fixture(t) {
         ]);
     }
     await reconcile();
-    async function send(input, path = '/v1/admin/panel/page') {
+    async function send(input, path = '/v1/admin/panel/page', overrideDB) {
         const body = JSON.stringify(input), timestamp = String(Math.floor(Date.now() / 1000));
         const signature = createHmac('sha256', secret).update(`POST\n${path}\n${timestamp}\n${createHash('sha256').update(body).digest('hex')}`).digest('hex');
-        const r = await mf.dispatchFetch(`https://fixture.invalid${path}`, { method: 'POST', body, headers: { 'content-type': 'application/json', 'x-shamrock-key-id': keyId, 'x-shamrock-timestamp': timestamp, 'x-shamrock-signature': signature } });
+        const init = { method: 'POST', body, headers: { 'content-type': 'application/json', 'x-shamrock-key-id': keyId, 'x-shamrock-timestamp': timestamp, 'x-shamrock-signature': signature } };
+        const r = overrideDB ? await worker.fetch(new Request(`https://fixture.invalid${path}`, init), { DB: overrideDB, ENVIRONMENT: 'local', GENERATION: '1', BRIDGE_KEY_ID: keyId, BRIDGE_SECRET: secret }) : await mf.dispatchFetch(`https://fixture.invalid${path}`, init);
         return { status: r.status, body: await r.json() };
     }
     async function read(principal, section, revision) {
@@ -222,4 +224,101 @@ test('panel pages preserve deterministic offsets and access changes invalidate a
     assert.equal(new Set([...first.rows, ...second.body.rows].map(r => r.personId)).size, 69);
     await f.db.prepare("INSERT INTO admin_grants VALUES('flight','frontend.read','flight','bravo')").run();
     assert.equal((await f.send({ ...base('flight'), section: 'verify', revision: manifest.revision })).body.error.code, 'SNAPSHOT_CHANGED');
+});
+
+const authorizeInput = (principalId, operation, target) => ({ environment: 'local', generation: 1, principalId, operation, target });
+const correctionPayload = () => ({ personId: 'cadet', eventId: 'event', expectedBaseVersion: 0, expectedEventVersion: 2, code: 'T', reason: 'Fictional reviewed correction.' });
+async function transferFlightCommander(f) {
+    await f.db.prepare("UPDATE directory_profiles SET flight_id='bravo',version=version+1 WHERE person_id='flight'").run();
+    await f.db.prepare("UPDATE memberships SET unit_id='bravo' WHERE person_id='flight'").run();
+    await f.reconcile();
+}
+
+test('targeted authorization returns only current permissible target context and works while writes are paused', async t => {
+    const f = await fixture(t); await f.request('cadet', 'request-alpha'); await f.request('other', 'request-bravo');
+    const allowed = await f.send(authorizeInput('blue', 'excusal.decide', { requestId: 'request-alpha' }), '/v1/admin/panel/authorize');
+    assert.equal(allowed.status, 200, JSON.stringify(allowed));
+    assert.deepEqual(allowed.body, { contractVersion: 'panel-authorization-v1', environment: 'local', generation: 1, allowed: true, operation: 'excusal.decide', target: { requestId: 'request-alpha' }, current: { expectedVersion: 1, status: 'Submitted', requestedOutcome: 'E', reason: 'Fictional cadet reason', decisionReason: null } });
+    for (const [principal, request] of [['blue', 'request-bravo'], ['blue', 'nonexistent'], ['flight', 'request-alpha'], ['outsider', 'request-alpha']]) {
+        const denied = await f.send(authorizeInput(principal, 'excusal.decide', { requestId: request }), '/v1/admin/panel/authorize');
+        assert.equal(denied.status, 403); assert.deepEqual(Object.keys(denied.body), ['error']); assert.equal(JSON.stringify(denied.body).includes('Fictional'), false);
+    }
+    await f.db.prepare('UPDATE system_control SET accepting_commands=0').run();
+    const correction = await f.send(authorizeInput('flight', 'attendance.correct', { personId: 'cadet', eventId: 'event' }), '/v1/admin/panel/authorize');
+    assert.equal(correction.status, 200); assert.deepEqual(Object.keys(correction.body.current).sort(), ['expectedBaseVersion', 'expectedEventVersion', 'flightId']); assert.equal(correction.body.current.flightId, 'alpha');
+    assert.equal((await f.send(authorizeInput('flight', 'attendance.correct', { personId: 'other', eventId: 'event' }), '/v1/admin/panel/authorize')).status, 403);
+    assert.equal((await f.send(f.command('flight', 'paused-panel', 'attendance.correct', correctionPayload()), '/v1/admin/panel/commands')).status, 403);
+});
+
+test('panel correction commits and replays exactly, rejects changed payload and never rebases the reviewed version', async t => {
+    const f = await fixture(t), command = f.command('flight', 'panel-correct', 'attendance.correct', correctionPayload());
+    const first = await f.send(command, '/v1/admin/panel/commands'); assert.equal(first.status, 200, JSON.stringify(first));
+    assert.deepEqual(await f.send(command, '/v1/admin/panel/commands'), first);
+    const changed = structuredClone(command); changed.payload.reason = 'Changed reviewed text';
+    assert.equal((await f.send(changed, '/v1/admin/panel/commands')).body.error.code, 'COMMAND_ID_CONFLICT');
+    const stale = f.command('flight', 'stale-panel-correct', 'attendance.correct', correctionPayload());
+    const preview = await f.send(authorizeInput('flight', 'attendance.correct', { personId: 'cadet', eventId: 'event' }), '/v1/admin/panel/authorize'); assert.ok(preview.body.current.expectedBaseVersion > 0);
+    assert.equal((await f.send(stale, '/v1/admin/panel/commands')).body.error.code, 'CORRECTION_CONFLICT');
+    assert.equal((await f.db.prepare('SELECT COUNT(*) AS n FROM attendance_corrections').first()).n, 1);
+    await transferFlightCommander(f);
+    assert.equal((await f.send(command, '/v1/admin/panel/commands')).status, 403, 'lost panel scope cannot retrieve an earlier receipt');
+    assert.equal((await f.send(command, '/v1/admin/commands')).status, 200, 'unchanged Sheets authority still replays its original receipt');
+});
+
+test('panel scope is checked inside the mutation when a Flight assignment changes after preflight but broad core authority survives', async t => {
+    const f = await fixture(t), command = f.command('flight', 'racing-panel-correct', 'attendance.correct', correctionPayload());
+    let batches = 0, queries = 0;
+    const DB = { prepare: sql => { queries++; return f.db.prepare(sql); }, batch: async statements => { if (++batches === 3) await transferFlightCommander(f); return f.db.batch(statements); } };
+    const result = await f.send(command, '/v1/admin/panel/commands', DB);
+    assert.equal(result.status, 409, JSON.stringify(result)); assert.equal(result.body.error.code, 'CORRECTION_CONFLICT');
+    assert.equal((await f.db.prepare("SELECT COUNT(*) AS n FROM command_registry WHERE command_id='racing-panel-correct'").first()).n, 0);
+    assert.equal((await f.db.prepare("SELECT COUNT(*) AS n FROM role_admin_grants WHERE principal_id='flight' AND capability='attendance.correct' AND scope_kind='wing'").first()).n, 1);
+    assert.ok(queries < 50, `${queries} statements`);
+    assert.equal((await f.send(command, '/v1/admin/commands')).status, 200, 'same core command remains intentionally authorized outside the scoped panel');
+});
+
+test('panel receipt read rejects scope revocation occurring after targeted preflight', async t => {
+    const f = await fixture(t), command = f.command('flight', 'receipt-panel-correct', 'attendance.correct', correctionPayload());
+    assert.equal((await f.send(command, '/v1/admin/panel/commands')).status, 200);
+    let revoked = false;
+    const wrap = (statement, sql) => new Proxy(statement, { get(target, key) {
+        if (key === 'bind') return (...values) => wrap(target.bind(...values), sql);
+        if (key === 'first') return async (...args) => { if (!revoked && sql.includes('SELECT c.payload_hash AS hash,c.receipt_json')) { revoked = true; await transferFlightCommander(f); } return target.first(...args); };
+        const value = Reflect.get(target, key); return typeof value === 'function' ? value.bind(target) : value;
+    } });
+    const DB = { prepare: sql => wrap(f.db.prepare(sql), sql), batch: stmts => f.db.batch(stmts) };
+    const replay = await f.send(command, '/v1/admin/panel/commands', DB);
+    assert.equal(replay.status, 403, JSON.stringify(replay)); assert.equal(revoked, true); assert.equal(Object.hasOwn(replay.body, 'result'), false);
+});
+
+test('panel decisions preserve exact Blue/Gold authority, strict replays and scoped current-term guard at commit', async t => {
+    const f = await fixture(t); await f.request('cadet', 'panel-request');
+    const command = f.command('blue', 'panel-decision', 'excusal.decide', { requestId: 'panel-request', expectedVersion: 1, decision: 'Denied', reason: 'Fictional reviewed decision' });
+    const first = await f.send(command, '/v1/admin/panel/commands'); assert.equal(first.status, 200, JSON.stringify(first));
+    assert.deepEqual(first.body.result, { requestId: 'panel-request', version: 2, status: 'Denied', decision: 'Denied' });
+    for (const privateKey of ['submittedBy', 'decidedBy', 'source', 'sourceJson', 'source_json']) assert.equal(Object.hasOwn(first.body.result, privateKey), false);
+    assert.deepEqual(await f.send(command, '/v1/admin/panel/commands'), first);
+    const changed = structuredClone(command); changed.payload.reason = 'Different reviewed decision';
+    assert.equal((await f.send(changed, '/v1/admin/panel/commands')).body.error.code, 'COMMAND_ID_CONFLICT');
+    await f.db.prepare("INSERT INTO terms VALUES('older','Fictional older term',0,0)").run();
+    const again = f.command('blue', 'panel-decision-race', 'excusal.decide', { requestId: 'panel-request', expectedVersion: 2, decision: 'Approved', reason: 'Fictional changed decision' });
+    let batches = 0;
+    const DB = { prepare: sql => f.db.prepare(sql), batch: async statements => { if (++batches === 3) await f.db.prepare("UPDATE event_details SET term_id='older',version=version+1 WHERE event_id='event'").run(); return f.db.batch(statements); } };
+    const result = await f.send(again, '/v1/admin/panel/commands', DB); assert.equal(result.status, 409, JSON.stringify(result));
+    assert.equal((await f.db.prepare("SELECT version FROM excusal_records WHERE request_id='panel-request'").first()).version, 2);
+    assert.equal((await f.send(again, '/v1/commands')).status, 200, 'existing core decision permission is unchanged');
+    await f.db.prepare("UPDATE directory_profiles SET role='Cadet',version=version+1 WHERE person_id='blue'").run(); await f.reconcile();
+    assert.equal((await f.send(command, '/v1/admin/panel/commands')).status, 403);
+});
+
+test('panel authorization accepts only exact server targets and panel apply excludes other operation families', async t => {
+    const f = await fixture(t), valid = authorizeInput('flight', 'attendance.correct', { personId: 'cadet', eventId: 'event' });
+    for (const invalid of [{ ...valid, flightId: 'alpha' }, { ...valid, target: { ...valid.target, allowed: true } }, { ...valid, operation: 'directory.upsert' }, { ...valid, target: { requestId: 'unknown' } }]) assert.equal((await f.send(invalid, '/v1/admin/panel/authorize')).status, 400);
+    const report = f.command('flight', 'not-panel-report', 'attendance.report', { reportId: 'not-panel-report', eventId: 'event', unitId: 'alpha', rosterVersion: 1, coveredPersonIds: ['cadet'], presentPersonIds: ['cadet'], completeness: 'partial' });
+    assert.equal((await f.send(report, '/v1/admin/panel/commands')).body.error.code, 'INVALID_PANEL_OPERATION');
+    const forged = { ...f.command('flight', 'forged-panel', 'attendance.correct', correctionPayload()), guard: { sql: '1', values: [] } };
+    assert.equal((await f.send(forged, '/v1/admin/panel/commands')).status, 400);
+    let batches = 0;
+    const DB = { prepare: sql => f.db.prepare(sql), batch: async statements => { if (++batches === 2) await f.db.prepare('UPDATE system_control SET generation=2').run(); return f.db.batch(statements); } };
+    assert.equal((await f.send(valid, '/v1/admin/panel/authorize', DB)).body.error.code, 'SNAPSHOT_CHANGED', 'generation changes cannot cross a targeted read');
 });

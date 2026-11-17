@@ -8,7 +8,9 @@ import { permissionCommand, permissionRefresh, attestPermissionFence, recoverPer
 import { effectiveAccessGrants } from './permission-grants.js';
 import { legacyHistoryPage } from './legacy-history-transport.js';
 import { frontendSnapshotPage } from './frontend-transport.js';
-import { panelSnapshotPage } from './panel-read.js';
+import { panelSnapshotPage, preparePanelAuthorization } from './panel-read.js';
+import type { CommandScopeGuard } from './command-scope.js';
+import { parseAttendanceCorrection } from '../../../packages/domain/src/corrections.js';
 import { prepareCloseout, advanceCloseout, closeoutStatus } from './closeout.js';
 import { listLegacyHistory, readLegacyHistory, listLegacyRequestHistory } from './legacy-history.js';
 import { recoverAdminEffect } from './effect-recovery.js';
@@ -158,19 +160,19 @@ function membershipGuard(ctx: Context): { sql: string; values: (string | number 
   };
 }
 
-function guardParts(env: Env, command: Command, ctx: Context): { sql: string; values: (string | number | null)[] } {
+function guardParts(env: Env, command: Command, ctx: Context, scope?: CommandScopeGuard): { sql: string; values: (string | number | null)[] } {
   const decision=command.operation==='excusal.decide',permission=decision?excusalDecisionPermission(command.actor.principalId,command.payload.requestId,ctx.unitId):{sql:permissionSql,values:[command.actor.principalId,capability(command),ctx.unitId,submission(command)?ctx.personId:null]};
   return {
     sql: `${controlSql} AND ${permission.sql} AND ${sourceSql}
       AND NOT EXISTS (SELECT 1 FROM json_each(?) selected WHERE NOT EXISTS
         (SELECT 1 FROM events e ${decision?'':'JOIN event_units eu ON eu.event_id=e.event_id'}
-         WHERE e.event_id=selected.value AND e.active=1 ${decision?'':'AND eu.unit_id=?'}))${submission(command)?' AND EXISTS(SELECT 1 FROM flight_hierarchy h JOIN squadrons s ON s.squadron_id=h.squadron_id WHERE h.unit_id=?)':''}`,
+         WHERE e.event_id=selected.value AND e.active=1 ${decision?'':'AND eu.unit_id=?'}))${submission(command)?' AND EXISTS(SELECT 1 FROM flight_hierarchy h JOIN squadrons s ON s.squadron_id=h.squadron_id WHERE h.unit_id=?)':''}${scope ? ` AND (${scope.sql})` : ''}`,
     values: [env.ENVIRONMENT, Number(env.GENERATION), ...permission.values,
-      command.source.kind, command.source.resourceKey, JSON.stringify(eventIds(command, ctx)),...(decision?[]:[ctx.unitId]),...(submission(command)?[ctx.unitId]:[])],
+      command.source.kind, command.source.resourceKey, JSON.stringify(eventIds(command, ctx)),...(decision?[]:[ctx.unitId]),...(submission(command)?[ctx.unitId]:[]), ...(scope?.values ?? [])],
   };
 }
 
-async function authorize(env: Env, command: Command, ctx: Context): Promise<void> {
+async function authorize(env: Env, command: Command, ctx: Context, scope?: CommandScopeGuard): Promise<void> {
   if (command.environment !== env.ENVIRONMENT || command.generation !== Number(env.GENERATION)) {
     throw new HttpError(409, 'WRONG_GENERATION', 'Reload the current environment before submitting.');
   }
@@ -178,7 +180,7 @@ async function authorize(env: Env, command: Command, ctx: Context): Promise<void
     || (command.actor.evidence === 'google-edit' && command.source.kind !== 'sheet')) {
     throw new HttpError(400, 'INVALID_EVIDENCE', 'Actor evidence does not match the source.');
   }
-  const guard = guardParts(env, command, ctx);
+  const guard = guardParts(env, command, ctx, scope);
   const result = await statement(env.DB, `SELECT (${guard.sql}) AS allowed`, ...guard.values).first<{ allowed: number }>();
   if (result?.allowed !== 1) throw new HttpError(403, 'NOT_AUTHORIZED', 'The actor, source or operation is not currently authorized.');
 }
@@ -190,8 +192,8 @@ interface Receipt {
   result: unknown;
   pendingEffects: true;
 }
-async function priorReceipt(env: Env, command: Command, ctx: Context, hash: string): Promise<Receipt | null> {
-  const guard = guardParts(env, command, ctx);
+async function priorReceipt(env: Env, command: Command, ctx: Context, hash: string, scope?: CommandScopeGuard): Promise<Receipt | null> {
+  const guard = guardParts(env, command, ctx, scope);
   const membership = membershipGuard(ctx);
   // Permission and receipt are read in one snapshot, including retries that race
   // with grant revocation after the preliminary validation above. Submission
@@ -205,17 +207,17 @@ async function priorReceipt(env: Env, command: Command, ctx: Context, hash: stri
   return JSON.parse(prior.receipt);
 }
 
-async function acceptCommand(env: Env, command: Command): Promise<Receipt> {
+async function acceptCommand(env: Env, command: Command, panelScope?: CommandScopeGuard): Promise<Receipt> {
   const ctx = await context(env.DB, command);
-  await authorize(env, command, ctx);
+  await authorize(env, command, ctx, panelScope);
   const membership = membershipGuard(ctx);
   const scope = await statement(env.DB, `SELECT (${membership.sql}) AS supported`, ...membership.values).first<{ supported: number }>();
   if (scope?.supported !== 1) throw new HttpError(409, 'AMBIGUOUS_SCOPE', 'This prototype requires one active unit per person in the command scope.');
   const hash = await digest(JSON.stringify(command)); // parseCommand emits deterministic property order.
-  const prior = await priorReceipt(env, command, ctx, hash);
+  const prior = await priorReceipt(env, command, ctx, hash, panelScope);
   if (prior) return prior;
   const now = new Date().toISOString();
-  const guard = guardParts(env, command, ctx);
+  const guard = guardParts(env, command, ctx, panelScope);
   // Recheck membership inside the same atomic batch as the accepted mutation.
   guard.sql += ` AND ${membership.sql}`;
   guard.values.push(...membership.values);
@@ -326,7 +328,7 @@ async function acceptCommand(env: Env, command: Command): Promise<Receipt> {
   try { await env.DB.batch(batch); }
   catch (error) {
     // Another identical request may have committed while our batch was waiting.
-    const committed = await priorReceipt(env, command, ctx, hash);
+    const committed = await priorReceipt(env, command, ctx, hash, panelScope);
     if (committed) return committed;
     const message = String(error);
     if (/constraint|command_preconditions/i.test(message)) {
@@ -502,6 +504,20 @@ export default {
       if (url.pathname === '/v1/admin/effects/availability' && !url.search) return json(await adminEffectAvailability(env, input));
       if (url.pathname === '/v1/admin/snapshot/page' && !url.search) return json(await frontendSnapshotPage(env, input));
       if (url.pathname === '/v1/admin/panel/page' && !url.search) return json(await panelSnapshotPage(env, input));
+      if (url.pathname === '/v1/admin/panel/authorize' && !url.search) return json((await preparePanelAuthorization(env, input)).authorization);
+      if (url.pathname === '/v1/admin/panel/commands' && !url.search) {
+        if (input && typeof input === 'object' && 'operation' in input && input.operation === 'attendance.correct') {
+          const command = parseAttendanceCorrection(input), { personId, eventId } = command.payload;
+          const check = await preparePanelAuthorization(env, { environment: command.environment, generation: command.generation, principalId: command.actor.principalId, operation: command.operation, target: { personId, eventId } });
+          return json(await acceptAttendanceCorrection(env, command, check.guard));
+        }
+        const command = parseCommand(input);
+        if (command.operation !== 'excusal.decide') throw new HttpError(400, 'INVALID_PANEL_OPERATION', 'Use a supported panel operation.');
+        const check = await preparePanelAuthorization(env, { environment: command.environment, generation: command.generation, principalId: command.actor.principalId, operation: command.operation, target: { requestId: command.payload.requestId } });
+        const receipt = await acceptCommand(env, command, check.guard), result = receipt.result as ExcusalRequest;
+        // A scoped decision receipt must not reveal the saved native source or other actors.
+        return json({ ...receipt, result: { requestId: result.requestId, version: result.version, status: result.status, decision: result.decision } });
+      }
       if (url.pathname === '/v1/admin/effects/project/page' && !url.search) return json(await frontendSnapshotPage(env, input, true));
       if (url.pathname === '/v1/admin/snapshot' && !url.search) return json(await frontendSnapshot(env, input));
       if (url.pathname === '/v1/admin/effects/recover' && !url.search) return json(await recoverAdminEffect(env, input));

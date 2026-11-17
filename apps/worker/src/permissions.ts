@@ -22,6 +22,8 @@ const sourceRevisionSql = `SELECT json_array(
  (SELECT json_group_array(json_array(unit_id,label,squadron_id)) FROM (SELECT u.unit_id,u.label,h.squadron_id FROM organizational_units u LEFT JOIN flight_hierarchy h ON h.unit_id=u.unit_id ORDER BY u.unit_id)),
  (SELECT json_group_array(json_array(squadron_id,label)) FROM (SELECT * FROM squadrons ORDER BY squadron_id)),
  (SELECT json_group_array(json_array(principal_id,active)) FROM (SELECT * FROM permission_managers ORDER BY principal_id))) AS revision`;
+/** Shared immutable source capture for narrower panel mutation guards; includes trusted identities and assignments. */
+export const permissionSourceRevisionSql = sourceRevisionSql;
 interface Facts {
     version: number;
     enabled: boolean;

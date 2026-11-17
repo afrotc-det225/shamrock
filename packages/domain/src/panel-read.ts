@@ -8,6 +8,10 @@ export const PANEL_PAGE_VERSION = 'panel-pages-v1' as const;
 export const PANEL_SECTIONS = ['people', 'flights', 'squadrons', 'terms', 'events', 'eventRosters', 'eventFlights', 'observations', 'requests', 'corrections', 'legacyBaselines'] as const;
 export type PanelSection = typeof PANEL_SECTIONS[number];
 export interface PanelRevision extends SnapshotRevision { access: string; }
+export type PanelAuthorization = {
+    contractVersion: 'panel-authorization-v1'; environment: FrontendSnapshot['environment']; generation: number; allowed: true;
+} & ({ operation: 'excusal.decide'; target: { requestId: string }; current: { expectedVersion: number; status: string; requestedOutcome: string; reason: string; decisionReason: string | null } }
+    | { operation: 'attendance.correct'; target: { personId: string; eventId: string }; current: { expectedBaseVersion: number; expectedEventVersion: number; flightId: string } });
 export interface PanelAccess {
     mode: 'wing' | 'scoped';
     flightIds: string[];

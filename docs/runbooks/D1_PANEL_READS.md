@@ -3,7 +3,9 @@
 The isolated Worker provides `POST /v1/admin/panel/page` for the new administration
 panel. This is a separate read policy. It does not change current spreadsheet
 sharing, Leadership's Wing-wide Attendance permissions, the Google publisher, or
-Blue/Gold approval authority. No migration or provider write is required.
+Blue/Gold approval authority. No migration or provider permission change is
+required to deploy the routes. Explicit panel commands use the existing audited
+D1 mutation flows.
 
 ## Authority and server integration
 
@@ -157,19 +159,85 @@ filling missing private profile fields. This contract covers the active term and
 roster. Full historical administration remains on the explicit full-read flow;
 scoped historical roster authority needs its own reviewed contract before use.
 
+## Targeted authorization and atomic panel commands
+
+`POST /v1/admin/panel/authorize` avoids downloading a manifest or request pages to
+check one proposed action. The signed server request has exactly
+`{environment,generation,principalId,operation,target}`. Only these operations and
+target shapes are accepted:
+
+| Operation | Target | Successful `current` fields |
+| --- | --- | --- |
+| `excusal.decide` | `{requestId}` | `expectedVersion`, `status`, `requestedOutcome`, `reason`, `decisionReason` |
+| `attendance.correct` | `{personId,eventId}` | `expectedBaseVersion`, `expectedEventVersion`, `flightId` |
+
+The successful response is
+`{contractVersion:"panel-authorization-v1",environment,generation,allowed:true,operation,target,current}`.
+The exported domain type is `PanelAuthorization`. Unknown, unrelated or
+unauthorized targets return `403 NOT_AUTHORIZED` without target data. The
+decision response omits actor identities, source payloads and unrelated profile
+information. A permission change during the read returns `409 SNAPSHOT_CHANGED`.
+Intake may be paused while this read succeeds; `allowed` establishes current
+panel scope and capability only, not complete command validation or future
+acceptance.
+
+Use `POST /v1/admin/panel/commands` for scoped panel applies and exact replay. It
+accepts the existing complete `excusal.decide` or `attendance.correct` command
+envelope and returns the ordinary command receipt envelope. Decision results are
+restricted to `{requestId,version,status,decision}`; saved source payloads and
+submitter/decider identities are never exposed by this scoped route. Correction
+results retain `{personId,eventId,version,code}`. The server supplies the
+verified actor and registered source. No caller-supplied guard, Flight scope,
+permission result or new operation family is accepted.
+
+The Worker resolves panel authority again internally, captures its trusted
+source state and attaches a server-created SQL predicate to the existing core
+transaction assertion. That predicate checks the captured authority sources and
+the exact target scope **inside the mutation transaction**. Receipt reads also
+evaluate it in the same SQL snapshot as the receipt, including ambiguous-write
+retries. A Flight assignment change between preflight and commit therefore
+rejects the panel correction even when the actor intentionally retains their
+broader Wing spreadsheet correction grant. The ordinary Sheets/core routes keep
+their existing behavior. No new grants or persistent permission tables are
+introduced.
+
+Scoped corrections require the person's active current Flight and the captured
+event-roster Flight to be among the caller's correction Flights. A member's
+older attendance may remain visible after a transfer while corrections to a
+former Flight's captured roster require an appropriately authorized manager.
+Scoped decisions require the same existing captured-Squadron permission as the
+core decision route and a current-term event. Explicit full-read callers retain
+their existing core permission checks and historical authority.
+
+Do not turn an authorization preview into a bearer token, cached permission or
+unconditional forward to a broad core command path. The panel server must deny
+alternate command **and receipt** paths to scoped sessions and use
+`/v1/admin/panel/commands` for exact frozen-command retries. Owner/explicit
+full-read flows may continue their existing routes under their current grants.
+Keep the expected versions in the reviewed command. The authorization read may
+report a newer version; never silently substitute it at apply. A stale review
+must be shown again. The scope predicate is intentionally conservative: an
+authority-source change can require a retry even if the final scope appears
+unchanged. Existing core version, identity, source, intake and idempotency rules
+remain authoritative.
+
 ## Evidence and remaining acceptance
 
 Local D1 tests cover real signed route dispatch, Flight/deputy redaction, preserved
 Wing spreadsheet reads, explicit owner/manager access, no approval inferred from
 Flight command, duplicate Squadron commanders, captured-Squadron reparenting,
 immediate revocation, named-account drift, interrupted pagination, concurrent
-authority changes, bounded offsets and invalid scope input. The read prepares at
+authority changes, bounded offsets and invalid scope input. Targeted apply tests
+also move an actor's Flight immediately before the mutation while retaining
+Wing correction authority, revoke scope between preflight and receipt lookup,
+move a decision target to an older term before commit, reject changed-payload
+replays and preserve stale expected versions. The paged read prepares at
 most 19 SQL statements per request, below the Free 50-query invocation limit at
 the implementation's established provider baseline; pages are bounded by the
 existing 128,000-byte frontend limit and section limits.
 
-No new service, paid tier, deployment, account grant or production mutation is
-introduced. Local tests do not establish hosted CPU/rows-read limits or native
+No new service, paid tier, account grant or production mutation is introduced by
+these source changes. Local tests do not establish hosted CPU/rows-read limits or native
 Google-account behavior. Before release, integrate and test the panel server's
 alternate-route denial, real named-account Flight/Blue/Gold access and revocation,
 and representative hosted request cost. Keep production unchanged until the

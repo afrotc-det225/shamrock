@@ -1,8 +1,11 @@
-import { PANEL_PAGE_VERSION, PANEL_SECTIONS, resolvePanelAccess, type PanelAuthority, type PanelPage, type PanelRevision, type PanelSection } from '../../../packages/domain/src/panel-read.js';
+import { PANEL_PAGE_VERSION, PANEL_SECTIONS, resolvePanelAccess, type PanelAuthority, type PanelAuthorization, type PanelPage, type PanelRevision, type PanelSection } from '../../../packages/domain/src/panel-read.js';
 import { FRONTEND_PAGE_MAX_BYTES, FRONTEND_SECTION_BOUNDS } from '../../../packages/domain/src/frontend-transport.js';
 import { effectiveAccessGrants, effectiveAdminGrants, effectivePermissionMembers } from './permission-grants.js';
 import { excusalDecisionRowPermission, excusalScopeJoin, excusalScopeSelect } from './excusal-scope.js';
 import { HttpError } from './http-error.js';
+import { permissionSourceRevisionSql } from './permissions.js';
+import { pairRevisionSql } from './corrections.js';
+import type { CommandScopeGuard } from './command-scope.js';
 
 interface Env { DB: D1Database; ENVIRONMENT: string; GENERATION: string; }
 type Row = Record<string, unknown>;
@@ -128,4 +131,73 @@ export async function panelSnapshotPage(env: Env, input: unknown): Promise<Panel
         bytes += size; rows.push(row);
     }
     return { ...response, offset, nextOffset: source.length > rows.length ? offset + rows.length : null, rows };
+}
+
+/** Capture exactly the authority inputs used by resolvePanelAccess, including out-of-band revocation.
+ * The JSON is private SQL guard material, never returned to the browser or treated as a bearer token. */
+function scopeRevision(principal: string): CommandScopeGuard {
+    const grant = (table: string, columns: string) => `(SELECT json_group_array(json_array(${columns})) FROM (SELECT * FROM ${table} WHERE principal_id=(SELECT principal_id FROM panel_actor) ORDER BY ${columns}))`;
+    return {
+        sql: `WITH panel_actor AS (SELECT ? AS principal_id) SELECT json_array((${permissionSourceRevisionSql}),
+          (SELECT json_array(environment,generation) FROM system_control WHERE singleton=1),
+          (SELECT json_array(enabled,version,policy_hash,config_json) FROM permission_policy_control WHERE singleton=1),
+          (SELECT json_group_array(json_array(term_id,is_current)) FROM (SELECT term_id,is_current FROM terms ORDER BY term_id)),
+          ${grant('admin_grants', 'capability,scope_kind,scope_key')},${grant('access_grants', 'capability,unit_id,subject_scope')},
+          ${grant('role_admin_grants', 'capability,scope_kind,scope_key')},${grant('role_access_grants', 'capability,unit_id,subject_scope')},
+          ${grant('role_permission_members', 'source_kind,source_id,source_version,linked_contact_id,linked_contact_version,policy_version,source_role,source_flight_id,source_status,linked_contact_active')},
+          (SELECT COUNT(*) FROM legacy_import_runs WHERE state<>'complete'),(SELECT COUNT(*) FROM legacy_operational_adoptions WHERE state<>'complete'),(SELECT COUNT(*) FROM event_roster_refresh_work)) AS revision`,
+        values: [principal],
+    };
+}
+
+/** Targeted preview and an internal atomic commit/replay guard. No state is changed or grant inferred. */
+export async function preparePanelAuthorization(env: Env, input: unknown): Promise<{ authorization: PanelAuthorization; guard: CommandScopeGuard }> {
+    if (!input || typeof input !== 'object' || Array.isArray(input)) return fail(400, 'INVALID_PANEL_REQUEST');
+    const req = input as Row, target = req.target as Row;
+    if (Object.keys(req).sort().join(',') !== 'environment,generation,operation,principalId,target' || !identifier(req.principalId)
+        || !['excusal.decide', 'attendance.correct'].includes(String(req.operation)) || !target || typeof target !== 'object' || Array.isArray(target)) return fail(400, 'INVALID_PANEL_REQUEST');
+    const decision = req.operation === 'excusal.decide';
+    if (Object.keys(target).sort().join(',') !== (decision ? 'requestId' : 'eventId,personId') || Object.values(target).some(v => !identifier(v))) return fail(400, 'INVALID_PANEL_REQUEST');
+    if (req.environment !== env.ENVIRONMENT || req.generation !== Number(env.GENERATION)) return fail(409, 'WRONG_GENERATION');
+    const principal = String(req.principalId), source = scopeRevision(principal);
+    const authorityQueries = authorityStatements(env, principal), sourceIndex = authorityQueries.length;
+    const initial = await env.DB.batch<Row>([...authorityQueries, env.DB.prepare(source.sql).bind(...source.values)]);
+    const access = resolvePanelAccess(authorityFrom(initial.slice(0, sourceIndex).map(r => r.results)));
+    if (!access) return fail(403, 'NOT_AUTHORIZED');
+    const control = initial[0].results[0];
+    if (control.ready !== 1) return fail(409, 'SNAPSHOT_IMPORT_ACTIVE');
+    if (Number(control.rosterPending)) return fail(409, 'EVENT_ROSTERS_PENDING');
+    if (control.termCount !== 1 || !control.termId) return fail(409, 'TERM_SCOPE_UNAVAILABLE');
+    const sourceValue = String(initial[sourceIndex].results[0].revision), full = access.capabilities.fullSnapshot ? 1 : 0;
+    let from: string, select: string, targetValues: (string | number | null)[], selectValues: (string | number | null)[] = [];
+    if (decision) {
+        const permission = excusalDecisionRowPermission(principal);
+        from = `FROM excusal_records r JOIN event_details d ON d.event_id=r.event_id WHERE r.request_id=?
+          AND (r.origin='native' OR EXISTS(SELECT 1 FROM legacy_operational_adoptions a WHERE a.adoption_id=r.legacy_adoption_id AND a.state='complete'))
+          AND (?=1 OR EXISTS(SELECT 1 FROM terms t WHERE t.term_id=d.term_id AND t.is_current=1)) AND ${permission.sql}`;
+        select = 'r.version AS expectedVersion,r.status,r.requested_outcome AS requestedOutcome,r.reason,r.decision_reason AS decisionReason';
+        targetValues = [String(target.requestId), full, ...permission.values];
+    } else {
+        from = `FROM event_details d JOIN event_roster_members m ON m.event_id=d.event_id AND m.version=d.version
+          LEFT JOIN directory_profiles p ON p.person_id=m.person_id WHERE d.event_id=? AND m.person_id=?
+          AND EXISTS(SELECT 1 FROM principals actor JOIN ${effectiveAdminGrants} g ON g.principal_id=actor.principal_id WHERE actor.principal_id=? AND actor.active=1
+            AND g.capability='attendance.correct' AND (g.scope_kind='wing' AND g.scope_key='*' OR g.scope_kind='flight' AND g.scope_key=m.flight_id))
+          AND (?=1 OR (EXISTS(SELECT 1 FROM terms t WHERE t.term_id=d.term_id AND t.is_current=1)
+            AND p.flight_id IN(SELECT value FROM json_each(?)) AND m.flight_id IN(SELECT value FROM json_each(?))
+            AND p.flight_path_status NOT IN('Inactive','Commissioned','Dropped')
+            AND EXISTS(SELECT 1 FROM memberships current_member WHERE current_member.person_id=p.person_id AND current_member.unit_id=p.flight_id AND current_member.active=1)))`;
+        select = `d.version AS expectedEventVersion,m.flight_id AS flightId,(${pairRevisionSql}) AS expectedBaseVersion`;
+        const flights = JSON.stringify(access.capabilities.attendanceCorrectionFlightIds);
+        targetValues = [String(target.eventId), String(target.personId), principal, full, flights, flights];
+        selectValues = Array.from({ length: 3 }, () => [String(target.eventId), String(target.personId)]).flat();
+    }
+    const rows = await env.DB.batch<Row>([env.DB.prepare(source.sql).bind(...source.values), env.DB.prepare(`SELECT ${select} ${from}`).bind(...selectValues, ...targetValues)]);
+    if (rows[0].results[0]?.revision !== sourceValue) return fail(409, 'SNAPSHOT_CHANGED');
+    const current = rows[1].results[0];
+    if (!current) return fail(403, 'NOT_AUTHORIZED');
+    return {
+        authorization: { contractVersion: 'panel-authorization-v1', environment: env.ENVIRONMENT as PanelAuthorization['environment'], generation: Number(env.GENERATION), allowed: true,
+            operation: req.operation, target, current } as PanelAuthorization,
+        guard: { sql: `(${source.sql})=? AND EXISTS(SELECT 1 ${from})`, values: [...source.values, sourceValue, ...targetValues] },
+    };
 }
