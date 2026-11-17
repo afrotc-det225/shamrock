@@ -222,6 +222,8 @@ test('reviewed schema reset moves hidden identity without hiding a replacement e
   const plan = planFrontendInitialization(input), after = apply(input.current, plan.requests);
   assert.equal(after.headers[3], 'event:event-2');
   assert.deepEqual(after.hiddenColumns, [7]);
+  assert(plan.requests.some(r => r.updateDimensionProperties?.range.dimension === 'COLUMNS' && r.updateDimensionProperties.range.startIndex === 3 && r.updateDimensionProperties.properties.pixelSize === 75));
+  assert(plan.requests.some(r => r.repeatCell?.range.startColumnIndex === 3 && r.repeatCell.range.startRowIndex === 1 && r.repeatCell.cell.userEnteredFormat.textFormat?.fontSize === 5));
   assert.ok(verifyFrontendPublicationReadback(plan, after));
 });
 

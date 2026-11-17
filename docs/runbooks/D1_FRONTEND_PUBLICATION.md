@@ -55,7 +55,7 @@ Baselines and frozen plans can exceed Script Properties' practical size. Store t
 
 ## Initialization boundary
 
-`planFrontendInitialization` accepts an empty native Table by default. A populated Table requires an explicit reviewed fictional reset binding naming the local/staging environment, generation, exact sheet/Table identifiers and exact fresh read. It clears only values and file chips in that bounded target rectangle, rewrites the approved schema and stable IDs, and applies normal keyed publication. Hidden fields follow their machine headers during this reviewed reset; a former hidden identity position is explicitly unhidden when it becomes an event column. Normal refresh continues to preserve physical columns. It does not interpret old names as identity evidence. A fictional-reset flag is host configuration, never an untrusted spreadsheet cell or a user-submitted command.
+`planFrontendInitialization` accepts an empty native Table by default. A populated Table requires an explicit reviewed fictional reset binding naming the local/staging environment, generation, exact sheet/Table identifiers and exact fresh read. It clears only values and file chips in that bounded target rectangle, rewrites the approved schema and stable IDs, and applies normal keyed publication. Hidden fields follow their machine headers during this reviewed reset; a former hidden identity position is explicitly unhidden when it becomes an event column. Normal refresh continues to preserve physical columns. Reviewed Attendance initialization applies the measured compact layout across the entire new schema, including event columns that replace former identity positions. It does not interpret old names as identity evidence. A fictional-reset flag is host configuration, never an untrusted spreadsheet cell or a user-submitted command.
 
 There is no production adoption shortcut. Migrating a populated operational Table requires a separate reviewed stable-ID mapping and preserved source evidence.
 
@@ -82,3 +82,7 @@ node --test tests/v3/frontend-publication.test.mjs tests/v3/frontend-supplementa
 ```
 
 Tests cover sorted identities, literal strings, dirty cells before trigger capture, version conflicts, frozen drafts and acknowledgement, file-chip normalization, retirement, growth/seeds, event versions, reporting holds, fencing/preconditions, reset guards, read-back failure and a 500-by-128 coalesced update. The provider-shape simulator deliberately does not claim live Google validation behavior or concurrent user interaction evidence.
+
+## Flight filter views
+
+The native publisher manages the standard named Flight views on Directory and Attendance using the current D1 Flight catalog. Each view is bound to its native Table and uses an explicit Flight equality condition, so a newly enrolled Flight cannot leak into another Flight’s view through an old exclusion list. Existing view identities and sort settings are retained; unrelated custom views are preserved. Ambiguous names, different Table bindings, and custom multi-field filters under a managed name stop publication for review. View changes are saved in the same frozen publication plan and verified before the frontend effect is acknowledged.

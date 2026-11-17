@@ -672,7 +672,7 @@ export function createNativeFrontendRuntime(services: NativeFrontendServices,
     let metadataCache: Record<string, any> | undefined, cellsCache: Record<string, any> | undefined;
     let excusalMetadataCache: Record<string, any> | undefined, excusalCellsCache: Record<string, any> | undefined, dashboardCache: DashboardPublicationRead | undefined;
     const invalidateReads = () => { metadataCache = undefined; cellsCache = undefined; excusalMetadataCache = undefined; excusalCellsCache = undefined; dashboardCache = undefined; };
-    const readMetadata = () => metadataCache ??= api(`${sheetsUrl(config.main.spreadsheetId)}?fields=${encodeURIComponent('spreadsheetId,sheets(properties,tables,protectedRanges,merges,charts)')}`);
+    const readMetadata = () => metadataCache ??= api(`${sheetsUrl(config.main.spreadsheetId)}?fields=${encodeURIComponent('spreadsheetId,sheets(properties,tables,protectedRanges,merges,charts,filterViews)')}`);
     const readExcusalMetadata = () => excusalMetadataCache ??= api(`${sheetsUrl(supplemental!.excusals.spreadsheetId)}?fields=${encodeURIComponent('spreadsheetId,sheets(properties,tables,protectedRanges)')}`);
     const column = (index: number) => { let result = ''; for (let n = index + 1; n > 0; n = Math.floor((n - 1) / 26)) result = String.fromCharCode(65 + (n - 1) % 26) + result; return result; };
     const quoted = (title: string) => `'${title.replace(/'/g, "''")}'`;
@@ -698,7 +698,7 @@ export function createNativeFrontendRuntime(services: NativeFrontendServices,
       const row = (r: number) => Array.from({ length: width }, (_, c) => source.rowData?.[r]?.values?.[c] ?? {});
       const headers = row(0).map((c: any) => c.userEnteredValue?.stringValue ?? ''), labels = row(1).map((c: any) => c.userEnteredValue?.stringValue ?? '');
       return { sheetId: binding.sheetId, tableId: binding.tableId, gridRowCount: sheet.properties.gridProperties.rowCount,
-        gridColumnCount: sheet.properties.gridProperties.columnCount, headers, labels, rows: Array.from({ length: table.range.endRowIndex - 2 }, (_, r) => row(r + 2)),
+        gridColumnCount: sheet.properties.gridProperties.columnCount, headers, labels, filterViews: sheet.filterViews ?? [], rows: Array.from({ length: table.range.endRowIndex - 2 }, (_, r) => row(r + 2)),
         range: { ...table.range, startColumnIndex: 0 }, hiddenColumns: Array.from({ length: width }, (_, c) => c).filter(c => source.columnMetadata?.[c]?.hiddenByUser === true), machineRowHidden: source.rowMetadata?.[0]?.hiddenByUser === true };
     }
     function readExcusal(queue: SquadronQueue): FrontendTableRead {
@@ -850,6 +850,15 @@ export function createNativeFrontendRuntime(services: NativeFrontendServices,
           if (!boundedRange(body.range) || !['userEnteredValue', 'userEnteredValue,chipRuns'].includes(body.fields)
             || !Array.isArray(body.rows) || body.rows.length !== body.range.endRowIndex - (body.range.startRowIndex ?? 0)
             || body.rows.some((r: any) => !Array.isArray(r.values) || r.values.length !== body.range.endColumnIndex - (body.range.startColumnIndex ?? 0))) fail('frontend_request', 'A retained frontend cell write exceeds its exact target.');
+        } else if (!excusals && ['addFilterView', 'updateFilterView'].includes(operation)) {
+          const view = body.filter, spec = view?.filterSpecs?.[0], criterion = spec?.filterCriteria?.condition;
+          const kinds = KINDS.filter(k => ['directory', 'attendance'].includes(k) && config.main.sheets[k].tableId === view?.tableId);
+          if (kinds.length !== 1 || !natural(view.filterViewId) || Object.keys(view).some(k => !['filterViewId', 'title', 'tableId', 'filterSpecs'].includes(k))
+            || view.filterSpecs?.length !== 1 || spec.columnIndex !== readTable(kinds[0]).headers.indexOf('flight')
+            || Object.keys(spec).sort().join(',') !== 'columnIndex,filterCriteria' || Object.keys(spec.filterCriteria).join(',') !== 'condition'
+            || criterion?.type !== 'TEXT_EQ' || criterion.values?.length !== 1 || typeof criterion.values[0].userEnteredValue !== 'string'
+            || !criterion.values[0].userEnteredValue.trim() || criterion.values[0].userEnteredValue.length > 80
+            || (operation === 'updateFilterView' ? body.fields !== 'filterSpecs' : view.title !== `${criterion.values[0].userEnteredValue} Flight`)) fail('frontend_request', 'Flight filter update exceeds its bound Table and equality criterion.');
         } else if (operation === 'updateTable') {
           if (body.fields !== 'range' || !tableIds.has(body.table?.tableId) || !boundedRange(body.table?.range)) fail('frontend_request', 'A retained frontend Table write is outside the approved bindings.');
         } else if (operation === 'updateSheetProperties') {

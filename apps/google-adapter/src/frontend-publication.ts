@@ -1,7 +1,8 @@
 /** Pure keyed frontend publication planning. The host owns IO, authentication and edit fencing. */
 import { AdapterError } from './index.js';
 import { DIRECTORY_EDIT_FIELDS, LEADERSHIP_EDIT_FIELDS } from './frontend-protections.js';
-import { buildAttendanceGrowthLayout } from './frontend-layout.js';
+import { planFrontendFlightViews, sameFrontendViews, type NativeFilterView } from './frontend-views.js';
+import { buildAttendanceGrowthLayout, buildAttendanceLayout } from './frontend-layout.js';
 import type { FrontendSnapshot, SnapshotRevision } from '../../../packages/domain/src/admin.js';
 import { REPORTING_POLICY_VERSION } from '../../../packages/domain/src/frontend-reporting.js';
 import type { FrontendReportingInput, ReportingMatrix, buildFrontendReporting } from '../../../packages/domain/src/frontend-reporting.js';
@@ -40,6 +41,7 @@ export interface FrontendPublicationTable {
   columns: FrontendColumn[];
   rows: FrontendPublicationRow[];
   holds?: { key: string; header: string; reason: string }[];
+  flightViews?: string[];
 }
 export interface FrontendPublicationModel {
   generation: number;
@@ -62,6 +64,7 @@ export interface FrontendTableRead {
   range: { sheetId: number; startRowIndex: number; endRowIndex: number; startColumnIndex: number; endColumnIndex: number };
   hiddenColumns: number[];
   machineRowHidden: boolean;
+  filterViews?: NativeFilterView[];
 }
 export interface FrontendPublicationBaseline {
   generation: number;
@@ -428,11 +431,14 @@ export function planFrontendPublication(input: FrontendPublicationInput): Fronte
   const keyColumn = headers.indexOf(table.keyHeader);
   if (!current.hiddenColumns.includes(keyColumn)) requests.push({ updateDimensionProperties: { range: { sheetId: current.sheetId, dimension: 'COLUMNS', startIndex: keyColumn, endIndex: keyColumn + 1 }, properties: { hiddenByUser: true }, fields: 'hiddenByUser' } });
   if (!current.machineRowHidden) requests.push({ updateDimensionProperties: { range: { sheetId: current.sheetId, dimension: 'ROWS', startIndex: 0, endIndex: 1 }, properties: { hiddenByUser: true }, fields: 'hiddenByUser' } });
+  const flightViews = table.flightViews && current.filterViews ? planFrontendFlightViews({ sheetId: current.sheetId, tableId: current.tableId, headers, flights: table.flightViews, views: current.filterViews }) : undefined;
+  if (flightViews) requests.push(...flightViews.requests);
   const batches = batchRequests(requests);
   const nextBaseline: FrontendPublicationBaseline = { generation: input.generation, revision: clone(input.revision), rows: [...nextRows.values()].map(clone),
     ...(input.baseline.slots ? { slots: { headers: [...headers], keys: finalRows.map(row => blank(row[table.keyHeader]) ? null : row[table.keyHeader] as string) } } : {}) };
   const expectedAfter: FrontendTableRead = { ...clone(current), headers, labels, rows: expectedRows, range,
     gridRowCount: Math.max(current.gridRowCount, endRow), gridColumnCount: Math.max(current.gridColumnCount, headers.length),
+    ...(flightViews ? { filterViews: flightViews.views } : {}),
     hiddenColumns: [...new Set([...current.hiddenColumns, keyColumn])].sort((a, b) => a - b), machineRowHidden: true };
   return { requests, batches, diagnostics, complete: diagnostics.length === 0, nextBaseline, retainedDrafts,
     expectedRead: canonical(current), expectedAfter, changedCells, copiedValidationRanges, validationExpectations, requiresVerifiedReadback: true };
@@ -524,7 +530,8 @@ export function planFrontendInitialization(input: {
   prefix.push({ updateCells: { range: { sheetId: current.sheetId, startRowIndex: 0, endRowIndex: rowCount + 2, startColumnIndex: 0, endColumnIndex: width }, rows: [], fields: 'userEnteredValue,chipRuns' } });
   prefix.push({ updateCells: { range: { sheetId: current.sheetId, startRowIndex: 0, endRowIndex: 2, startColumnIndex: 0, endColumnIndex: headers.length }, rows: [headers, labels].map(row => ({ values: row.map(frontendLiteralCell) })), fields: 'userEnteredValue' } });
   prefix.push({ updateTable: { table: { tableId: current.tableId, range: virtual.range }, fields: 'range' } });
-  plan.requests = [...prefix, ...plan.requests]; plan.batches = batchRequests(plan.requests); plan.expectedRead = frontendReadFingerprint(current);
+  const layout = table.kind === 'attendance' ? buildAttendanceLayout({ sheetId: current.sheetId, headers, labels, eventHeaders: table.columns.filter(c => c.header.startsWith('event:')).map(c => c.header), dataEndRow: plan.expectedAfter.range.endRowIndex }, false) : [];
+  plan.requests = [...prefix, ...plan.requests, ...layout]; plan.batches = batchRequests(plan.requests); plan.expectedRead = frontendReadFingerprint(current);
   return plan;
 }
 
@@ -554,6 +561,7 @@ export function snapshotToFrontendReportingInput(snapshot: FrontendSnapshot, asO
 export function verifyFrontendPublicationReadback(plan: FrontendPublicationPlan, actual: FrontendTableRead): boolean {
   const expected = plan.expectedAfter;
   if (actual.sheetId !== expected.sheetId || actual.tableId !== expected.tableId || !same(actual.range, expected.range) || !same(actual.headers, expected.headers) || !same(actual.labels, expected.labels) || actual.rows.length !== expected.rows.length || !actual.machineRowHidden || expected.hiddenColumns.some(c => !actual.hiddenColumns.includes(c))) return false;
+  if (expected.filterViews && (!actual.filterViews || !sameFrontendViews(expected.filterViews, actual.filterViews))) return false;
   try {
     return actual.rows.every((row, r) => row.length === expected.headers.length && row.every((cell, c) => {
       const column: FrontendColumn = { header: expected.headers[c], label: expected.labels[c], editable: false, fileChip: !!expected.rows[r][c].chipRuns?.length };
@@ -597,7 +605,7 @@ export function buildFrontendPublicationModel(input: {
   const flights = new Map(snapshot.flights.map(f => [f.flightId, f])), squadrons = new Map(snapshot.squadrons.map(s => [s.squadronId, s]));
   const columns = (fields: readonly (readonly [string, string, string])[], edits: readonly string[], seeds: Set<string>): FrontendColumn[] => fields.map(([header, label]) => ({ header, label, editable: edits.includes(header), ...(seeds.has(header) ? { seedKey: `directory:${header}` } : {}), ...(header === 'photo_link' ? { fileChip: true } : {}) }));
   const directoryColumns = [...columns(DIRECTORY, DIRECTORY_EDIT_FIELDS, DIRECTORY_VALIDATED), { header: 'person_id', label: 'Person ID', editable: false }];
-  const directory: FrontendPublicationTable = { kind: 'directory', keyHeader: 'person_id', columns: directoryColumns,
+  const directory: FrontendPublicationTable = { kind: 'directory', keyHeader: 'person_id', columns: directoryColumns, flightViews: snapshot.flights.map(f => f.label),
     rows: snapshot.people.filter(p => p.active).map(p => {
       const flight = p.flightId ? flights.get(p.flightId) : null, squadron = flight?.squadronId ? squadrons.get(flight.squadronId) : null;
       const profile = { ...p, flight: flight?.label ?? '', squadron: squadron?.label ?? '' };
@@ -621,7 +629,7 @@ export function buildFrontendPublicationModel(input: {
     const key = JSON.stringify([v.personId, v.eventId]); if (!id(v.personId) || !id(v.eventId) || !integer(v.version) || versions.has(key)) fail('Attendance record versions are missing or ambiguous.'); versions.set(key, v.version);
   }
   const fixed = [['last_name', 'Last Name'], ['first_name', 'First Name'], ['as_year', 'Year'], ['flight', 'Flight'], ['squadron', 'Sqdn'], ['overall_attendance_pct', 'Overall'], ['llab_attendance_pct', 'LLAB']];
-  const attendance: FrontendPublicationTable = { kind: 'attendance', keyHeader: 'person_id',
+  const attendance: FrontendPublicationTable = { kind: 'attendance', keyHeader: 'person_id', flightViews: snapshot.flights.map(f => f.label),
     columns: [...fixed.map(([header, label]) => ({ header, label, editable: false })), ...matrix.eventColumns.map(e => ({ header: e.machineHeader, label: e.label, editable: true, seedKey: 'attendance:code' })), { header: 'person_id', label: 'Person ID', editable: false }], rows: [], holds: [] };
   for (const r of matrix.rows) {
     const values: Record<string, FrontendValue> = { last_name: r.lastName, first_name: r.firstName, as_year: r.asYear, flight: r.flight, squadron: r.squadron, overall_attendance_pct: r.overall.percentage, llab_attendance_pct: r.llab.percentage, person_id: r.personId };
