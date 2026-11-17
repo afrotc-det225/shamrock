@@ -1,3 +1,5 @@
+import { createNativeRetention, type NativeRetentionConfig } from './private-retention-native.js';
+import { archivedInputEntry, archivedInputReceipt, compactInputJournal } from './input-retention.js';
 import { createPermissionContext } from './permissions-context.js';
 import { createNativePermissionRuntime } from './permissions-host.js';
 import { assertPermissionFenceClear } from './permissions-refresh.js';
@@ -15,6 +17,7 @@ export const INPUT_PROPERTIES={config:'SHAMROCK_V3_INPUT_CONFIG',pause:'SHAMROCK
 export const INPUT_HANDLERS={edit:'shamrockV3NativeFrontendEdit',confirmation:'shamrockV3NativeFrontendConfirm'} as const;
 export interface NativeInputConfig {
   version:1;environment:'staging';generation:number;enabled:boolean;resourceReview:'EXISTING_INPUT_SURFACES_REVIEWED_FOR_STAGING';
+  retention?:NativeRetentionConfig;
   journalFileId:string;principals:InputPrincipal[];surfaces:InputSurfaceBinding[];
   controlRequest?:{requestId:string;sequence:number;action:'setup'|'resume'|'pause';frontendSha256:string;journalSha256:string};
   providerReview?:{reviewId:string;bindingsSha256:string;filterViewCoordinatesVerified:true;protectedSortDenied:true};
@@ -62,6 +65,8 @@ export function createNativeFrontendInput(services:NativeInputServices,frontend=
       ||!Array.isArray(config.principals)||new Set(config.principals.map(p=>p.email.toLowerCase())).size!==config.principals.length||!config.confirmation?.expectedTitle.includes('Staging')
       ||config.journalFileId===config.confirmation.formId)fail('input_configuration','An exact reviewed staging input configuration is required.');
     const signer=createGoogleSigner(services.Utilities,properties.getProperty(HOST_PROPERTIES.secret)??'');
+    if(config.retention&&[config.retention.indexFileId,config.retention.archiveFolderId].some(id=>[config.journalFileId,config.confirmation.formId,...config.surfaces.map(s=>s.spreadsheetId)].includes(id)))fail('input_configuration','Retention storage must be separate from input resources.');
+    const retention=config.retention?createNativeRetention(services,config.retention,owner,config.generation,signer):undefined;
     const transport=createPagedFrontendTransport(createGoogleTransport(services.UrlFetchApp),{environment:'staging',generation:config.generation,baseUrl:host.workerOrigin,keyId:host.keyId},signer,now);
     const fingerprint=signer.sha256(inputCanonical({surfaces:config.surfaces,confirmation:config.confirmation}));
     const enabled=()=>config.enabled&&properties.getProperty(INPUT_PROPERTIES.pause)!=='true';
@@ -86,7 +91,7 @@ export function createNativeFrontendInput(services:NativeInputServices,frontend=
       return read;
     }
     function setupReceipt(){const setup=JSON.parse(properties.getProperty(INPUT_PROPERTIES.setup)??'null');if(!setup||setup.fingerprint!==fingerprint)fail('input_setup','Verify the native input triggers before processing edits.');return setup;}
-    return{host,owner,config,signer,fingerprint,enabled,request,journal,confirmationRead,setupReceipt};
+    return{host,owner,config,signer,fingerprint,enabled,request,journal,confirmationRead,setupReceipt,retention};
   }
   function pause(){properties.setProperty(INPUT_PROPERTIES.pause,'true');if(properties.getProperty(INPUT_PROPERTIES.pause)!=='true')fail('input_pause','The input pause did not persist.');return{status:'paused'};}
   function note(edit:NativeEditEvidence,text:string){if(!Number.isSafeInteger(edit.row)||!Number.isSafeInteger(edit.column)||edit.row<3||edit.column<1||edit.rows*edit.columns>250)return;
@@ -101,9 +106,9 @@ export function createNativeFrontendInput(services:NativeInputServices,frontend=
   }
   function work(value='pending'){properties.setProperty(INPUT_PROPERTIES.work,value);if(properties.getProperty(INPUT_PROPERTIES.work)!==value)fail('input_state','The input work marker did not persist.');}
   const idleMarker=(ctx:NonNullable<ReturnType<typeof context>>)=>'idle:'+ctx.signer.sha256(inputCanonical([ctx.config.generation,ctx.config.journalFileId]));
-  function finish(ctx:NonNullable<ReturnType<typeof context>>,io:InputJournalPorts){work(Object.values(io.journal.entries).some(e=>!e.superseded&&e.commands.some(c=>c.status==='queued'||c.status==='committed'&&!c.applied)||e.superseded&&!e.supersededApplied)?'pending':idleMarker(ctx));}
+  function finish(ctx:NonNullable<ReturnType<typeof context>>,io:InputJournalPorts){if(ctx.retention)compactInputJournal(io,ctx.retention);work(Object.values(io.journal.entries).some(e=>!e.superseded&&e.commands.some(c=>c.status==='queued'||c.status==='committed'&&!c.applied)||e.superseded&&!e.supersededApplied)?'pending':idleMarker(ctx));}
   function ports(ctx:NonNullable<ReturnType<typeof context>>,session:NativeFrontendInputSession):InputJournalPorts{
-    const store=ctx.journal(),journal=store.load();return{journal,state:session.state,saveJournal:value=>{work();store.save(value);},saveState:value=>session.save(value),sha256:text=>ctx.signer.sha256(text),send:(path,command)=>{const response=ctx.request(path,command);return response.status===409&&response.body?.error?.code==='PERMISSION_FENCE_REQUIRED'?createNativePermissionRuntime(services,frontend).submit(command,session) as ReturnType<typeof ctx.request>:response;},stillVisible(edit){
+    const store=ctx.journal(),journal=store.load();return{journal,state:session.state,saveJournal:value=>{work();store.save(value);},saveState:value=>session.save(value),sha256:text=>ctx.signer.sha256(text),...(ctx.retention?{archivedReceiptHash:(id:string)=>archivedInputReceipt(ctx.retention!,id)}:{}),send:(path,command)=>{const response=ctx.request(path,command);return response.status===409&&response.body?.error?.code==='PERMISSION_FENCE_REQUIRED'?createNativePermissionRuntime(services,frontend).submit(command,session) as ReturnType<typeof ctx.request>:response;},stillVisible(edit){
       const read=session.read(edit.surface),table=inputSurfaceState(session.state,edit.surface);assertImmutableInputSlots(table.baseline,read,edit.surface);return edit.drafts.every(d=>{const row=table.baseline.slots?.keys.indexOf(d.key),column=read.headers.indexOf(d.header);return row!==undefined&&row>=0&&column>=0&&inputCanonical(nativeInputValue(read.rows[row]?.[column]))===inputCanonical(d.value);});
     }};
   }
@@ -190,10 +195,11 @@ export function createNativeFrontendInput(services:NativeInputServices,frontend=
       const b=ctx.config.confirmation;if(sourceId!==b.formId||ctx.setupReceipt().ids[sourceId]!==trigger)fail('input_identity','Unexpected confirmation trigger.');
       const native=api(`${form(b.formId)}/responses/${encodeURIComponent(responseId)}`);if(native.formId!==b.formId||native.responseId!==responseId||!native.respondentEmail||!Number.isFinite(Date.parse(native.lastSubmittedTime)))fail('input_confirmation','Verified native confirmation identity is missing.');
       const answer=(id:string)=>{const a=native.answers?.[id];if(a?.questionId!==id||a.textAnswers?.answers?.length!==1||typeof a.textAnswers.answers[0].value!=='string')fail('input_confirmation','A frozen confirmation answer is missing.');return a.textAnswers.answers[0].value;};
-      const reference=answer(b.reference.questionId),summary=answer(b.summary.questionId),action=answer(b.action.questionId),io=ports(ctx,session),entry=io.journal.entries[reference];
+      const reference=answer(b.reference.questionId),summary=answer(b.summary.questionId),action=answer(b.action.questionId),io=ports(ctx,session),entry=io.journal.entries[reference]??(ctx.retention?archivedInputEntry(ctx.retention,reference):undefined);
       if(!entry||entry.superseded)fail('input_confirmation','The referenced frozen edit is unavailable or was replaced before dispatch.');
       const commands=commandsForCapturedEdit({edit:entry.edit,principals:ctx.config.principals,confirmation:{verified:true,verifiedEmail:native.respondentEmail,reference,summary,action}});
       if(entry.commands.length&&inputCanonical(entry.commands.map(c=>c.command))!==inputCanonical(commands))fail('input_confirmation','A dispatched edit cannot change its confirmed actor or command.');
+      if(!io.journal.entries[reference])return{status:status(entry),editId:reference,archived:true};
       if(!entry.commands.length){entry.commands=commands.map((command,templateIndex)=>({command,templateIndex,status:'queued',attempted:false}));entry.confirmation={responseId,submittedAt:native.lastSubmittedTime,email:native.respondentEmail};io.saveJournal(io.journal);}
       deliverFrontendInputs(io);updateNote(ctx,entry,io);finish(ctx,io);return{status:status(entry),editId:reference};
     });},

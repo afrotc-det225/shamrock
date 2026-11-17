@@ -34,7 +34,10 @@ function fixture(){
    assert.equal(options.headers.Authorization,'Bearer fixture-oauth');
    if(u.host==='sheets.googleapis.com'){fx.notes.push(body);assert(body.requests.every(r=>r.repeatCell.fields==='note'));return response({});}
    if(u.host==='forms.googleapis.com')return response(u.pathname.includes('/responses/')?fx.confirmationResponse:copy(form));
-   const id=u.pathname.split('/').at(-1);assert(['confirmation','input-journal'].includes(id));
+   const id=u.pathname.split('/').at(-1);if(fx.retentionFiles&&['retention-folder',...Object.keys(fx.retentionFiles)].includes(id)){
+    assert.equal(options.method,'get');if(u.searchParams.get('alt')==='media')return response(fx.retentionFiles[id]);
+    return response({id,mimeType:id==='retention-folder'?'application/vnd.google-apps.folder':'application/json',parents:id==='retention-folder'?[]:['retention-folder'],size:JSON.stringify(fx.retentionFiles[id]??{}).length,version:'1',owners:[{emailAddress:owner}],permissions:[{type:'user',role:'owner',emailAddress:owner}]});
+   }assert(['confirmation','input-journal'].includes(id));
    if(options.method==='patch'){assert.equal(id,'input-journal');fx.journal=copy(body);return response({id});}
    if(u.searchParams.get('alt')==='media')return response(copy(fx.journal));
    return response({id,name:id==='confirmation'?config.confirmation.expectedTitle:id,mimeType:id==='confirmation'?'application/vnd.google-apps.form':'application/json',size:JSON.stringify(fx.journal).length,version:'1',owners:[{emailAddress:owner}],permissions:[{type:'user',role:'owner',emailAddress:owner}]});
@@ -76,4 +79,13 @@ test('idle scheduled input flush does not rewrite historical receipt notes',()=>
 test('shared permission fence prevents native edit dispatch and leaves the input journal unchanged',()=>{
  const f=fixture();f.runtime.setup();f.runtime.resume();f.props.SHAMROCK_V3_PERMISSION_FENCED='pending';const journal=copy(f.fx.journal);f.fx.tables.attendance.rows[0][1]=cell('P');
  assert.throws(()=>f.runtime.onEdit(f.edit()),e=>e.code==='permission_refresh');assert.deepEqual(f.fx.journal,journal);assert.equal(f.fx.commands.length,0);
+});
+
+ test('archived confirmation validates frozen identity and returns its prior receipt without another delivery',()=>{
+ const f=fixture();f.runtime.setup();f.runtime.resume();f.fx.tables.attendance.rows[0][1]=cell('P');const held=f.runtime.onEdit(f.edit(null)),entry=f.fx.journal.entries[held.editId];
+ f.fx.confirmationResponse={formId:'confirmation',responseId:'archived-response',lastSubmittedTime:'2026-11-06T12:00:00Z',respondentEmail:email,answers:Object.fromEntries(Object.entries({'ref-q':held.editId,'summary-q':entry.edit.summary,'action-q':'Confirm these changes'}).map(([questionId,value])=>[questionId,{questionId,textAnswers:{answers:[{value}]}}]))};
+ f.runtime.replayConfirmation('archived-response');assert.equal(f.fx.commands.length,1);const archived=copy(f.fx.journal.entries[held.editId]),key=`input-entry.${held.editId}`,keyHash=sha(key),text=inputCanonical(archived),prefix=keyHash[0];
+ f.config.retention={version:1,archiveFolderId:'retention-folder',indexFileId:'retention-index'};f.update();f.fx.retentionFiles={'retention-index':{version:1,environment:'staging',generation:1,buckets:{[prefix]:'retention-bucket'}},'retention-bucket':{version:1,prefix,records:{[keyHash]:{key,hash:sha(text),bytes:Buffer.byteLength(text),inline:archived}}}};delete f.fx.journal.entries[held.editId];
+ assert.deepEqual(f.runtime.replayConfirmation('archived-response'),{status:'committed',editId:held.editId,archived:true});assert.equal(f.fx.commands.length,1);assert.equal(Object.keys(f.fx.journal.entries).length,0);
+ f.fx.confirmationResponse.respondentEmail='outsider@example.invalid';assert.throws(()=>f.runtime.replayConfirmation('archived-response'));assert.equal(f.fx.commands.length,1);
 });
