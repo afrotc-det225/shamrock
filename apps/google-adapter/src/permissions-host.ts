@@ -1,3 +1,4 @@
+import { parseCatalogCommand } from '../../../packages/domain/src/organizational-catalog.js';
 /** Opt-in native host for trusted access turnover. Private controls are consumed once; no import-time IO. */
 import { AdapterError } from './index.js';
 import { createGoogleSigner } from './apps-script.js';
@@ -88,7 +89,7 @@ export function createNativePermissionRuntime(services: NativeFrontendServices, 
         }
         if (result.status !== 409 || result.body?.error?.code !== 'PERMISSION_FENCE_REQUIRED')
             return result;
-        const normalized = ['directory.upsert', 'directory.selfUpdate', 'directory.enroll', 'leadership.upsert', 'event.upsert'].includes(raw.operation) ? parseAdminCommand(command) : command;
+        const normalized = ['directory.upsert', 'directory.selfUpdate', 'directory.enroll', 'leadership.upsert', 'event.upsert'].includes(raw.operation) ? parseAdminCommand(command) : ['flight.upsert','squadron.upsert'].includes(raw.operation) ? parseCatalogCommand(command) : command;
         const payloadSha256 = c.signer.sha256(JSON.stringify(normalized)), state = c.state.load() as State;
         if (state.pendingChange && !state.pendingChange.receipt && state.pendingChange.commandId !== raw.commandId)
             fail('Resolve the retained permission change before preparing another one.');

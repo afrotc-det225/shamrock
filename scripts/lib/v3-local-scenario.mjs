@@ -33,6 +33,8 @@ export async function runLocalScenario() {
       db.prepare("INSERT INTO people VALUES('person-a','Example A'),('person-b','Example B')"),
       db.prepare("INSERT INTO principals VALUES('representative',NULL,1),('cadet-a','person-a',1),('approver',NULL,1)"),
       db.prepare("INSERT INTO organizational_units VALUES('alpha','Alpha',1)"),
+      db.prepare("INSERT INTO squadrons VALUES('blue','Blue')"),
+      db.prepare("INSERT INTO flight_hierarchy VALUES('alpha','blue')"),
       db.prepare("INSERT INTO memberships VALUES('person-a','alpha',1),('person-b','alpha',1)"),
       db.prepare("INSERT INTO events VALUES('event-one','Fictional training',1)"),
       db.prepare("INSERT INTO event_units VALUES('event-one','alpha')"),

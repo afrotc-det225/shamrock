@@ -169,6 +169,11 @@ export interface FrontendSnapshot {
     personId: string;
     eventId: string;
     flightId: string;
+    /** Captured request ownership, never derived from a later Flight reassignment. */
+    capturedSquadronId?: string | null;
+    capturedSquadronLabel?: string | null;
+    capturedFlightLabel?: string | null;
+    scopeEvidence?: 'submission' | 'legacy-source' | 'observed-migration' | null;
     order: number;
     /** Retained request state is visible but does not replay an old attendance effect. */
     legacyStateOnly?: boolean;

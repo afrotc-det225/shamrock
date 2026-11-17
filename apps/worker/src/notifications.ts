@@ -108,7 +108,8 @@ export function planFromSnapshot(snapshot: FrontendSnapshot, recipe: PlanCommand
     const person = snapshot.people.find(row => row.personId === request.personId);
     const event = snapshot.events.find(row => row.eventId === request.eventId);
     const flight = snapshot.flights.find(row => row.flightId === request.flightId);
-    const squadron = snapshot.squadrons.find(row => row.squadronId === flight?.squadronId);
+    if(Object.hasOwn(request,'capturedSquadronId')&&!request.capturedSquadronId)throw new HttpError(409,'EXCUSAL_SCOPE_UNAVAILABLE','Retain the request until its submitted Squadron is reviewed.');
+    const squadron = snapshot.squadrons.find(row => row.squadronId === (request.capturedSquadronId ?? flight?.squadronId));
     if (!person || !event || !squadron)
       throw new HttpError(409, 'NOTIFICATION_SNAPSHOT_INCOMPLETE', 'Resolve the excusal routing records before planning its notice.');
     const commander = recipient(snapshot, [`${squadron.label} Squadron Commander`, `Cadet ${squadron.label} Squadron Commander`]);
@@ -187,7 +188,9 @@ export async function planNotifications(env: NotificationEnv, input: unknown, ta
   if (authorized?.allowed !== 1)
     throw new HttpError(403, 'NOT_AUTHORIZED', 'Current notification authority is required.');
   const snapshot = await readNotificationContext(env,command.actor.principalId,command.payload);
-  const frozenSnapshot = task ? { ...snapshot, requests: snapshot.requests.filter(request => request.requestId !== task.request_id).concat({ ...JSON.parse(task.request_json), order: 0 }) } : snapshot;
+  const captured = task ? snapshot.requests.find(request=>request.requestId===task.request_id) : undefined;
+  // Older retained task JSON predates the scope fields; its request's immutable capture still governs routing.
+  const frozenSnapshot = task ? { ...snapshot, requests: snapshot.requests.filter(request => request.requestId !== task.request_id).concat({ ...JSON.parse(task.request_json), ...(captured&&Object.hasOwn(captured,'capturedSquadronId') ? {capturedSquadronId:captured.capturedSquadronId,capturedSquadronLabel:captured.capturedSquadronLabel,capturedFlightLabel:captured.capturedFlightLabel,scopeEvidence:captured.scopeEvidence} : {}), order: 0 }) } : snapshot;
   const intents = planFromSnapshot(frozenSnapshot, command.payload);
   if (intents.length > 100)
     throw new HttpError(409, 'NOTIFICATION_TOO_LARGE', 'Plan a smaller reviewed notification scope.');

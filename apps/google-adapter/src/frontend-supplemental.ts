@@ -101,7 +101,8 @@ export function buildExcusalPublicationTables(input: {
     const event = events.get(request.eventId), person = people.get(request.personId), flight = flights.get(request.flightId);
     if (!event || !person || !flight?.squadronId) fail('An excusal target or its recorded squadron is unavailable.');
     if (event.termId !== current[0].termId) continue;
-    const table = tables.find(t => t.squadronId === flight.squadronId);
+    if(Object.hasOwn(request,'capturedSquadronId')&&!request.capturedSquadronId)fail('The submitted Squadron capture is unavailable; retain the request for review.');
+    const table = tables.find(t => t.squadronId === (request.capturedSquadronId ?? flight.squadronId));
     if (!table) fail('A current request is outside the configured Blue/Gold queues.');
     if (!integer(request.version, 1) || !['Submitted', ...EXCUSAL_DECISIONS].includes(request.status) || !(REQUESTED_OUTCOMES as readonly string[]).includes(request.requestedOutcome) || typeof request.reason !== 'string' || request.reason.length > 4000) fail('Invalid recorded excusal state.');
     canonicalTimestamp(request.submittedAt, input.timeZone);
@@ -110,7 +111,7 @@ export function buildExcusalPublicationTables(input: {
     table.rows.push({ key: request.requestId, values: {
       timestamp, decision: request.status === 'Submitted' ? null : request.status,
       event: event.columnLabel || event.label, reason: request.reason, requested_outcome: request.requestedOutcome,
-      email: person.email, last_name: person.lastName, first_name: person.firstName, flight: flight.label, request_id: request.requestId,
+      email: person.email, last_name: person.lastName, first_name: person.firstName, flight: request.capturedFlightLabel ?? flight.label, request_id: request.requestId,
     }, versions: { decision: request.version }, commandBindings: { decision: { operation: 'excusal.decide', entityId: request.requestId, field: 'decision', expectedVersion: request.version } } });
     if (table.rows.length > 500) fail('A squadron queue exceeds the reviewed 500-request capacity.');
   }

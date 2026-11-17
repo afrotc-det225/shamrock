@@ -220,3 +220,5 @@ Operational policy questions and approval to host the applicable records on Clou
 
 Future roster policy and operator create/update helpers are documented in
 [reviewed future event rosters](D1_EVENT_ROSTERS.md).
+
+Audited Flight/Squadron catalog changes and submitted Excusal ownership are described in [D1_ORGANIZATIONAL_CATALOG.md](D1_ORGANIZATIONAL_CATALOG.md).

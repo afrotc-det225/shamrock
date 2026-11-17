@@ -16,3 +16,6 @@ export const effectiveAccessGrants = `(SELECT principal_id,capability,unit_id,su
  UNION SELECT g.principal_id,g.capability,g.unit_id,g.subject_scope FROM role_access_grants g WHERE ${validMember})`;
 export const effectiveAdminGrants = `(SELECT principal_id,capability,scope_kind,scope_key FROM admin_grants
  UNION SELECT g.principal_id,g.capability,g.scope_kind,g.scope_key FROM role_admin_grants g WHERE ${validMember})`;
+
+/** Current policy membership, including commanders whose Squadron has no current Flights. */
+export const effectivePermissionMembers = `(SELECT g.* FROM role_permission_members g WHERE ${validMember})`;

@@ -1,3 +1,4 @@
+import { excusalScopeSelect, excusalScopeJoin } from './excusal-scope.js';
 import { effectiveAdminGrants } from './permission-grants.js';
 import { DIRECTORY_FIELDS, operationallyActive, type DirectoryRecord, type SnapshotRevision } from '../../../packages/domain/src/admin.js';
 import { FRONTEND_PAGE_MAX_BYTES, FRONTEND_PAGE_VERSION, FRONTEND_SECTIONS, FRONTEND_SECTION_BOUNDS, type FrontendPage, type FrontendPageManifest, type FrontendSection } from '../../../packages/domain/src/frontend-transport.js';
@@ -9,7 +10,7 @@ const fail=(status:number,code:string):never=>{throw new HttpError(status,code,'
 const identifier=(v:unknown):v is string=>typeof v==='string'&&/^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/.test(v);
 const revisionSql=`SELECT (SELECT COALESCE(MAX(audit_id),0) FROM audit_events) AS operations,(SELECT COALESCE(MAX(audit_id),0) FROM admin_audit_events) AS administration`;
 const contactsFrom=`FROM leadership_contacts c WHERE NOT EXISTS(SELECT 1 FROM legacy_operational_adoption_rows r JOIN legacy_operational_adoptions a ON a.adoption_id=r.adoption_id WHERE r.kind='leadership' AND r.target_id=c.contact_id AND a.state<>'complete')`;
-const requestsFrom=`FROM excusal_records r LEFT JOIN audit_events a ON a.command_id=r.last_command_id WHERE r.origin='native' OR EXISTS(SELECT 1 FROM legacy_operational_adoptions l WHERE l.adoption_id=r.legacy_adoption_id AND l.state='complete')`;
+const requestsFrom=`FROM excusal_records r ${excusalScopeJoin} LEFT JOIN audit_events a ON a.command_id=r.last_command_id WHERE r.origin='native' OR EXISTS(SELECT 1 FROM legacy_operational_adoptions l WHERE l.adoption_id=r.legacy_adoption_id AND l.state='complete')`;
 const baselineFrom=`FROM legacy_attendance_baselines b JOIN legacy_import_runs i ON i.import_run_id=b.import_run_id AND i.state='complete'`;
 const eventRosterFrom=`FROM event_roster_members m JOIN event_details d ON d.event_id=m.event_id AND d.version=m.version JOIN event_roster_versions v ON v.event_id=m.event_id AND v.version=m.version`;
 const profileColumns=['last_name','first_name','as_year','rank','role','university','email','phone','dorm','cip_broad_area','cip_code','afsc','home_town','home_state','class_year','date_of_birth','flight_path_status','photo_link'];
@@ -23,7 +24,7 @@ const queries:Record<FrontendSection,{select:string;from:string;order:string;lim
   eventRosters:{select:'m.event_id AS eventId,m.person_id AS personId',from:eventRosterFrom,order:'m.event_id,m.person_id',limit:512},
   eventFlights:{select:'event_id AS eventId,unit_id AS flightId',from:'FROM event_units',order:'event_id,unit_id',limit:512},
   observations:{select:`'observation:'||o.observation_id AS factId,o.person_id AS personId,o.event_id AS eventId,a.audit_id AS 'order',o.code`,from:'FROM attendance_observations o JOIN attendance_reports r ON r.report_id=o.report_id JOIN audit_events a ON a.command_id=r.command_id',order:'o.observation_id',limit:256},
-  requests:{select:`r.request_id AS requestId,r.person_id AS personId,r.event_id AS eventId,r.unit_id AS flightId,COALESCE(a.audit_id,0) AS 'order',(r.origin='legacy' AND r.last_command_id IS NULL) AS legacyStateOnly,r.status,r.requested_outcome AS requestedOutcome,r.version,r.reason,r.submitted_at AS submittedAt,r.submitted_by AS submittedBy,r.updated_at AS updatedAt,r.decided_at AS decidedAt,r.decided_by AS decidedBy,r.decision_reason AS decisionReason`,from:requestsFrom,order:'r.request_id',limit:32},
+  requests:{select:`r.request_id AS requestId,r.person_id AS personId,r.event_id AS eventId,r.unit_id AS flightId,${excusalScopeSelect},COALESCE(a.audit_id,0) AS 'order',(r.origin='legacy' AND r.last_command_id IS NULL) AS legacyStateOnly,r.status,r.requested_outcome AS requestedOutcome,r.version,r.reason,r.submitted_at AS submittedAt,r.submitted_by AS submittedBy,r.updated_at AS updatedAt,r.decided_at AS decidedAt,r.decided_by AS decidedBy,r.decision_reason AS decisionReason`,from:requestsFrom,order:'r.request_id',limit:32},
   corrections:{select:`'correction:'||c.correction_id AS factId,c.person_id AS personId,c.event_id AS eventId,a.audit_id AS 'order',c.code`,from:'FROM attendance_corrections c JOIN audit_events a ON a.command_id=c.command_id',order:'a.audit_id',limit:256},
   termRosters:{select:'term_id AS termId,person_id AS personId,last_name AS lastName,first_name AS firstName,as_year AS asYear,flight_id AS flightId,flight_path_status AS flightPathStatus,date_of_birth AS dateOfBirth',from:'FROM term_roster_snapshots',order:'term_id,person_id',limit:128},
   legacyBaselines:{select:'b.baseline_id AS baselineId,b.person_id AS personId,b.event_id AS eventId,b.code',from:baselineFrom,order:'b.person_id,b.event_id',limit:256},
@@ -48,7 +49,7 @@ function scopedQueries():typeof queries {
   result.eventRosters.from+=' WHERE m.event_id IN(SELECT event_id FROM scoped_events)';
   result.eventFlights.from+=' WHERE event_id IN(SELECT event_id FROM scoped_events)';
   result.observations.from+=' WHERE o.event_id IN(SELECT event_id FROM scoped_events)';
-  result.requests.from=`FROM excusal_records r LEFT JOIN audit_events a ON a.command_id=r.last_command_id WHERE (r.origin='native' OR EXISTS(SELECT 1 FROM legacy_operational_adoptions l WHERE l.adoption_id=r.legacy_adoption_id AND l.state='complete')) AND r.event_id IN(SELECT event_id FROM scoped_events)`;
+  result.requests.from=`FROM excusal_records r ${excusalScopeJoin} LEFT JOIN audit_events a ON a.command_id=r.last_command_id WHERE (r.origin='native' OR EXISTS(SELECT 1 FROM legacy_operational_adoptions l WHERE l.adoption_id=r.legacy_adoption_id AND l.state='complete')) AND r.event_id IN(SELECT event_id FROM scoped_events)`;
   result.corrections.from+=' WHERE c.event_id IN(SELECT event_id FROM scoped_events)';
   result.termRosters.from+=' WHERE term_id IN(SELECT term_id FROM selected_term)';
   result.legacyBaselines.from+=' WHERE b.event_id IN(SELECT event_id FROM scoped_events)';

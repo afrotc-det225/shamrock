@@ -24,6 +24,8 @@ export async function runCapacityScenario() {
       db.prepare("INSERT INTO people SELECT value,'Fictional '||value FROM json_each(?)").bind(JSON.stringify(people)),
       db.prepare("INSERT INTO principals VALUES('representative',NULL,1),('cadet','person-000',1),('approver',NULL,1)"),
       db.prepare("INSERT INTO organizational_units VALUES('alpha','Fictional Alpha',1)"),
+      db.prepare("INSERT INTO squadrons VALUES('blue','Blue')"),
+      db.prepare("INSERT INTO flight_hierarchy VALUES('alpha','blue')"),
       db.prepare("INSERT INTO memberships SELECT person_id,'alpha',1 FROM people"),
       db.prepare("INSERT INTO events SELECT value,'Fictional '||value,1 FROM json_each(?)").bind(JSON.stringify(events)),
       db.prepare("INSERT INTO event_units SELECT event_id,'alpha' FROM events"),

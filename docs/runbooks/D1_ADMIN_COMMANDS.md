@@ -54,7 +54,7 @@ At most one effect of each kind can be leased. Claims have ten-minute leases. Ex
 
 ## Bootstrap and validation
 
-The additive migration intentionally does not invent the detachment's Flight/Squadron mapping, term order, principal grants or profile identities. Import those reviewed catalogs while paused through the controlled migration/bootstrap process, using private runtime bindings. The paged term, Directory and explicit Leadership catalogs support coherent operational exports. Flight/Squadron catalog mutations are separate from the profile/event commands documented here; use only the reviewed catalog workflow available in the deployed release, or a paused, generation-reviewed bootstrap if that workflow is absent. Do not edit catalogs behind an active publisher or treat an unaudited SQL edit as a normal operator action.
+The additive migration intentionally does not invent the detachment's Flight/Squadron mapping, term order, principal grants or profile identities. Import those reviewed catalogs while paused through the controlled migration/bootstrap process, using private runtime bindings. The paged term, Directory and explicit Leadership catalogs support coherent operational exports. Migration 0015 adds audited `flight.upsert` and `squadron.upsert`, with the existing native permission fence, immutable submitted Excusal scope, normal refresh effects and versioned retirement. See [D1_ORGANIZATIONAL_CATALOG.md](D1_ORGANIZATIONAL_CATALOG.md). Use those commands rather than direct SQL; a reviewed catalog change advances the normal administrative audit revision.
 
 Run:
 

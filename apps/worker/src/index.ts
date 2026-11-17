@@ -1,3 +1,5 @@
+import { acceptCatalogCommand, readOrganizationalCatalog } from './organizational-catalog.js';
+import { captureExcusalScopes, excusalDecisionPermission } from './excusal-scope.js';
 import { beginTransitionPreparation,stepTransitionPreparation,readTransitionArchivePage,abandonTransitionPreparation } from './transition-transport.js';
 import { ownerMailRehearsal } from './mail-rehearsal.js';
 import { previewEventRoster,applyEventRoster,refreshEventRoster } from './event-rosters.js';
@@ -145,6 +147,8 @@ const singleUnitScopeSql = `NOT EXISTS (SELECT 1 FROM memberships scoped JOIN me
   WHERE scoped.unit_id=? AND scoped.active=1)`;
 
 function membershipGuard(ctx: Context): { sql: string; values: (string | number | null)[] } {
+  // A submitted request retains its subject and Squadron even after a Directory transfer or retirement.
+  if(ctx.current)return {sql:'(SELECT COUNT(*) FROM memberships WHERE person_id=? AND active=1)<=1',values:[ctx.personId]};
   return {
     sql: `${singleUnitScopeSql}${ctx.personId === null ? '' : ` AND
       (SELECT COUNT(*) FROM memberships WHERE person_id=? AND active=1)=1
@@ -154,14 +158,14 @@ function membershipGuard(ctx: Context): { sql: string; values: (string | number 
 }
 
 function guardParts(env: Env, command: Command, ctx: Context): { sql: string; values: (string | number | null)[] } {
+  const decision=command.operation==='excusal.decide',permission=decision?excusalDecisionPermission(command.actor.principalId,command.payload.requestId,ctx.unitId):{sql:permissionSql,values:[command.actor.principalId,capability(command),ctx.unitId,submission(command)?ctx.personId:null]};
   return {
-    sql: `${controlSql} AND ${permissionSql} AND ${sourceSql}
+    sql: `${controlSql} AND ${permission.sql} AND ${sourceSql}
       AND NOT EXISTS (SELECT 1 FROM json_each(?) selected WHERE NOT EXISTS
-        (SELECT 1 FROM events e JOIN event_units eu ON eu.event_id=e.event_id
-         WHERE e.event_id=selected.value AND e.active=1 AND eu.unit_id=?))`,
-    values: [env.ENVIRONMENT, Number(env.GENERATION), command.actor.principalId, capability(command),
-      ctx.unitId, submission(command) ? ctx.personId : null,
-      command.source.kind, command.source.resourceKey, JSON.stringify(eventIds(command, ctx)), ctx.unitId],
+        (SELECT 1 FROM events e ${decision?'':'JOIN event_units eu ON eu.event_id=e.event_id'}
+         WHERE e.event_id=selected.value AND e.active=1 ${decision?'':'AND eu.unit_id=?'}))${submission(command)?' AND EXISTS(SELECT 1 FROM flight_hierarchy h JOIN squadrons s ON s.squadron_id=h.squadron_id WHERE h.unit_id=?)':''}`,
+    values: [env.ENVIRONMENT, Number(env.GENERATION), ...permission.values,
+      command.source.kind, command.source.resourceKey, JSON.stringify(eventIds(command, ctx)),...(decision?[]:[ctx.unitId]),...(submission(command)?[ctx.unitId]:[])],
   };
 }
 
@@ -266,6 +270,7 @@ async function acceptCommand(env: Env, command: Command): Promise<Receipt> {
       command.payload.personId, ctx.unitId, command.payload.requestedOutcome, command.payload.reason,
       now, command.actor.principalId, now, JSON.stringify(command.source), command.commandId, command.commandId,
       JSON.stringify(requests.map(request => ({ requestId: request.requestId, eventId: request.eventId })))));
+    writes.push(captureExcusalScopes(env.DB,requests.map(request=>request.requestId),ctx.unitId,now));
   } else {
     const request = decideExcusalRequest(ctx.current!, command, now);
     notificationRequests = [request];
@@ -285,7 +290,11 @@ async function acceptCommand(env: Env, command: Command): Promise<Receipt> {
     writes.push(statement(env.DB, `INSERT INTO excusal_notification_tasks(task_id,source_command_id,request_id,request_version,request_json,state,mode,created_at)
       SELECT json_extract(j.value,'$.taskId'),?,r.request_id,r.version,json_object('requestId',request_id,'personId',person_id,'eventId',event_id,
         'flightId',unit_id,'status',status,'requestedOutcome',requested_outcome,'version',version,'reason',reason,'submittedAt',submitted_at,
-        'submittedBy',submitted_by,'updatedAt',updated_at,'decidedAt',decided_at,'decidedBy',decided_by,'decisionReason',decision_reason),
+        'submittedBy',submitted_by,'updatedAt',updated_at,'decidedAt',decided_at,'decidedBy',decided_by,'decisionReason',decision_reason,
+        'capturedSquadronId',(SELECT squadron_id FROM excusal_request_scopes sc WHERE sc.request_id=r.request_id),
+        'capturedSquadronLabel',(SELECT squadron_label FROM excusal_request_scopes sc WHERE sc.request_id=r.request_id),
+        'capturedFlightLabel',(SELECT flight_label FROM excusal_request_scopes sc WHERE sc.request_id=r.request_id),
+        'scopeEvidence',(SELECT evidence FROM excusal_request_scopes sc WHERE sc.request_id=r.request_id)),
         'pending','suppressed',? FROM excusal_records r JOIN json_each(?) j ON r.request_id=json_extract(j.value,'$.requestId') AND r.version=json_extract(j.value,'$.version') WHERE last_command_id=?`, command.commandId, now, JSON.stringify(tasks), command.commandId));
   }
 
@@ -472,8 +481,10 @@ export default {
       if (url.pathname === '/v1/admin/notifications/plan' && !url.search) return json(await planNotifications(env, input));
       if (url.pathname === '/v1/admin/notifications/process' && !url.search) return json(await processNotificationTask(env, input));
       if (url.pathname === '/v1/admin/notifications/status' && !url.search) return json(await notificationStatus(env, input));
+      if (url.pathname === '/v1/admin/catalog' && !url.search) return json(await readOrganizationalCatalog(env,input));
       if (url.pathname === '/v1/admin/commands' && !url.search) {
         if(input&&typeof input==='object'&&'operation' in input&&input.operation==='event.roster.apply')return json(await applyEventRoster(env,input));
+        if(input&&typeof input==='object'&&'operation' in input&&['flight.upsert','squadron.upsert'].includes(String(input.operation)))return json(await acceptCatalogCommand(env,input));
         if (input && typeof input === 'object' && 'operation' in input && input.operation === 'attendance.correct') {
           return json(await acceptAttendanceCorrection(env, input));
         }
