@@ -1,7 +1,7 @@
 # Administrator panel: hosted staging
 
 This Worker serves the same administrator interface with verified Google sign-in,
-separate D1 session/proposal persistence, and a service binding to an explicitly
+separate SQLite Durable Object session/proposal persistence, and a service binding to an explicitly
 reviewed fictional or private real-data staging backend. It cannot select a production environment. The production
 Apps Script system is unaffected. Do not deploy `local-fixture.ts` or the Node
 owner-local server.
@@ -9,7 +9,7 @@ owner-local server.
 ## Provider setup
 
 Coordinate with the main migration release owner. Use the existing free Workers
-plan, free D1 capacity, and workers.dev address; no Cloudflare Access subscription,
+plan, its SQLite Durable Object allowance, free operational D1 capacity, and a workers.dev address; no Cloudflare Access subscription,
 paid model, custom domain or GitHub subscription is required.
 
 1. Build with `node apps/admin/build-domain.mjs`,
@@ -17,18 +17,17 @@ paid model, custom domain or GitHub subscription is required.
    `node apps/admin/build-hosted.mjs --release` from a committed checkout. The
    generated `.build/admin/hosted-release.json` pins source, Worker, schema and
    every static asset by SHA-256; release mode refuses dirty imported source.
-2. Create a separate session database and use `installPanelSchema` from `setup.mjs`
-   with a committed source hash and provider callbacks that inspect/apply/read back
-   the exact target. It refuses a nonempty/mismatched database, pins the schema hash
-   in `panel_schema`, and includes a transactional empty-database assertion. Apply
-   its ordered statements atomically; never execute the raw schema blindly. It is
-   independent of the operational migration ledger. Record its schema hash and
-   deployment binding in the private operations record.
-3. Make a private resolved copy of `wrangler.example.jsonc`. Its database ID,
-   origin, backend service, bridge key ID, generation and source must agree with
-   the reviewed fictional staging release. The main file is
-   `.build/admin/hosted-worker.mjs`; static assets are `apps/admin/dist/`.
-   Resolve paths relative to the private configuration's directory.
+2. Bind `AUTH_STORE` to `StagingPanelStore` with a `new_sqlite_classes` migration,
+   as shown in `wrangler.example.jsonc`. Use SQLite storage, not the paid-only
+   legacy key/value Durable Object backend. Set `AUTH_STORE_VERSION=1`. The
+   object name includes the exact HTTPS `APP_ORIGIN` and numeric `GENERATION`;
+   do not reuse an installation's object for another origin or generation.
+3. Make a private resolved copy of `wrangler.example.jsonc`. Its origin, backend
+   service, bridge key ID, generation and source must agree with the reviewed
+   staging release. The main file is `.build/admin/hosted-worker.mjs`; static
+   assets are `apps/admin/dist/`. Resolve paths relative to the private config.
+   Bootstrap the control store through the reviewed migration below. There is
+   no public bootstrap, enrollment, database query or maintenance endpoint.
 4. Register a distinct `test` source named `admin-staging-web` in the fictional
    backend. Do not impersonate a Google spreadsheet source. A future production
    release needs a dedicated web/admin source contract, migration and audit tests.
@@ -71,18 +70,103 @@ email, merge fictional receipts into real history, or enable operational intake
 merely to view records. Record the data capture date and import comparison in the
 private release evidence; a real dataset flag does not establish currentness.
 
+### Migrate the existing panel control store
+
+Authentication state, identity bindings, invitations, previews, proposals and
+proposal leases share one SQLite Durable Object. They must stay together:
+preview entry and proposal application use atomic SQL fences across those tables.
+Moving only sessions would introduce a preview/apply race. Cadet records,
+attendance, operational grants and audit receipts remain in the separate D1
+backend. The production Apps Script system is untouched.
+
+The migration is a deliberate brief staging sign-in interruption:
+
+1. Preserve the old panel D1 database and its deployment evidence. Reconcile any
+   proposal in `applying` state before migration, even when its lease expired.
+   Determine its backend command receipt and retain the original command ID;
+   never reset or clear an uncertain apply merely to allow migration.
+2. Deploy the reviewed DO-backed Worker with version 2 cookies and **no**
+   bootstrap secret. Static assets remain available; authentication fails closed.
+   Wait for old requests to finish and verify the old runtime is fenced before
+   taking the final source snapshot. Do not run an older panel concurrently.
+3. Capture the exact `identity_bindings`, `login_invitations` and `proposals`
+   rows from the old panel database with bounded private reads. Capture twice
+   and verify stability. Preserve inactive identities, expired/consumed
+   invitations, command IDs, results and lease fields exactly. Review destination,
+   source commit, row counts and hashes. Reject any applying proposal or
+   unexpired proposal lease. Do not import sessions, OAuth states, request limits
+   or preview state; every browser must authenticate again.
+4. Construct the private `AUTH_STORE_BOOTSTRAP` secret below from that reviewed
+   capture. The SHA-256 is over the exact UTF-8 `JSON.stringify(payload)` bytes,
+   without a newline. It is an integrity/destination check on a private secret,
+   not a substitute for reviewing the source. The capture must be under 30
+   minutes old when the empty object initializes.
+5. Install the secret using an immediate Worker update. Verify `/health` reports
+   `controlStore.ready=true` and the expected schema and bootstrap hashes. Then
+   remove the bootstrap secret using another immediate update and verify again,
+   including a cold object restart. A default deferred DO update may retain old
+   bindings for several minutes; do not treat a warm status read as proof that
+   secret removal or a configuration change has reached a cold instance.
+6. Test Google login, `/api/session`, logout and revoked access independently of
+   operational records. Retain the old database as private evidence until the
+   migration and recovery rehearsal are accepted. No operational D1 row changes
+   are needed for this control-store migration.
+
+Secret envelope (replace every placeholder privately):
+
+```json
+{
+  "sha256": "SHA256_OF_EXACT_SERIALIZED_PAYLOAD",
+  "payload": {
+    "contractVersion": 1,
+    "environment": "staging",
+    "origin": "https://panel-staging.example.invalid",
+    "generation": 1,
+    "sourceCommit": "FORTY_CHARACTER_REVIEWED_COMMIT_HASH",
+    "capturedAt": "ISO_TIMESTAMP_OF_REVIEWED_CAPTURE",
+    "tables": {
+      "identity_bindings": [],
+      "login_invitations": [],
+      "proposals": []
+    }
+  }
+}
+```
+
+Each row must include exactly its table's existing column names, including null
+fields. Initialization creates the pinned schema, imports all rows, compares exact
+readback, and writes installation metadata in one synchronous SQL transaction.
+Any failure rolls back the complete import. Existing unknown tables, a changed
+schema inventory, a mismatched origin/generation or another bootstrap fingerprint
+fail closed. An initialized object works after the secret is removed; a fresh
+object cannot initialize without it. There is no automatic fallback to D1.
+The schema fingerprint includes the base schema, all three control migrations
+and installation metadata. Future schema changes need an explicit reviewed
+control-store migration; editing those files alone intentionally fails closed
+against an already initialized object.
+
+The seed is bounded to 5,000 UTF-8 bytes. Never truncate records to fit that bound.
+A larger import or later restore requires a separately reviewed private operator
+transfer with equivalent destination, completeness and transaction checks. The
+initial seed is not a general backup format. Preserve source evidence until that
+recovery rehearsal is complete.
+
 ### One-time reviewed staging login
 
-Apply `migrations/0004_login_invitations.sql` to the separate panel session database
-after its earlier migrations, and record the exact schema hash in the private
-release evidence. Leave the base `schema.sql` hash unchanged. An operator may
-privately insert a `login_invitations` row only for an explicitly reviewed account
-and an existing, appropriately scoped operational principal. Store the SHA-256 of
-the account email lowercased without whitespace, the principal, and integer
-`created`/`expires` milliseconds; expiry must be no more than 24 hours after creation.
-Leave both consumption fields null. Keep the invitation count below 2,000, remove
+Invitations now live in the private control object, not the legacy panel D1
+copy. New invitations and identity revocation require a reviewed private operator
+binding/maintenance operation; there is no browser enrollment or SQL endpoint.
+Changing the old D1 copy after migration has no effect. The bootstrap may carry
+existing reviewed invitations unchanged. Do not put personal identities or
+operator SQL into the public configuration or deploy an unprotected maintenance
+Worker to administer them.
+
+A reviewed invitation contains the SHA-256 of the account email lowercased
+without whitespace, an existing appropriately scoped operational principal, and
+integer `created`/`expires` milliseconds. Expiry is at most 24 hours after creation.
+Both consumption fields start null. Keep the invitation count below 2,000, remove
 expired unused invitations during reviewed maintenance, and retain consumed rows
-as private enrollment evidence. No UI or API creates invitations.
+as private enrollment evidence. No UI or public API creates invitations.
 
 The account holder uses the normal hosted Google login with only `openid email`
 consent. After signature, issuer, audience, nonce, PKCE and verified-email checks,
@@ -104,9 +188,9 @@ Google Sheet/Form access.
 - `jose` verifies RS256 signatures from Google's fixed JWKS endpoint, issuer,
   client audience, authorized party, token age/expiry, nonce, verified-email claim
   and subject. Only the subject maps to the operational principal.
-- Eight-hour opaque sessions are hashed in D1; cookies are Secure, HttpOnly,
+- Eight-hour opaque sessions are hashed in the SQLite Durable Object; version 2 cookies are Secure, HttpOnly,
   host-only and SameSite=Lax. Every request rechecks the active identity binding.
-  The same indexed query reads the session's preview mode, avoiding a second D1
+  The same indexed query reads the session's preview mode, avoiding a second storage
   round trip without caching authorization between requests.
   Logout deletes the session. Removing a binding immediately blocks later requests.
 - Same-origin checks and a constant-time CSRF check protect writes. The Worker
@@ -140,24 +224,30 @@ OAuth callback URLs contain transient authorization codes. Do not enable automat
 URL/body/header tracing on authentication routes. Operator data changes remain
 audited in the operational backend; add only redacted event-code logs if needed.
 
-If D1 explicitly rejects a request for exceeding its daily read or write limit,
-sign-in returns `SERVICE_LIMIT_REACHED` rather than blaming Google credentials.
-Authenticated API requests return HTTP 503 with that same safe code and a
-`Retry-After` value for the next midnight UTC reset. No provider error details,
-OAuth values or automatic retries are exposed. Stop hosted rehearsals until the
-reset; do not upgrade billing or rotate working OAuth credentials to bypass this
-limit. An ordinary SQL, token-exchange or identity error is not classified as a
-daily limit. Free-tier exhaustion prevents authenticating and reading records;
-health/static-page success alone cannot establish that sign-in is working.
-Workers request allowance and D1 row-read/write allowance are separate. This
-sign-in flow uses D1 for its request limit, OAuth state, authorized identity
-binding and session, so unused Workers requests do not make sign-in available
-when D1 rejects the required operations. Do not skip identity or session checks
-to work around a database limit. A constant `SELECT 1` can report zero rows read;
-even a successful small table read does not establish that the complete OAuth
-state and session flow has recovered.
-The panel pauses automatic and focus-triggered refreshes until the bounded
-`Retry-After` delay or the next UTC reset, and shows that time in the user's locale.
+Authentication no longer reads operational or legacy panel D1. OAuth request
+limits, browser-bound state, subject bindings, sessions, CSRF, logout and preview
+mode are served by the independent control object. `/api/session` confirms the
+verified session with `authenticated=true` and `hosted=true`, without claiming
+that records are available or that the account currently holds an operational
+grant. The operational backend still checks current authority on every data read
+or write. This separation does not bypass access revocation.
+
+If operational D1 reaches its daily read/write limit, signed-in API requests
+return HTTP 503 with `SERVICE_LIMIT_REACHED` and a bounded `Retry-After`. The
+panel retains a signed-in shell and stops automatic/focus-triggered data refreshes
+until that delay or the next midnight UTC reset. The operator can still sign out
+and sign in. There is no automatic repeated polling, billing upgrade, identity
+cache or bypass. An unavailable control object returns `AUTH_STORE_UNAVAILABLE`
+and fails closed; static assets remain available. Workers request/CPU limits,
+Durable Object request/duration/storage limits and operational D1 limits are
+independent. Independent authentication does not make operational records usable
+when D1 has stopped serving them.
+
+Use one SQLite object per staging installation, lazy RPC calls, and the existing
+bounded hourly cleanup. No alarms, persistent sockets, busy polling, warmup timer
+or extra paid provider is needed. Verify real provider usage and cold-start/login
+CPU before claiming capacity: emulator success establishes transaction behavior,
+not a free-tier capacity guarantee.
 
 ## Hosted acceptance
 
@@ -174,7 +264,10 @@ The panel pauses automatic and focus-triggered refreshes until the bounded
   a revoked backend grant and a revoked identity binding.
 - Verify native Sheet/Form delivery separately using the main migration's paused
   rehearsals. Database acceptance alone does not establish Google publication.
-- Verify free-tier request/CPU/D1 usage in the provider for the real hosted flow;
+- Verify login/session/logout while the operational backend is unavailable, and
+  cold control-store restart after removing the bootstrap secret. Old cookie
+  names and old session tokens must not become valid in the new store.
+- Verify free-tier request/CPU/D1/Durable Object usage in the provider for the real hosted flow;
   never upgrade a plan automatically when a limit is encountered.
 - Test sign-out and a fresh browser; there must be no local-owner bypass on the
   hosted Worker. Inspect logs for absence of tokens, callback query strings and PII.
@@ -206,17 +299,23 @@ Keep the signed-in administrator panel and all ordinary operations independent o
 CRC. A successor needs the project-owned Cloudflare/Google accounts, shared vault,
 and an explicitly registered personal Google subject with backend grants.
 
-For an access incident, deactivate the relevant identity binding and backend
-principal/grants, then delete their sessions. Pausing backend mutations is the
+For an access incident, immediately revoke the backend principal/grants to stop
+operational access. Use the reviewed private operator binding to deactivate the
+control-store identity and delete its sessions; changing the old panel D1 copy
+does not revoke a current sign-in. Pausing backend mutations is the
 independent stop switch. Preserve proposal records when troubleshooting interrupted
 writes; retry the same command only after checking its receipt. Do not clear an
 active proposal lease to force a second write.
 
-To roll back, restore the prior reviewed administrator Worker/assets version with
-its compatible session schema and bindings. Do not roll back or overwrite the
-operational database to undo a presentation deployment. If the auth database must
-be restored, invalidate all restored sessions and OAuth states before reopening
-access; old session tokens must not become valid again.
+To roll back a presentation release, use a reviewed Worker/assets version with
+its compatible control-store schema and binding. Do not overwrite the operational
+D1 database. Do not reactivate the legacy D1-backed authentication release after
+migration without fencing the new runtime, reconciling all newer proposals and
+identity revocations, and invalidating all old sessions/OAuth states. A stale
+control-state rollback can restore revoked access or repeat an uncertain command.
+A control-store restore requires a reviewed private export/restore procedure;
+start a new cookie/object generation, omit every old session/OAuth/preview row,
+and preserve original command IDs/results for idempotent recovery.
 
 The main interface intentionally omits development badges. Its separate staging
 hostname and these release records identify the environment. This presentation
@@ -327,9 +426,10 @@ Production remains unchanged.
 
 ### Account preview release gate
 
-`View as` remains disabled until its operational backend and separate panel schema
-are deployed and exercised together. In addition to panel migration `0002`, apply
-`0003_preview_intents.sql` before deploying the integrated preview bundle. It saves
+`View as` remains disabled until its operational backend and separate control
+store are deployed and exercised together. Durable Object initialization includes
+both `0002_view_as.sql` and `0003_preview_intents.sql`; do not apply those files to
+the operational D1 database. The preview-intent schema saves
 entry/exit audit request IDs before network calls, fences pending entry against
 command apply leases, and prevents delayed entry responses from restoring an
 exited session. Missing schema fails closed, including when the feature flag is off.

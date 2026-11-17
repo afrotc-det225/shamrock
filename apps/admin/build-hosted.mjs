@@ -14,7 +14,8 @@ const built=await build({
   platform: "node",
   format: "esm",
   target: "es2022",
-  external: ["node:*"],
+  external: ["node:*", "cloudflare:*"],
+  loader: { ".sql": "text" },
   plugins: [
     {
       name: "source-domain",

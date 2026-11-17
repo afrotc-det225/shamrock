@@ -180,7 +180,7 @@ test("OAuth state is browser-bound, single-use and PKCE-protected; only subject 
   );
   const browser = start.headers
     .getSetCookie()
-    .find((s) => s.startsWith("__Host-shamrock-auth="))
+    .find((s) => s.startsWith("__Host-shamrock-auth-v2="))
     .split(";")[0];
   let exchanged = false;
   const fake = {
@@ -211,7 +211,7 @@ test("OAuth state is browser-bound, single-use and PKCE-protected; only subject 
   assert.equal(success.status, 303);
   const sessionCookie = success.headers
     .getSetCookie()
-    .find((s) => s.startsWith("__Host-shamrock="))
+    .find((s) => s.startsWith("__Host-shamrock-v2="))
     .split(";")[0];
   assert.match(success.headers.getSetCookie()[0], /Secure; HttpOnly/);
   assert.equal(
@@ -244,7 +244,7 @@ async function invitationLogin(f) {
   return async (subject,email,extra={})=>{
     const start=await authRoute(new Request(origin+'/auth/login'),env);
     const auth=new URL(start.headers.get('location'));
-    const browser=start.headers.getSetCookie().find(value=>value.startsWith('__Host-shamrock-auth=')).split(';')[0];
+    const browser=start.headers.getSetCookie().find(value=>value.startsWith('__Host-shamrock-auth-v2=')).split(';')[0];
     const token=await new SignJWT({sub:subject,email,email_verified:true,nonce:auth.searchParams.get('nonce'),...extra})
       .setProtectedHeader({alg:'RS256',kid:'invitation-test'}).setIssuer('https://accounts.google.com')
       .setAudience('test-client').setIssuedAt().setExpirationTime('5m').sign(pair.privateKey);
@@ -358,7 +358,7 @@ test("hosted runtime refuses anonymous sessions, spoofed identity, cross-origin 
     csrf,
     Date.now() + 60000,
   );
-  const cookie = "__Host-shamrock=" + token;
+  const cookie = "__Host-shamrock-v2=" + token;
   assert.equal(
     (
       await send("/api/session", {
@@ -622,7 +622,7 @@ test("scoped HTTP sessions cannot reach full pages, management or transition rou
     Date.now() + 60000,
   );
   const headers = {
-    cookie: "__Host-shamrock=" + token,
+    cookie: "__Host-shamrock-v2=" + token,
     origin,
     "content-type": "application/json",
     "x-shamrock-csrf": csrf,
@@ -693,7 +693,7 @@ test("hosted state defers receipts; receipt reads retain the authenticated princ
   const f=await fixture(t,script),token=random(),hash=await sha(token);
   await f.run("INSERT INTO identity_bindings VALUES('receipt-sub','operator',1)");
   await f.run("INSERT INTO sessions VALUES(?,?,?,?)",hash,'receipt-sub',random(),Date.now()+60000);
-  const headers={cookie:'__Host-shamrock='+token,'x-principal-id':'someone-else'};
+  const headers={cookie:'__Host-shamrock-v2='+token,'x-principal-id':'someone-else'};
   const binding=digest(JSON.stringify(['https://backend-staging.example.invalid',1,'operator','sheet','panel-source','test-key']));
   await f.run("INSERT INTO proposals(id,binding,principal,command,summary,created,state) VALUES('own',?,'operator','{}','not-json',1,'complete')",binding);
   const state=await f.mf.dispatchFetch(origin+'/api/state',{headers});
@@ -721,7 +721,7 @@ test('unchanged state uses fresh authority without recounting, and never reuses 
   const f=await fixture(t,script),token=random();
   await f.run("INSERT INTO identity_bindings VALUES('cached-sub','operator',1)");
   await f.run("INSERT INTO sessions VALUES(?,?,?,?)",await sha(token),'cached-sub',random(),Date.now()+60000);
-  const headers={cookie:'__Host-shamrock='+token};
+  const headers={cookie:'__Host-shamrock-v2='+token};
   const first=await(await f.mf.dispatchFetch(origin+'/api/state',{headers})).json();assert.equal(first.manifest.manifests,1);
   const capture={captureKey:first.captureKey,revision:first.manifest.revision,viewAsRevision:null};
   const refresh=async value=>f.mf.dispatchFetch(origin+'/api/state',{headers:{...headers,'x-shamrock-capture':encodeURIComponent(JSON.stringify(value))}});
@@ -741,7 +741,7 @@ test("receipt reads discard results when authority is revoked before the final a
   const f=await fixture(t,script),token=random();
   await f.run("INSERT INTO identity_bindings VALUES('receipt-sub','operator',1)");
   await f.run("INSERT INTO sessions VALUES(?,?,?,?)",await sha(token),'receipt-sub',random(),Date.now()+60000);
-  const response=await f.mf.dispatchFetch(origin+'/api/receipts',{headers:{cookie:'__Host-shamrock='+token}});
+  const response=await f.mf.dispatchFetch(origin+'/api/receipts',{headers:{cookie:'__Host-shamrock-v2='+token}});
   assert.equal(response.status,403);assert.equal((await response.json()).receipts,undefined);
 });
 
@@ -759,7 +759,7 @@ test('View as keeps the verified actor, wraps reads, and blocks every mutation e
   const f=await fixture(t,script,true), token=random(),csrf=random(),hash=await sha(token);
   await f.run("INSERT INTO identity_bindings VALUES('actual-sub','actual-admin',1)");
   await f.run('INSERT INTO sessions VALUES(?,?,?,?)',hash,'actual-sub',csrf,Date.now()+60000);
-  const headers={cookie:'__Host-shamrock='+token,origin,'content-type':'application/json','x-shamrock-csrf':csrf};
+  const headers={cookie:'__Host-shamrock-v2='+token,origin,'content-type':'application/json','x-shamrock-csrf':csrf};
   const post=(path,body)=>f.mf.dispatchFetch(origin+path,{method:'POST',headers,body:JSON.stringify(body)});
   const entered=await post('/api/view-as',{personId:'selected-cadet'});assert.equal(entered.status,200);
   const state=await f.mf.dispatchFetch(origin+'/api/state',{headers});assert.equal(state.status,200);

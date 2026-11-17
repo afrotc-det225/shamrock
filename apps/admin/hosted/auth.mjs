@@ -69,7 +69,7 @@ async function resolveLoginBinding(env, identity, now) {
     "SELECT principal_id FROM identity_bindings WHERE google_sub=? AND active=1",
   ).bind(identity.subject).first();
   if (existing || !identity.emailHash) return existing;
-  // The two writes and readback share one D1 transaction. An invitation never
+  // The two writes and readback share one control-store transaction. An invitation never
   // replaces a subject binding, reactivates one, or adds a login to a bound principal.
   const results = await env.PANEL_DB.batch([
     env.PANEL_DB.prepare(`INSERT INTO identity_bindings(google_sub,principal_id,active)
@@ -91,7 +91,7 @@ async function resolveLoginBinding(env, identity, now) {
   return results[2].results[0] || null;
 }
 export async function session(request, env) {
-  const token = cookie(request, "__Host-shamrock");
+  const token = cookie(request, "__Host-shamrock-v2");
   if (!/^[A-Za-z0-9_-]{43}$/.test(token))
     throw new PanelError("SIGN_IN_REQUIRED", "Sign in to SHAMROCK.", 401);
   const row = await env.PANEL_DB.prepare(
@@ -132,7 +132,7 @@ export async function authRoute(
   const url = new URL(request.url),
     now = Date.now();
   if (url.pathname === "/auth/login" && request.method === "GET") {
-    const previous = cookie(request, "__Host-shamrock");
+    const previous = cookie(request, "__Host-shamrock-v2");
     if (/^[A-Za-z0-9_-]{43}$/.test(previous))
       await env.PANEL_DB.prepare("DELETE FROM sessions WHERE token_hash=?")
         .bind(await sha(previous))
@@ -184,13 +184,13 @@ export async function authRoute(
       prompt: "select_account",
     }).toString();
     return redirect(auth.toString(), [
-      setCookie("__Host-shamrock-auth", browser, 600),
-      setCookie("__Host-shamrock", "", 0),
+      setCookie("__Host-shamrock-auth-v2", browser, 600),
+      setCookie("__Host-shamrock-v2", "", 0),
     ]);
   }
   if (url.pathname === "/auth/callback" && request.method === "GET") {
     const state = url.searchParams.get("state"),
-      browser = cookie(request, "__Host-shamrock-auth");
+      browser = cookie(request, "__Host-shamrock-auth-v2");
     if (
       !/^[A-Za-z0-9_-]{43}$/.test(state || "") ||
       !/^[A-Za-z0-9_-]{43}$/.test(browser)
@@ -280,14 +280,14 @@ export async function authRoute(
         429,
       );
     return redirect("/", [
-      setCookie("__Host-shamrock", token, 8 * 3600),
-      setCookie("__Host-shamrock-auth", "", 0),
+      setCookie("__Host-shamrock-v2", token, 8 * 3600),
+      setCookie("__Host-shamrock-auth-v2", "", 0),
     ]);
   }
   if (url.pathname === "/api/session" && request.method === "POST") {
     originCheck(request, env.APP_ORIGIN);
     const current = await session(request, env);
-    return json({ csrf: current.csrf, viewAs: previewResponse(previewFromSession(current)) });
+    return json({ authenticated: true, hosted: true, csrf: current.csrf, viewAs: previewResponse(previewFromSession(current)) });
   }
   if (url.pathname === "/auth/logout" && request.method === "POST") {
     const current = await session(request, env);
@@ -298,7 +298,7 @@ export async function authRoute(
     return new Response(JSON.stringify({ signedOut: true }), {
       headers: {
         "content-type": "application/json",
-        "Set-Cookie": setCookie("__Host-shamrock", "", 0),
+        "Set-Cookie": setCookie("__Host-shamrock-v2", "", 0),
       },
     });
   }
