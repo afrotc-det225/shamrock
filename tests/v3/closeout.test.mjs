@@ -52,6 +52,17 @@ test('bounded resume reloads attendance and preserves a report/correction arrivi
  assert.equal((await f.db.prepare("SELECT COUNT(*) AS n FROM attendance_corrections WHERE reason=?").bind(CLOSEOUT_POLICY.version).first()).n,54);
  const done=await f.advance(two.body);assert.equal(done.status,200);assert.equal(done.body.state,'complete');
 });
+test('automatic closeout and final summary keep the event Flight after a later Directory transfer',async t=>{
+ const f=await fixture(t,1);
+ await f.db.batch([f.db.prepare("INSERT INTO organizational_units VALUES('bravo','Bravo',1)"),f.db.prepare("INSERT INTO flight_hierarchy VALUES('bravo','blue')")]);
+ const transfer=envelope('directory.upsert',{personId:f.people[0],expectedVersion:1,flightId:'bravo',profile:profile(0)},'transfer-after-event');assert.equal((await f.send(transfer)).status,200);
+ const prepared=await f.prepare();assert.equal(prepared.status,200,JSON.stringify(prepared.body));
+ assert.equal((await f.db.prepare('SELECT flight_id FROM closeout_items').first()).flight_id,'alpha');
+ const step=await f.advance(prepared.body);assert.equal(step.status,200);assert.equal(step.body.changed,1);
+ const done=await f.advance(step.body);assert.equal(done.status,200);assert.equal(done.body.state,'complete');
+ const notice=await f.db.prepare('SELECT scope_id,to_json,body FROM notification_intents').first();assert.equal(notice.scope_id,'alpha');assert.deepEqual(JSON.parse(notice.to_json),['commander@example.invalid']);assert.match(notice.body,/Example, Cadet 0/);
+ assert.equal((await f.db.prepare('SELECT code FROM attendance_corrections').first()).code,'A');
+});
 test('concurrent late presence invalidates the whole step and retry uses current effective attendance',async t=>{
  const f=await fixture(t,2),p=await f.prepare();let batches=0;
  const DB={prepare:sql=>f.db.prepare(sql),batch:async rows=>{batches++;if(batches===2)await f.correct(f.people[0],'P');return f.db.batch(rows);}};

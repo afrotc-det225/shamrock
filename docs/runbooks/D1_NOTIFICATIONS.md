@@ -21,6 +21,19 @@ reply-to. Missing squadron routing is blocked, without an invented fallback
 address. The automation identifies itself as SHAMROCK Automations rather than
 signing as a human commander.
 
+Attendance status facts in both daily and preliminary weekly notices belong to
+the Flight captured in that event's current roster version. Final Sunday closeout
+already retains the same Flight in each closeout item. A later Directory transfer
+does not move an earlier event's attendance or hide it when the new Flight is
+outside that event's scope. Commander/deputy contact routing remains current.
+Managed future rosters refresh after a transfer before notices can be planned;
+missing captured Flight identity blocks planning instead of using a guessed
+current Flight. This replaces the legacy matrix's single current-Flight column
+(`src/services/attendance.ts`), which could reassign historical follow-up after a
+transfer. Excusal submission/decision messages continue to use the request's
+captured Squadron. Daily pending-status summaries use the event roster consistently
+with approved statuses, rather than the legacy mixture of request and matrix Flights.
+
 Messages distinguish approved excusals, pending requests, recorded A/U and
 attendance not yet established. A denial or a missing request never establishes
 an absence. The [explicit Sunday closeout policy](D1_SUNDAY_CLOSEOUT.md) separately

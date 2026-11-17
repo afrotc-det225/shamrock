@@ -4,7 +4,7 @@ import { effectiveAdminGrants } from './permission-grants.js';
 import { adminIdentifier, type FrontendSnapshot } from '../../../packages/domain/src/admin.js';
 import { buildFrontendReporting, REPORTING_POLICY_VERSION } from '../../../packages/domain/src/frontend-reporting.js';
 import { NOTICE_POLICY, advanceDelivery, noticeLocalClock, planExcusalNotice, planScheduledNotices, type FlightNoticeContact, type NoticeRecipient, type NotificationIntent, } from '../../../packages/domain/src/notifications.js';
-import { readNotificationContext } from './reporting-context.js';
+import { readNotificationContext, type NotificationContext } from './reporting-context.js';
 import { HttpError } from './http-error.js';
 type Value = string | number | null;
 interface NotificationEnv {
@@ -96,7 +96,7 @@ export function flightNoticeContacts(snapshot: FrontendSnapshot): FlightNoticeCo
     commander: recipient(snapshot, [`${f.label} Flight Commander`, `Cadet ${f.label} Flight Commander`]),
     deputy: recipient(snapshot, [`${f.label} Deputy Flight Commander`, `Deputy ${f.label} Flight Commander`, `Cadet ${f.label} Deputy Flight Commander`]) }));
 }
-export function planFromSnapshot(snapshot: FrontendSnapshot, recipe: PlanCommand['payload']): NotificationIntent[] {
+export function planFromSnapshot(snapshot: FrontendSnapshot & Partial<Pick<NotificationContext,'eventRosterFlights'>>, recipe: PlanCommand['payload']): NotificationIntent[] {
   if (snapshot.diagnostics.length)
     throw new HttpError(409, 'NOTIFICATION_SNAPSHOT_INCOMPLETE', 'Resolve the roster/catalog diagnostics before planning notices.');
   const clock = noticeLocalClock(recipe.asOf);
@@ -136,10 +136,18 @@ export function planFromSnapshot(snapshot: FrontendSnapshot, recipe: PlanCommand
     type: ({ 'mando': 'Mando PT', 'secondary': 'Secondary PT', 'llab': 'LLAB', 'other': 'Other' } as const)[event.eventType], startsAt: event.startAt!, status: event.status,
     flightIds: snapshot.eventFlights.filter(scope => scope.eventId === event.eventId).map(scope => scope.flightId) }));
   const eventIds = new Set(events.map(event => event.eventId));
-  const attendance = report.matrices.flatMap(matrix => matrix.rows.flatMap(person => person.flightId === null ? [] : person.cells.filter(cell => eventIds.has(cell.eventId)).map(cell => ({
-    eventId: cell.eventId, personId: person.personId, flightId: person.flightId!, displayName: `${person.lastName}, ${person.firstName}`,
-    eligible: cell.eligible, code: cell.effectiveCode, pendingRequest: cell.requests.some(request => request.status === 'Submitted'),
-  }))));
+  // Event eligibility and Flight ownership are one capture. A later Directory transfer
+  // must not move or hide that event's facts; future managed events refresh first.
+  if(!Array.isArray(snapshot.eventRosterFlights))throw new HttpError(409,'NOTIFICATION_ROSTER_INCOMPLETE','Read the captured event roster before planning notices.');
+  const rosterFlights=new Map(snapshot.eventRosterFlights.map(row=>[JSON.stringify([row.eventId,row.personId]),row.flightId]));
+  if(rosterFlights.size!==snapshot.eventRosterFlights.length)throw new HttpError(409,'NOTIFICATION_ROSTER_INCOMPLETE','The captured notification roster is ambiguous.');
+  const flightsById=new Set(snapshot.flights.map(f=>f.flightId));
+  const attendance = report.matrices.flatMap(matrix => matrix.rows.flatMap(person => person.cells.filter(cell => eventIds.has(cell.eventId)&&cell.eligible!==false).map(cell => {
+    const flightId=rosterFlights.get(JSON.stringify([cell.eventId,person.personId]));
+    if(!flightId||!flightsById.has(flightId))throw new HttpError(409,'NOTIFICATION_ROSTER_INCOMPLETE','Resolve the captured Flight before planning attendance notices.');
+    return {eventId:cell.eventId,personId:person.personId,flightId,displayName:`${person.lastName}, ${person.firstName}`,
+      eligible:cell.eligible,code:cell.effectiveCode,pendingRequest:cell.requests.some(request=>request.status==='Submitted')};
+  })));
   return planScheduledNotices({ now: recipe.asOf, mode: 'staging', events, flights, attendance });
 }
 /** One bounded current-facts revalidator for both local delivery and owner-only native rehearsal. */

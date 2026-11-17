@@ -6,6 +6,8 @@ import { frontendSnapshot,type FrontendReadScope } from './admin.js';
 import { effectiveAdminGrants } from './permission-grants.js';
 import { HttpError } from './http-error.js';
 interface Env {DB:D1Database;ENVIRONMENT:string;GENERATION:string}
+/** Internal event ownership; Directory membership remains the current contact/profile view. */
+export type NotificationContext = FrontendSnapshot & { eventRosterFlights: {eventId:string;personId:string;flightId:string|null}[] };
 type Value=string|number|null;
 const stmt=(db:D1Database,sql:string,...values:Value[])=>db.prepare(sql).bind(...values);
 const shift=(date:string,days:number)=>{const d=new Date(date+'T12:00:00Z');d.setUTCDate(d.getUTCDate()+days);return d.toISOString().slice(0,10);};
@@ -18,18 +20,27 @@ async function scopeRead(env:Env,principalId:string,query:D1PreparedStatement):P
 }
 const context=(env:Env,principalId:string,scope:FrontendReadScope)=>frontendSnapshot(env,{environment:env.ENVIRONMENT,generation:Number(env.GENERATION),principalId},scope);
 /** Routing is current, while a retained excusal task may subsequently substitute its immutable request version. */
-export async function readNotificationContext(env:Env,principalId:string,recipe:{kind:'scheduled'|'excusal';asOf:string;requestId:string|null}):Promise<FrontendSnapshot>{
+export async function readNotificationContext(env:Env,principalId:string,recipe:{kind:'scheduled'|'excusal';asOf:string;requestId:string|null}):Promise<NotificationContext>{
   const clock=noticeLocalClock(recipe.asOf);
   if(recipe.kind==='excusal'){
     adminIdentifier(recipe.requestId);const read=await scopeRead(env,principalId,stmt(env.DB,`SELECT event_id AS eventId FROM excusal_records r WHERE request_id=? AND (origin='native' OR EXISTS(SELECT 1 FROM legacy_operational_adoptions a WHERE a.adoption_id=r.legacy_adoption_id AND a.state='complete'))`,recipe.requestId));
-    if(read.rows.length!==1)throw new HttpError(404,'NOT_FOUND','The requested excusal is unavailable.');return context(env,principalId,{eventIds:[String(read.rows[0].eventId)],requestId:recipe.requestId!,includeAttendanceFacts:false,expectedRevision:read.revision});
+    if(read.rows.length!==1)throw new HttpError(404,'NOT_FOUND','The requested excusal is unavailable.');return {...await context(env,principalId,{eventIds:[String(read.rows[0].eventId)],requestId:recipe.requestId!,includeAttendanceFacts:false,expectedRevision:read.revision}),eventRosterFlights:[]};
   }
   if(recipe.kind!=='scheduled'||recipe.requestId!==null)throw new HttpError(400,'INVALID_NOTIFICATION','Invalid notification context.');
   const weekly=clock.weekday===0&&clock.hour>=17,start=weekly?shift(clock.date,-7):clock.date;
-  const read=await scopeRead(env,principalId,stmt(env.DB,`SELECT event_id AS eventId,event_type AS type,start_at AS startAt FROM event_details WHERE status='active' AND start_at>=? AND start_at<? ORDER BY event_id LIMIT 201`,start+'T00:00:00.000Z',shift(clock.date,2)+'T00:00:00.000Z'));
+  const read=await scopeRead(env,principalId,stmt(env.DB,`SELECT d.event_id AS eventId,d.event_type AS type,d.start_at AS startAt,
+    (SELECT json_group_array(json_object('personId',person_id,'flightId',flight_id)) FROM
+      (SELECT person_id,flight_id FROM event_roster_members m WHERE m.event_id=d.event_id AND m.version=d.version ORDER BY person_id LIMIT 501)) AS rosterJson
+    FROM event_details d WHERE d.status='active' AND d.start_at>=? AND d.start_at<? ORDER BY d.event_id LIMIT 201`,start+'T00:00:00.000Z',shift(clock.date,2)+'T00:00:00.000Z'));
   if(read.rows.length>200)throw new HttpError(409,'CONTEXT_TOO_LARGE','Use a bounded notification event window.');
   const eventIds=read.rows.filter(e=>{const date=noticeLocalClock(String(e.startAt)).date;return weekly&&date>=start&&date<clock.date||clock.hour>=5&&date===clock.date&&['mando','llab'].includes(String(e.type));}).map(e=>String(e.eventId));
-  return context(env,principalId,{eventIds,expectedRevision:read.revision});
+  const eventSet=new Set(eventIds),eventRosterFlights:NotificationContext['eventRosterFlights']=[];
+  for(const event of read.rows.filter(e=>eventSet.has(String(e.eventId)))){
+    const roster=JSON.parse(String(event.rosterJson)) as {personId:string;flightId:string|null}[];
+    if(roster.length>500||eventRosterFlights.length+roster.length>50000)throw new HttpError(409,'CONTEXT_TOO_LARGE','Use a bounded notification event roster.');
+    eventRosterFlights.push(...roster.map(person=>({eventId:String(event.eventId),...person})));
+  }
+  return {...await context(env,principalId,{eventIds,expectedRevision:read.revision}),eventRosterFlights};
 }
 /** Freeze only the current due event catalog/roster; prepare does not need attendance facts. */
 export async function readCloseoutPreparationContext(env:Env,principalId:string,asOf:string):Promise<FrontendSnapshot>{

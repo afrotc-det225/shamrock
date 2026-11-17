@@ -634,8 +634,10 @@ test('notification contexts exclude unrelated historical facts while preserving 
   const currentCorrection=structuredClone(f.correction);currentCorrection.commandId='mark-current';currentCorrection.source.submissionId=currentCorrection.commandId;
   assert.equal((await f.send(currentCorrection)).status,200);
   const full=await frontendSnapshot(f.env,read()),scoped=await readNotificationContext(f.env,'admin',f.plan.payload);
+  full.eventRosterFlights=(await f.db.prepare('SELECT m.event_id AS eventId,m.person_id AS personId,m.flight_id AS flightId FROM event_roster_members m JOIN event_details d ON d.event_id=m.event_id AND d.version=m.version ORDER BY m.event_id,m.person_id').all()).results;
   assert.equal(full.events.length,3);assert.equal(full.corrections.length,3);
   assert.deepEqual(scoped.events.map(e=>e.eventId),['event-one']);assert.deepEqual(scoped.corrections.map(e=>e.eventId),['event-one']);
+  assert.deepEqual(scoped.eventRosterFlights,[{eventId:'event-one',personId:'person-a',flightId:'alpha'}]);
   assert.deepEqual(planFromSnapshot(scoped,f.plan.payload),planFromSnapshot(full,f.plan.payload));
   const weekly={...f.plan.payload,asOf:'2026-01-04T22:00:00.000Z'};
   assert.deepEqual(planFromSnapshot(await readNotificationContext(f.env,'admin',weekly),weekly),planFromSnapshot(full,weekly));
@@ -644,6 +646,37 @@ test('notification contexts exclude unrelated historical facts while preserving 
   const excusal={kind:'excusal',asOf:'2026-01-01T10:00:00.000Z',requestId:'scope-request'},one=await readNotificationContext(f.env,'admin',excusal);
   assert.equal(one.requests.length,1);assert.equal(one.corrections.length,0);assert.equal(one.observations.length,0);assert.equal(one.legacyBaselines.length,0);
   assert.deepEqual(planFromSnapshot(one,excusal),planFromSnapshot(await frontendSnapshot(f.env,read()),excusal));
+});
+test('daily and preliminary weekly notices retain captured Flight after a transfer and use its current commander',async t=>{
+  const f=await notificationFixture(t);
+  const event=revised(command('event.upsert'));event.payload.flightIds=['alpha'];event.payload.eligiblePersonIds=['person-a'];
+  assert.equal((await f.send(event)).status,200);
+  const correction=structuredClone(f.correction);correction.payload.code='E';correction.payload.expectedEventVersion=2;assert.equal((await f.send(correction)).status,200);
+  const transfer=revised(command());transfer.payload.flightId='bravo';transfer.payload.profile.role='';assert.equal((await f.send(transfer)).status,200);
+  const commander=command('leadership.upsert');commander.payload.profile.role='Alpha Flight Commander';commander.payload.profile.email='current-commander@example.invalid';assert.equal((await f.send(commander)).status,200);
+  for(const asOf of ['2026-01-01T10:00:00.000Z','2026-01-01T20:00:00.000Z','2026-01-04T22:00:00.000Z']){
+    const recipe={...f.plan.payload,asOf},context=await readNotificationContext(f.env,'admin',recipe);
+    assert.equal(context.people[0].flightId,'bravo');assert.equal(context.eventRosterFlights[0].flightId,'alpha');
+    const notices=planFromSnapshot(context,recipe);assert.equal(notices.length,1);assert.equal(notices[0].scopeId,'alpha');
+    assert.deepEqual(notices[0].to,['current-commander@example.invalid']);assert.match(notices[0].body,/Approved excusals:\n- Example, Cadet/);
+    assert.throws(()=>planFromSnapshot({...context,eventRosterFlights:[]},recipe),{code:'NOTIFICATION_ROSTER_INCOMPLETE'});
+    assert.throws(()=>planFromSnapshot({...context,eventRosterFlights:undefined},recipe),{code:'NOTIFICATION_ROSTER_INCOMPLETE'});
+  }
+  const result=await f.send(f.plan,noticePath);assert.equal(result.status,200,JSON.stringify(result.body));
+  const saved=await f.db.prepare('SELECT scope_id,state,body FROM notification_intents').first();assert.equal(saved.scope_id,'alpha');assert.equal(saved.state,'suppressed');assert.match(saved.body,/Approved excusals:\n- Example, Cadet/);
+});
+test('upcoming notification facts follow the refreshed event version without reading an older Flight capture',async t=>{
+  const f=await notificationFixture(t),tomorrow=new Date(Date.now()+86400000).toISOString().slice(0,10);
+  const event=command('event.upsert');event.commandId='future-notice';event.source.submissionId=event.commandId;
+  Object.assign(event.payload,{eventId:'future-notice',startAt:tomorrow+'T12:00:00.000Z',endAt:tomorrow+'T13:00:00.000Z',eligiblePersonIds:['person-a']});
+  assert.equal((await f.send(event)).status,200);
+  const recipe={...f.plan.payload,asOf:tomorrow+'T10:00:00.000Z'};
+  assert.deepEqual((await readNotificationContext(f.env,'admin',recipe)).eventRosterFlights,[{eventId:'future-notice',personId:'person-a',flightId:'alpha'}]);
+  const transfer=revised(command());transfer.payload.flightId='bravo';transfer.payload.profile.role='';assert.equal((await f.send(transfer)).status,200);
+  assert.equal((await f.send(revised(event))).status,200);
+  assert.deepEqual((await f.db.prepare("SELECT version,flight_id FROM event_roster_members WHERE event_id='future-notice' ORDER BY version").all()).results,[{version:1,flight_id:'alpha'},{version:2,flight_id:'bravo'}]);
+  const context=await readNotificationContext(f.env,'admin',recipe);assert.deepEqual(context.eventRosterFlights,[{eventId:'future-notice',personId:'person-a',flightId:'bravo'}]);
+  const notices=planFromSnapshot(context,recipe);assert.doesNotMatch(notices.find(n=>n.scopeId==='alpha').body,/Example, Cadet/);assert.match(notices.find(n=>n.scopeId==='bravo').body,/Attendance not yet established:\n- Example, Cadet/);
 });
 test('scoped reads reject a changed audit revision or revoked reader between catalog selection and facts',async t=>{
   const f=await notificationFixture(t);let batches=0;
