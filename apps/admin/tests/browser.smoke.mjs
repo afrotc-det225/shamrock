@@ -21,6 +21,7 @@ try {
     errors = [];
   let stateReads = 0,
     pageReads = 0;
+  const requestedSections = [];
   page.on("pageerror", (e) => errors.push(e.message));
   // Exercise the hosted paged transport with the real local backend contract.
   const host = Object.create(HostedBackend.prototype);
@@ -44,6 +45,7 @@ try {
   });
   await page.route("**/api/page", async (route) => {
     pageReads++;
+    requestedSections.push(route.request().postDataJSON().section);
     try {
       await route.fulfill({
         json: await host.page(route.request().postDataJSON()),
@@ -65,6 +67,9 @@ try {
     .getByRole("button", { name: "Edit Veterans Day", exact: true })
     .waitFor();
   const initialPageReads = pageReads;
+  assert.equal(initialPageReads,4,"Events opens without loading attendance, roster or Directory");
+  assert.deepEqual(requestedSections.slice().sort(),["events","manifest","terms","verify"]);
+  const beforeEdit = await service.snapshot();
   const refreshed = page.waitForResponse((r) => r.url().endsWith("/api/state"));
   await page.clock.fastForward(61000);
   await refreshed;
@@ -103,6 +108,8 @@ try {
     await page.getByLabel("Event name", { exact: true }).inputValue(),
     "Veterans Day ceremony",
   );
+  assert.deepEqual((await service.snapshot()).events.find(e=>e.eventId==='veterans').eligiblePersonIds,
+    beforeEdit.events.find(e=>e.eventId==='veterans').eligiblePersonIds,"on-demand editor preserves complete eligibility");
   await apply();
   assert.equal(
     (await service.snapshot()).events.find((e) => e.eventId === "veterans")

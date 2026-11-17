@@ -2,11 +2,11 @@ import React, { useState, useRef, useEffect } from "react";
 import { Eye } from "lucide-react";
 import { Drawer, SearchBox, Empty } from "./components";
 import { name } from "./api";
-export function ViewAsSelector({ people, onSelect, busy }) {
+export function ViewAsSelector({ people, onSelect, onOpen, busy }) {
   const [open, setOpen] = useState(false), [query, setQuery] = useState("");
   const rows = people.filter(person => name(person).toLowerCase().includes(query.toLowerCase()));
   return <>
-    <button disabled={busy} onClick={() => { setQuery(""); setOpen(true); }}><Eye size={18} /> View as</button>
+    <button disabled={busy} onClick={() => { setQuery(""); onOpen ? onOpen(() => setOpen(true)) : setOpen(true); }}><Eye size={18} /> View as</button>
     {open && <Drawer title="View as" onClose={() => setOpen(false)}>
       <div className="fields">
         <SearchBox placeholder="Find a person to view" value={query} onChange={setQuery} />

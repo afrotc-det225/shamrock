@@ -185,6 +185,21 @@ release gate.
 
 ### Loading behavior
 
+Hosted administrators initially load only the Events list: an explicit
+`events-list-v1` profile containing verified terms and event rows. It is never
+passed to attendance reporting or represented as a complete snapshot. The local
+fixture uses four page requests (manifest, terms, events, verify), plus state and
+session bootstrap; a 47-event fixture uses five page requests. Directory, rosters,
+attendance and excusals are not fetched just to display this list.
+
+Edit/Add/Change schedule fetch the complete verified snapshot on demand before
+opening controls, retaining exact eligibility and Flight bindings. The View as
+selector does the same only when opened. Other data screens currently load the
+full snapshot; History can load independently after the access check. Navigation
+aborts superseded reads and discards late results. The existing in-memory cache
+is keyed by environment/actor binding, manifest/access revision and View as
+revision; no private data is written to browser storage.
+
 The initial loading view retains the page heading and table layout, reports actual
 loading/verification stages, and offers Cancel/Retry. Its progress indicator counts
 completed record groups; it is not an elapsed-time estimate. Motion is disabled

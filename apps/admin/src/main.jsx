@@ -52,16 +52,20 @@ function App() {
   const pendingRead = useRef(null),
     lastRead = useRef(0),
     live = useRef({});
-  live.current = { busy, proposal, data, preview };
-  const reload = async (force = false) => {
+  live.current = { busy, proposal, data, preview, page };
+  const reload = async (force = false, profile) => {
     if (pendingRead.current) {
-      await pendingRead.current;
-      if (!force) return;
+      if (force && pendingAbort.current) { pendingAbort.current.superseded = true; pendingAbort.current.abort(); }
+      const previous = await pendingRead.current.catch(() => null);
+      if (!force) return previous;
     }
     const controller = new AbortController();
     pendingAbort.current = controller;
     setReadProgress({stage: "Checking access"});
-    const task = api("/state", undefined, {signal: controller.signal, onProgress: setReadProgress}).then((value) => {
+    profile ||= live.current.data?.snapshot ? "full" : live.current.page === "History" ? "access" : live.current.page === "Events" ? "events" : "full";
+    const task = api("/state", undefined, {profile, signal: controller.signal, onProgress: setReadProgress}).then((value) => {
+      if (controller.signal.aborted || pendingAbort.current !== controller)
+        throw Object.assign(new Error("A newer view is loading."), {code:"SUPERSEDED"});
       setData(value);
       setPreview(value.viewAs || null);
       if (
@@ -71,12 +75,14 @@ function App() {
         setPage("Attendance & excusals");
       lastRead.current = Date.now();
       setSync("");
+      return value;
     });
     pendingRead.current = task;
     try {
-      await task;
+      return await task;
     } catch (error) {
       controller.abort();
+      if (controller.superseded) throw Object.assign(new Error("A newer view is loading."), {code:"SUPERSEDED"});
       if (error.name === "AbortError") throw new Error("Loading stopped.");
       throw error;
     } finally {
@@ -88,6 +94,7 @@ function App() {
     startSession()
       .then(value => { setPreview(value.viewAs || null); return reload(); })
       .catch((e) => {
+        if (e.code === "SUPERSEDED") return;
         if (e.code === "SIGN_IN_REQUIRED") setSignIn(true);
         else setError(e.message);
       });
@@ -149,6 +156,7 @@ function App() {
     try {
       await fn();
     } catch (e) {
+      if (e.code === "SUPERSEDED") return;
       if (e.code === "SIGN_IN_REQUIRED" || e.status === 403) {
         setData(null);
         setProposal(null);
@@ -179,7 +187,14 @@ function App() {
     setPage(value);
     setError("");
     setNotice("");
+    if (!data?.snapshot && (value !== "History" || !data))
+      void run(() => reload(true, value === "Events" ? "events" : value === "History" ? "access" : "full"));
   };
+  const withFullData = (callback) => run(async () => {
+    const value = live.current.data?.snapshot ? live.current.data : await reload(true, "full");
+    if (!value?.snapshot) throw new Error("The records could not be loaded.");
+    callback(value.snapshot);
+  });
   const viewAs = (person) => run(async () => {
     if (pendingRead.current) await pendingRead.current.catch(() => {});
     const result = await api("/view-as", { personId: person?.personId || null });
@@ -194,7 +209,7 @@ function App() {
   const visiblePages = blockedPreview ? [] : scoped
     ? pages.filter(([title]) => title === "Attendance & excusals")
     : pages.filter(([title]) => title !== "History" || data?.meta.hosted);
-  const common = { ...data, propose, busy, readOnly: !!preview, notify: setNotice, refresh: reload };
+  const common = { ...data, propose, busy, readOnly: !!preview, notify: setNotice, refresh: reload, withFullData };
   if (signIn) {
     const code = new URLSearchParams(location.search).get("signin");
     const message =
@@ -247,8 +262,8 @@ function App() {
             ))}
           </nav>
           <div className="sidebar-bottom">
-            {!preview && !scoped && data?.meta.viewAsEnabled && data?.snapshot &&
-              <ViewAsSelector people={data.snapshot.people} onSelect={viewAs} busy={busy} />}
+            {!preview && !scoped && data?.meta.viewAsEnabled &&
+              <ViewAsSelector people={data.snapshot?.people || []} onOpen={done => withFullData(done)} onSelect={viewAs} busy={busy} />}
             {!preview && !scoped && (
               <button
                 className={page === "Assistant" ? "selected" : ""}
@@ -290,7 +305,7 @@ function App() {
                 {notice}
               </div>
             )}
-            {blockedPreview ? <p>{viewAsStatus[preview.status] || "This account cannot be previewed."}</p> : !data ? (
+            {blockedPreview ? <p>{viewAsStatus[preview.status] || "This account cannot be previewed."}</p> : !data || (!data.snapshot && page !== "History" && !(page === "Events" && data.eventsList)) ? (
               <section className="loading-panel" aria-busy={!error}>
                 {error ? (
                   <button

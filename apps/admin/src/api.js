@@ -1,8 +1,9 @@
 import { hydrateReporting } from "./reporting";
-import { loadSnapshot } from "../snapshot-client";
+import { loadSnapshot, loadEventsList } from "../snapshot-client";
 let csrf;
 let retainedCapture;
 let viewRevision;
+let retainedEvents;
 export async function api(path, body, options = {}) {
   const response = await fetch(`/api${path}`, {
     method: body === undefined ? "GET" : "POST",
@@ -14,9 +15,10 @@ export async function api(path, body, options = {}) {
     signal: options.signal,
   });
   const data = await response.json();
+  options.signal?.throwIfAborted();
   if (!response.ok) {
     if (response.status === 401 || response.status === 403)
-      retainedCapture = undefined;
+      { retainedCapture = undefined; retainedEvents = undefined; }
     const error = new Error(
       data.error?.message || "Unable to complete this request.",
     );
@@ -32,21 +34,31 @@ export async function api(path, body, options = {}) {
     }
     if (data.transport === "paged-v1") {
       const key = JSON.stringify([data.captureKey, data.manifest, data.viewAsRevision]);
+      if (options.profile === "access" && data.manifest.access.capabilities.fullSnapshot) return data;
+      if (options.profile === "events" && data.manifest.access.capabilities.fullSnapshot && retainedCapture?.key !== key) {
+        data.eventsList = retainedEvents?.key === key ? retainedEvents.eventsList :
+          await loadEventsList(data, (nextPath,nextBody)=>api(nextPath,nextBody,{signal:options.signal}),options.onProgress);
+        options.signal?.throwIfAborted();
+        retainedEvents = {key,eventsList:data.eventsList};
+        return data;
+      }
       if (retainedCapture?.key === key)
         data.snapshot = retainedCapture.snapshot;
       else {
         data.snapshot = await loadSnapshot(data,
           (nextPath, nextBody) => api(nextPath, nextBody, {signal: options.signal}), options.onProgress);
+        options.signal?.throwIfAborted();
         retainedCapture = { key, snapshot: data.snapshot };
       }
     }
     return hydrateReporting(data);
   }
-  if (path === "/view-as") { retainedCapture = undefined; viewRevision = undefined; }
+  if (path === "/view-as") { retainedCapture = undefined; retainedEvents = undefined; viewRevision = undefined; }
   return data;
 }
 export async function startSession() {
   retainedCapture = undefined;
+  retainedEvents = undefined;
   viewRevision = undefined;
   const result = await api("/session", {});
   csrf = result.csrf;

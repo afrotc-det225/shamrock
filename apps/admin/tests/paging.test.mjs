@@ -13,7 +13,7 @@ await build({
   platform: "browser",
   format: "esm",
 });
-const { loadSnapshot } = await import(
+const { loadSnapshot, loadEventsList } = await import(
   "../../../.build/admin/snapshot-client.mjs"
 );
 function proxy(backend) {
@@ -22,6 +22,34 @@ function proxy(backend) {
   host.post = (path, body) => backend.post(path, body);
   return host;
 }
+test("Events list uses four bounded pages, never reads rosters, and stays distinct from a full snapshot", async t => {
+  const local=await createLocalBackend();t.after(()=>local.dispose());
+  const host=proxy(local.backend),manifest=await host.panelManifest(),calls=[];
+  const list=await loadEventsList({manifest},async(_path,body)=>{calls.push(body.section);return host.page(body);});
+  assert.equal(list.contractVersion,"events-list-v1");
+  assert.equal(list.people,undefined);assert.equal(list.observations,undefined);
+  assert.equal(list.events[0].eligiblePersonIds,undefined);
+  assert.deepEqual(calls.slice().sort(),["events","manifest","terms","verify"]);
+  const full=await local.backend.snapshot();
+  assert.deepEqual(list.events.map(event=>event.eventId),full.events.map(event=>event.eventId));
+  t.diagnostic(JSON.stringify({initialPageRequests:calls.length,initialStateRequests:1}));
+});
+test("47-event list uses five pages and rejects a changed final revision",async t=>{
+  const local=await createLocalBackend();t.after(()=>local.dispose());
+  const host=proxy(local.backend),manifest=await host.panelManifest(),calls=[];
+  const fullManifest=await host.post("/v1/admin/snapshot/page",{...host.identity(),section:"manifest",offset:0,revision:null});
+  const source=await host.post("/v1/admin/snapshot/page",{...host.identity(),section:"events",offset:0,revision:fullManifest.revision});
+  const rows=Array.from({length:47},(_,i)=>({...source.rows[0],eventId:`fictional-event-${i}`}));
+  const request=async(_path,body)=>{
+    calls.push(body.section);
+    const result=body.section==='events' ? {...source,offset:body.offset} : await host.page(body);
+    if(body.section==='manifest') result.sections.find(entry=>entry.section==='events').count=47;
+    if(body.section==='events') {result.rows=rows.slice(body.offset,body.offset+32);result.nextOffset=body.offset+result.rows.length<47?body.offset+result.rows.length:null;}
+    return result;
+  };
+  const list=await loadEventsList({manifest},request);assert.equal(list.events.length,47);assert.equal(calls.length,5);
+  await assert.rejects(()=>loadEventsList({manifest},async(path,body)=>{const value=await request(path,body);if(body.section==='verify')value.revision.operations++;return value;}));
+});
 test("browser paged full capture matches existing operational catalogs and preserves inactive profiles", async (t) => {
   const local = await createLocalBackend();
   t.after(() => local.dispose());

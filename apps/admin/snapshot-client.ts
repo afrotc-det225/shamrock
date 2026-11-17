@@ -29,6 +29,46 @@ const canonical = (value) =>
 const same = (a, b) => canonical(a) === canonical(b);
 const identifier = (v) =>
   typeof v === "string" && /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/.test(v);
+
+/** An explicit list profile, never a partial FrontendSnapshot. Editors load full data. */
+export async function loadEventsList(state, request, progress = (_value) => {}) {
+  check(state.manifest.access.capabilities.fullSnapshot);
+  const get = async (section, offset, revision) => {
+    const page = await request("/page", {surface:"full",section,offset,revision,accessRevision:state.manifest.revision});
+    check(new TextEncoder().encode(JSON.stringify(page)).length <= FRONTEND_PAGE_MAX_BYTES);
+    check(page.contractVersion === "frontend-pages-v1" && page.section === section &&
+      (revision === null || same(page.revision, revision)));
+    return page;
+  };
+  const manifest = await get("manifest",0,null);
+  check(Array.isArray(manifest.sections) && manifest.sections.length === FRONTEND_SECTIONS.length &&
+    manifest.sections.every((entry,index)=>entry.section===FRONTEND_SECTIONS[index] &&
+      Number.isSafeInteger(entry.count) && entry.count >= 0 && entry.count <= FRONTEND_SECTION_BOUNDS[entry.section]));
+  const read = async section => {
+    const count=manifest.sections.find(entry=>entry.section===section).count, rows=[];
+    let offset=0;
+    while(offset<count) {
+      const page=await get(section,offset,manifest.revision);
+      check(page.offset===offset && same(page.scope,manifest.scope) && Array.isArray(page.rows) &&
+        page.rows.length>0 && offset+page.rows.length<=count);
+      rows.push(...page.rows);offset+=page.rows.length;
+      check(page.nextOffset===(offset<count?offset:null));
+    }
+    return rows;
+  };
+  progress({stage:"Loading events"});
+  const [terms,events]=await Promise.all([read("terms"),read("events")]);
+  progress({stage:"Verifying events"});
+  const verified=await get("verify",0,manifest.revision);
+  check(verified.verified===true && same(verified.scope,manifest.scope) &&
+    same(verified.effect ?? null,manifest.effect ?? null));
+  check(terms.filter(term=>!!term.isCurrent).length===1 &&
+    terms.find(term=>!!term.isCurrent).termId===manifest.scope.currentTermId &&
+    new Set(events.map(event=>event.eventId)).size===events.length &&
+    events.every(event=>event.termId===manifest.scope.termId));
+  return {contractVersion:"events-list-v1",revision:manifest.revision,scope:manifest.scope,
+    terms:terms.map(term=>({...term,isCurrent:!!term.isCurrent})),events};
+}
 async function virtualId(id) {
   return (
     "cadet:" +

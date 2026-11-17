@@ -13,7 +13,8 @@ import {
 import { eventTypes, displayDate, name } from "./api";
 import { toEastern, fromEastern } from "./time";
 import BulkSchedule from "./BulkSchedule";
-export default function Events({ snapshot: s, propose, busy, refresh, readOnly = false }) {
+export default function Events({ snapshot, eventsList, propose, busy, refresh, readOnly = false, withFullData }) {
+  const s = snapshot || eventsList;
   const [bulk, setBulk] = useState(false);
   const [query, setQuery] = useState(""),
     [type, setType] = useState(""),
@@ -29,7 +30,7 @@ export default function Events({ snapshot: s, propose, busy, refresh, readOnly =
       setTimeError(e.message);
     }
   };
-  const open = (e) =>
+  const openFrom = (source, e) =>
     setEdit(
       e
         ? {
@@ -52,7 +53,7 @@ export default function Events({ snapshot: s, propose, busy, refresh, readOnly =
               ].map((k) => [k, e[k]]),
             ),
             expectedVersion: e.version,
-            flightIds: s.eventFlights
+            flightIds: source.eventFlights
               .filter((f) => f.eventId === e.eventId)
               .map((f) => f.flightId),
           }
@@ -62,7 +63,7 @@ export default function Events({ snapshot: s, propose, busy, refresh, readOnly =
             termId: term,
             eventType: "other",
             trainingWeek: null,
-            displayOrder: s.events.length,
+            displayOrder: source.events.length,
             label: "",
             columnLabel: "",
             expectedGroup: "",
@@ -75,6 +76,11 @@ export default function Events({ snapshot: s, propose, busy, refresh, readOnly =
             notes: "",
           },
     );
+  const open = (event) => withFullData ? withFullData(source => {
+    const current = event ? source.events.find(value => value.eventId === event.eventId) : null;
+    if (event && !current) throw new Error("This event is no longer available. Reload the list.");
+    openFrom(source, current);
+  }) : openFrom(s, event);
   const rows = s.events
     .filter(
       (e) =>
@@ -88,10 +94,10 @@ export default function Events({ snapshot: s, propose, busy, refresh, readOnly =
       <section className="page-controls">
         <Heading title="Events">
           <div className="actions">
-            <button disabled={readOnly || !term || busy} onClick={() => setBulk(true)}>
+            <button disabled={readOnly || !term || busy} onClick={() => withFullData ? withFullData(() => setBulk(true)) : setBulk(true)}>
               Change schedule
             </button>
-            <button className="primary" disabled={readOnly} onClick={() => open()}>
+            <button className="primary" disabled={readOnly || busy} onClick={() => open()}>
               <Plus size={17} />
               Add event
             </button>
@@ -130,7 +136,7 @@ export default function Events({ snapshot: s, propose, busy, refresh, readOnly =
         {rows.map((e) => (
           <tr key={e.eventId}>
             <td>
-              <button className="text-button" disabled={readOnly} onClick={() => open(e)}>
+              <button className="text-button" disabled={readOnly || busy} onClick={() => open(e)}>
                 {e.label}
               </button>
               <small>{e.location}</small>
@@ -147,7 +153,7 @@ export default function Events({ snapshot: s, propose, busy, refresh, readOnly =
             <td>
               <button
                 className="icon"
-                disabled={readOnly}
+                disabled={readOnly || busy}
                 aria-label={`Edit ${e.label}`}
                 onClick={() => open(e)}
               >
