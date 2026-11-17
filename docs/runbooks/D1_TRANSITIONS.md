@@ -2,9 +2,11 @@
 
 Migration `0006_transition_and_delivery_workflows.sql` adds resumable semester
 and academic-year preparation. It changes neither current production entry
-points nor applied migrations 1–5. The implementation has local D1 and adapter
-port tests; it has not run against Google or a hosted database. Keep the staging
-host and notifications suppressed until a separate reviewed integration run.
+points nor applied migrations 1–5. The implementation has local D1 and native adapter tests. Check the private
+release evidence for the exact hosted schema, completed archive/acceptance
+rehearsals and final pause state; source completion does not establish those
+provider results. Keep staging paused between controlled runs and operational
+notification recipients suppressed.
 
 ## Operational policy and review
 
@@ -140,7 +142,7 @@ private configuration file. It stays file-owned, rather than being copied into
 Script Properties. Import pauses intake, frontend publication and maintenance;
 resuming either of the other consumers does not resume maintenance. The existing
 flush invokes suppressed notification planning only when maintenance is enabled.
-No additional trigger, Google file, MailApp binding or mail OAuth scope is created.
+Enabling maintenance creates no additional trigger or Google file. Its notification planner stays suppressed. The current staging manifest also contains the mail scope for the independent [owner-only MailApp rehearsal](D1_OWNER_MAIL_REHEARSAL.md); that scope does not enable operational delivery or make maintenance itself a mail sender.
 
 The strict binding contains `version: 1`, `environment: 'staging'`, the current
 `generation`, `enabled`, optional `closeoutEnabled` and `rosterRefreshEnabled` (both default false), the exact review marker

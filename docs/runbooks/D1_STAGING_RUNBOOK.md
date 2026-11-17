@@ -1,10 +1,36 @@
 # Isolated D1 staging setup
 
-This procedure applies only to the fictional staging prototype. It does not deploy the current Apps Script project or authorize production data migration. Read the [prototype runbook](D1_PROTOTYPE_RUNBOOK.md) first. Keep account/database IDs and secret values out of Git, terminal output and release manifests.
+This procedure applies to isolated staging resources: the fictional rehearsal environment and the separately authorized private real-data staging environment. It does not deploy the current production Apps Script project, change production authority or authorize a D1 cutover. Read the [prototype runbook](D1_PROTOTYPE_RUNBOOK.md) first. Keep account/database IDs and secret values out of Git, terminal output and release manifests.
 
-Latest verified checkpoint, 2026-11-06: the fictional staging database has schema versions 1–5, Worker source `cd7ffadbc20c5d7ccdf8d04b49c8c8d752895783`, and Google source `34a157c0dec854070a75940bd006367976433119`. Each hosted source was read back exactly. Migration rehearsal on a detached hosted restore preceded the source upgrades; fresh exports restored locally at every checkpoint and preserved all original business records. D1 remains fenced, notifications suppressed and both Forms closed. The optional native frontend publisher is deployed but disabled, with private baseline initialization and signed live publication still pending. See the [engineering checkpoint](D1_PROTOTYPE_RUNBOOK.md#november-6-engineering-checkpoint) and private operations record for the current state and acceptance gaps. All 27 production source files remain unchanged; production has not migrated to D1.
+Historical checkpoint, 2026-11-06: the fictional staging database has schema versions 1–5, Worker source `cd7ffadbc20c5d7ccdf8d04b49c8c8d752895783`, and Google source `34a157c0dec854070a75940bd006367976433119`. Each hosted source was read back exactly. Migration rehearsal on a detached hosted restore preceded the source upgrades; fresh exports restored locally at every checkpoint and preserved all original business records. D1 remains fenced, notifications suppressed and both Forms closed. The optional native frontend publisher is deployed but disabled, with private baseline initialization and signed live publication still pending. See the [engineering checkpoint](D1_PROTOTYPE_RUNBOOK.md#november-6-engineering-checkpoint) and private operations record for the current state and acceptance gaps. All 27 production source files remain unchanged; production has not migrated to D1.
 
 The historical November 5 owner-account rehearsal below completed a decision after a full-row sort and verified publication. It ended with twelve commands, twelve audits and thirteen completed jobs, with none unfinished. The Google host was paused and its retained claim cleared normally. A separate [production account handoff](ACCOUNT_HANDOFF_RUNBOOK.md) transferred the existing resources and automations to the project account. Historical release pins below describe their individual rehearsals, not the latest deployed staging source.
+
+## Current capabilities and deployment boundary
+
+Current source includes native Main/Blue/Gold publication and input capture,
+managed Attendance/Excusals/Directory Forms, verified Directory self-service,
+D1-derived reports, bounded historical publication, reviewed future rosters,
+operational CSV/bulk tools, permissions, closeout and term transitions. Optional
+native mail tests target only the verified automation owner. The staging manifest
+includes the Drive write and mail scopes needed by those explicitly gated hosts.
+Their availability in a build does not establish that they are enabled or tested
+on a particular deployment.
+
+Check the private operations record and live readback for the current source,
+migration ledger, configuration, permissions and pause state. The November 5/6
+milestones below preserve dated evidence, including their original release pins
+and limits. They are not a current deployment inventory. Continue to require
+ordinary-account native edit/filter/trigger tests, exact real-data comparison and
+history readback, hosted recovery/transition exercises, measured provider budgets,
+owner-only mail acceptance/delivery and a successor rehearsal before cutover.
+
+Use [managed Forms](D1_MANAGED_FORMS.md), [native spreadsheet input](D1_NATIVE_INPUT.md),
+[frontend publication](D1_FRONTEND_RUNTIME.md), [role permissions](D1_ROLE_PERMISSIONS.md),
+[history](D1_HISTORY_REPORTS.md), [owner-only mail](D1_OWNER_MAIL_REHEARSAL.md)
+and [operational administration](D1_OPERATIONAL_ADMIN.md) for their current bindings.
+The original technical journal/projection setup later in this runbook remains a
+separate fixture, not the final visible Main/Blue/Gold interface.
 
 ## Verified live Google checkpoint
 
@@ -47,7 +73,7 @@ The contention fix freezes the native edit evidence before a bounded lock wait, 
 
 Diagnostic-only follow-up `9ca5ce2` adds safe HTTP-status reporting and passed 201 local tests (31 current-system regressions and 170 v3 tests). It does not change claim or retry behavior and was not the source of the live results above. Record its deployment verification separately; it cannot recover the previously masked HTTP status.
 
-Cross-domain `e.user`, authenticated confirmation for an unknown editor, broader concurrency/failure recovery, hosted restore, provider capacity and full feature parity remain incomplete. Production source remained unchanged throughout this staging work.
+At this milestone, cross-domain `e.user`, authenticated confirmation, broader concurrency/failure recovery, hosted restore, provider capacity and full feature parity had not been established. Later source adds confirmation and recovery mechanisms, and later dated evidence records a hosted fictional restore; the milestone itself proves neither. Production source remained unchanged throughout this staging work.
 
 ## Milestone 3: native spreadsheet presentation
 
@@ -65,7 +91,7 @@ The first retry after the formatting fix exceeded the original lease at 23:12:35
 
 The normal retry ran at 23:22:10–24 local and acknowledged the retained job at 04:22:23.833 UTC on November 6. It cleared its own saved claim without repeating the decision or appending a duplicate slot. Final read-back verified twelve commands, twelve audits, thirteen completed jobs, six committed Google journal entries and seven valid decision slots. Presentation verification returned ready with no issues; all unrelated original drafts, contexts, observations, protections and Table/view IDs remained intact. The host pause completed at 23:22:49 local, D1 was fenced again, both Forms remained unpublished/closed with verified email collection, and fresh Script Properties read-back confirmed paused state, claim removal and preservation of every other property. D1 `quick_check` returned `ok` and `foreign_key_check` found no violations. No paid service or production write was introduced.
 
-Full attendance matrices, Directory/Leadership presentation, Dashboard charts, term transitions, non-owner access, cross-domain identity, capacity, hosted restoration and concurrency before the edit handler's first identity read remain release gates. The owner-only sort/edit rehearsal does not establish those behaviors.
+This owner-only sort/edit milestone did not establish full attendance matrices, Directory/Leadership presentation, Dashboard charts, term transitions, non-owner access, cross-domain identity, capacity, hosted restoration or concurrency before the edit handler's first identity read. Current implementations and later evidence must be assessed separately against those release gates.
 
 ## Prepare a reviewed release
 
@@ -84,8 +110,8 @@ Deployment is through the connected Cloudflare API in this phase. No paid subscr
 ## Provision only the intended staging account
 
 1. Authenticate the explicitly selected SHAMROCK Cloudflare connection. List accounts and verify the intended identity before writes. List existing Workers/databases and reuse only an identified staging resource; never silently adopt or overwrite an unfamiliar resource.
-2. Create one D1 database named `shamrock-staging`, using the Eastern North America placement hint and disabled read replication. A placement hint is not a data-residency guarantee. Record actual bindings in provider configuration, not the repository.
-3. Ensure the account's free `workers.dev` subdomain exists. Upload only the staging Worker under `shamrock-staging`; no production routes or Google files change.
+2. For a fresh fictional environment, create one D1 database named `shamrock-staging`, using the Eastern North America placement hint and disabled read replication. A real-data comparison needs its own explicitly reviewed private staging database, Worker and recovery record; do not mix it with the fictional reset/smoke fixture. A placement hint is not a data-residency guarantee. Record actual bindings in provider configuration, not the repository.
+3. Verify the account's current free `workers.dev` subdomain and the exact staging Worker binding before upload; use `shamrock-staging` for the fictional host. Never assume a stored origin survived an account subdomain rename. Update reviewed private bindings and configuration hashes/checkpoints deliberately; keep production routes and Google files unchanged.
 4. Keep `BRIDGE_SECRET` in a concealed 1Password item for recovery and a Worker `secret_text` binding at runtime. The initial item is titled **SHAMROCK staging bridge** and belongs alongside the new project account credentials. Verify that designated custodians can access the vault before handoff; a private vault is not automatically shared with successors.
 
 The plugin can create resources and upload the already built module using the Cloudflare REST API. Discover the current endpoint schemas before execution. Never print an upload request containing the secret. Do not invent CLI commands or add deployment credentials to an artifact.
@@ -96,12 +122,12 @@ The plugin can create resources and upload the already built module using the Cl
 
 Apply the complete `bootstrap.batch` in a single D1 REST query request. The first assertion rejects an unexpected schema inside that transaction. The batch creates the application schema, a migration ledger and `system_control` with `accepting_commands=0`. Inspect every result, then verify the ledger hash, complete schema, staging generation, `PRAGMA quick_check` and `PRAGMA foreign_key_check`. Do not mask an incomplete migration with `CREATE TABLE IF NOT EXISTS` or manually mark a failed migration complete.
 
-For a new database, bootstrap creates version 1. Apply any remaining versions using the same upgrade procedure below; do not deploy a Worker requiring version 2 against version 1.
+The original bootstrap creates version 1. Apply every migration required by the selected committed release using the upgrade procedure below, or use the guarded current-schema fresh-database helper described at the end. Never deploy a Worker against an older incompatible schema.
 
 ## Upgrade a paused staging database
 
 1. Pause Google intake, journal dispatch and publication; close the staging Forms and verify D1 `accepting_commands=0` for the intended generation. Capture the currently deployed Worker/Google source and configuration for recovery. Never use production bindings.
-2. Export the existing fictional staging database into restricted ignored storage and record its SHA-256. Restore it into an isolated database and verify schema, migration history, counts, `quick_check`, foreign keys and paused control. Record exactly which restore environment was tested. A file's existence is not restore evidence.
+2. Export the exact selected staging database into restricted ignored storage and record its SHA-256. Restore it into an isolated database and verify schema, migration history, counts, `quick_check`, foreign keys and paused control. Record exactly which restore environment was tested. A file's existence is not restore evidence.
 3. Save fresh preflight arrays under exactly `inventory`, `ledger` and `controls`. The queries are in the release plan. Use `migrationEvidenceHash` from `scripts/lib/v3-migrations.mjs` to bind the recovery record to this preflight. Recovery fields are `environment`, `generation`, `fromVersion`, `evidenceSha256`, `backupSha256`, `rollbackSourceCommit`, `reviewed: true`, `restoreVerified: true`, and `adaptersPaused: true`. These attestations require actual evidence; the helper does not verify backup contents or pause Google for you.
 4. Prepare the next version's reviewed API batch without applying it:
 
@@ -113,7 +139,7 @@ node scripts/prepare-v3-migration.mjs --environment staging --generation 1 \
 
 5. Check the selected account/database, manifest and every statement. Submit the emitted `batch` as **one transactional D1 API request**. Do not split it into separate calls. Exact schema/ledger/control assertions run inside that transaction before additive DDL/backfill; a mismatch or failed write rolls the batch back. The helper supports bounded additive migrations and backfills only into newly created tables, not arbitrary repairs.
 6. Re-read schema, ledger and paused control; inspect every API result and both integrity checks. After an ambiguous response, classify fresh state before retrying. Repeat for another version only with new preflight/recovery evidence. Matching latest state is a no-op.
-7. Upload compatible committed Worker/Google artifacts while still paused, then run a bounded fictional rehearsal. Never infer data rollback from reverting application code. Prefer a reviewed forward fix; restore only while fenced and with no accepted writes omitted, then revalidate schema, generation and code compatibility.
+7. Upload compatible committed Worker/Google artifacts while still paused, then run the bounded rehearsal appropriate to that dataset. Use fictional records for destructive/failure fixtures and explicitly approved private real-data comparisons for parity. Never infer data rollback from reverting application code. Prefer a reviewed forward fix; restore only while fenced and with no accepted writes omitted, then revalidate schema, generation and code compatibility.
 
 **Version 2 compatibility:** the older Worker does not populate the new command/event scope table. Do not reopen processing after a code-only rollback to that Worker against version 2. Keep processing fenced until a compatible forward fix, or a reviewed restoration of both the pre-upgrade schema/data and matching code with no accepted writes omitted.
 
@@ -129,7 +155,7 @@ Upload the manifest's `worker.mjs` as an ES module with these runtime bindings:
 | `BRIDGE_KEY_ID` | The identifier associated with the staging credential |
 | `BRIDGE_SECRET` | The concealed staging credential, using `secret_text` |
 
-Set the manifest's compatibility date; do not add cron triggers, Google credentials or notification delivery. Keep persisted request logging disabled for this prototype. Enable only the staging Worker's `workers.dev` route, with preview URLs disabled. Verify its module/configuration after upload and verify `/health` and rejection of an unsigned mutation. Health alone does not prove D1 works.
+Set the manifest's compatibility date; do not add cron triggers or Google credentials to the Worker. Keep operational notification delivery suppressed. The optional owner-only mail rehearsal has separate reviewed Worker bindings and native gates documented in its runbook. Keep persisted request logging disabled for this prototype. Enable only the staging Worker's `workers.dev` route, with preview URLs disabled. Verify its module/configuration after upload and verify `/health` and rejection of an unsigned mutation. Health alone does not prove D1 works.
 
 ## Fictional cloud smoke test
 
@@ -152,19 +178,21 @@ Record the source commit, hashes, migration verification, Worker configuration, 
 
 Use a separate standalone Apps Script project owned by the project automation account. Keep its local clasp binding under ignored `.build/google-staging/`; always specify both that binding and the named automation-account profile. The root `.clasp.json` continues to identify production. Upload only the committed release's `GoogleAdapter.js` and `appsscript.json`; do not copy the production `dist/` files into staging.
 
-The staging manifest requests Forms metadata/response access, spreadsheets, read-only Drive metadata/content, outbound requests, trigger management and the executing account's email. It requests no mail sending scope. The native runtime reads current Drive ACLs and Sheets protections instead of trusting a saved assertion. The standalone script and its private journal must be accessible only to the automation owner in this first rehearsal.
+The current staging manifest requests Forms read/write and response access, spreadsheets, Drive access, outbound requests, trigger management, the executing account's email and `script.send_mail`. Drive writes support private checkpoints, recovery/retention artifacts and credential delivery cleanup. The mail scope supports the separately gated owner-only `MailApp` rehearsal; granting consent does not enable operational recipients. The native runtimes read current Drive ACLs and Sheets protections instead of trusting saved assertions. Keep the standalone script, signing material and private journals/checkpoints accessible only to the automation owner; frontend sharing uses explicit reviewed ordinary-user lists.
 
 Google CLI authorization and Apps Script runtime authorization are distinct. A successful clasp login does not authorize installed triggers or prove that a shared OAuth client's Google Cloud project enables the required APIs. If an API returns `SERVICE_DISABLED` for that shared client, do not attempt to change Google's project. Use a project-owned standard Google Cloud project for staging and enable only the necessary free Google Workspace APIs. Keep billing unlinked. Never change production's associated Google Cloud project to solve a staging login problem. The default/standard project choice, consent configuration and API enablement must be verified on the actual staging project before recording setup as successful.
 
 External OAuth apps left in **Testing** have test-user authorizations that expire after seven days; offline refresh tokens expire too. The basic profile/email exception does not cover this manifest's Forms, Sheets and Drive scopes. Plan reauthorization during staging and review the production consent publishing/verification configuration before unattended operation. This rehearsal did not test beyond seven days or establish an exact Apps Script trigger-expiry schedule. See [Google's app audience documentation](https://support.google.com/cloud/answer/15549945?hl=en).
 
-Prepare two private, explicitly named staging workbooks and two staging Forms containing only fictional data. The journal workbook contains separate command-journal and projection-cursor tabs. The operator workbook contains attendance results, recorded excusal results and a separate decision-input tab. The four journal/output tabs begin empty for the initializer. Use the exact headers and configured decision mode in the [adapter contract](../../apps/google-adapter/README.md): milestone 1 used fixed targets; milestone 2 uses a new tab with projection-created request/version slots. Retain an old fixed-slot tab and its drafts rather than reinterpreting them as the new schema. Never bind these names to production by guessing or create replacements for missing configured resources.
+For the original fictional journal/projection fixture, prepare two private, explicitly named staging workbooks and two fictional staging Forms. The journal workbook contains separate command-journal and projection-cursor tabs. The operator workbook contains attendance results, recorded excusal results and a separate decision-input tab. The four journal/output tabs begin empty for the initializer. Use the exact headers and configured decision mode in the [adapter contract](../../apps/google-adapter/README.md): milestone 1 used fixed targets; milestone 2 uses a new tab with projection-created request/version slots. Retain an old fixed-slot tab and its drafts rather than reinterpreting them as the new schema. Never bind these names to production by guessing or create replacements for missing configured resources.
 
 Protect each output tab as a whole sheet, with no unprotected ranges and no ordinary protection editors. Protect decision metadata and permit only its draft-decision cells as inputs. Configure Forms to collect `VERIFIED` emails and restrict edit access to the automation owner. Keep them unpublished until a controlled rehearsal. Validate native Apps Script item IDs against the configured item roles; a REST item ID's textual encoding is not sufficient evidence.
 
-Store configuration, identity enrollment and immutable choice catalogs in Script Properties as documented in the adapter README. Keep the HMAC key in its own concealed Script Property and the password vault. Actual identities and provider resource IDs belong in private runtime configuration, never either repository. Enroll test operators against fictional D1 principals; this is not permission to copy production rosters into staging.
+The original projection host keeps its compact bindings and enrolled choices in Script Properties. Current frontend, managed Forms, native input, permission, maintenance, History and owner-mail hosts read reviewed owner-private configuration/checkpoint files; the [configuration import and credential controls](D1_HISTORY_REPORTS.md#bounded-native-history-workbook) keep secrets in named Script Properties and pause optional runtimes. Keep recovery keys in the shared password vault. Actual identities and provider resource IDs belong in private runtime configuration, never either repository. Use fictional D1 principals for the original smoke fixture. Authorized real-data staging follows the separate [private capture/import](D1_IMPORT_PARITY.md) and [operational adoption](D1_OPERATIONAL_ADOPTION.md) workflows; it must not fabricate old actors, revive old submissions or notify operational recipients.
 
-Run `shamrockV3StagingSetup` manually as the automation account, granting the staging runtime consent. Setup verifies existing resources, initializes the journal and outputs and reconciles its versioned triggers. It remains paused. Confirm both the host and projection setup receipts before running `shamrockV3StagingResume`. The Worker also remains fenced until explicitly enabled for the rehearsal. Submit a real test response after setup, verify the D1 receipt and protected sheet output, test repeated delivery, and then pause both sides again. Record native identity, protection and publication evidence separately from mock-test results.
+For that original fixture, run `shamrockV3StagingSetup` manually as the automation account, granting the current staging runtime consent. Setup verifies existing resources, initializes the journal and outputs and reconciles its versioned triggers. It remains paused. Confirm both the host and projection setup receipts before running `shamrockV3StagingResume`. The Worker also remains fenced until explicitly enabled for the rehearsal. Submit a real test response after setup, verify the D1 receipt and protected sheet output, test repeated delivery, and then pause both sides again. Record native identity, protection and publication evidence separately from mock-test results.
+
+The full native workflow binds existing isolated Main and Excusals workbooks plus Attendance, Excusals and Directory Forms through their respective runbooks. Each consumer has its own reviewed setup, pause/resume and checkpoint contracts; resuming the legacy projection host does not implicitly enable them. Keep technical transports and private history/archive books out of the ordinary frontend tabs.
 
 Do not migrate production automation as part of this rehearsal. Use the [account handoff runbook](ACCOUNT_HANDOFF_RUNBOOK.md) for its existing resources, old-owner trigger inventory, controlled replacement and recovery.
 
