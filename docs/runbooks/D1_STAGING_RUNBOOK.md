@@ -34,6 +34,30 @@ and [operational administration](D1_OPERATIONAL_ADMIN.md) for their current bind
 The original technical journal/projection setup later in this runbook remains a
 separate fixture, not the final visible Main/Blue/Gold interface.
 
+### Sign-in availability during a database outage
+
+The staging web panel now keeps its Google identity bindings, login invitations,
+OAuth state, sessions and proposal/View as coordination in one private
+SQLite-backed Durable Object. Cadet records, operational permissions and domain
+audit receipts remain in D1. Successful sign-in does not grant operational access:
+each records request and change must still pass the D1 permission checks.
+
+When D1 is unavailable, a verified session displays “You're signed in” with a
+records-unavailable message and Sign out. Writable controls are inaccessible;
+existing editor drafts stay mounted privately for recovery. A daily-limit response
+pauses records requests until the provider's retry time; other transient outages
+use a bounded retry delay. There is no database polling from the sign-in page and
+no fallback to stale permission data. Existing lazy reads and View as read-only
+fences remain in effect.
+
+The control store uses the Workers Free SQLite Durable Object allowance, which is
+separate from D1's daily read allowance. Its own limits can still stop sign-in.
+Do not upgrade billing or introduce paid storage to bypass a rehearsal limit.
+Follow the [hosted panel setup and control-store migration](../../apps/admin/hosted/README.md)
+for the reviewed one-time transfer, fresh session-cookie boundary, private access
+maintenance, rollback and retained legacy database. Editing archived D1 login
+tables after migration **does not change sign-in authority**.
+
 ### Snapshot read budgets
 
 Measure D1 **rows read**, not only request counts or Worker CPU, when rehearsing

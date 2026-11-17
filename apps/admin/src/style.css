@@ -1468,3 +1468,9 @@ html:has(dialog[open]) {
   .sidebar-bottom > button, .sidebar-bottom .sign-out { min-height: 32px; padding: 4px; font-size: 11px; gap: 4px; }
   .sidebar-bottom p { flex: none; }
 }
+
+/* Authentication remains usable while operational records are unavailable. */
+.records-unavailable .login-form { max-width: 620px; }
+.session-confirmed { color: var(--green, #176344); font-size: .78rem; font-weight: 600; letter-spacing: .04em; }
+.outage-actions { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 16px; }
+.records-unavailable .login-form > p { line-height: 1.6; }

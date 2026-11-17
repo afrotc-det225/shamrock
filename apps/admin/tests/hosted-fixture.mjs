@@ -1,5 +1,5 @@
 // Test-only entry point. No route in this module belongs in a hosted deployment.
-import worker from "../hosted/worker.mjs";
+import worker from "../hosted/panel-handler.mjs";
 export default {
   async fetch(request, env, ctx) {
     if (
@@ -19,6 +19,6 @@ export default {
         ),
       );
     }
-    return worker.fetch(request, env, ctx);
+    return worker.fetch(request, env);
   },
 };

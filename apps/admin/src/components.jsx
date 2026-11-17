@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useContext, createContext } from "react";
 export const EditorError = createContext("");
+export const EditorSuspended = createContext(false);
 import { X, Search, Check, Clock3, Minus, CircleAlert } from "lucide-react";
 export function Field({ label, children, ...props }) {
   return (
@@ -129,11 +130,14 @@ export function AttendanceRate({ value }) {
   );
 }
 export function Drawer({ title, children, onClose }) {
-  const ref = useRef();
+  const ref = useRef(), suspended = useContext(EditorSuspended);
   useEffect(() => {
-    ref.current.showModal();
+    // Close the native top layer during an outage without discarding form state.
+    // Hiding an ancestor alone leaves showModal() siblings inert.
+    if (suspended) ref.current.close();
+    else if (!ref.current.open) ref.current.showModal();
     return () => ref.current?.close();
-  }, []);
+  }, [suspended]);
   return (
     <dialog
       ref={ref}

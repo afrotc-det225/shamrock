@@ -33,6 +33,16 @@ The isolated native input runtime normally retains immutable physical slots. A s
 - When a feature establishes a new baseline, obsolete compatibility checks should be removed or clearly quarantined.
 - If old and new behavior must coexist, version the Apps Script entry points or workflow labels explicitly.
 
+### Isolated staging web authentication
+
+The hosted staging panel authenticates Google subjects through a private SQLite
+Durable Object, independently of the operational D1 database. OAuth challenges,
+sessions, reviewed identity bindings and invitations share the same transactional
+store as View as state and proposal leases so a read-only preview and a pending
+write cannot race across stores. Operational authorization remains in D1 and fails
+closed during an outage. New sessions do not inherit legacy D1 cookies, roles or
+preview state. This does not change the production Apps Script runtime.
+
 ## 3. Provisioning Model (Idempotent Ensure-Exists)
 Provisioning must be safe to re-run.
 

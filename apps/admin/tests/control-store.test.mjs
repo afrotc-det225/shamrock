@@ -128,7 +128,7 @@ test("SQLite control storage authenticates, retains revocation and signs out wit
   assert.equal(state.status,503,"records remain unavailable while the operational backend quota is exhausted");
   assert.equal((await f.mf.dispatchFetch(origin+"/api/session",{method:"POST",headers:{origin,cookie}})).status,200);
   const logout = headers => f.mf.dispatchFetch(origin+"/auth/logout",{method:"POST",redirect:"manual",headers:{cookie,origin,...headers}});
-  assert.equal((await logout({})).headers.get("location"),"/?signin=SIGN_IN_FAILED","logout requires CSRF");
+  assert.equal((await logout({})).status,403,"logout requires CSRF and returns an actual error, not a login redirect");
   assert.equal((await f.mf.dispatchFetch(origin+"/api/session",{method:"POST",headers:{origin,cookie}})).status,200);
   assert.equal((await logout({"x-shamrock-csrf":body.csrf})).status,200);
   assert.equal((await f.mf.dispatchFetch(origin+"/api/session",{method:"POST",headers:{origin,cookie}})).status,401);

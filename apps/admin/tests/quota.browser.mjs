@@ -13,7 +13,7 @@ try {
  await page.clock.install({time:new Date('2026-11-17T18:00:00Z')});
  await page.goto(`http://127.0.0.1:${server.address().port}/?signin=SERVICE_LIMIT_REACHED`);
  await page.getByText('Sign in with the school email listed in SHAMROCK.',{exact:true}).waitFor({timeout:10000});
- assert.match(await page.locator('.login').innerText(),/database has reached its daily limit.*7:00 PM EST/);
+ assert.match(await page.locator('.login').innerText(),/previous attempt hit a service limit/);
  assert.equal(await page.getByText('Use the Google account your administrator has authorized.',{exact:true}).count(),0);
  await page.clock.fastForward(200);
  await page.screenshot({path:'/tmp/shamrock-signin-limit-desktop.png',animations:'disabled'});
@@ -26,7 +26,10 @@ try {
  await page.goto(`http://127.0.0.1:${server.address().port}/`);
  await page.getByRole('button',{name:'Add event',exact:true}).waitFor({timeout:10000});
  await page.clock.fastForward(61000);
- await page.getByText('Database daily limit reached. Automatic updates will resume after the allowance resets.',{exact:true}).waitFor({timeout:10000});
+ await page.getByRole('heading',{name:"You're signed in",exact:true}).waitFor({timeout:10000});
+ assert.equal(await page.getByRole('navigation').count(),0);
+ assert.equal(await page.getByRole('button',{name:'Add event',exact:true}).count(),0);
+ assert(await page.getByRole('button',{name:'Retry records',exact:true}).isDisabled());
  assert.equal(reads,2);
  await page.clock.fastForward(300000);
  await page.evaluate(()=>window.dispatchEvent(new Event('focus')));
@@ -36,5 +39,33 @@ try {
  await page.waitForTimeout(50);
  assert.equal(reads,3,'automatic refresh resumes when Retry-After expires');
  assert.deepEqual(errors,[]);
- console.log('PASS: localized quota message, school-email guidance, desktop/mobile layout, no framework/runtime errors, background and focus reads stop during quota cooldown.');
+ // First-load outage keeps successful authentication and recovers without another session request.
+ await page.unroute('**/api/state');
+ let sessions=0,unavailable=true,initialReads=0;
+ await page.route('**/api/session',async route=>{sessions++;await route.continue();});
+ await page.route('**/api/state',async route=>{initialReads++;if(!unavailable)return route.continue();await route.fulfill({status:503,headers:{'Retry-After':'60'},json:{error:{code:'SERVICE_LIMIT_REACHED',message:'Daily allowance exhausted.'}}});});
+ await page.reload();
+ await page.getByRole('heading',{name:"You're signed in",exact:true}).waitFor({timeout:10000});
+ assert.equal(sessions,1);assert.equal(initialReads,1);
+ assert.equal(await page.getByRole('navigation').count(),0);
+ await page.screenshot({path:'/tmp/shamrock-records-unavailable-mobile.png',animations:'disabled'});
+ assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
+ unavailable=false;
+ await page.clock.fastForward(61000);
+ await page.getByRole('button',{name:'Add event',exact:true}).waitFor({timeout:10000});
+ assert.equal(sessions,1,'record recovery reuses authenticated session');
+ assert.equal(initialReads,2,'one record recovery request');
+ // Sign out uses the independent session even if no operational records ever load.
+ unavailable=true;await page.reload();
+ await page.getByRole('heading',{name:"You're signed in",exact:true}).waitFor({timeout:10000});
+ let signouts=0;
+ await page.route('**/auth/logout',async route=>{signouts++;assert(route.request().headers()['x-shamrock-csrf']);
+   await page.unroute('**/api/session');
+   await page.route('**/api/session',r=>r.fulfill({status:401,json:{error:{code:'SIGN_IN_REQUIRED',message:'Sign in to SHAMROCK.'}}}));
+   await route.fulfill({status:200,json:{ok:true}});});
+ await page.getByRole('button',{name:'Sign out',exact:true}).click();
+ await page.getByRole('heading',{name:'Sign in',exact:true}).waitFor({timeout:10000});
+ assert.equal(signouts,1);
+ assert.deepEqual(errors,[]);
+ console.log('PASS: signed-in outage on first load and background refresh; no write controls; school-email guidance; desktop/mobile layout; bounded quota cooldown; recovery without reauthentication; independent sign-out.');
 }finally{await browser.close();await new Promise(r=>server.close(r));service.close();await local.dispose();}

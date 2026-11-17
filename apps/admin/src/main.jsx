@@ -12,7 +12,7 @@ import {
   History as HistoryIcon,
 } from "lucide-react";
 import { api, startSession, label, logout } from "./api";
-import { Drawer, EditorError } from "./components";
+import { Drawer, EditorError, EditorSuspended } from "./components";
 import Events from "./Events";
 import People from "./People";
 import Attendance from "./Attendance";
@@ -45,6 +45,8 @@ function App() {
     [busy, setBusy] = useState(false),
     [proposal, setProposal] = useState(null),
     [signIn, setSignIn] = useState(false),
+    [sessionInfo, setSessionInfo] = useState(null),
+    [readOutage, setReadOutage] = useState(null),
     [sync, setSync] = useState("");
   const [preview, setPreview] = useState(null), [previewName, setPreviewName] = useState("");
   const [readProgress, setReadProgress] = useState({stage: "Checking access"});
@@ -55,6 +57,7 @@ function App() {
   const bootstrap = useRef(null);
   const initialize = () => {
     if (!bootstrap.current) bootstrap.current = startSession().then(value => {
+      setSessionInfo(value); setSignIn(false);
       setPreview(value.viewAs || null); return value;
     }).catch(error => { bootstrap.current = null; throw error; });
     return bootstrap.current;
@@ -68,10 +71,24 @@ function App() {
     const reset = new Date(); reset.setUTCHours(24, 0, 0, 0);
     capacityRetryAt.current = error.retryAfterSeconds
       ? Date.now() + error.retryAfterSeconds * 1000 : reset.getTime();
+    setReadOutage({limited:true, retryAt:capacityRetryAt.current});
     setSync("Database daily limit reached. Automatic updates will resume after the allowance resets.");
     return true;
   };
-  live.current = { busy, proposal, data, preview, page };
+  const recordsUnavailable = (error) => {
+    if (pauseAtServiceLimit(error)) return true;
+    if (error.status >= 500 || error instanceof TypeError) {
+      capacityRetryAt.current = Date.now() + (error.retryAfterSeconds || 60) * 1000;
+      setReadOutage({limited:false, retryAt:capacityRetryAt.current});
+      return true;
+    }
+    return false;
+  };
+  const requireSignIn = () => {
+    bootstrap.current = null;
+    setSessionInfo(null); setData(null); setReadOutage(null); setSignIn(true);
+  };
+  live.current = { busy, proposal, data, preview, page, sessionInfo, readOutage };
   const reload = async (force = false, profile) => {
     if (!force && pendingRead.current) return pendingRead.current;
     const intent = ++readIntent.current;
@@ -94,6 +111,7 @@ function App() {
       if (controller.signal.aborted || pendingAbort.current !== controller || intent !== readIntent.current)
         throw Object.assign(new Error("A newer view is loading."), {code:"SUPERSEDED"});
       setData(value);
+      setReadOutage(null); setError(""); capacityRetryAt.current = 0;
       setPreview(value.viewAs || null);
       if (
         value.snapshot?.access &&
@@ -107,6 +125,7 @@ function App() {
       controller.abort();
       if (controller.superseded) throw Object.assign(new Error("A newer view is loading."), {code:"SUPERSEDED"});
       if (error.name === "AbortError") throw new Error("Loading stopped.");
+      recordsUnavailable(error);
       throw error;
     });
     pendingRead.current = task;
@@ -122,7 +141,7 @@ function App() {
       .catch((e) => {
         if (e.code === "SUPERSEDED") return;
         pauseAtServiceLimit(e);
-        if (e.code === "SIGN_IN_REQUIRED") setSignIn(true);
+        if (e.code === "SIGN_IN_REQUIRED") requireSignIn();
         else setError(e.message);
       });
   }, []);
@@ -141,13 +160,13 @@ function App() {
         document.visibilityState === "visible" &&
         navigator.onLine &&
         Date.now() >= capacityRetryAt.current &&
-        current.data &&
+        (current.data || (current.sessionInfo && current.readOutage)) &&
         !current.busy &&
-        !current.proposal &&
-        !document.querySelector('dialog[open], form[data-dirty="true"]') &&
-        !["INPUT", "TEXTAREA", "SELECT"].includes(
+        (!current.proposal || current.readOutage) &&
+        (current.readOutage || !document.querySelector('dialog[open], form[data-dirty="true"]')) &&
+        (current.readOutage || !["INPUT", "TEXTAREA", "SELECT"].includes(
           document.activeElement?.tagName,
-        ) &&
+        )) &&
         Date.now() - lastRead.current >= 15000
       ) {
         try {
@@ -155,11 +174,11 @@ function App() {
           failures = 0;
         } catch (e) {
           if (e.code === "SUPERSEDED") { schedule(); return; }
-          if (pauseAtServiceLimit(e)) { schedule(); return; }
+          if (recordsUnavailable(e)) { schedule(); return; }
           failures = Math.min(failures + 1, 3);
           if (e.code === "SIGN_IN_REQUIRED" || e.status === 403) {
             setData(null);
-            if (!current.preview) setSignIn(true);
+            if (!current.preview) requireSignIn();
           } else setSync("Updates interrupted. Retrying automatically.");
         }
       }
@@ -189,6 +208,7 @@ function App() {
     } catch (e) {
       if (e.code === "SUPERSEDED") return;
       pauseAtServiceLimit(e);
+      if (e.code === "SIGN_IN_REQUIRED") requireSignIn();
       if (e.code === "SIGN_IN_REQUIRED" || e.status === 403) {
         setData(null);
         setProposal(null);
@@ -262,11 +282,11 @@ function App() {
   const common = { ...data, propose, busy, readOnly: !!preview, notify: setNotice, refresh: reload, withFullData };
   if (signIn) {
     const code = new URLSearchParams(location.search).get("signin");
-    const reset = new Date(); reset.setUTCHours(24, 0, 0, 0);
-    const resetTime = new Intl.DateTimeFormat(undefined, {hour:"numeric",minute:"2-digit",timeZoneName:"short"}).format(reset);
     const message =
       code === "SERVICE_LIMIT_REACHED"
-        ? `SHAMROCK's database has reached its daily limit. Please try signing in again after ${resetTime}.`
+        ? "The previous attempt hit a service limit. Please try signing in again."
+        : code === "AUTH_STORE_UNAVAILABLE"
+        ? "Sign-in is temporarily unavailable. Please try again later."
         : code === "ACCESS_NOT_GRANTED"
         ? "This account does not have SHAMROCK access. Contact your administrator."
         : code === "SIGN_IN_LIMIT"
@@ -297,7 +317,36 @@ function App() {
     );
   }
 
+  let outageScreen = null;
+  if (sessionInfo && readOutage) {
+    const retryTime = new Intl.DateTimeFormat(undefined, {
+      hour:"numeric", minute:"2-digit", timeZoneName:"short",
+    }).format(new Date(readOutage.retryAt));
+    outageScreen = <div className="login records-unavailable">
+      <section className="login-brand"><Brand /></section>
+      <main className="login-form">
+        <span className="session-confirmed">Signed in securely</span>
+        <h1>You're signed in</h1>
+        <p role="status">Cadet records are temporarily unavailable.</p>
+        <p>{readOutage.limited
+          ? `The database has reached its daily allowance. We'll check again after ${retryTime}.`
+          : "SHAMROCK will retry shortly. You can stay on this page."}</p>
+        {preview && <p>View as remains read-only.</p>}
+        {error && <div className="error" role="alert">{error}</div>}
+        {busy && <small role="status">Checking records…</small>}
+        <div className="outage-actions">
+          <button disabled={busy || Date.now() < capacityRetryAt.current}
+            onClick={() => run(() => reload(true))}>Retry records</button>
+          <button disabled={busy} onClick={() => run(logout)}>Sign out</button>
+        </div>
+      </main>
+    </div>;
+  }
+
   return (
+    <>
+    <div hidden={!!outageScreen} inert={outageScreen ? true : undefined}>
+    <EditorSuspended.Provider value={!!outageScreen}>
     <EditorError.Provider value={error}>
       <div className="app">
         <aside className="sidebar">
@@ -456,6 +505,10 @@ function App() {
         )}
       </div>
     </EditorError.Provider>
+    </EditorSuspended.Provider>
+    </div>
+    {outageScreen}
+    </>
   );
 }
 function displayTarget(target, s) {

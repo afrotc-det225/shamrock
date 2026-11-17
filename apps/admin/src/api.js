@@ -171,8 +171,10 @@ export async function logout() {
     method: "POST",
     headers: { "x-shamrock-csrf": csrf || "" },
   });
-  if (!response.ok)
-    throw new Error("Sign-out did not complete. Please reload.");
+  if (!response.ok) {
+    const failure = await response.json().catch(() => null);
+    throw new Error(failure?.error?.message || "Sign-out did not complete. Please reload.");
+  }
   retainedCapture = undefined;
   retainedEvents = undefined;
   retainedState = undefined;
