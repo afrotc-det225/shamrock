@@ -223,6 +223,21 @@ to 13, plus the unchanged initial state request. This is a local request-count
 measurement, not hosted CPU or wall-clock evidence. No browser-persistent data
 cache or background prefetch was added.
 
+Hosted `/api/state` also defers saved-change receipts. It returns
+`receiptsDeferred:true` for the administrator's own full-access view and omits
+inline `history`; missing receipts never mean an empty change log. Overview,
+System and Semester load `GET /api/receipts` only while those screens are open,
+show loading/error/retry states, and refresh after the parent state reloads
+(including a saved apply). Leaving a screen cancels its receipt request. The
+local fixture still accepts its existing inline history.
+
+The receipt endpoint rechecks current full panel authority before and after the
+bounded, indexed proposal query. It returns only the authenticated principal's
+receipts for the exact backend binding, and View as rejects this route. Records
+stay in component memory; no browser-persistent cache or background receipt
+prefetch is used. `node tests/receipts.browser.mjs` exercises deferred loading,
+failure/retry, System's saved-change retry and Semester's preparation history.
+
 ### View as
 
 Administrators can choose **View as**, select a cadet, and inspect that person's

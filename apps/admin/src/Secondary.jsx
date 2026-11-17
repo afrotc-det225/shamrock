@@ -2,8 +2,10 @@ import React, { useState } from "react";
 import { Send } from "lucide-react";
 import { Heading, Table, Status, Empty } from "./components";
 import { api } from "./api";
-export function Overview({ snapshot: s, reporting, history, navigate, readOnly = false }) {
+import { useReceipts, ReceiptStatus } from "./receipts";
+export function Overview({ snapshot: s, reporting, history, receiptsDeferred, reportingTime, captureKey, navigate, readOnly = false }) {
   const d = reporting?.dashboard;
+  const receipt = useReceipts({ history, receiptsDeferred, reportingTime, captureKey, enabled: !readOnly });
   return (
     <>
       <Heading
@@ -32,8 +34,9 @@ export function Overview({ snapshot: s, reporting, history, navigate, readOnly =
       </div>
       {!readOnly && <section className="form-section">
         <h2>Recent changes</h2>
-        {history.length ? (
-          <History rows={history.slice(0, 5)} />
+        <ReceiptStatus receipt={receipt} />
+        {receipt.rows === null ? null : receipt.rows.length ? (
+          <History rows={receipt.rows.slice(0, 5)} />
         ) : (
           <Empty>No changes yet.</Empty>
         )}
@@ -70,7 +73,8 @@ export function History({ rows, retry, busy }) {
     </Table>
   );
 }
-export function System({ snapshot, history, retry, busy }) {
+export function System({ snapshot, history, receiptsDeferred, reportingTime, captureKey, retry, busy }) {
+  const receipt = useReceipts({ history, receiptsDeferred, reportingTime, captureKey });
   return (
     <>
       <Heading
@@ -81,7 +85,8 @@ export function System({ snapshot, history, retry, busy }) {
       </div>
       <section className="form-section">
         <h2>Change history</h2>
-        <History rows={history} retry={retry} busy={busy} />
+        <ReceiptStatus receipt={receipt} />
+        {receipt.rows !== null && <History rows={receipt.rows} retry={retry} busy={busy} />}
       </section>
       <details>
         <summary>Diagnostics</summary>

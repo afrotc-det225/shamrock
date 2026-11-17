@@ -235,6 +235,7 @@ test("hosted runtime refuses anonymous sessions, spoofed identity, cross-origin 
     send = (path, init = {}) => f.mf.dispatchFetch(origin + path, init);
   assert.match((await send("/")).headers.get("content-type"), /^text\/html/);
   assert.equal((await send("/api/state")).status, 401);
+  assert.equal((await send("/api/receipts")).status, 401);
   assert.equal(
     (
       await send("/api/session", {
@@ -544,7 +545,8 @@ test("scoped HTTP sessions cannot reach full pages, management or transition rou
   assert.equal(state.status, 200);
   const data = await state.json();
   assert.equal(data.snapshot, undefined);
-  assert.deepEqual(data.history, []);
+  assert.equal(data.history, undefined);
+  assert.equal(data.receiptsDeferred, false);
   assert.equal(data.transport, "paged-v1");
   for (const [path, body] of [
     [
@@ -582,6 +584,7 @@ test("scoped HTTP sessions cannot reach full pages, management or transition rou
     ).status,
     403,
   );
+  assert.equal((await f.mf.dispatchFetch(origin + "/api/receipts", { headers })).status, 403);
   assert.equal(
     (
       await f.mf.dispatchFetch(origin + "/api/page", {
@@ -592,6 +595,45 @@ test("scoped HTTP sessions cannot reach full pages, management or transition rou
     ).status,
     403,
   );
+});
+
+test("hosted state defers receipts; receipt reads retain the authenticated principal and backend binding", async t => {
+  const script = `export default {async fetch(request){
+    const body=await request.json();
+    if(new URL(request.url).pathname!=='/v1/admin/panel/page'||body.principalId!=='operator')
+      return Response.json({error:{code:'FORBIDDEN',message:'Unavailable'}},{status:403});
+    return Response.json({section:'manifest',revision:{operations:1,administration:1,access:'a'.repeat(64)},access:{capabilities:{fullSnapshot:true}}});
+  }};`;
+  const f=await fixture(t,script),token=random(),hash=await sha(token);
+  await f.run("INSERT INTO identity_bindings VALUES('receipt-sub','operator',1)");
+  await f.run("INSERT INTO sessions VALUES(?,?,?,?)",hash,'receipt-sub',random(),Date.now()+60000);
+  const headers={cookie:'__Host-shamrock='+token,'x-principal-id':'someone-else'};
+  const binding=digest(JSON.stringify(['https://backend-staging.example.invalid',1,'operator','sheet','panel-source','test-key']));
+  await f.run("INSERT INTO proposals(id,binding,principal,command,summary,created,state) VALUES('own',?,'operator','{}','not-json',1,'complete')",binding);
+  const state=await f.mf.dispatchFetch(origin+'/api/state',{headers});
+  assert.equal(state.status,200,'state must not parse stored receipt payloads');
+  const data=await state.json();assert.equal(data.history,undefined);assert.equal(data.receiptsDeferred,true);
+  await f.run("UPDATE proposals SET summary=? WHERE id='own'",JSON.stringify({title:'Fictional saved event',target:'Event'}));
+  await f.run("INSERT INTO proposals(id,binding,principal,command,summary,created,state) VALUES('other-person',?,'someone-else','{}','not-json',2,'complete')",binding);
+  await f.run("INSERT INTO proposals(id,binding,principal,command,summary,created,state) VALUES('other-backend','other-binding','operator','{}','not-json',3,'complete')");
+  const response=await f.mf.dispatchFetch(origin+'/api/receipts',{headers});
+  assert.equal(response.status,200);
+  const body=await response.json();assert.equal(body.contractVersion,'admin-receipts-v1');
+  assert.deepEqual(body.receipts.map(row=>row.id),['own']);
+  await f.run("UPDATE identity_bindings SET active=0 WHERE google_sub='receipt-sub'");
+  assert.equal((await f.mf.dispatchFetch(origin+'/api/receipts',{headers})).status,401);
+});
+
+test("receipt reads discard results when authority is revoked before the final access check",async t=>{
+  const script=`let reads=0;export default {async fetch(){
+    if(++reads>1)return Response.json({error:{code:'NOT_AUTHORIZED',message:'Access revoked'}},{status:403});
+    return Response.json({revision:{operations:1,administration:1,access:'a'.repeat(64)},access:{capabilities:{fullSnapshot:true}}});
+  }};`;
+  const f=await fixture(t,script),token=random();
+  await f.run("INSERT INTO identity_bindings VALUES('receipt-sub','operator',1)");
+  await f.run("INSERT INTO sessions VALUES(?,?,?,?)",await sha(token),'receipt-sub',random(),Date.now()+60000);
+  const response=await f.mf.dispatchFetch(origin+'/api/receipts',{headers:{cookie:'__Host-shamrock='+token}});
+  assert.equal(response.status,403);assert.equal((await response.json()).receipts,undefined);
 });
 
 test('View as keeps the verified actor, wraps reads, and blocks every mutation even without preview headers', async t => {
@@ -618,6 +660,7 @@ test('View as keeps the verified actor, wraps reads, and blocks every mutation e
     const r=await post(path,{operation:'excusal.decide',approved:true,payload:{}});assert.equal(r.status,403);assert.equal((await r.json()).error.code,'VIEW_AS_READ_ONLY');
   }
   assert.equal((await f.mf.dispatchFetch(origin+'/api/transition?id=saved',{headers})).status,403);
+  assert.equal((await f.mf.dispatchFetch(origin+'/api/receipts',{headers})).status,403);
   assert.equal((await post('/api/page',{surface:'full',section:'people',offset:0})).status,409,'missing revision cannot bypass preview');
   const exited=await post('/api/view-as',{personId:null});assert.equal(exited.status,200,'exit succeeds despite revoked audit authority');assert.equal((await exited.json()).viewAs,null);
   assert.equal((await f.run('SELECT count(*) AS n FROM session_previews')).results[0].n,0);

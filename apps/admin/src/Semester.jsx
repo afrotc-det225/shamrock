@@ -2,6 +2,7 @@ import React, { useState } from "react";
 import { Heading, Field, Select, Table } from "./components";
 import { name, years, statuses, api } from "./api";
 import { semesterDefaults } from './schedule.mjs';
+import { useReceipts, ReceiptStatus } from './receipts';
 export default function Semester({
   snapshot: s,
   propose,
@@ -9,7 +10,11 @@ export default function Semester({
   notify,
   meta,
   history,
+  receiptsDeferred,
+  reportingTime,
+  captureKey,
 }) {
+  const receipt = useReceipts({ history, receiptsDeferred, reportingTime, captureKey });
   const current = s.terms.find((t) => t.isCurrent),
     [defaults] = useState(() => semesterDefaults(s)),
     [title, setTitle] = useState(defaults.label),
@@ -28,7 +33,7 @@ export default function Semester({
       setStatusError(e.message);
     }
   };
-  const plans = history.filter(
+  const plans = (receipt.rows || []).filter(
     (r) =>
       r.summary.title === "Prepare semester" &&
       r.summary.transitionId &&
@@ -79,6 +84,7 @@ export default function Semester({
       <Heading
         title="Semester"
       />
+      <ReceiptStatus receipt={receipt} />
       {plans.length > 0 && (
         <section className="form-section">
           <h2>Prepared plans</h2>
