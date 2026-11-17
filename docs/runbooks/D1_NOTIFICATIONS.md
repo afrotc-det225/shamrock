@@ -178,3 +178,5 @@ reach delivery. Current routing/content changes invalidate the reviewed hash.
 The owner-only native rehearsal uses this same path and keeps its 24-hour source
 and planning-window restriction; it cannot replay an old closeout. Operational
 staging notices remain suppressed.
+
+Scoped notification, completed-closeout revalidation and owner-mail claims inherit the shared pending event roster fence. If eligibility refresh work is outstanding, they return `EVENT_ROSTERS_PENDING` without creating a delivery attempt. Closeout preparation and processing also wait; an aged unresolved roster job must be reviewed before automatic attendance facts can be written.

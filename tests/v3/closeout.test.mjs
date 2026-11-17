@@ -124,6 +124,9 @@ test('closeout owner rehearsal preserves the suppressed ledger and rechecks curr
  const env={...f.env,ENVIRONMENT:'staging',OWNER_MAIL_REHEARSAL_ENABLED:'true',OWNER_MAIL_REHEARSAL_EMAIL:'owner@example.invalid',OWNER_MAIL_REHEARSAL_PRINCIPAL:'admin'},base={environment:'staging',generation:1,principalId:'admin'},at=new Date(Date.parse(f.asOf)+1000).toISOString();
  const before=(await f.db.prepare('SELECT * FROM notification_intents').all()).results,notice=before[0];
  const prepared=await ownerMailRehearsal(env,'prepare',{...base,caseId:'closeout-case',noticeId:notice.notice_id,payloadHash:notice.payload_hash},at);
+ await f.db.batch([f.db.prepare(`INSERT INTO event_roster_policies VALUES('event',1,'current-active-flight-v1',1,'["alpha"]','event-create','admin','2026-01-01T00:00:00.000Z',NULL)`),f.db.prepare("INSERT INTO event_roster_refresh_work VALUES('event','event-create','2026-01-01T00:00:00.000Z')")]);
+ await assert.rejects(ownerMailRehearsal(env,'claim',{...base,caseId:'closeout-case',claimId:'closeout-claim',workerId:'native',reviewHash:prepared.reviewHash},at),{code:'EVENT_ROSTERS_PENDING'});assert.equal(await f.count('owner_mail_attempts'),0);
+ await f.db.prepare('DELETE FROM event_roster_refresh_work').run();
  const claim=await ownerMailRehearsal(env,'claim',{...base,caseId:'closeout-case',claimId:'closeout-claim',workerId:'native',reviewHash:prepared.reviewHash},at);
  assert.deepEqual(claim.message.to,['owner@example.invalid']);assert.match(claim.message.body,/Sunday attendance closeout/);assert.deepEqual((await f.db.prepare('SELECT * FROM notification_intents').all()).results,before);
  const g=await fixture(t,1);await completeFixtureCloseout(g);const original=await g.db.prepare('SELECT * FROM notification_intents').first();await g.db.prepare("UPDATE leadership_contacts SET email='changed@example.invalid',version=version+1 WHERE contact_id='commander'").run();
@@ -138,4 +141,11 @@ test('incomplete, old-generation, changed-term and revoked-reader closeout recip
  await f.db.prepare("DELETE FROM admin_grants WHERE capability='frontend.read'").run();await assert.rejects(revalidateNotificationIntent(f.env,'admin',recipe,notice.notice_key),{code:'NOT_AUTHORIZED'});
  await f.db.batch([f.db.prepare("INSERT INTO admin_grants VALUES('admin','frontend.read','wing','*')"),f.db.prepare('UPDATE terms SET is_current=0'),f.db.prepare("INSERT INTO terms VALUES('next','Next',2,1)")]);
  await assert.rejects(revalidateNotificationIntent(f.env,'admin',recipe,notice.notice_key),{code:'CLOSEOUT_TERM'});
+});
+
+test('pending event roster work blocks scoped closeout preparation and later processing without partial facts',async t=>{
+ const f=await fixture(t,1);await f.db.batch([f.db.prepare(`INSERT INTO event_roster_policies VALUES('event',1,'current-active-flight-v1',1,'["alpha"]','event-create','admin','2026-01-01T00:00:00.000Z',NULL)`),f.db.prepare("INSERT INTO event_roster_refresh_work VALUES('event','event-create','2026-01-01T00:00:00.000Z')")]);
+ assert.equal((await f.prepare()).body.error.code,'EVENT_ROSTERS_PENDING');assert.equal(await f.count('attendance_closeouts'),0);
+ await f.db.prepare('DELETE FROM event_roster_refresh_work').run();const prepared=await f.prepare();assert.equal(prepared.status,200);
+ await f.db.prepare("INSERT INTO event_roster_refresh_work VALUES('event','event-create','2026-01-01T00:00:00.000Z')").run();assert.equal((await f.advance(prepared.body)).body.error.code,'EVENT_ROSTERS_PENDING');assert.equal(await f.count('attendance_corrections'),0);assert.equal(await f.count('closeout_steps'),0);
 });

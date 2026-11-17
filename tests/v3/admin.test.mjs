@@ -709,3 +709,9 @@ test('Directory and contact catalogs export inactive unreferenced records beyond
  await f.send(revised(command()));for(const section of ['directory-catalog','contacts-catalog'])assert.equal((await f.send(read({section,offset:32,revision:current.manifest.revision}),path)).body.error.code,'SNAPSHOT_CHANGED');
  await f.db.prepare("DELETE FROM admin_grants WHERE capability='frontend.read'").run();for(const section of ['directory-catalog','contacts-catalog'])assert.equal((await f.send(read({section,offset:0,revision:null}),path)).status,403);
 });
+test('scheduled and excusal scoped notice revalidation inherits the pending event roster fence',async t=>{
+ const f=await notificationFixture(t),request={...f.attendance,commandId:'pending-scope-request',source:{...f.attendance.source,submissionId:'pending-scope-request'},operation:'excusal.submit',payload:{requestId:'pending-scope-request',eventId:'event-one',personId:'person-a',requestedOutcome:'E',reason:'Fictional reason'}};assert.equal((await f.send(request,'/v1/commands')).status,200);
+ await f.db.batch([f.db.prepare(`INSERT INTO event_roster_policies VALUES('event-one',1,'current-active-flight-v1',1,'["alpha"]','event.upsert','admin','2026-01-01T00:00:00.000Z',NULL)`),f.db.prepare("INSERT INTO event_roster_refresh_work VALUES('event-one','event.upsert','2026-01-01T00:00:00.000Z')")]);
+ await assert.rejects(readNotificationContext(f.env,'admin',f.plan.payload),{code:'EVENT_ROSTERS_PENDING'});
+ await assert.rejects(readNotificationContext(f.env,'admin',{kind:'excusal',asOf:f.plan.payload.asOf,requestId:'pending-scope-request'}),{code:'EVENT_ROSTERS_PENDING'});assert.equal(await f.count('notification_intents'),0);
+});

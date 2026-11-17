@@ -176,3 +176,5 @@ checks keep an unconfigured sender idle without extra URL Fetch calls.
 Renewed owner consent, actual owner-only delivery, inbox observation and the
 post-rehearsal hosted pause/readback remain live acceptance work. None of these
 local results authorize production delivery or account cutover.
+
+Scoped notification, completed-closeout revalidation and owner-mail claims inherit the shared pending event roster fence. If eligibility refresh work is outstanding, they return `EVENT_ROSTERS_PENDING` without creating a delivery attempt. Closeout preparation and processing also wait; an aged unresolved roster job must be reviewed before automatic attendance facts can be written.
