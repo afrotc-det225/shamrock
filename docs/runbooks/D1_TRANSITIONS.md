@@ -58,6 +58,8 @@ command fence atomically. No API grants its own transition permission.
 - `transition.accept`, `transition.cancel` or `transition.complete`, payload
   `{transitionId,expectedVersion,planHash}` from the reviewed status/receipt.
 
+New transition capture pages select the outgoing current semester, its Directory/Leadership context, frozen eligibility and attendance evidence. Previously archived semesters remain in D1 and in their existing immutable archives; they are not recopied into every new semester archive. The descriptor binds each page to the selected semester and current-term identity. Existing completed whole-JSON/page archives keep their original content and hashes. Unconsumed preparations started with the earlier unscoped page protocol must be abandoned and prepared again after this release; do not mix old manifests with new scoped pages. Acceptance still checks target term ID/sort order against the complete database catalog.
+
 The server stores the exact normalized plan hash and an immutable capture descriptor hash. The assembled snapshot hash is recorded separately after the native archive verifies all source pages and protected output. Existing whole-JSON snapshots keep their original hashes. Cancellation is allowed before acceptance; it does not change people or
 the current term. Changing an already frozen proposal requires cancellation and
 a new transition identity. Receipts are idempotent and recheck current authority.

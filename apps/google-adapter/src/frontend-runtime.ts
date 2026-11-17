@@ -10,12 +10,12 @@ import { HOST_PROPERTIES, parseStagingHostConfig } from './staging-host.js';
 import { CONFIG_FILE_ID_PROPERTY } from './staging-config.js';
 import { planFrontendProtections, verifyFrontendProtections, type FrontendProtectionAccess, type FrontendProtectionInput } from './frontend-protections.js';
 import { planFrontendPublication, assertFrontendPublicationPreconditions, verifyFrontendPublicationReadback,
-  buildFrontendPublicationModel, snapshotToFrontendReportingInput, verifyFrontendValidationReadback,
+  buildFrontendPublicationModel, verifyFrontendValidationReadback,
   type FrontendPublicationModel, type FrontendPublicationBaseline, type FrontendPublicationPlan,
   type FrontendTableRead, type FrontendValidationSeed, type FrontendDraft,
   type FrontendValidationExpectation, type FrontendValidationRead } from './frontend-publication.js';
 import type { FrontendSnapshot } from '../../../packages/domain/src/admin.js';
-import { buildFrontendReporting } from '../../../packages/domain/src/frontend-reporting.js';
+import { buildCoherentFrontendReporting } from './frontend-history-summary.js';
 import { buildExcusalPublicationTables, planExcusalPublication, planDashboardPublication, verifyDashboardPublicationReadback, dashboardReadFingerprint,
   type DashboardPublicationPlan, type DashboardPublicationRead } from './frontend-supplemental.js';
 import type { DashboardAction } from './frontend-dashboard.js';
@@ -172,7 +172,7 @@ export function buildSignedFrontendRequest(action: 'claim' | 'project' | 'ack', 
 export function buildCoherentFrontendModel(snapshot: FrontendSnapshot, asOfDate: string): FrontendPublicationModel {
   if (!Array.isArray(snapshot.attendanceVersions) || !Array.isArray(snapshot.corrections)
     || !Array.isArray(snapshot.diagnostics) || snapshot.diagnostics.some(d => d.count > 0)) fail('frontend_snapshot_incomplete', 'Complete the explicit roster, event and profile records before publishing the frontend.');
-  const result = buildFrontendReporting(snapshotToFrontendReportingInput(snapshot, asOfDate));
+  const result = buildCoherentFrontendReporting(snapshot, asOfDate);
   const versions = new Map<string, number>();
   for (const entry of snapshot.attendanceVersions) {
     const key = JSON.stringify([entry.personId, entry.eventId]);
@@ -960,8 +960,8 @@ export function createNativeFrontendRuntime(services: NativeFrontendServices,
     if (supplemental) runtime.supplemental = {
       plan(snapshot, state) {
         if (!services.Utilities.formatDate) fail('frontend_configuration', 'A detachment-local date provider is required.');
-        const reporting = { revision: snapshot.revision, result: buildFrontendReporting(snapshotToFrontendReportingInput(snapshot,
-          services.Utilities.formatDate(new Date(now() * 1000), 'America/Indiana/Indianapolis', 'yyyy-MM-dd'))) };
+        const reporting = { revision: snapshot.revision, result: buildCoherentFrontendReporting(snapshot,
+          services.Utilities.formatDate(new Date(now() * 1000), 'America/Indiana/Indianapolis', 'yyyy-MM-dd')) };
         const dashboard = planDashboardPublication({ revision: snapshot.revision, previousRevision: state.dashboardRevision, reporting,
           current: readDashboard(), chartIds: supplemental.dashboard.chartIds, actions: supplemental.dashboard.actions, editFenceVerified: true });
         const models = buildExcusalPublicationTables({ snapshot, blueSquadronId: supplemental.excusals.sheets.blue.squadronId,

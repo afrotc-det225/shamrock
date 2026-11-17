@@ -28,39 +28,73 @@ const queries:Record<FrontendSection,{select:string;from:string;order:string;lim
   termRosters:{select:'term_id AS termId,person_id AS personId,last_name AS lastName,first_name AS firstName,as_year AS asYear,flight_id AS flightId,flight_path_status AS flightPathStatus,date_of_birth AS dateOfBirth',from:'FROM term_roster_snapshots',order:'term_id,person_id',limit:128},
   legacyBaselines:{select:'b.baseline_id AS baselineId,b.person_id AS personId,b.event_id AS eventId,b.code',from:baselineFrom,order:'b.person_id,b.event_id',limit:256},
 };
+/** A publication reads one semester. Older evidence remains queryable by an explicit term ID. */
+const scopeCte = `WITH selected_term AS (SELECT term_id FROM terms WHERE term_id=COALESCE(?,(SELECT term_id FROM terms WHERE is_current=1))),
+ scoped_events AS (SELECT event_id FROM event_details WHERE term_id IN(SELECT term_id FROM selected_term)),
+ scoped_people AS (SELECT p.person_id FROM people p WHERE
+ EXISTS(SELECT 1 FROM directory_profiles d WHERE d.person_id=p.person_id AND d.flight_path_status NOT IN ('Inactive','Commissioned','Dropped') AND EXISTS(SELECT 1 FROM terms WHERE is_current=1 AND term_id IN(SELECT term_id FROM selected_term)))
+ OR EXISTS(SELECT 1 FROM term_roster_snapshots r WHERE r.person_id=p.person_id AND r.term_id IN(SELECT term_id FROM selected_term))
+ OR EXISTS(SELECT 1 FROM event_roster_members m JOIN event_details d ON d.event_id=m.event_id AND d.version=m.version WHERE m.person_id=p.person_id AND m.event_id IN(SELECT event_id FROM scoped_events))
+ OR EXISTS(SELECT 1 FROM attendance_observations o WHERE o.person_id=p.person_id AND o.event_id IN(SELECT event_id FROM scoped_events))
+ OR EXISTS(SELECT 1 FROM attendance_corrections c WHERE c.person_id=p.person_id AND c.event_id IN(SELECT event_id FROM scoped_events))
+ OR EXISTS(SELECT 1 FROM excusal_records r WHERE r.person_id=p.person_id AND r.event_id IN(SELECT event_id FROM scoped_events))
+ OR EXISTS(SELECT 1 FROM legacy_attendance_baselines b WHERE b.person_id=p.person_id AND b.event_id IN(SELECT event_id FROM scoped_events))) `;
+function scopedQueries():typeof queries {
+  const result=Object.fromEntries(Object.entries(queries).map(([key,q])=>[key,{...q}])) as typeof queries;
+  result.people.from+=' WHERE d.person_id IN(SELECT person_id FROM scoped_people)';
+  result.contacts.from+=' AND ((c.person_id IS NULL AND c.active=1) OR c.person_id IN(SELECT person_id FROM scoped_people))';
+  result.terms.from+=' WHERE is_current=1 OR term_id IN(SELECT term_id FROM selected_term)';
+  result.events.from+=' WHERE e.event_id IN(SELECT event_id FROM scoped_events)';
+  result.eventRosters.from+=' WHERE m.event_id IN(SELECT event_id FROM scoped_events)';
+  result.eventFlights.from+=' WHERE event_id IN(SELECT event_id FROM scoped_events)';
+  result.observations.from+=' WHERE o.event_id IN(SELECT event_id FROM scoped_events)';
+  result.requests.from=`FROM excusal_records r LEFT JOIN audit_events a ON a.command_id=r.last_command_id WHERE (r.origin='native' OR EXISTS(SELECT 1 FROM legacy_operational_adoptions l WHERE l.adoption_id=r.legacy_adoption_id AND l.state='complete')) AND r.event_id IN(SELECT event_id FROM scoped_events)`;
+  result.corrections.from+=' WHERE c.event_id IN(SELECT event_id FROM scoped_events)';
+  result.termRosters.from+=' WHERE term_id IN(SELECT term_id FROM selected_term)';
+  result.legacyBaselines.from+=' WHERE b.event_id IN(SELECT event_id FROM scoped_events)';
+  return result;
+}
+const semesterQueries=scopedQueries();
 /** Every page uses one D1 transaction for authorization, revision and bounded rows. No provider writes. */
-export async function frontendSnapshotPage(env:Env,input:unknown,forEffect=false):Promise<FrontendPage>{
+export async function frontendSnapshotPage(env:Env,input:unknown,forEffect=false):Promise<FrontendPage|{contractVersion:typeof FRONTEND_PAGE_VERSION;section:'term-catalog';revision:SnapshotRevision;rows:{termId:string;label:string;sortOrder:number;isCurrent:boolean}[];nextOffset:number|null}>{
   if(!input||typeof input!=='object'||Array.isArray(input))fail(400,'INVALID_PAGE_REQUEST');const req=input as Record<string,unknown>;
-  const keys=['environment','generation','principalId','section','offset','revision',...(forEffect?['workerId','effectId','claimToken']:[])];
+  const keys=['environment','generation','principalId','section','offset','revision',...(Object.hasOwn(req,'termId')?['termId']:[]),...(forEffect?['workerId','effectId','claimToken']:[])];
+  const termId=req.termId??null;if(termId!==null&&!identifier(termId))fail(400,'INVALID_PAGE_REQUEST');
   if(Object.keys(req).length!==keys.length||keys.some(k=>!Object.hasOwn(req,k))||!identifier(req.principalId)||forEffect&&['workerId','effectId','claimToken'].some(k=>!identifier(req[k])))fail(400,'INVALID_PAGE_REQUEST');
   if(req.environment!==env.ENVIRONMENT||req.generation!==Number(env.GENERATION))fail(409,'WRONG_GENERATION');
-  const section=req.section;if(typeof section!=='string'||!['manifest','verify',...FRONTEND_SECTIONS].includes(section)||!Number.isSafeInteger(req.offset)||Number(req.offset)<0)fail(400,'INVALID_PAGE_REQUEST');
-  if(section==='manifest'?req.revision!==null||req.offset!==0:!req.revision||typeof req.revision!=='object'||Array.isArray(req.revision)||Object.keys(req.revision).sort().join(',')!=='administration,operations'||Object.values(req.revision).some(v=>!Number.isSafeInteger(v)||Number(v)<0))fail(400,'INVALID_PAGE_REQUEST');
-  if(section==='verify'&&req.offset!==0||section!=='manifest'&&section!=='verify'&&Number(req.offset)>FRONTEND_SECTION_BOUNDS[section as FrontendSection])fail(400,'INVALID_PAGE_REQUEST');
+  const section=req.section;if(typeof section!=='string'||!['manifest','verify','term-catalog',...FRONTEND_SECTIONS].includes(section)||!Number.isSafeInteger(req.offset)||Number(req.offset)<0)fail(400,'INVALID_PAGE_REQUEST');
+  if(section==='manifest'?req.revision!==null||req.offset!==0:section==='term-catalog'&&req.revision===null?false:!req.revision||typeof req.revision!=='object'||Array.isArray(req.revision)||Object.keys(req.revision).sort().join(',')!=='administration,operations'||Object.values(req.revision).some(v=>!Number.isSafeInteger(v)||Number(v)<0))fail(400,'INVALID_PAGE_REQUEST');
+  if(section==='term-catalog'&&(forEffect||termId!==null||Number(req.offset)>1000000)||section==='verify'&&req.offset!==0||!['manifest','verify','term-catalog'].includes(String(section))&&Number(req.offset)>FRONTEND_SECTION_BOUNDS[section as FrontendSection])fail(400,'INVALID_PAGE_REQUEST');
   const guard=`EXISTS(SELECT 1 FROM system_control WHERE singleton=1 AND environment=? AND generation=?${forEffect?' AND accepting_commands=1':''}) AND EXISTS(SELECT 1 FROM principals p JOIN ${effectiveAdminGrants} g ON g.principal_id=p.principal_id WHERE p.principal_id=? AND p.active=1 AND g.capability='frontend.read' AND g.scope_kind='wing' AND g.scope_key='*')`;
-  const statements=[stmt(env.DB,`SELECT (${guard}) AS allowed,NOT EXISTS(SELECT 1 FROM legacy_import_runs WHERE state<>'complete') AND NOT EXISTS(SELECT 1 FROM legacy_operational_adoptions WHERE state<>'complete') AS ready`,env.ENVIRONMENT,Number(env.GENERATION),String(req.principalId)),stmt(env.DB,revisionSql)];
+  const statements=[stmt(env.DB,`SELECT (${guard}) AS allowed,NOT EXISTS(SELECT 1 FROM legacy_import_runs WHERE state<>'complete') AND NOT EXISTS(SELECT 1 FROM legacy_operational_adoptions WHERE state<>'complete') AS ready,(SELECT COUNT(*) FROM event_roster_refresh_work) AS rosterPending`,env.ENVIRONMENT,Number(env.GENERATION),String(req.principalId)),stmt(env.DB,revisionSql)];
   if(forEffect)statements.push(stmt(env.DB,`SELECT effect_id AS effectId,kind,claim_operations_revision AS operationsFloor,claim_administration_revision AS administrationFloor FROM admin_effects WHERE effect_id=? AND worker_id=? AND claim_token=? AND state='leased' AND lease_expires_at>?`,String(req.effectId),String(req.workerId),String(req.claimToken),new Date().toISOString()));
+  const scopeIndex=statements.length;statements.push(stmt(env.DB,`SELECT (SELECT COUNT(*) FROM terms WHERE is_current=1) AS currentCount,(SELECT term_id FROM terms WHERE is_current=1) AS currentTermId,(SELECT term_id FROM terms WHERE term_id=COALESCE(?,(SELECT term_id FROM terms WHERE is_current=1))) AS termId`,termId as string|null));
   const resultIndex=statements.length;
   if(section==='manifest'){
-    statements.push(stmt(env.DB,`SELECT ${FRONTEND_SECTIONS.map(s=>`(SELECT COUNT(*) ${queries[s].from}) AS ${s}`).join(',')}`));
-    statements.push(stmt(env.DB,`SELECT (SELECT COUNT(*) FROM people p WHERE NOT EXISTS(SELECT 1 FROM directory_profiles d WHERE d.person_id=p.person_id)) AS peopleMissingProfiles,(SELECT COUNT(*) FROM events e WHERE NOT EXISTS(SELECT 1 FROM event_details d WHERE d.event_id=e.event_id)) AS eventsMissingDetails`));
-  }else if(section!=='verify'){const q=queries[section as FrontendSection];statements.push(stmt(env.DB,`SELECT ${q.select} ${q.from} ORDER BY ${q.order} LIMIT ? OFFSET ?`,q.limit+1,Number(req.offset)));}
+    statements.push(stmt(env.DB,`${scopeCte} SELECT ${FRONTEND_SECTIONS.map(s=>`(SELECT COUNT(*) ${semesterQueries[s].from}) AS ${s}`).join(',')}`,termId as string|null));
+    statements.push(stmt(env.DB,`${scopeCte} SELECT (SELECT COUNT(*) FROM scoped_people p WHERE NOT EXISTS(SELECT 1 FROM directory_profiles d WHERE d.person_id=p.person_id)) AS peopleMissingProfiles,(SELECT COUNT(*) FROM events e WHERE e.active=1 AND NOT EXISTS(SELECT 1 FROM event_details d WHERE d.event_id=e.event_id)) AS eventsMissingDetails`,termId as string|null));
+    statements.push(stmt(env.DB,"SELECT term_id AS termId,label,sort_order AS sortOrder FROM terms WHERE sort_order<(SELECT sort_order FROM terms WHERE is_current=1) ORDER BY sort_order DESC,term_id LIMIT 2"));
+  }else if(section==='term-catalog'){statements.push(stmt(env.DB,'SELECT term_id AS termId,label,sort_order AS sortOrder,is_current AS isCurrent FROM terms ORDER BY sort_order DESC,term_id LIMIT 33 OFFSET ?',Number(req.offset)));}
+  else if(section!=='verify'){const q=semesterQueries[section as FrontendSection];statements.push(stmt(env.DB,`${scopeCte} SELECT ${q.select} ${q.from} ORDER BY ${q.order} LIMIT ? OFFSET ?`,termId as string|null,q.limit+1,Number(req.offset)));}
   const results=await env.DB.batch<Record<string,unknown>>(statements);
-  if(results[0].results[0]?.allowed!==1)fail(403,'NOT_AUTHORIZED');if(results[0].results[0]?.ready!==1)fail(409,'SNAPSHOT_IMPORT_ACTIVE');
+  if(results[0].results[0]?.allowed!==1)fail(403,'NOT_AUTHORIZED');if(results[0].results[0]?.ready!==1)fail(409,'SNAPSHOT_IMPORT_ACTIVE');if(Number(results[0].results[0]?.rosterPending)>0)fail(409,'EVENT_ROSTERS_PENDING');
   const revision=results[1].results[0] as unknown as SnapshotRevision,expected=req.revision as SnapshotRevision|null;
   if(expected&&(expected.operations!==revision.operations||expected.administration!==revision.administration))fail(409,'SNAPSHOT_CHANGED');
+  const rawScope=results[scopeIndex].results[0];if(rawScope.currentCount!==1||!rawScope.termId)fail(409,'TERM_SCOPE_UNAVAILABLE');
+  const scope={termId:String(rawScope.termId),currentTermId:String(rawScope.currentTermId)};
   let effect:FrontendPageManifest['effect'];
-  if(forEffect){const lease=results[2].results[0];if(!lease)fail(409,'LEASE_CONFLICT');if(lease.kind==='frontend.refresh'&&(lease.operationsFloor===null||lease.administrationFloor===null||revision.operations<Number(lease.operationsFloor)||revision.administration<Number(lease.administrationFloor)))fail(409,'SNAPSHOT_BEHIND_CLAIM');effect={effectId:String(lease.effectId),kind:String(lease.kind)};}
+  if(forEffect){const lease=results[2].results[0];if(!lease)fail(409,'LEASE_CONFLICT');if(lease.kind==='frontend.refresh'&&(lease.operationsFloor===null||lease.administrationFloor===null||revision.operations<Number(lease.operationsFloor)||revision.administration<Number(lease.administrationFloor)))fail(409,'SNAPSHOT_BEHIND_CLAIM');effect={effectId:String(lease.effectId),kind:String(lease.kind)};if(termId!==null)fail(400,'HISTORICAL_EFFECT_SCOPE_FORBIDDEN');}
   if(section==='manifest'){
     const counts=results[resultIndex].results[0],diagnostics=results[resultIndex+1].results[0];
     const sections=FRONTEND_SECTIONS.map(section=>({section,count:Number(counts[section])}));if(sections.some(s=>s.count>FRONTEND_SECTION_BOUNDS[s.section]))fail(409,'SNAPSHOT_TOO_LARGE');
-    return {contractVersion:FRONTEND_PAGE_VERSION,section:'manifest',environment:req.environment as 'local'|'staging',generation:Number(req.generation),revision,sections,diagnostics:[{code:'PEOPLE_MISSING_PROFILES',count:Number(diagnostics.peopleMissingProfiles)},{code:'EVENTS_MISSING_DETAILS',count:Number(diagnostics.eventsMissingDetails)}].filter(d=>d.count>0),...(effect?{effect}:{})};
+    return {contractVersion:FRONTEND_PAGE_VERSION,section:'manifest',environment:req.environment as 'local'|'staging',generation:Number(req.generation),revision,scope,previousTerms:results[resultIndex+2].results as unknown as NonNullable<FrontendPageManifest['previousTerms']>,sections,diagnostics:[{code:'PEOPLE_MISSING_PROFILES',count:Number(diagnostics.peopleMissingProfiles)},{code:'EVENTS_MISSING_DETAILS',count:Number(diagnostics.eventsMissingDetails)}].filter(d=>d.count>0),...(effect?{effect}:{})};
   }
-  if(section==='verify')return {contractVersion:FRONTEND_PAGE_VERSION,section:'verify',revision,verified:true,...(effect?{effect}:{})};
-  const q=queries[section as FrontendSection],sourceRows=results[resultIndex].results;let bytes=1000;const rows:Record<string,unknown>[]=[];
+  if(section==='term-catalog'){const source=results[resultIndex].results;return{contractVersion:FRONTEND_PAGE_VERSION,section,revision,rows:source.slice(0,32).map(r=>({termId:String(r.termId),label:String(r.label),sortOrder:Number(r.sortOrder),isCurrent:!!r.isCurrent})),nextOffset:source.length>32?Number(req.offset)+32:null};}
+  if(section==='verify')return {contractVersion:FRONTEND_PAGE_VERSION,section:'verify',revision,scope,verified:true,...(effect?{effect}:{})};
+  const q=semesterQueries[section as FrontendSection],sourceRows=results[resultIndex].results;let bytes=1000;const rows:Record<string,unknown>[]=[];
   for(const source of sourceRows.slice(0,q.limit)){
     const row=section==='people'?{...source,virtualContactId:`cadet:${Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(String(source.personId)))),b=>b.toString(16).padStart(2,'0')).join('')}`}:source;
     const size=new TextEncoder().encode(JSON.stringify(row)).length+1;if(bytes+size>FRONTEND_PAGE_MAX_BYTES){if(!rows.length)fail(409,'SNAPSHOT_ROW_TOO_LARGE');break;}bytes+=size;rows.push(row);
   }
-  return {contractVersion:FRONTEND_PAGE_VERSION,section:section as FrontendSection,offset:Number(req.offset),nextOffset:sourceRows.length>rows.length?Number(req.offset)+rows.length:null,revision,rows};
+  return {contractVersion:FRONTEND_PAGE_VERSION,section:section as FrontendSection,scope,offset:Number(req.offset),nextOffset:sourceRows.length>rows.length?Number(req.offset)+rows.length:null,revision,rows};
 }

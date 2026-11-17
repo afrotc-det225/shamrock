@@ -6,13 +6,15 @@ export const FRONTEND_SECTIONS = ['people','contacts','flights','squadrons','ter
 export type FrontendSection = typeof FRONTEND_SECTIONS[number];
 export const FRONTEND_SECTION_BOUNDS: Record<FrontendSection,number> = {people:500,contacts:200,flights:50,squadrons:20,terms:20,events:200,eventRosters:100000,eventFlights:10000,observations:10000,requests:5000,corrections:10000,termRosters:10000,legacyBaselines:25000};
 export const FRONTEND_PAGE_MAX_BYTES = 128000;
+export interface FrontendReadScope {termId:string;currentTermId:string;}
 export interface FrontendPageManifest {
   contractVersion:typeof FRONTEND_PAGE_VERSION;section:'manifest';environment:'local'|'staging';generation:number;revision:SnapshotRevision;
   sections:{section:FrontendSection;count:number}[];diagnostics:{code:string;count:number}[];
   effect?:{effectId:string;kind:string};
+  scope?:FrontendReadScope;previousTerms?:{termId:string;label:string;sortOrder:number}[];
 }
-export interface FrontendDataPage {contractVersion:typeof FRONTEND_PAGE_VERSION;section:FrontendSection;offset:number;nextOffset:number|null;revision:SnapshotRevision;rows:Record<string,unknown>[];}
-export interface FrontendVerifyPage {contractVersion:typeof FRONTEND_PAGE_VERSION;section:'verify';revision:SnapshotRevision;verified:true;effect?:{effectId:string;kind:string};}
+export interface FrontendDataPage {contractVersion:typeof FRONTEND_PAGE_VERSION;section:FrontendSection;offset:number;nextOffset:number|null;revision:SnapshotRevision;rows:Record<string,unknown>[];scope?:FrontendReadScope;}
+export interface FrontendVerifyPage {contractVersion:typeof FRONTEND_PAGE_VERSION;section:'verify';revision:SnapshotRevision;verified:true;effect?:{effectId:string;kind:string};scope?:FrontendReadScope;}
 export type FrontendPage = FrontendPageManifest|FrontendDataPage|FrontendVerifyPage;
 const check=(condition:unknown):void=>{if(!condition)throw new Error('INVALID_FRONTEND_PAGE_SEQUENCE');};
 const sameRevision=(a:SnapshotRevision,b:SnapshotRevision)=>a?.operations===b?.operations&&a?.administration===b?.administration;
@@ -22,17 +24,24 @@ export function assembleFrontendSnapshotPages(manifest:FrontendPageManifest,page
   check(['local','staging'].includes(manifest.environment)&&Number.isSafeInteger(manifest.generation)&&manifest.generation>0);
   check(Number.isSafeInteger(manifest.revision.operations)&&manifest.revision.operations>=0&&Number.isSafeInteger(manifest.revision.administration)&&manifest.revision.administration>=0);
   check(JSON.stringify(manifest.effect??null)===JSON.stringify(verified.effect??null));
+  check(JSON.stringify(manifest.scope??null)===JSON.stringify(verified.scope??null));
+  if(manifest.scope)check(typeof manifest.scope.termId==='string'&&typeof manifest.scope.currentTermId==='string');
   check(manifest.sections.length===FRONTEND_SECTIONS.length&&manifest.sections.every((s,i)=>s.section===FRONTEND_SECTIONS[i]&&Number.isSafeInteger(s.count)&&s.count>=0&&s.count<=FRONTEND_SECTION_BOUNDS[s.section]));
   const data={} as Record<FrontendSection,Record<string,unknown>[]>;let pageIndex=0;
   for(const entry of manifest.sections){
     const rows:Record<string,unknown>[]=[];let offset=0;
-    do {const page=pages[pageIndex++];check(page?.contractVersion===FRONTEND_PAGE_VERSION&&page.section===entry.section&&page.offset===offset&&sameRevision(page.revision,manifest.revision)&&Array.isArray(page.rows));
+    do {const page=pages[pageIndex++];check(page?.contractVersion===FRONTEND_PAGE_VERSION&&page.section===entry.section&&page.offset===offset&&sameRevision(page.revision,manifest.revision)&&JSON.stringify(page.scope??null)===JSON.stringify(manifest.scope??null)&&Array.isArray(page.rows));
       check(page.rows.length<=512&&rows.length+page.rows.length<=entry.count);rows.push(...page.rows);offset+=page.rows.length;
       check(page.nextOffset===(offset<entry.count?offset:null));check(page.rows.length>0||entry.count===0);
     }while(offset<entry.count);
     check(rows.length===entry.count);data[entry.section]=rows;
   }
   check(pageIndex===pages.length);
+  if(manifest.scope){
+    const scope=manifest.scope,current=data.terms.filter(t=>t.isCurrent===1);
+    check(current.length===1&&current[0].termId===scope.currentTermId&&data.terms.some(t=>t.termId===scope.termId));
+    check(data.terms.every(t=>t.termId===scope.termId||t.termId===scope.currentTermId)&&data.events.every(e=>e.termId===scope.termId)&&data.termRosters.every(t=>t.termId===scope.termId));
+  }
   const people=data.people.map(({virtualContactId,...person})=>({...person,active:operationallyActive(person as unknown as DirectoryRecord)})) as FrontendSnapshot['people'];
   const contacts=data.contacts as unknown as (Omit<LeadershipRecord,'active'|'contactVersion'|'profileVersion'|'publicationVersion'>&{version:number;active:number})[];
   const flights=data.flights as unknown as FrontendSnapshot['flights'],squadrons=data.squadrons as unknown as FrontendSnapshot['squadrons'];

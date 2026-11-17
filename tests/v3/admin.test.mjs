@@ -594,10 +594,10 @@ async function pagedSnapshot(f,extra={},path='/v1/admin/snapshot/page') {
   for(const {section}of manifest.sections){let offset=0;do{const result=await f.send({...base,section,offset,revision:manifest.revision},path);assert.equal(result.status,200,JSON.stringify(result.body));assert.ok(Buffer.byteLength(JSON.stringify(result.body))<=128000);pages.push(result.body);offset=result.body.nextOffset;}while(offset!==null);}
   const final=await f.send({...base,section:'verify',offset:0,revision:manifest.revision},path);assert.equal(final.status,200);return {snapshot:assembleFrontendSnapshotPages(manifest,pages,final.body),manifest,pages,verify:final.body};
 }
-test('bounded frontend pages reconstruct every legacy snapshot field and reject missing, duplicate or torn pages',async t=>{
+test('bounded frontend pages reconstruct every current-semester snapshot field and reject missing, duplicate or torn pages',async t=>{
   const f=await fixture(t);assert.equal((await f.send(command())).status,200);assert.equal((await f.send(command('leadership.upsert'))).status,200);const event=command('event.upsert');event.payload.eligiblePersonIds=['person-a'];assert.equal((await f.send(event)).status,200);
   await f.db.batch([f.db.prepare("INSERT INTO people SELECT 'person-'||printf('%03d',value),'Fictional Cadet' FROM json_each(?)").bind(JSON.stringify(Array.from({length:40},(_,i)=>i))),f.db.prepare(`INSERT INTO directory_profiles SELECT 'person-'||printf('%03d',j.value),d.version,d.flight_id,d.last_name,d.first_name,d.as_year,d.rank,d.role,d.university,'cadet-'||j.value||'@example.invalid',d.phone,d.dorm,d.cip_broad_area,d.cip_code,d.afsc,d.home_town,d.home_state,d.class_year,d.date_of_birth,d.flight_path_status,d.photo_link,d.updated_at FROM directory_profiles d,json_each(?) j WHERE d.person_id='person-a'`).bind(JSON.stringify(Array.from({length:40},(_,i)=>i)))]);
-  const full=(await f.send(read(),'/v1/admin/snapshot')).body,paged=await pagedSnapshot(f);assert.deepEqual(paged.snapshot,full);assert.equal(paged.pages.filter(p=>p.section==='people').length,2);assert.equal(paged.snapshot.leadership.length,42);
+  const full=(await f.send(read(),'/v1/admin/snapshot')).body,paged=await pagedSnapshot(f);assert.deepEqual(paged.snapshot,{...full,terms:full.terms.filter(t=>t.isCurrent)});assert.equal(paged.pages.filter(p=>p.section==='people').length,2);assert.equal(paged.snapshot.leadership.length,42);
   assert.throws(()=>assembleFrontendSnapshotPages(paged.manifest,paged.pages.slice(1),paged.verify),/INVALID_FRONTEND_PAGE_SEQUENCE/);
   assert.throws(()=>assembleFrontendSnapshotPages(paged.manifest,[...paged.pages,paged.pages[0]],paged.verify),/INVALID_FRONTEND_PAGE_SEQUENCE/);
   const torn=structuredClone(paged.pages);torn[0].revision.operations++;assert.throws(()=>assembleFrontendSnapshotPages(paged.manifest,torn,paged.verify),/INVALID_FRONTEND_PAGE_SEQUENCE/);
@@ -651,4 +651,45 @@ test('scoped reads reject a changed audit revision or revoked reader between cat
   await assert.rejects(readNotificationContext({...f.env,DB},'admin',f.plan.payload),{code:'SNAPSHOT_CHANGED'});
   batches=0;const denied={prepare:sql=>f.db.prepare(sql),batch:async statements=>{const result=await f.db.batch(statements);if(++batches===1)await f.db.prepare("DELETE FROM admin_grants WHERE principal_id='admin' AND capability='frontend.read'").run();return result;}};
   await assert.rejects(readNotificationContext({...f.env,DB:denied},'admin',f.plan.payload),{code:'NOT_AUTHORIZED'});
+});
+
+test('current semester pages remain bounded after historical events and observations exceed the old global limits',async t=>{
+ const f=await fixture(t);await f.send(command());const event=command('event.upsert');event.payload.eligiblePersonIds=['person-a'];assert.equal((await f.send(event)).status,200);
+ const eventNumbers=JSON.stringify(Array.from({length:202},(_,i)=>i)),factNumbers=JSON.stringify(Array.from({length:12000},(_,i)=>i));
+ await f.db.batch([
+  f.db.prepare("INSERT INTO terms VALUES('term-older','Older Fictional',0,0)"),
+  f.db.prepare("INSERT INTO events SELECT 'old-'||value,'Historical event',0 FROM json_each(?)").bind(eventNumbers),
+  f.db.prepare("INSERT INTO event_details SELECT 'old-'||j.value,1,CASE WHEN j.value<101 THEN 'term-prior' ELSE 'term-older' END,d.event_type,d.training_week,j.value,'Historical LLAB',d.expected_group,'archived',d.start_at,d.end_at,'','',d.created_at,d.created_by,d.updated_at FROM event_details d,json_each(?) j WHERE d.event_id='event-one'").bind(eventNumbers),
+  f.db.prepare("INSERT INTO operation_commands SELECT 'old-command-'||value,'hash','admin','attendance.submit','alpha','old-'||(value%202),'person-a','test','historical','old-command-'||value,1,'2025-01-01T00:00:00.000Z','{}' FROM json_each(?)").bind(factNumbers),
+  f.db.prepare("INSERT INTO audit_events(command_id,actor_id,actor_evidence,operation,target_id,accepted_at,metadata_json) SELECT command_id,actor_id,'verified-form',operation,event_id,accepted_at,'{}' FROM operation_commands WHERE command_id LIKE 'old-command-%'"),
+  f.db.prepare("INSERT INTO attendance_reports SELECT command_id,event_id,'alpha',1,'complete',accepted_at,'admin',command_id FROM operation_commands WHERE command_id LIKE 'old-command-%'"),
+  f.db.prepare("INSERT INTO attendance_observations(report_id,event_id,person_id,code,accepted_at) SELECT report_id,event_id,'person-a','P',submitted_at FROM attendance_reports"),
+  f.db.prepare("INSERT INTO term_roster_snapshots SELECT 'term-prior',person_id,last_name,first_name,'AS100',flight_id,flight_path_status,date_of_birth,'directory.upsert' FROM directory_profiles"),
+ ]);
+ const current=await pagedSnapshot(f);assert.deepEqual(current.manifest.scope,{termId:'term-current',currentTermId:'term-current'});assert.equal(current.snapshot.events.length,1);assert.equal(current.snapshot.observations.length,0);assert.equal(current.snapshot.terms.length,1);
+ assert.deepEqual(current.manifest.previousTerms.map(t=>t.termId),['term-prior','term-older']);
+ assert.equal((await f.send(read(),'/v1/admin/snapshot')).body.error.code,'SNAPSHOT_TOO_LARGE');
+ const prior=await pagedSnapshot(f,{termId:'term-prior'});assert.equal(prior.snapshot.events.length,101);assert.equal(prior.snapshot.observations.length,6041);assert.equal(prior.snapshot.terms.find(t=>!t.isCurrent).roster[0].asYear,'AS100');
+ assert(prior.snapshot.events.every(e=>e.termId==='term-prior'));assert.equal(await f.count('events'),203);assert.equal(await f.count('attendance_observations'),12000);
+ const wrongScope=structuredClone(current.pages);wrongScope[0].scope.termId='term-prior';assert.throws(()=>assembleFrontendSnapshotPages(current.manifest,wrongScope,current.verify),/INVALID_FRONTEND_PAGE_SEQUENCE/);
+ const unknown=await f.send(read({termId:'missing',section:'manifest',offset:0,revision:null}),'/v1/admin/snapshot/page');assert.equal(unknown.body.error.code,'TERM_SCOPE_UNAVAILABLE');
+ const claim=(await f.send(effect({kind:'frontend.refresh'}),'/v1/admin/effects/claim')).body.effect;
+ const denied=await f.send(effect({effectId:claim.effectId,claimToken:claim.claimToken,termId:'term-prior',section:'manifest',offset:0,revision:null}),'/v1/admin/effects/project/page');assert.equal(denied.body.error.code,'HISTORICAL_EFFECT_SCOPE_FORBIDDEN');
+});
+test('term catalog pages retain all semesters without adding them to the ordinary frontend and recheck revisions',async t=>{
+ const f=await fixture(t);await f.db.prepare("INSERT INTO terms SELECT 'archived-'||value,'Archived '||value,value+10,0 FROM json_each(?)").bind(JSON.stringify(Array.from({length:40},(_,i)=>i))).run();
+ const path='/v1/admin/snapshot/page',first=await f.send(read({section:'term-catalog',offset:0,revision:null}),path);assert.equal(first.status,200);assert.equal(first.body.rows.length,32);assert.equal(first.body.nextOffset,32);
+ const second=await f.send(read({section:'term-catalog',offset:32,revision:first.body.revision}),path);assert.equal(second.status,200);assert.equal(second.body.rows.length,10);assert.equal(second.body.nextOffset,null);assert.equal(new Set([...first.body.rows,...second.body.rows].map(t=>t.termId)).size,42);
+ assert.equal((await pagedSnapshot(f)).snapshot.terms.length,1);
+ await f.send(command());assert.equal((await f.send(read({section:'term-catalog',offset:32,revision:first.body.revision}),path)).body.error.code,'SNAPSHOT_CHANGED');
+ await f.db.prepare("DELETE FROM admin_grants WHERE capability='frontend.read'").run();assert.equal((await f.send(read({section:'term-catalog',offset:0,revision:null}),path)).status,403);
+});
+test('all live and historical page reads wait for pending future event roster refresh work',async t=>{
+ const f=await fixture(t);await f.send(command('event.upsert'));await f.db.batch([
+  f.db.prepare("INSERT INTO event_roster_policies VALUES('event-one',1,'current-active-flight-v1',1,'event.upsert','admin','2026-01-01T00:00:00Z',NULL)"),
+  f.db.prepare("INSERT INTO event_roster_refresh_work VALUES('event-one','event.upsert','2026-01-01T00:00:00Z')")]);
+ for(const extra of [{section:'manifest',offset:0,revision:null},{section:'manifest',offset:0,revision:null,termId:'term-prior'},{section:'term-catalog',offset:0,revision:null}]){
+  const r=await f.send(read(extra),'/v1/admin/snapshot/page');assert.equal(r.status,409);assert.equal(r.body.error.code,'EVENT_ROSTERS_PENDING');
+ }
+ await f.db.prepare('DELETE FROM event_roster_refresh_work').run();assert.equal((await pagedSnapshot(f)).snapshot.events.length,1);
 });
