@@ -7,6 +7,8 @@ import {
   Table,
   Status,
   Empty,
+  FlightLabel,
+  AttendanceRate,
 } from "./components";
 import { name } from "./api";
 export default function Attendance({ snapshot: s, reporting, propose, busy }) {
@@ -31,46 +33,46 @@ export default function Attendance({ snapshot: s, reporting, propose, busy }) {
   };
   return (
     <>
-      <Heading
-        title="Attendance & excusals"
-      />
-      <div className="tabs">
-        <button
-          aria-pressed={tab === "attendance"}
-          onClick={() => setTab("attendance")}
-        >
-          Attendance
-        </button>
-        <button
-          aria-pressed={tab === "excusals"}
-          onClick={() => setTab("excusals")}
-        >
-          Excusals ({s.requests.filter((r) => r.status === "Submitted").length}{" "}
-          pending)
-        </button>
-      </div>
-      <div className="toolbar">
-        {tab === "attendance" && (
+      <section className="page-controls">
+        <Heading title="Attendance & excusals" />
+        <div className="tabs">
+          <button
+            aria-pressed={tab === "attendance"}
+            onClick={() => setTab("attendance")}
+          >
+            Attendance
+          </button>
+          <button
+            aria-pressed={tab === "excusals"}
+            onClick={() => setTab("excusals")}
+          >
+            Excusals (
+            {s.requests.filter((r) => r.status === "Submitted").length} pending)
+          </button>
+        </div>
+        <div className="toolbar">
+          {tab === "attendance" && (
+            <Select
+              label="Event"
+              value={event}
+              onChange={setEvent}
+              options={s.events.map((e) => ({
+                value: e.eventId,
+                label: e.label,
+              }))}
+            />
+          )}
           <Select
-            label="Event"
-            value={event}
-            onChange={setEvent}
-            options={s.events.map((e) => ({
-              value: e.eventId,
-              label: e.label,
-            }))}
+            label="Flight"
+            value={flight}
+            onChange={setFlight}
+            options={[
+              { value: "", label: "All Flights" },
+              ...s.flights.map((f) => ({ value: f.flightId, label: f.label })),
+            ]}
           />
-        )}
-        <Select
-          label="Flight"
-          value={flight}
-          onChange={setFlight}
-          options={[
-            { value: "", label: "All Flights" },
-            ...s.flights.map((f) => ({ value: f.flightId, label: f.label })),
-          ]}
-        />
-      </div>
+        </div>
+      </section>
       {tab === "attendance" ? (
         <Table
           headers={["Cadet", "Flight", "Attendance", "Overall", "LLAB", ""]}
@@ -86,22 +88,26 @@ export default function Attendance({ snapshot: s, reporting, propose, busy }) {
             .map((p) => {
               const row = matrix?.rows.find((r) => r.personId === p.personId),
                 cell = row?.cells.find((c) => c.eventId === event);
-              const pct = (x) =>
-                !x || x.noCountedAttendance
-                  ? "—"
-                  : `${Math.round(x.percentage * 100)}%`;
               return (
                 <tr key={p.personId}>
                   <td>{name(p)}</td>
                   <td>
-                    {s.flights.find((f) => f.flightId === p.flightId)?.label}
+                    <FlightLabel>
+                      {s.flights.find((f) => f.flightId === p.flightId)?.label}
+                    </FlightLabel>
                   </td>
                   <td>
                     <Status>{cell?.effectiveCode || "Blank"}</Status>
-                    {cell?.needsReview && <small>Needs review</small>}
+                    {cell?.needsReview && (
+                      <small className="review-needed">Needs review</small>
+                    )}
                   </td>
-                  <td>{pct(row?.overall)}</td>
-                  <td>{pct(row?.llab)}</td>
+                  <td>
+                    <AttendanceRate value={row?.overall} />
+                  </td>
+                  <td>
+                    <AttendanceRate value={row?.llab} />
+                  </td>
                   <td>
                     <button onClick={() => correction(p)}>Correct</button>
                   </td>

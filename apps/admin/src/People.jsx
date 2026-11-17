@@ -9,6 +9,7 @@ import {
   Table,
   Status,
   Empty,
+  FlightLabel,
 } from "./components";
 import { name, label, years, statuses, profileFields } from "./api";
 export default function People({
@@ -112,32 +113,35 @@ export default function People({
   }
   return (
     <>
-      <Heading
-        title={leadership ? "Leadership" : "Cadets"}
-      >
-        <button className="primary" onClick={() => open()}>
-          <Plus size={17} />
-          {leadership ? "Add contact" : "Add cadet"}
-        </button>
-      </Heading>
-      <div className="toolbar">
-        <SearchBox
-          placeholder={leadership ? "Find a leader" : "Find a cadet"}
-          value={query}
-          onChange={setQuery}
-        />
-        {!leadership && (
-          <Select
-            label="Flight"
-            value={flight}
-            onChange={setFlight}
-            options={[
-              { value: "", label: "All Flights" },
-              ...s.flights.map((f) => ({ value: f.flightId, label: f.label })),
-            ]}
+      <section className="page-controls">
+        <Heading title={leadership ? "Leadership" : "Cadets"}>
+          <button className="primary" onClick={() => open()}>
+            <Plus size={17} />
+            {leadership ? "Add contact" : "Add cadet"}
+          </button>
+        </Heading>
+        <div className="toolbar">
+          <SearchBox
+            placeholder={leadership ? "Find a leader" : "Find a cadet"}
+            value={query}
+            onChange={setQuery}
           />
-        )}
-      </div>
+          {!leadership && (
+            <Select
+              label="Flight"
+              value={flight}
+              onChange={setFlight}
+              options={[
+                { value: "", label: "All Flights" },
+                ...s.flights.map((f) => ({
+                  value: f.flightId,
+                  label: f.label,
+                })),
+              ]}
+            />
+          )}
+        </div>
+      </section>
       <Table
         headers={
           leadership
@@ -148,10 +152,18 @@ export default function People({
         {rows.map((p) => (
           <tr key={p.contactId || p.personId}>
             <td>
-              <button className="text-button" onClick={() => open(p)}>
-                {name(p)}
-              </button>
-              <small>{p.rank}</small>
+              <div className="person-cell">
+                <span className="initials" aria-hidden="true">
+                  {p.firstName?.[0]}
+                  {p.lastName?.[0]}
+                </span>
+                <span>
+                  <button className="text-button" onClick={() => open(p)}>
+                    {name(p)}
+                  </button>
+                  <small>{p.rank}</small>
+                </span>
+              </div>
             </td>
             {leadership ? (
               <>
@@ -163,10 +175,13 @@ export default function People({
               <>
                 <td>{p.asYear}</td>
                 <td>
-                  {s.flights.find((f) => f.flightId === p.flightId)?.label ||
-                    "Unassigned"}
+                  <FlightLabel>
+                    {s.flights.find((f) => f.flightId === p.flightId)?.label}
+                  </FlightLabel>
                 </td>
-                <td>{p.flightPathStatus}</td>
+                <td>
+                  <Status>{p.flightPathStatus}</Status>
+                </td>
               </>
             )}
             <td>

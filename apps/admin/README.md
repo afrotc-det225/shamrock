@@ -198,3 +198,11 @@ data; filtering a Wing snapshot in the browser is insufficient. Blue/Gold Squadr
 Commanders retain excusal approval authority. Existing spreadsheet permissions
 are unchanged. The third-hour attendance policy is unchanged until a versioned
 configuration workflow and its parity tests are implemented.
+
+List views keep page filters below the sticky top bar. Long tables scroll within
+a bounded region with pinned column headings and the first identifying column.
+The sidebar marks the current page with a gold icon and short underline rather
+than a filled selection box. Flight labels, event types and decision states have
+color cues alongside text; attendance rates include a small proportional bar
+without introducing new pass/fail thresholds. Editors and feedback use brief
+transitions only when the user has not requested reduced motion.

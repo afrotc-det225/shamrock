@@ -12,9 +12,9 @@ import {
 } from "./components";
 import { eventTypes, displayDate, name } from "./api";
 import { toEastern, fromEastern } from "./time";
-import BulkSchedule from './BulkSchedule';
+import BulkSchedule from "./BulkSchedule";
 export default function Events({ snapshot: s, propose, busy, refresh }) {
-  const [bulk,setBulk]=useState(false);
+  const [bulk, setBulk] = useState(false);
   const [query, setQuery] = useState(""),
     [type, setType] = useState(""),
     [term, setTerm] = useState(s.terms.find((t) => t.isCurrent)?.termId || ""),
@@ -85,44 +85,47 @@ export default function Events({ snapshot: s, propose, busy, refresh }) {
     .sort((a, b) => a.displayOrder - b.displayOrder);
   return (
     <>
-      <Heading
-        title="Events"
-      >
-        <div className="actions"><button disabled={!term||busy} onClick={()=>setBulk(true)}>Change schedule</button>
-        <button className="primary" onClick={() => open()}>
-          <Plus size={17} />
-          Add event
-        </button>
+      <section className="page-controls">
+        <Heading title="Events">
+          <div className="actions">
+            <button disabled={!term || busy} onClick={() => setBulk(true)}>
+              Change schedule
+            </button>
+            <button className="primary" onClick={() => open()}>
+              <Plus size={17} />
+              Add event
+            </button>
+          </div>
+        </Heading>
+        <div className="toolbar">
+          <SearchBox
+            value={query}
+            onChange={setQuery}
+            placeholder="Find an event"
+          />
+          <Select
+            label="Semester"
+            value={term}
+            onChange={setTerm}
+            options={[
+              { value: "", label: "All semesters" },
+              ...s.terms.map((t) => ({ value: t.termId, label: t.label })),
+            ]}
+          />
+          <Select
+            label="Type"
+            value={type}
+            onChange={setType}
+            options={[
+              { value: "", label: "All types" },
+              ...Object.entries(eventTypes).map(([value, label]) => ({
+                value,
+                label,
+              })),
+            ]}
+          />
         </div>
-      </Heading>
-      <div className="toolbar">
-        <SearchBox
-          value={query}
-          onChange={setQuery}
-          placeholder="Find an event"
-        />
-        <Select
-          label="Semester"
-          value={term}
-          onChange={setTerm}
-          options={[
-            { value: "", label: "All semesters" },
-            ...s.terms.map((t) => ({ value: t.termId, label: t.label })),
-          ]}
-        />
-        <Select
-          label="Type"
-          value={type}
-          onChange={setType}
-          options={[
-            { value: "", label: "All types" },
-            ...Object.entries(eventTypes).map(([value, label]) => ({
-              value,
-              label,
-            })),
-          ]}
-        />
-      </div>
+      </section>
       <Table headers={["Event", "Type", "Date & time · Eastern", "Status", ""]}>
         {rows.map((e) => (
           <tr key={e.eventId}>
@@ -132,7 +135,11 @@ export default function Events({ snapshot: s, propose, busy, refresh }) {
               </button>
               <small>{e.location}</small>
             </td>
-            <td>{eventTypes[e.eventType] || e.eventType}</td>
+            <td>
+              <span className={`event-type ${e.eventType}`}>
+                {eventTypes[e.eventType] || e.eventType}
+              </span>
+            </td>
             <td>{displayDate(e.startAt)}</td>
             <td>
               <Status>{e.status}</Status>
@@ -150,7 +157,14 @@ export default function Events({ snapshot: s, propose, busy, refresh }) {
         ))}
       </Table>
       {!rows.length && <Empty>No events match these filters.</Empty>}
-      {bulk&&<BulkSchedule snapshot={s} term={term} onClose={()=>setBulk(false)} onSaved={()=>refresh(true)}/>}
+      {bulk && (
+        <BulkSchedule
+          snapshot={s}
+          term={term}
+          onClose={() => setBulk(false)}
+          onSaved={() => refresh(true)}
+        />
+      )}
       {edit && (
         <Editor
           title={edit.expectedVersion ? "Edit event" : "Add event"}

@@ -42,20 +42,26 @@ function App() {
     [proposal, setProposal] = useState(null),
     [signIn, setSignIn] = useState(false),
     [sync, setSync] = useState("");
-  const pendingRead = useRef(null), lastRead = useRef(0), live = useRef({});
-  live.current = {busy, proposal, data};
+  const pendingRead = useRef(null),
+    lastRead = useRef(0),
+    live = useRef({});
+  live.current = { busy, proposal, data };
   const reload = async (force = false) => {
     if (pendingRead.current) {
       await pendingRead.current;
       if (!force) return;
     }
-    const task = api('/state').then(value => {
+    const task = api("/state").then((value) => {
       setData(value);
       lastRead.current = Date.now();
-      setSync('');
+      setSync("");
     });
     pendingRead.current = task;
-    try { await task; } finally { if (pendingRead.current === task) pendingRead.current = null; }
+    try {
+      await task;
+    } finally {
+      if (pendingRead.current === task) pendingRead.current = null;
+    }
   };
   useEffect(() => {
     startSession()
@@ -66,28 +72,55 @@ function App() {
       });
   }, []);
   useEffect(() => {
-    let timer, stopped = false, failures = 0;
-    const schedule = () => { clearTimeout(timer); if (!stopped) timer = setTimeout(tick, Math.min(300000, 60000 * 2 ** failures)); };
+    let timer,
+      stopped = false,
+      failures = 0;
+    const schedule = () => {
+      clearTimeout(timer);
+      if (!stopped)
+        timer = setTimeout(tick, Math.min(300000, 60000 * 2 ** failures));
+    };
     const tick = async () => {
       const current = live.current;
-      if (document.visibilityState === 'visible' && navigator.onLine && current.data &&
-          !current.busy && !current.proposal && !document.querySelector('dialog[open], form[data-dirty="true"]') &&
-          !['INPUT','TEXTAREA','SELECT'].includes(document.activeElement?.tagName) && Date.now() - lastRead.current >= 15000) {
-        try { await reload(); failures = 0; }
-        catch (e) {
+      if (
+        document.visibilityState === "visible" &&
+        navigator.onLine &&
+        current.data &&
+        !current.busy &&
+        !current.proposal &&
+        !document.querySelector('dialog[open], form[data-dirty="true"]') &&
+        !["INPUT", "TEXTAREA", "SELECT"].includes(
+          document.activeElement?.tagName,
+        ) &&
+        Date.now() - lastRead.current >= 15000
+      ) {
+        try {
+          await reload();
+          failures = 0;
+        } catch (e) {
           failures = Math.min(failures + 1, 3);
-          if (e.code === 'SIGN_IN_REQUIRED') { setData(null); setSignIn(true); }
-          else setSync('Updates interrupted. Retrying automatically.');
+          if (e.code === "SIGN_IN_REQUIRED") {
+            setData(null);
+            setSignIn(true);
+          } else setSync("Updates interrupted. Retrying automatically.");
         }
       }
       schedule();
     };
-    const resume = () => { if (!stopped) void tick(); };
-    window.addEventListener('focus', resume);
-    window.addEventListener('online', resume);
-    document.addEventListener('visibilitychange', resume);
+    const resume = () => {
+      if (!stopped) void tick();
+    };
+    window.addEventListener("focus", resume);
+    window.addEventListener("online", resume);
+    document.addEventListener("visibilitychange", resume);
     schedule();
-    return () => { stopped = true; clearTimeout(timer); window.removeEventListener('focus', resume); window.removeEventListener('online', resume); document.removeEventListener('visibilitychange', resume); };
+    return () => {
+      stopped = true;
+      clearTimeout(timer);
+      window.removeEventListener("focus", resume);
+      window.removeEventListener("online", resume);
+      document.removeEventListener("visibilitychange", resume);
+    };
   }, []);
   const run = async (fn) => {
     setBusy(true);
@@ -122,7 +155,7 @@ function App() {
     setError("");
     setNotice("");
   };
-  const common = { ...data, propose, busy, notify: setNotice, refresh:reload };
+  const common = { ...data, propose, busy, notify: setNotice, refresh: reload };
   if (signIn) {
     const code = new URLSearchParams(location.search).get("signin");
     const message =
@@ -166,6 +199,7 @@ function App() {
               <button
                 key={title}
                 className={page === title ? "selected" : ""}
+                aria-current={page === title ? "page" : undefined}
                 onClick={() => navigate(title)}
               >
                 <Icon size={19} />
@@ -213,9 +247,17 @@ function App() {
             )}
             {!data ? (
               <p aria-live="polite">
-                {error
-                  ? <button onClick={() => run(() => startSession().then(() => reload(true)))}>Retry connection</button>
-                  : "Loading SHAMROCK…"}
+                {error ? (
+                  <button
+                    onClick={() =>
+                      run(() => startSession().then(() => reload(true)))
+                    }
+                  >
+                    Retry connection
+                  </button>
+                ) : (
+                  "Loading SHAMROCK…"
+                )}
               </p>
             ) : (
               <>
@@ -248,7 +290,9 @@ function App() {
                   </React.Fragment>
                 ))}
               </dl>
-              {proposal.summary.consequence && <p className="notice">{proposal.summary.consequence}</p>}
+              {proposal.summary.consequence && (
+                <p className="notice">{proposal.summary.consequence}</p>
+              )}
               {error && (
                 <p role="alert" className="error">
                   {error}
