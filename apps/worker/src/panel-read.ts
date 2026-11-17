@@ -51,18 +51,18 @@ function authorityFrom(rows: Row[][]): PanelAuthority {
 }
 function queries() {
     const people = 'd.person_id AS personId,d.version,d.flight_id AS flightId,d.last_name AS lastName,d.first_name AS firstName,d.rank,d.as_year AS asYear,d.flight_path_status AS flightPathStatus';
-    const queries: Record<PanelSection, { select: string; from: string; order: string; limit: number; }> = {
+    const queries: Record<PanelSection, { select: string; from: string; countFrom?: string; order: string; limit: number; }> = {
         people: { select: people, from: 'FROM directory_profiles d WHERE d.person_id IN(SELECT person_id FROM scoped_people)', order: 'd.person_id', limit: 64 },
         flights: { select: 'u.unit_id AS flightId,u.label,h.squadron_id AS squadronId,u.roster_version AS rosterVersion', from: 'FROM organizational_units u LEFT JOIN flight_hierarchy h ON h.unit_id=u.unit_id WHERE u.unit_id IN(SELECT flight_id FROM scoped_flights)', order: 'u.unit_id', limit: 50 },
         squadrons: { select: 's.squadron_id AS squadronId,s.label', from: 'FROM squadrons s WHERE s.squadron_id IN(SELECT h.squadron_id FROM flight_hierarchy h WHERE h.unit_id IN(SELECT flight_id FROM scoped_flights)) OR s.squadron_id IN(SELECT captured_squadron_id FROM visible_requests)', order: 's.squadron_id', limit: 20 },
         terms: { select: 'term_id AS termId,label,sort_order AS sortOrder,is_current AS isCurrent', from: 'FROM terms WHERE is_current=1', order: 'term_id', limit: 1 },
         events: { select: `e.event_id AS eventId,d.version,d.term_id AS termId,d.event_type AS eventType,d.training_week AS trainingWeek,d.display_order AS displayOrder,e.label,d.column_label AS columnLabel,d.expected_group AS expectedGroup,d.status,d.start_at AS startAt,d.end_at AS endAt,d.location,EXISTS(SELECT 1 FROM event_roster_versions v WHERE v.event_id=e.event_id AND v.version=d.version) AS hasRoster`, from: 'FROM events e JOIN event_details d ON d.event_id=e.event_id WHERE e.event_id IN(SELECT event_id FROM scoped_events)', order: 'd.display_order,e.event_id', limit: 32 },
-        eventRosters: { select: 'm.event_id AS eventId,m.person_id AS personId', from: 'FROM event_roster_members m JOIN event_details d ON d.event_id=m.event_id AND d.version=m.version WHERE m.event_id IN(SELECT event_id FROM scoped_events) AND m.person_id IN(SELECT person_id FROM scoped_people)', order: 'm.event_id,m.person_id', limit: 256 },
+        eventRosters: { select: 'm.event_id AS eventId,m.person_id AS personId', from: 'FROM event_roster_members m JOIN event_details d ON d.event_id=m.event_id AND d.version=m.version WHERE m.event_id IN(SELECT event_id FROM scoped_events) AND m.person_id IN(SELECT person_id FROM scoped_people)', countFrom: 'FROM event_details d CROSS JOIN event_roster_members m ON d.event_id=m.event_id AND d.version=m.version WHERE d.event_id IN(SELECT event_id FROM scoped_events) AND m.person_id IN(SELECT person_id FROM scoped_people)', order: 'm.event_id,m.person_id', limit: 256 },
         eventFlights: { select: 'event_id AS eventId,unit_id AS flightId', from: 'FROM event_units WHERE event_id IN(SELECT event_id FROM scoped_events) AND unit_id IN(SELECT flight_id FROM scoped_flights)', order: 'event_id,unit_id', limit: 256 },
         observations: { select: `'observation:'||o.observation_id AS factId,o.person_id AS personId,o.event_id AS eventId,a.audit_id AS 'order',o.code`, from: 'FROM attendance_observations o JOIN attendance_reports r ON r.report_id=o.report_id JOIN audit_events a ON a.command_id=r.command_id WHERE o.event_id IN(SELECT event_id FROM scoped_events) AND o.person_id IN(SELECT person_id FROM scoped_people)', order: 'o.observation_id', limit: 256 },
         requests: { select: `r.request_id AS requestId,r.person_id AS personId,p.display_name AS personDisplayName,r.event_id AS eventId,r.unit_id AS flightId,${excusalScopeSelect},COALESCE(a.audit_id,0) AS 'order',(r.origin='legacy' AND r.last_command_id IS NULL) AS legacyStateOnly,r.status,r.requested_outcome AS requestedOutcome,r.version,r.reason,r.submitted_at AS submittedAt,r.updated_at AS updatedAt,r.decided_at AS decidedAt,r.decision_reason AS decisionReason,r.can_decide AS canDecide`, from: `FROM visible_requests r JOIN people p ON p.person_id=r.person_id ${excusalScopeJoin} LEFT JOIN audit_events a ON a.command_id=r.last_command_id`, order: 'r.request_id', limit: 32 },
         corrections: { select: `'correction:'||c.correction_id AS factId,c.person_id AS personId,c.event_id AS eventId,a.audit_id AS 'order',c.code`, from: 'FROM attendance_corrections c JOIN audit_events a ON a.command_id=c.command_id WHERE c.event_id IN(SELECT event_id FROM scoped_events) AND c.person_id IN(SELECT person_id FROM scoped_people)', order: 'a.audit_id', limit: 256 },
-        legacyBaselines: { select: 'b.baseline_id AS baselineId,b.person_id AS personId,b.event_id AS eventId,b.code', from: "FROM legacy_attendance_baselines b JOIN legacy_import_runs i ON i.import_run_id=b.import_run_id AND i.state='complete' WHERE b.event_id IN(SELECT event_id FROM scoped_events) AND b.person_id IN(SELECT person_id FROM scoped_people)", order: 'b.person_id,b.event_id', limit: 256 },
+        legacyBaselines: { select: 'b.baseline_id AS baselineId,b.person_id AS personId,b.event_id AS eventId,b.code', from: "FROM legacy_attendance_baselines b JOIN legacy_import_runs i ON i.import_run_id=b.import_run_id AND i.state='complete' WHERE b.event_id IN(SELECT event_id FROM scoped_events) AND b.person_id IN(SELECT person_id FROM scoped_people)", countFrom: "FROM legacy_attendance_baselines b WHERE b.import_run_id IN(SELECT import_run_id FROM legacy_import_runs WHERE state='complete') AND b.event_id IN(SELECT event_id FROM scoped_events) AND b.person_id IN(SELECT person_id FROM scoped_people)", order: 'b.person_id,b.event_id', limit: 256 },
     };
     return queries;
 }
@@ -91,15 +91,19 @@ export async function panelSnapshotPage(env: Env, input: unknown): Promise<Panel
     const revision: PanelRevision = { operations: Number(control.operations), administration: Number(control.administration), access: [...new Uint8Array(digest)].map(v => v.toString(16).padStart(2, '0')).join('') };
     if (expected && (expected.operations !== revision.operations || expected.administration !== revision.administration || expected.access !== revision.access)) fail(409, 'SNAPSHOT_CHANGED');
     const decision = excusalDecisionRowPermission(principal);
-    const cte = `WITH scoped_flights AS (SELECT value AS flight_id FROM json_each(?)),
-      scoped_people AS (SELECT d.person_id FROM directory_profiles d WHERE d.flight_id IN(SELECT flight_id FROM scoped_flights)
+    // Manifest counts reuse the same small scope sets in eleven subqueries. Keep
+    // them within this transaction instead of recalculating decisions per count.
+    // Page queries retain streaming plans so LIMIT can stop reads early.
+    const materialized = section === 'manifest' ? 'MATERIALIZED ' : '';
+    const cte = `WITH scoped_flights AS ${materialized}(SELECT value AS flight_id FROM json_each(?)),
+      scoped_people AS ${materialized}(SELECT d.person_id FROM directory_profiles d WHERE d.flight_id IN(SELECT flight_id FROM scoped_flights)
         AND d.flight_path_status NOT IN ('Inactive','Commissioned','Dropped') AND EXISTS(SELECT 1 FROM memberships m WHERE m.person_id=d.person_id AND m.unit_id=d.flight_id AND m.active=1)),
       candidates AS (SELECT r.request_id,r.event_id,r.person_id,r.unit_id,r.origin,r.last_command_id,r.status,r.requested_outcome,r.version,r.reason,
         r.submitted_at,r.updated_at,r.decided_at,r.decision_reason,sc.squadron_id AS captured_squadron_id,${decision.sql} AS can_decide FROM excusal_records r ${excusalScopeJoin}
         JOIN event_details d ON d.event_id=r.event_id JOIN terms t ON t.term_id=d.term_id AND t.is_current=1
         WHERE r.origin='native' OR EXISTS(SELECT 1 FROM legacy_operational_adoptions a WHERE a.adoption_id=r.legacy_adoption_id AND a.state='complete')),
-      visible_requests AS (SELECT * FROM candidates WHERE can_decide=1 OR unit_id IN(SELECT flight_id FROM scoped_flights) OR person_id IN(SELECT person_id FROM scoped_people)),
-      scoped_events AS (SELECT d.event_id FROM event_details d JOIN terms t ON t.term_id=d.term_id AND t.is_current=1
+      visible_requests AS ${materialized}(SELECT * FROM candidates WHERE can_decide=1 OR unit_id IN(SELECT flight_id FROM scoped_flights) OR person_id IN(SELECT person_id FROM scoped_people)),
+      scoped_events AS ${materialized}(SELECT d.event_id FROM event_details d JOIN terms t ON t.term_id=d.term_id AND t.is_current=1
         WHERE EXISTS(SELECT 1 FROM event_units eu WHERE eu.event_id=d.event_id AND eu.unit_id IN(SELECT flight_id FROM scoped_flights))
           OR EXISTS(SELECT 1 FROM visible_requests r WHERE r.event_id=d.event_id)
           OR EXISTS(SELECT 1 FROM event_roster_members m WHERE m.event_id=d.event_id AND m.version=d.version AND m.person_id IN(SELECT person_id FROM scoped_people))
@@ -108,7 +112,7 @@ export async function panelSnapshotPage(env: Env, input: unknown): Promise<Panel
           OR EXISTS(SELECT 1 FROM legacy_attendance_baselines b WHERE b.event_id=d.event_id AND b.person_id IN(SELECT person_id FROM scoped_people))) `;
     const bind = [JSON.stringify(access.flightIds), ...decision.values];
     const allQueries = queries(), statements = authorityStatements(env, principal), dataIndex = statements.length;
-    if (section === 'manifest') statements.push(env.DB.prepare(`${cte} SELECT ${PANEL_SECTIONS.map(s => `(SELECT COUNT(*) ${allQueries[s].from}) AS ${s}`).join(',')}`).bind(...bind));
+    if (section === 'manifest') statements.push(env.DB.prepare(`${cte} SELECT ${PANEL_SECTIONS.map(s => `(SELECT COUNT(*) ${allQueries[s].countFrom ?? allQueries[s].from}) AS ${s}`).join(',')}`).bind(...bind));
     else if (section !== 'verify') {
         const q = allQueries[section];
         statements.push(env.DB.prepare(`${cte} SELECT ${q.select} ${q.from} ORDER BY ${q.order} LIMIT ? OFFSET ?`).bind(...bind, q.limit + 1, offset));

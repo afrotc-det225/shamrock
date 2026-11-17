@@ -182,6 +182,27 @@ test('scope changes between authority resolution and data read discard rows; bou
     assert.ok(queries < 50, `${queries} prepared queries`);
 });
 
+test('request-only Squadron manifest reuses transaction scopes while counts match every paged section', async t => {
+    const f=await fixture(t);
+    for(let i=0;i<24;i++)await f.request('cadet',`retained-${String(i).padStart(2,'0')}`);
+    await f.db.prepare("UPDATE flight_hierarchy SET squadron_id='gold' WHERE unit_id='alpha'").run();await f.reconcile();
+    await f.db.batch([
+        f.db.prepare("WITH RECURSIVE n(i) AS(SELECT 1 UNION ALL SELECT i+1 FROM n WHERE i<80) INSERT INTO events SELECT printf('unrelated-%03d',i),'Unrelated training',1 FROM n"),
+        f.db.prepare("INSERT INTO event_details SELECT e.event_id,1,d.term_id,d.event_type,d.training_week,d.display_order,e.label,d.expected_group,d.status,d.start_at,d.end_at,d.location,d.notes,d.created_at,d.created_by,d.updated_at FROM events e CROSS JOIN event_details d WHERE e.event_id LIKE 'unrelated-%' AND d.event_id='bravo-event'"),
+        f.db.prepare("INSERT INTO event_units SELECT event_id,'bravo' FROM events WHERE event_id LIKE 'unrelated-%'"),
+    ]);
+    let dataReads=0;
+    const DB={prepare:sql=>({sql,statement:f.db.prepare(sql),bind(...values){return{sql,statement:f.db.prepare(sql).bind(...values)}}}),batch:async statements=>{const results=await f.db.batch(statements.map(s=>s.statement));results.forEach((r,i)=>{if(statements[i].sql.startsWith('WITH scoped_flights'))dataReads+=r.meta.rows_read});return results;}};
+    const manifest=await panelSnapshotPage({...f.env,DB},base('blue'));
+    assert.deepEqual(manifest.access.flightIds,[]);assert(dataReads<4000,`${dataReads} manifest data reads`);
+    for(const {section,count} of manifest.sections){
+        let offset=0,total=0;do{const page=await panelSnapshotPage({...f.env,DB},{...base('blue'),section,offset,revision:manifest.revision});total+=page.rows.length;offset=page.nextOffset;}while(offset!==null);
+        assert.equal(total,count,section);
+    }
+    assert.equal(manifest.sections.find(s=>s.section==='people').count,0);
+    assert.equal(manifest.sections.find(s=>s.section==='requests').count,24);
+});
+
 test('invalid fields, forged scope selection, wrong generation and unsupported historical reads are rejected', async t => {
     const f = await fixture(t), manifest = (await f.send(base('flight'))).body;
     for (const extra of [{ flightIds: ['bravo'] }, { termId: 'other' }, { section: 'contacts' }, { offset: -1 }, { offset: 1 }, { revision: {} }]) assert.equal((await f.send({ ...base('flight'), ...extra })).status, 400);

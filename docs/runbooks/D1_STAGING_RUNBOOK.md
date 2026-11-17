@@ -34,6 +34,31 @@ and [operational administration](D1_OPERATIONAL_ADMIN.md) for their current bind
 The original technical journal/projection setup later in this runbook remains a
 separate fixture, not the final visible Main/Blue/Gold interface.
 
+### Snapshot read budgets
+
+Measure D1 **rows read**, not only request counts or Worker CPU, when rehearsing
+full roster publication and scoped panel reads. A bounded page can still scan an
+entire semester before SQLite sorts and applies its limit. Current roster pages
+order by the current-event join key so the existing roster index can stream rows.
+Scoped panel manifests reuse Flight, person, visible-request and event scopes
+inside the same data transaction; their count plans retain the same membership,
+current-version and completed-import conditions as the returned pages. Page
+queries keep their streaming plans, and both authority reads still fence every
+scoped response. No cross-user cache or new provider storage is introduced.
+
+The November 17 local D1 rehearsal using an isolated real-data export measured
+8,697 roster-query reads before the change versus 586 on the first page, 1,122 on
+the second and 4,467 on the final page afterward. Offset pagination still costs
+more on later pages. The scoped manifest fell from 42,003 to 27,668 reads for the
+full Flight set, 11,484 to 7,013 for one Flight, and 15,532 to 1,989 for a
+request-only scope. Returned rows and counts were identical. These are local
+query measurements, not live daily capacity or a production acceptance result.
+Repeat the provider usage check after staging deployment, account for exports
+and integrity rehearsals separately, and avoid repeated full snapshots when the
+manifest revision has not changed. A completed native History publication returns
+before making D1 history requests; an unfinished publication retains its cursor
+and continues one bounded page per invocation.
+
 ## Verified live Google checkpoint
 
 **Historical milestone 1, source `5e1057f4a13c45960e70844724aa5261e49f422e`:** the operator linked the staging script to its standard Google Cloud project and completed Import and Setup. Headers were verified on all four journal/output tabs. The two uploaded script files exactly matched that release; the rehearsal did not modify their source.

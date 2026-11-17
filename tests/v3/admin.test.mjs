@@ -5,6 +5,7 @@ import {resolve} from 'node:path';
 import test from 'node:test';
 import {Miniflare,Log,LogLevel} from 'miniflare';
 import worker from '../../.build/v3/apps/worker/src/index.js';
+import {frontendSnapshotPage} from '../../.build/v3/apps/worker/src/frontend-transport.js';
 import {parseAdminCommand,operationallyActive} from '../../.build/v3/packages/domain/src/admin.js';
 const secret='fictional-admin-test-secret-never-for-deployment';
 const keyId='admin-fixture';
@@ -47,6 +48,32 @@ function command(operation='directory.upsert',changes={}) {
 function revised(c,revision=2) {const copy=structuredClone(c);copy.commandId+=`-${revision}`;copy.source.revision=revision;copy.payload.expectedVersion=revision-1;return copy;}
 const read=extra=>({environment:'local',generation:1,principalId:'admin',...extra});
 const effect=extra=>read({workerId:'adapter-one',...extra});
+
+test('roster pages stream the current-version index without rescanning the full semester',async t=>{
+  const f=await fixture(t);assert.equal((await f.send(command())).status,200);
+  await f.db.batch([
+    f.db.prepare("WITH RECURSIVE n(i) AS(SELECT 1 UNION ALL SELECT i+1 FROM n WHERE i<100) INSERT INTO people SELECT printf('sample-%03d',i),'Example Cadet' FROM n"),
+    f.db.prepare("INSERT INTO directory_profiles SELECT p.person_id,1,'alpha',d.last_name,d.first_name,d.as_year,d.rank,'Cadet',d.university,'',d.phone,d.dorm,d.cip_broad_area,d.cip_code,d.afsc,d.home_town,d.home_state,d.class_year,d.date_of_birth,d.flight_path_status,d.photo_link,d.updated_at FROM people p CROSS JOIN directory_profiles d WHERE p.person_id LIKE 'sample-%' AND d.person_id='person-a'"),
+    f.db.prepare("INSERT INTO memberships SELECT person_id,'alpha',1 FROM people WHERE person_id LIKE 'sample-%'"),
+  ]);
+  const eligiblePersonIds=(await f.db.prepare('SELECT person_id FROM people ORDER BY person_id').all()).results.map(r=>r.person_id);
+  for(let i=0;i<8;i++){
+    const c=command('event.upsert');c.commandId=`roster-${i}`;c.source.submissionId=c.commandId;c.payload.eventId=c.commandId;c.payload.eligiblePersonIds=eligiblePersonIds;
+    assert.equal((await f.send(c)).status,200);
+    if(i===0)assert.equal((await f.send(revised(c))).status,200,'old event versions remain excluded');
+  }
+  let rowsRead=0;
+  const DB={prepare:sql=>f.db.prepare(sql),batch:async statements=>{const results=await f.db.batch(statements);rowsRead+=results.reduce((sum,r)=>sum+r.meta.rows_read,0);return results;}};
+  const env={...f.env,DB},manifest=await frontendSnapshotPage(env,read({section:'manifest',offset:0,revision:null}));
+  const expected=(await f.db.prepare('SELECT m.event_id AS eventId,m.person_id AS personId FROM event_roster_members m JOIN event_details d ON d.event_id=m.event_id AND d.version=m.version ORDER BY m.event_id,m.person_id').all()).results;
+  const actual=[];let offset=0;
+  do{
+    rowsRead=0;const page=await frontendSnapshotPage(env,read({section:'eventRosters',offset,revision:manifest.revision}));
+    if(offset===0)assert(rowsRead<expected.length,`${rowsRead} reads for the first page of ${expected.length} current members`);
+    actual.push(...page.rows);offset=page.nextOffset;
+  }while(offset!==null);
+  assert.deepEqual(actual,expected);assert.equal(actual.length,808);
+});
 
 // Contract tests cover unsafe or unsupported identity changes before any SQL runs.
 test('admin contract rejects unsupported fields, invalid dates, forms, retired events and contradictory profile state',()=>{
