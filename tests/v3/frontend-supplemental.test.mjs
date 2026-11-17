@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { buildExcusalPublicationTables, planExcusalPublication, frontendTimestampSerial, planDashboardPublication,
-  verifyDashboardPublicationReadback } from '../../.build/v3/apps/google-adapter/src/frontend-supplemental.js';
+  verifyDashboardPublicationReadback, equivalentDashboardChart } from '../../.build/v3/apps/google-adapter/src/frontend-supplemental.js';
 import { buildFrontendDashboard } from '../../.build/v3/apps/google-adapter/src/frontend-dashboard.js';
 import { frontendLiteralCell, snapshotToFrontendReportingInput, verifyFrontendValidationReadback } from '../../.build/v3/apps/google-adapter/src/frontend-publication.js';
 import { buildFrontendReporting } from '../../.build/v3/packages/domain/src/frontend-reporting.js';
@@ -130,7 +130,7 @@ test('Dashboard refuses stale snapshots, an unfenced refresh or a mismatched nat
   }
 });
 
-test('native chart readback accepts only provider font/color representations, with strict data and axis checks', () => {
+test('native chart readback accepts observed defaults and keyed axes while retaining exact chart semantics', () => {
   const plan = planDashboardPublication(dashboardInput());
   const actual = structuredClone(plan.expectedAfter);
   const encoded = color => Object.fromEntries(Object.entries(color).map(([k, v]) => [k, Math.fround(Math.floor(v * 255 + 0.00001) / 255)]));
@@ -140,24 +140,50 @@ test('native chart readback accepts only provider font/color representations, wi
     spec.titleTextFormat.fontFamily = spec.fontName;
     spec.titleTextFormat.foregroundColor = encoded(spec.titleTextFormat.foregroundColor);
     spec.titleTextFormat.foregroundColorStyle = { rgbColor: structuredClone(spec.titleTextFormat.foregroundColor) };
-    for (const axis of spec.basicChart.axis) { axis.format = { fontFamily: spec.fontName }; axis.viewWindowOptions ??= {}; }
+    for (const axis of spec.basicChart.axis) {
+      assert.equal(axis.title, ''); delete axis.title;
+      axis.format = { fontFamily: spec.fontName }; axis.viewWindowOptions ??= {};
+    }
+    // Native BAR readback orders axes by position; their scale options stay attached.
+    spec.basicChart.axis.sort((a, b) => a.position.localeCompare(b.position));
     for (const series of spec.basicChart.series) {
       series.colorStyle.rgbColor = encoded(series.colorStyle.rgbColor);
       series.color = structuredClone(series.colorStyle.rgbColor);
+      if (spec.basicChart.chartType === 'LINE') { assert.equal(series.pointStyle.shape, 'CIRCLE'); delete series.pointStyle.shape; }
     }
   }
+  const untouched = structuredClone(actual);
   assert.equal(verifyDashboardPublicationReadback(plan, actual), true);
+  assert.deepEqual(actual, untouched);
   for (const mutate of [
     x => x.charts[0].spec.basicChart.axis[1].viewWindowOptions.viewWindowMax = 99,
     x => x.charts[0].spec.basicChart.axis[0].format.fontFamily = 'Arial',
     x => x.charts[0].spec.basicChart.series[0].series.sourceRange.sources[0].endRowIndex++,
+    x => x.charts[0].spec.basicChart.domains[0].domain.sourceRange.sources[0].startColumnIndex++,
     x => x.charts[0].spec.basicChart.series[0].color.red = 0.9,
     x => x.charts[0].spec.backgroundColor = { red: 0, green: 0, blue: 0 },
     x => x.charts[0].spec.hiddenDimensionStrategy = 'SKIP_HIDDEN_ROWS_AND_COLUMNS',
+    x => x.charts[1].spec.basicChart.series[0].pointStyle.shape = 'DIAMOND',
+    x => x.charts[1].spec.basicChart.series[0].pointStyle.size++,
+    x => x.charts[1].spec.basicChart.series[0].lineStyle.width++,
+    x => x.charts[3].spec.basicChart.axis[0].viewWindowOptions.viewWindowMin = 1,
+    x => x.charts[3].spec.basicChart.axis[1].viewWindowOptions = x.charts[3].spec.basicChart.axis[0].viewWindowOptions,
+    x => x.charts[3].spec.basicChart.series[0].targetAxis = 'LEFT_AXIS',
+    x => x.charts[3].spec.basicChart.axis[0].title = 'Changed scale',
+    x => x.charts[3].spec.basicChart.axis[1].position = 'BOTTOM_AXIS',
   ]) {
     const changed = structuredClone(actual); mutate(changed);
     assert.equal(verifyDashboardPublicationReadback(plan, changed), false);
   }
   const next = dashboardInput(); next.current = actual;
   assert.equal(planDashboardPublication(next).requests.some(r => r.updateChartSpec), false);
+});
+
+test('chart comparison rejects ambiguous axis positions even when both inputs repeat them', () => {
+  const original = planDashboardPublication(dashboardInput()).expectedAfter.charts[3].spec;
+  for (const position of ['BOTTOM_AXIS', 'AXIS_POSITION_UNSPECIFIED', null]) {
+    const changed = structuredClone(original); changed.basicChart.axis[0].position = position;
+    // BOTTOM_AXIS duplicates the second BAR axis; unknown/null cannot establish a key.
+    assert.equal(equivalentDashboardChart(changed, structuredClone(changed)), false);
+  }
 });

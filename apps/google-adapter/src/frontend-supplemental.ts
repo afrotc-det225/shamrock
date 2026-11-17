@@ -10,9 +10,9 @@ import { frontendLiteralCell, planFrontendPublication, type FrontendPublicationI
 const canonical = (value: unknown): string => JSON.stringify(value, (_key, v) => v && typeof v === 'object' && !Array.isArray(v) ? Object.fromEntries(Object.keys(v).sort().map(k => [k, v[k]])) : v);
 const same = (a: unknown, b: unknown) => canonical(a) === canonical(b);
 const copy = <T>(x: T): T => JSON.parse(JSON.stringify(x)) as T;
-/** Sheets returns inherited fonts, deprecated color aliases and byte-encoded RGB.
- * Normalize only those representations; data ranges, axes and every other field
- * still require equality. Do not use a general subset or fuzzy chart comparison. */
+/** Sheets returns inherited fonts, color aliases, byte-encoded RGB and omitted
+ * chart defaults. Axes are keyed by their unique position rather than list order.
+ * Normalize only those representations; ranges, scales and styles remain exact. */
 export function equivalentDashboardChart(a: Record<string, any>, b: Record<string, any>): boolean {
   const normalize = (source: Record<string, any>) => {
     const spec = copy(source);
@@ -41,12 +41,21 @@ export function equivalentDashboardChart(a: Record<string, any>, b: Record<strin
       spec.titleTextFormat.fontFamily ??= spec.fontName;
       aliases(spec.titleTextFormat, 'foregroundColor');
     }
+    const positions = new Set<string>();
     for (const axis of spec.basicChart?.axis ?? []) {
+      if (!['BOTTOM_AXIS', 'LEFT_AXIS', 'RIGHT_AXIS'].includes(axis.position) || positions.has(axis.position)) throw Error('Ambiguous chart axis.');
+      positions.add(axis.position);
+      if (axis.title === '') delete axis.title; // Sheets omits an explicitly empty title.
       axis.format ??= {};
       axis.format.fontFamily ??= spec.fontName;
       axis.viewWindowOptions ??= {};
     }
-    for (const series of spec.basicChart?.series ?? []) aliases(series, 'color');
+    spec.basicChart?.axis?.sort((x: { position: string }, y: { position: string }) => x.position.localeCompare(y.position));
+    for (const series of spec.basicChart?.series ?? []) {
+      aliases(series, 'color');
+      // CIRCLE is omitted from native LINE readback; retain size and other shapes.
+      if (spec.basicChart.chartType === 'LINE' && series.pointStyle?.shape === 'CIRCLE') delete series.pointStyle.shape;
+    }
     return spec;
   };
   try { return same(normalize(a), normalize(b)); } catch { return false; }
