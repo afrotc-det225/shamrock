@@ -26,6 +26,14 @@ Use the existing staging API transport with explicit account/database bindings. 
 
 The estimator uses conservative index-write allowances. Canonical patch SQL is driven by at most 100 JSON rows with an indexed primary-key target lookup; it does not scan the whole attendance matrix for each changed cell. Evidence reads and writes are bounded per chunk. The execution receipt increases the administration revision, invalidating cached frontend snapshots without periodic polling.
 
+## Resume after a free-tier quota stop
+
+A D1 quota response is a storage availability failure, not evidence that a Google account lacks permission. Do not bootstrap another account, weaken authorization, repeatedly retry large reads or upgrade the plan to get past it. Keep production unchanged and preserve the staging checkpoints.
+
+If no import batch has been applied, freeze the coherent source snapshot and local rehearsal as a dated review artifact. After the daily UTC quota reset, obtain fresh account-wide usage, recheck source Drive versions and actual Form responses, and observe the exact staging generation, migration ledger, permission policy and administration revision. A changed source requires a new coherent capture; a changed destination requires a new backup. Regenerate and rehearse the plan from those inputs before approving its new execution hash. A locally passing earlier plan is not a claim that its sources are still current.
+
+If evidence batches have already been applied, inspect the saved immutable execution plan and durable receipts first. Resume that exact reviewed plan only while its fences still hold; do not regenerate its timestamps, replace its source snapshot or replay initialization from a different plan. Require indexed evidence readback before the final atomic swap. Recheck remaining daily read/write headroom before advancing to another batch, verification phase or native publication. Current production edits belong in a subsequent reviewed refresh, with all earlier evidence retained.
+
 ## Retained predecessor attendance
 
 `scripts/lib/import-predecessor.mjs` supports the specific original human-header Attendance format: Year, Last Name, First Name, University Email Address, Flight, Total, LLAB, then training-week event columns. It retains the original typed cells and formulas. Metadata explicitly declares the first data row and identity-column mapping; the email column is never displayed as an identity field in a historical report.
