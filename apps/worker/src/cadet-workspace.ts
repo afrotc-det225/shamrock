@@ -289,7 +289,7 @@ export async function cadetRoute(
     throw new HttpError(
       409,
       "WRITES_PAUSED",
-      "Staging submissions are paused.",
+      "Submissions are paused.",
     );
   if (
     !object(a) ||
