@@ -1,3 +1,4 @@
+import {browsePanel, profiles, type Profile} from "./panel-browse.js";
 import { PANEL_VIEW_AS_PAGE_MAX_BYTES, type PanelViewAsAuthorization, type PanelViewAsKind, type PanelViewAsPage, type PanelViewAsStatus } from '../../../packages/domain/src/panel-view-as.js';
 import { effectiveAdminGrants } from './permission-grants.js';
 import { panelReadAuthority, panelSnapshotPage } from './panel-read.js';
@@ -154,4 +155,17 @@ export async function panelViewAsPage(env: Env, input: unknown): Promise<PanelVi
   const response: PanelViewAsPage = { contractVersion: 'panel-view-as-page-v1', readOnly: true, environment: env.ENVIRONMENT as PanelViewAsPage['environment'], generation: Number(env.GENERATION), entryAuditId: entry, targetPersonId: person, targetPrincipalId: binding.targetPrincipalId, viewRevision, kind, page: result };
   if (new TextEncoder().encode(JSON.stringify(response)).length > PANEL_VIEW_AS_PAGE_MAX_BYTES) fail(409, 'VIEW_AS_PAGE_TOO_LARGE');
   return response;
+}
+
+/** Shared browse endpoint, including the real actor and target fence on every preview D1 batch. */
+export async function panelBrowse(env:Env,input:unknown) {
+  const req=identity(env,input), preview=Object.hasOwn(req,'entryAuditId');
+  if (Object.keys(req).sort().join(',') !== (preview?'entryAuditId,environment,generation,principalId,profile,targetPersonId':'environment,generation,principalId,profile') ||
+      !profiles.includes(req.profile as Profile)) throw new HttpError(400,'INVALID_PANEL_REQUEST','Invalid page.');
+  const actor = {environment:env.ENVIRONMENT,generation:Number(env.GENERATION),principalId:req.principalId};
+  if (!preview) return browsePanel(env,actor,req.profile as Profile);
+  if (!id(req.entryAuditId)||!id(req.targetPersonId)) return fail(400,'INVALID_VIEW_AS_REQUEST');
+  const {query,binding}=await readBinding(env,req.principalId,req.targetPersonId,req.entryAuditId);
+  if(!binding.targetPrincipalId)return fail(403,'NOT_AUTHORIZED');
+  return browsePanel(guardedEnvironment(env,query,binding.raw),{...actor,principalId:binding.targetPrincipalId},req.profile as Profile);
 }

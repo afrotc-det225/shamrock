@@ -74,3 +74,15 @@ original paged transport. This change adds no index maintenance or stored copy.
 | Refresh and writes | The browser conditionally reuses an unchanged capture. Commands still check current authority and versions. | Keep current write checks and avoid using an archive or cached list as command authority. |
 
 Only the History change in this review alters the running read path. The other projections require cold/warm measurements and parity checks before implementation. Compare network trips, bytes, rows read and Worker CPU separately. Native Google publication has a different job: bounded, resumable batches remain useful there.
+
+### Operational panel reads
+
+Cadets and Leadership load current list columns and contacts. Opening an editor loads the complete authorized record and version before enabling a change. Attendance loads eligibility, ordered facts, excusal outcomes and correction versions together. Excusals loads the visible queue with decision versions. Overview reads current counts and term. Search, sorting, flight filters and attendance reporting run in the browser. History retains its separate semester files.
+
+Each profile uses the existing signed backend, D1 and session. The backend rechecks the authority and record revision in the batch that reads the rows. A hosted Worker isolate can retain up to 24 private results for 60 seconds. Reuse requires matching actor, effective scope, preview entry and revisions. A browser keeps visited profiles in memory and revalidates access on return. Browser storage is unnecessary. Large responses use the established scoped pager. View as retains its read-only command guard.
+
+Release the staging backend before the panel, retaining existing bindings and History files. Run the following from the repository root with an owner-only, read-only staging SQLite export and its generation. The check compares the browser display models to the original pager for the Wing and available scoped readers. It reports only byte counts. Exercise navigation, switching tabs, editing and View as with the staging session separately.
+
+```sh
+node scripts/rehearse-panel-browse.mjs PRIVATE_EXPORT.sqlite GENERATION
+```

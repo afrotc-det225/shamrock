@@ -12,9 +12,9 @@ import {
 } from "./components";
 import { name } from "./api";
 import { currentExcusalRequests } from "./attendance-events.mjs";
-export default function Attendance({ snapshot: s, reporting, propose, busy, readOnly = false }) {
-  const [tab, setTab] = useState("attendance"),
-    [selectedEvent, setEvent] = useState(""),
+export default function Attendance({ snapshot, list, tab="attendance", onTab, reporting, propose, busy, readOnly = false }) {
+  const s = snapshot || list;
+  const [selectedEvent, setEvent] = useState(""),
     [flight, setFlight] = useState(""),
     [edit, setEdit] = useState(null),
     [reason, setReason] = useState(""),
@@ -47,13 +47,13 @@ export default function Attendance({ snapshot: s, reporting, propose, busy, read
         <div className="tabs">
           <button
             aria-pressed={tab === "attendance"}
-            onClick={() => setTab("attendance")}
+            onClick={() => onTab("attendance")}
           >
             Attendance
           </button>
           <button
             aria-pressed={tab === "excusals"}
-            onClick={() => setTab("excusals")}
+            onClick={() => onTab("excusals")}
           >
             Excusals (
             {queue.filter((r) => r.status === "Submitted").length} pending)

@@ -34,7 +34,7 @@ const queries:Record<FrontendSection,{select:string;from:string;order:string;lim
   legacyBaselines:{select:`b.baseline_id AS baselineId,b.person_id AS personId,b.event_id AS eventId,b.code,${baselineRevisionSql} AS baselineRevision`,from:baselineFrom,order:'b.person_id,b.event_id',limit:256},
 };
 /** A publication reads one semester. Older evidence remains queryable by an explicit term ID. */
-const scopeCte = `WITH selected_term AS (SELECT term_id FROM terms WHERE term_id=COALESCE(?,(SELECT term_id FROM terms WHERE is_current=1))),
+export const scopeCte = `WITH selected_term AS (SELECT term_id FROM terms WHERE term_id=COALESCE(?,(SELECT term_id FROM terms WHERE is_current=1))),
  scoped_events AS (SELECT event_id FROM event_details WHERE term_id IN(SELECT term_id FROM selected_term)),
  scoped_people AS (SELECT p.person_id FROM people p WHERE
  EXISTS(SELECT 1 FROM directory_profiles d WHERE d.person_id=p.person_id AND d.flight_path_status NOT IN ('Inactive','Commissioned','Dropped') AND EXISTS(SELECT 1 FROM terms WHERE is_current=1 AND term_id IN(SELECT term_id FROM selected_term)))
@@ -60,7 +60,8 @@ function scopedQueries():typeof queries {
   result.legacyBaselines.from+=' WHERE b.event_id IN(SELECT event_id FROM scoped_events)';
   return result;
 }
-const semesterQueries=scopedQueries();
+export const semesterQueries=scopedQueries();
+export const directoryCatalogQuery=queries.people, leadershipCatalogQuery=queries.contacts;
 const catalogs=['term-catalog','directory-catalog','contacts-catalog'];
 interface CatalogPage {contractVersion:typeof FRONTEND_PAGE_VERSION;section:'term-catalog'|'directory-catalog'|'contacts-catalog';revision:SnapshotRevision;rows:Record<string,unknown>[];nextOffset:number|null;}
 /** Every page uses one D1 transaction for authorization, revision and bounded rows. No provider writes. */

@@ -4,31 +4,31 @@ import { Heading, Table, Status, Empty } from "./components";
 import { api } from "./api";
 import { currentExcusalRequests } from "./attendance-events.mjs";
 import { useReceipts, ReceiptStatus } from "./receipts";
-export function Overview({ snapshot: s, reporting, history, receiptsDeferred, reportingTime, captureKey, navigate, readOnly = false }) {
+export function Overview({ snapshot: s, overview, reporting, history, receiptsDeferred, reportingTime, captureKey, navigate, readOnly = false }) {
   const d = reporting?.dashboard;
   const receipt = useReceipts({ history, receiptsDeferred, reportingTime, captureKey, enabled: !readOnly });
   return (
     <>
       <Heading
         title="Overview"
-        description={`${s.terms.find((t) => t.isCurrent)?.label || "Semester not configured"} · Detachment 225`}
+        description={`${overview?.term || s?.terms.find((t) => t.isCurrent)?.label || "Semester not configured"} · Detachment 225`}
       />
       <div className="metrics">
         <div>
           <strong>
-            {d?.totalCadets ?? s.people.filter((p) => p.active).length}
+            {overview?.activeCadets ?? d?.totalCadets ?? s.people.filter((p) => p.active).length}
           </strong>
           <span>Active cadets</span>
         </div>
         <div>
           <strong>
-            {s.events.filter((e) => e.status === "active").length}
+            {overview?.activeEvents ?? s.events.filter((e) => e.status === "active").length}
           </strong>
           <span>Active events</span>
         </div>
         <div>
           <strong>
-            {currentExcusalRequests(s).filter(r => r.status === "Submitted").length}
+            {overview?.pending ?? currentExcusalRequests(s).filter(r => r.status === "Submitted").length}
           </strong>
           <span>Pending excusals</span>
         </div>

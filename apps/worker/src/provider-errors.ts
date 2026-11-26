@@ -33,7 +33,7 @@ const readPaths = new Set([
   '/v1/admin/transitions/archive/page', '/v1/admin/notifications/status',
   '/v1/admin/notifications/rehearsal/status', '/v1/admin/permissions/status',
   '/v1/admin/event-rosters/preview', '/v1/admin/directory/review-authorize',
-  '/v1/admin/history/list', '/v1/admin/history/requests', '/v1/admin/history/summary',
+  '/v1/admin/panel/browse', '/v1/admin/history/list', '/v1/admin/history/requests', '/v1/admin/history/summary',
   '/v1/admin/history/page', '/v1/admin/history/read', '/v1/admin/effects/availability',
   '/v1/admin/snapshot', '/v1/admin/snapshot/page', '/v1/admin/panel/page',
   '/v1/admin/panel/access', '/v1/admin/panel/authorize',

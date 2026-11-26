@@ -37,7 +37,10 @@ const pages = [
   ["Semester", Layers],
   ["System", Settings],
 ];
+const profileFor = (page,tab) => ({"Cadets":"cadets","Leadership":"leadership","Attendance & excusals":tab,
+  "Overview":"overview","Events":"events","History":"access","Assistant":"access"}[page] || "full");
 function App() {
+  const [attendanceTab,setAttendanceTab] = useState("attendance");
   const [page, setPage] = useState("Events"),
     [data, setData] = useState(null),
     [error, setError] = useState(""),
@@ -93,7 +96,7 @@ function App() {
     bootstrap.current = null;
     setSessionInfo(null); setData(null); setReadOutage(null); setSignIn(true);
   };
-  live.current = { busy, proposal, data, preview, page, sessionInfo, readOutage };
+  live.current = { busy, proposal, data, preview, page, attendanceTab, sessionInfo, readOutage };
   const reload = async (force = false, profile) => {
     if (!force && pendingRead.current) return pendingRead.current;
     const intent = ++readIntent.current;
@@ -109,7 +112,7 @@ function App() {
     const controller = new AbortController();
     pendingAbort.current = controller;
     setReadProgress({stage: "Checking access"});
-    profile ||= ["History", "Assistant"].includes(live.current.page) ? "access" : live.current.page === "Events" ? "events" : "full";
+    profile ||= profileFor(live.current.page,live.current.attendanceTab);
     const task = api("/state", undefined, {profile, signal: controller.signal, onProgress: value => {
       if (!controller.signal.aborted && pendingAbort.current === controller) setReadProgress(value);
     }}).then((value) => {
@@ -119,10 +122,10 @@ function App() {
       setReadOutage(null); setError(""); capacityRetryAt.current = 0; readFailures.current = 0;
       setPreview(value.viewAs || null);
       if (
-        value.snapshot?.access &&
-        !value.snapshot.access.capabilities.fullSnapshot
+        (value.snapshot?.access || value.manifest?.access) &&
+        !(value.snapshot?.access || value.manifest.access).capabilities.fullSnapshot
       )
-        setPage("Attendance & excusals");
+        { setPage("Attendance & excusals"); if(value.browse) setAttendanceTab(value.browse.profile); }
       lastRead.current = Date.now();
       setSync("");
       return value;
@@ -258,7 +261,7 @@ function App() {
     setError("");
     setNotice("");
     if (!data?.snapshot && (!["History", "Assistant"].includes(value) || !data))
-      void run(() => reload(true, value === "Events" ? "events" : ["History", "Assistant"].includes(value) ? "access" : "full"));
+      void run(() => reload(true, profileFor(value,attendanceTab)));
   };
   const cancelRead = () => {
     readIntent.current++;
@@ -291,8 +294,15 @@ function App() {
     if (result.auditRecorded === false) setNotice("Exited View as; the exit audit could not be saved.");
   });
   const blockedPreview = preview && preview.status !== "ready";
-  const scoped =
-    data?.snapshot?.access && !data.snapshot.access.capabilities.fullSnapshot;
+  const access = data?.snapshot?.access || data?.manifest?.access;
+  const scoped = access && !access.capabilities.fullSnapshot;
+  const browseReady = data?.browse && (data.browse.profile === profileFor(page,attendanceTab) ||
+    page === "Attendance & excusals" && ["attendance","excusals"].includes(data.browse.profile));
+  const changeAttendanceTab = value => {
+    if (attendanceTab === value && (!data.browse || data.browse.profile === value)) return;
+    setAttendanceTab(value);
+    if (!data.snapshot) void run(() => reload(true,value));
+  };
   const visiblePages = blockedPreview ? [] : scoped
     ? pages.filter(([title]) => title === "Attendance & excusals")
     : pages.filter(([title]) => title !== "History" || data?.meta.hosted);
@@ -415,7 +425,7 @@ function App() {
                 {sync}
               </small>
             )}
-            {loadingEditor && data?.eventsList && <div className="editor-loading">
+            {loadingEditor && (data?.eventsList || data?.browse) && <div className="editor-loading">
               <span role="status">{readProgress.stage === "Verifying records" ? "Verifying editor records…" : "Loading editor records…"}</span>
               <button onClick={cancelRead}>Cancel</button>
             </div>}
@@ -430,7 +440,7 @@ function App() {
               </div>
             )}
             {blockedPreview ? <div><p>{viewAsStatus[preview.status] || "This account cannot be previewed."}</p>
-              {preview.status === "starting" && <button disabled={busy} onClick={()=>viewAs({personId:preview.personId})}>Retry view</button>}</div> : !data || (!data.snapshot && !["History", "Assistant"].includes(page) && !(page === "Events" && data.eventsList)) ? (
+              {preview.status === "starting" && <button disabled={busy} onClick={()=>viewAs({personId:preview.personId})}>Retry view</button>}</div> : !data || (!data.snapshot && !browseReady && !["History", "Assistant"].includes(page) && !(page === "Events" && data.eventsList)) ? (
               <section className="loading-panel" aria-busy={!error}>
                 {error ? (
                   <button
@@ -459,7 +469,7 @@ function App() {
                 {!scoped && page === "Leadership" && (
                   <People key="leadership" leadership {...common} />
                 )}{" "}
-                {page === "Attendance & excusals" && <Attendance {...common} />}{" "}
+                {page === "Attendance & excusals" && <Attendance {...common} tab={data.browse?.profile || attendanceTab} onTab={changeAttendanceTab} />}{" "}
                 {!scoped && page === "History" && <History key={JSON.stringify([data.captureKey, data.manifest?.revision?.access, preview?.entryAuditId])} />}
                 {!preview && !scoped && page === "Semester" && <Semester {...common} />}{" "}
                 {!scoped && page === "Overview" && (

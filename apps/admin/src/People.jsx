@@ -14,19 +14,29 @@ import {
 import { name, label, years, statuses, profileFields } from "./api";
 import { compareCadetsForDisplay, compareLeadershipForDisplay } from "../../../packages/domain/src/cadet-display-order";
 export default function People({
-  snapshot: s,
+  snapshot, list, withFullData,
   propose,
   busy,
   leadership = false,
   readOnly = false,
 }) {
+  const s = snapshot || list;
   const [query, setQuery] = useState(""),
     [flight, setFlight] = useState(""),
     [edit, setEdit] = useState(null);
   const set = (k, v) => setEdit({ ...edit, [k]: v }),
     profile = (k, v) =>
       setEdit({ ...edit, profile: { ...edit.profile, [k]: v } });
-  const open = (p) => {
+  const open = (row) => {
+    if (snapshot) return openRecord(row);
+    return withFullData(full => {
+      const record = row && (leadership ? full.leadership.find(c=>c.contactId===row.contactId) :
+        full.people.find(p=>p.personId===row.personId));
+      if (row && !record) throw Error("This record changed. Reload the page.");
+      openRecord(record);
+    });
+  };
+  const openRecord = (p) => {
     if (leadership)
       setEdit({
         contactId: p?.contactId || crypto.randomUUID(),

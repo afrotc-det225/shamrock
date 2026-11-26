@@ -10,6 +10,7 @@ const paths = new Set([
   "/v1/admin/snapshot/page",
   "/v1/admin/panel/page",
   "/v1/admin/panel/access",
+  "/v1/admin/panel/browse",
   "/v1/admin/panel/authorize",
   "/v1/admin/panel/commands",
   "/v1/admin/commands",
@@ -162,7 +163,7 @@ export class HostedBackend {
         503,
       );
     }
-    const result = await boundedJson(response, 150000);
+    const result = await boundedJson(response, path === "/v1/admin/panel/browse" ? 2000000 : 150000);
     if (!response.ok) {
       const error = new PanelError(
         result.error?.code || "BACKEND_ERROR",

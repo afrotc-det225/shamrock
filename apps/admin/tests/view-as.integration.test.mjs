@@ -67,3 +67,17 @@ test('actual backend historical preview pages retain a separate archive token an
  assert.notEqual(calls[1].viewRevision,normal.viewRevision);
  await assert.rejects(()=>host.historyPage({...calls[1],viewRevision:normal.viewRevision}),e=>e.code==='VIEW_AS_CHANGED');
 });
+
+test('browse profiles use effective View as scope for lists, attendance and excusals',async t=>{
+ const {host,local,person}=await fixture(t,false);
+ const input={...local.backend.identity(),targetPersonId:person.personId,entryAuditId:host.preview.entry_audit_id};
+ const read=profile=>local.backend.post('/v1/admin/panel/browse',{...input,profile});
+ for(const profile of ['cadets','leadership','overview']) await assert.rejects(()=>read(profile),e=>e.status===403);
+ const list=await read('attendance');
+ assert.deepEqual(JSON.parse(list.tables.flights).map(f=>f[0]),['alpha']);
+ assert(JSON.parse(list.tables.people).every(p=>p[5]==='alpha'));
+ assert(!('contacts' in list.tables));
+ const queue=await read('excusals');assert.equal(queue.profile,'excusals');
+ await local.db.prepare('UPDATE principals SET active=0 WHERE principal_id=?').bind(input.principalId).run();
+ await assert.rejects(()=>read('excusals'),e=>e.status===403);
+});

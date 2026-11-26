@@ -1,17 +1,24 @@
+import { decodeBrowse } from "./browse";
 import { hydrateReporting } from "./reporting";
 import { loadSnapshot, loadEventsList } from "../snapshot-client";
 let csrf;
 let retainedCapture;
 let retainedEvents;
 let retainedState;
+const retainedViews = new Map();
+const revisionOf = data => JSON.stringify([data?.captureKey,data?.manifest?.scope,data?.manifest?.revision,data?.viewAsRevision]);
 export async function api(path, body, options = {}) {
-  const previous = path === "/state" ? retainedState : null;
   const profile = options.profile || "full";
+  const previous = path === "/state" ? retainedViews.get(profile) || retainedState : null;
+  const wantsBrowse = ["cadets","leadership","overview","attendance","excusals"].includes(profile);
+  const matchingProfile = previous?.browse ? previous.browse.profile === profile : !wantsBrowse;
+  const conditional = previous?.transport === "paged-v1" && matchingProfile &&
+    (profile !== "events" || previous.eventsList || previous.snapshot);
   const response = await fetch(`/api${path}${path === "/state" ? `?profile=${encodeURIComponent(profile)}` : ""}`, {
     method: body === undefined ? "GET" : "POST",
     headers: {
       ...(body === undefined ? {} : { "content-type": "application/json", "x-shamrock-csrf": csrf || "" }),
-      ...(previous?.transport === "paged-v1" && (profile !== "events" || previous.eventsList || previous.snapshot) ? {"x-shamrock-capture": encodeURIComponent(JSON.stringify({
+      ...(conditional ? {"x-shamrock-capture": encodeURIComponent(JSON.stringify({
         captureKey:previous.captureKey,revision:previous.manifest.revision,viewAsRevision:previous.viewAsRevision??null,
       }))} : {}),
     },
@@ -22,7 +29,7 @@ export async function api(path, body, options = {}) {
   options.signal?.throwIfAborted();
   if (!response.ok) {
     if (response.status === 401 || response.status === 403)
-      { retainedCapture = undefined; retainedEvents = undefined; retainedState = undefined; }
+      { retainedCapture = undefined; retainedEvents = undefined; retainedState = undefined; retainedViews.clear(); }
     const error = new Error(
       data.error?.message || "Unable to complete this request.",
     );
@@ -40,10 +47,18 @@ export async function api(path, body, options = {}) {
         throw Object.assign(new Error("Reload SHAMROCK with current account access."), {code:"SNAPSHOT_CHANGED"});
       data = {...previous,reportingTime:data.reportingTime,viewAs:data.viewAs,viewAsRevision:data.viewAsRevision};
     }
+    if (revisionOf(retainedState) !== revisionOf(data)) retainedViews.clear();
+    if (data.browse) {
+      const loaded = data.list || data.overview ? data : await decodeBrowse(data);
+      options.signal?.throwIfAborted();
+      retainedState=loaded;
+      retainedViews.set(data.browse.profile, loaded);
+      return loaded;
+    }
     if (data.viewAs && data.viewAs.status !== "ready") {
       retainedCapture = undefined;
       retainedEvents = undefined;
-      retainedState = undefined;
+      retainedState = undefined; retainedViews.clear();
       return data;
     }
     if (data.transport === "paged-v1") {
@@ -71,13 +86,13 @@ export async function api(path, body, options = {}) {
     }
     return hydrateReporting(data);
   }
-  if (path === "/view-as") { retainedCapture = undefined; retainedEvents = undefined; retainedState = undefined; }
+  if (path === "/view-as") { retainedCapture = undefined; retainedEvents = undefined; retainedState = undefined; retainedViews.clear(); }
   return data;
 }
 export async function startSession() {
   retainedCapture = undefined;
   retainedEvents = undefined;
-  retainedState = undefined;
+  retainedState = undefined; retainedViews.clear();
   const result = await api("/session", {});
   csrf = result.csrf;
   return result;
@@ -181,6 +196,6 @@ export async function logout() {
   }
   retainedCapture = undefined;
   retainedEvents = undefined;
-  retainedState = undefined;
+  retainedState = undefined; retainedViews.clear();
   location.assign("/");
 }

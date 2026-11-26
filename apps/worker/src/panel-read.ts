@@ -13,7 +13,7 @@ const fail = (status: number, code: string): never => { throw new HttpError(stat
 const identifier = (v: unknown): v is string => typeof v === 'string' && /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/.test(v);
 
 /** Repeated in the data transaction: revocation/catalog drift cannot race a previously computed scope. */
-function authorityStatements(env: Env, principal: string): D1PreparedStatement[] {
+export function authorityStatements(env: Env, principal: string): D1PreparedStatement[] {
     const db = env.DB;
     return [
         db.prepare(`SELECT EXISTS(SELECT 1 FROM system_control WHERE singleton=1 AND environment=? AND generation=?) AS valid,
@@ -49,7 +49,7 @@ function authorityFrom(rows: Row[][]): PanelAuthority {
         flights: rows[7] as unknown as PanelAuthority['flights'], squadrons: rows[8] as unknown as PanelAuthority['squadrons'],
     };
 }
-function queries() {
+export function panelSectionQueries() {
     const people = 'd.person_id AS personId,d.version,d.flight_id AS flightId,d.last_name AS lastName,d.first_name AS firstName,d.rank,d.as_year AS asYear,d.flight_path_status AS flightPathStatus';
     const queries: Record<PanelSection, { select: string; from: string; countFrom?: string; order: string; limit: number; }> = {
         people: { select: people, from: 'FROM directory_profiles d WHERE d.person_id IN(SELECT person_id FROM scoped_people)', order: 'd.person_id', limit: 64 },
@@ -65,6 +65,45 @@ function queries() {
         legacyBaselines: { select: `b.baseline_id AS baselineId,b.person_id AS personId,b.event_id AS eventId,b.code,${baselineRevisionSql} AS baselineRevision`, from: "FROM legacy_attendance_baselines b JOIN legacy_import_runs i ON i.import_run_id=b.import_run_id AND i.state='complete' WHERE b.event_id IN(SELECT event_id FROM scoped_events) AND b.person_id IN(SELECT person_id FROM scoped_people)", countFrom: "FROM legacy_attendance_baselines b WHERE b.import_run_id IN(SELECT import_run_id FROM legacy_import_runs WHERE state='complete') AND b.event_id IN(SELECT event_id FROM scoped_events) AND b.person_id IN(SELECT person_id FROM scoped_people)", order: 'b.person_id,b.event_id', limit: 256 },
     };
     return queries;
+}
+
+export function scopedPanelSource(principal: string, flightIds: readonly string[], forCounts: boolean) {
+    const decision = excusalDecisionRowPermission(principal);
+    // Manifest counts reuse the same small scope sets in eleven subqueries. Keep
+    // them within this transaction instead of recalculating decisions per count.
+    // Page queries retain streaming plans so LIMIT can stop reads early.
+    const materialized = forCounts ? 'MATERIALIZED ' : '';
+    const cte = `WITH scoped_flights AS ${materialized}(SELECT value AS flight_id FROM json_each(?)),
+      scoped_people AS ${materialized}(SELECT d.person_id FROM directory_profiles d WHERE d.flight_id IN(SELECT flight_id FROM scoped_flights)
+        AND d.flight_path_status NOT IN ('Inactive','Commissioned','Dropped') AND EXISTS(SELECT 1 FROM memberships m WHERE m.person_id=d.person_id AND m.unit_id=d.flight_id AND m.active=1)),
+      candidates AS (SELECT r.request_id,r.event_id,r.person_id,r.unit_id,r.origin,r.last_command_id,r.status,r.requested_outcome,r.version,r.reason,
+        r.submitted_at,r.updated_at,r.decided_at,r.decision_reason,sc.squadron_id AS captured_squadron_id,${decision.sql} AS can_decide FROM excusal_records r ${excusalScopeJoin}
+        JOIN event_details d ON d.event_id=r.event_id JOIN terms t ON t.term_id=d.term_id AND t.is_current=1
+        WHERE r.origin='native' OR EXISTS(SELECT 1 FROM legacy_operational_adoptions a WHERE a.adoption_id=r.legacy_adoption_id AND a.state='complete')),
+      visible_requests AS ${materialized}(SELECT * FROM candidates WHERE can_decide=1 OR unit_id IN(SELECT flight_id FROM scoped_flights) OR person_id IN(SELECT person_id FROM scoped_people)),
+      scoped_events AS ${materialized}(SELECT d.event_id FROM event_details d JOIN terms t ON t.term_id=d.term_id AND t.is_current=1
+        WHERE EXISTS(SELECT 1 FROM event_units eu WHERE eu.event_id=d.event_id AND eu.unit_id IN(SELECT flight_id FROM scoped_flights))
+          OR EXISTS(SELECT 1 FROM visible_requests r WHERE r.event_id=d.event_id)
+          OR EXISTS(SELECT 1 FROM event_roster_members m WHERE m.event_id=d.event_id AND m.version=d.version AND m.person_id IN(SELECT person_id FROM scoped_people))
+          OR EXISTS(SELECT 1 FROM attendance_observations o WHERE o.event_id=d.event_id AND o.person_id IN(SELECT person_id FROM scoped_people))
+          OR EXISTS(SELECT 1 FROM attendance_corrections c WHERE c.event_id=d.event_id AND c.person_id IN(SELECT person_id FROM scoped_people))
+          OR EXISTS(SELECT 1 FROM legacy_attendance_baselines b WHERE b.event_id=d.event_id AND b.person_id IN(SELECT person_id FROM scoped_people))) `;
+    const bind = [JSON.stringify(flightIds), ...decision.values];
+    return {cte, bind};
+}
+
+export async function readPanelContext(env:Env, principal:string) {
+    const first = (await env.DB.batch<Row>(authorityStatements(env, principal))).map(r => r.results);
+    const authority = authorityFrom(first), access = resolvePanelAccess(authority);
+    if (!access) return fail(403, 'NOT_AUTHORIZED');
+    const control = first[0][0];
+    if (control.ready !== 1) fail(409, 'SNAPSHOT_IMPORT_ACTIVE');
+    if (Number(control.rosterPending)) fail(409, 'EVENT_ROSTERS_PENDING');
+    if (control.termCount !== 1 || !control.termId) fail(409, 'TERM_SCOPE_UNAVAILABLE');
+    const hashInput = JSON.stringify({ principalId: principal, authority, permissionVersion: control.permissionVersion, permissionHash: control.permissionHash, termId: control.termId });
+    const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(hashInput));
+    const revision: PanelRevision = { operations: Number(control.operations), administration: Number(control.administration), access: [...new Uint8Array(digest)].map(v => v.toString(16).padStart(2, '0')).join('') };
+    return {first,access,control,revision};
 }
 
 /** Signed adapter route; principalId must come from the panel server's verified session, never browser JSON. */
@@ -85,39 +124,10 @@ export async function panelSnapshotPage(env: Env, input: unknown, authorityOnly 
         || Object.keys(expected).sort().join(',') !== 'access,administration,operations' || typeof expected.access !== 'string' || !/^[a-f0-9]{64}$/.test(expected.access)
         || ![expected.operations, expected.administration].every(v => Number.isSafeInteger(v) && v >= 0)) fail(400, 'INVALID_PANEL_REQUEST');
     if (section === 'verify' && offset !== 0 || section !== 'manifest' && section !== 'verify' && offset > FRONTEND_SECTION_BOUNDS[section]) fail(400, 'INVALID_PANEL_REQUEST');
-    const first = (await env.DB.batch<Row>(authorityStatements(env, principal))).map(r => r.results);
-    const authority = authorityFrom(first), access = resolvePanelAccess(authority);
-    if (!access) return fail(403, 'NOT_AUTHORIZED');
-    const control = first[0][0];
-    if (control.ready !== 1) fail(409, 'SNAPSHOT_IMPORT_ACTIVE');
-    if (Number(control.rosterPending)) fail(409, 'EVENT_ROSTERS_PENDING');
-    if (control.termCount !== 1 || !control.termId) fail(409, 'TERM_SCOPE_UNAVAILABLE');
-    const hashInput = JSON.stringify({ principalId: req.principalId, authority, permissionVersion: control.permissionVersion, permissionHash: control.permissionHash, termId: control.termId });
-    const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(hashInput));
-    const revision: PanelRevision = { operations: Number(control.operations), administration: Number(control.administration), access: [...new Uint8Array(digest)].map(v => v.toString(16).padStart(2, '0')).join('') };
+    const {first,access,control,revision} = await readPanelContext(env,principal);
     if (expected && (expected.operations !== revision.operations || expected.administration !== revision.administration || expected.access !== revision.access)) fail(409, 'SNAPSHOT_CHANGED');
-    const decision = excusalDecisionRowPermission(principal);
-    // Manifest counts reuse the same small scope sets in eleven subqueries. Keep
-    // them within this transaction instead of recalculating decisions per count.
-    // Page queries retain streaming plans so LIMIT can stop reads early.
-    const materialized = section === 'manifest' ? 'MATERIALIZED ' : '';
-    const cte = `WITH scoped_flights AS ${materialized}(SELECT value AS flight_id FROM json_each(?)),
-      scoped_people AS ${materialized}(SELECT d.person_id FROM directory_profiles d WHERE d.flight_id IN(SELECT flight_id FROM scoped_flights)
-        AND d.flight_path_status NOT IN ('Inactive','Commissioned','Dropped') AND EXISTS(SELECT 1 FROM memberships m WHERE m.person_id=d.person_id AND m.unit_id=d.flight_id AND m.active=1)),
-      candidates AS (SELECT r.request_id,r.event_id,r.person_id,r.unit_id,r.origin,r.last_command_id,r.status,r.requested_outcome,r.version,r.reason,
-        r.submitted_at,r.updated_at,r.decided_at,r.decision_reason,sc.squadron_id AS captured_squadron_id,${decision.sql} AS can_decide FROM excusal_records r ${excusalScopeJoin}
-        JOIN event_details d ON d.event_id=r.event_id JOIN terms t ON t.term_id=d.term_id AND t.is_current=1
-        WHERE r.origin='native' OR EXISTS(SELECT 1 FROM legacy_operational_adoptions a WHERE a.adoption_id=r.legacy_adoption_id AND a.state='complete')),
-      visible_requests AS ${materialized}(SELECT * FROM candidates WHERE can_decide=1 OR unit_id IN(SELECT flight_id FROM scoped_flights) OR person_id IN(SELECT person_id FROM scoped_people)),
-      scoped_events AS ${materialized}(SELECT d.event_id FROM event_details d JOIN terms t ON t.term_id=d.term_id AND t.is_current=1
-        WHERE EXISTS(SELECT 1 FROM event_units eu WHERE eu.event_id=d.event_id AND eu.unit_id IN(SELECT flight_id FROM scoped_flights))
-          OR EXISTS(SELECT 1 FROM visible_requests r WHERE r.event_id=d.event_id)
-          OR EXISTS(SELECT 1 FROM event_roster_members m WHERE m.event_id=d.event_id AND m.version=d.version AND m.person_id IN(SELECT person_id FROM scoped_people))
-          OR EXISTS(SELECT 1 FROM attendance_observations o WHERE o.event_id=d.event_id AND o.person_id IN(SELECT person_id FROM scoped_people))
-          OR EXISTS(SELECT 1 FROM attendance_corrections c WHERE c.event_id=d.event_id AND c.person_id IN(SELECT person_id FROM scoped_people))
-          OR EXISTS(SELECT 1 FROM legacy_attendance_baselines b WHERE b.event_id=d.event_id AND b.person_id IN(SELECT person_id FROM scoped_people))) `;
-    const bind = [JSON.stringify(access.flightIds), ...decision.values];
-    const allQueries = queries(), statements = authorityStatements(env, principal), dataIndex = statements.length;
+    const {cte, bind} = scopedPanelSource(principal, access.flightIds, section === "manifest");
+    const allQueries = panelSectionQueries(), statements = authorityStatements(env, principal), dataIndex = statements.length;
     if (!authorityOnly && section === 'manifest' && selectedSections.length) statements.push(env.DB.prepare(`${cte} SELECT ${selectedSections.map(s => `(SELECT COUNT(*) ${allQueries[s].countFrom ?? allQueries[s].from}) AS ${s}`).join(',')}`).bind(...bind));
     else if (!authorityOnly && section !== 'verify' && section !== 'manifest') {
         const q = allQueries[section];

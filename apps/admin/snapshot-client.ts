@@ -86,7 +86,7 @@ async function virtualId(id) {
   );
 }
 /** Complete private catalogs are assembled only after server-authorized full reads. */
-async function mergeCatalogs(snapshot, people, contacts) {
+export async function mergeCatalogs(snapshot, people, contacts) {
   check(
     people.every(
       (p) =>

@@ -6,6 +6,7 @@ import { PanelError } from "../errors.mjs";
 import { json, boundedJson, secure } from "./http.mjs";
 import { TRANSITION_POLICY } from "../../../packages/domain/src/transitions.ts";
 import { previewFromSession, previewResponse, changePreview } from "./view-as.mjs";
+import { browseState, browseProfiles } from "./browse.mjs";
 import { eventsState } from "./events-list.mjs";
 import { dailyLimitResponse } from "./provider-errors.mjs";
 import { semesterHistory } from "./semester-history.mjs";
@@ -90,7 +91,7 @@ export default {
         throw new PanelError("VIEW_AS_READ_ONLY", "Exit View as before making changes.", 403);
       if (url.pathname === "/api/state" && request.method === "GET") {
         const profile = url.searchParams.get("profile");
-        if (profile !== null && !["events", "access", "full"].includes(profile))
+        if (profile !== null && !["events", "access", "full", ...browseProfiles].includes(profile))
           throw new PanelError("INVALID_REQUEST", "Reload SHAMROCK.");
         if (preview && preview.status !== "ready")
           return secure(json({ viewAs: previewResponse(preview), snapshot: null,
@@ -100,14 +101,22 @@ export default {
             viewAs:previewResponse(preview),viewAsRevision:backend.viewRevision,
             reportingTime:Date.now()}));
         const events = profile === "events" && !preview ? await eventsState(backend) : null;
-        const authority = events?.authority ?? (profile && !preview ? await backend.panelAuthority() : null);
-        const manifest = authority?.access.capabilities.fullSnapshot
+        const browsing = browseProfiles.includes(profile);
+        const authority = events?.authority ?? (browsing || profile === "events" || (profile && !preview) ? await backend.panelAuthority() : null);
+        const scopedStart = profile === "events" && authority && !authority.access.capabilities.fullSnapshot;
+        let browse;
+        if (browsing || scopedStart) {
+          try { browse = await browseState(backend,authority,scopedStart ? "attendance" : profile); }
+          catch (error) { if (!["BROWSE_TOO_LARGE","TOO_LARGE"].includes(error.code)) throw error; }
+        }
+        const manifest = browse || authority?.access.capabilities.fullSnapshot
           ? {...authority, section:"manifest", sections:[], partial:true}
           : await backend.panelManifest();
 
         return secure(
           json({
             manifest,
+            ...(browse ? {browse} : {}),
             ...(events ? {eventsList:events.eventsList} : {}),
             ...(backend.snapshotManifest ? {snapshotManifest:backend.snapshotManifest} : {}),
             transport: "paged-v1",
