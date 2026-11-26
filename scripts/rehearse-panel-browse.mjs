@@ -64,7 +64,7 @@ async function run(file, generation) {
           assert.deepEqual(pick(data.list.people,fields),pick(full.people,fields));
         }
         if (profile==='overview') {
-          assert.deepEqual(data.birthdayCalendar, full.people.filter(p=>p.active && p.dateOfBirth).map(p=>[p.firstName,p.lastName,p.dateOfBirth.slice(5)]));
+          assert.deepEqual(data.birthdayCalendar, full.people.filter(p=>p.active && p.dateOfBirth).map(p=>[p.firstName,p.lastName,p.dateOfBirth.slice(5),p.flightId]));
         }
         if (profile==='leadership') {
           const fields = 'contactId firstName lastName role rank email officeLocation reportsTo';

@@ -99,6 +99,7 @@ try {
     await page
       .getByRole("button", { name: "Review change", exact: true })
       .click();
+    await page.locator("dialog:modal").getByRole("heading",{name:"Review change"}).waitFor();
     await page
       .getByRole("button", { name: "Apply change", exact: true })
       .click();
@@ -199,7 +200,15 @@ try {
   });
   assert.equal(contrasts.length, 10);
   assert(Math.min(...contrasts) >= 4.5, "Attendance code text must remain legible on its fill.");
+  const matrix = page.locator(".attendance-matrix");
+  assert.deepEqual(await matrix.locator("thead th[title]").evaluateAll(headers=>
+    [...new Set(headers.map(h=>h.getBoundingClientRect().width))]),[68]);
+  const layout = () => page.locator("main").evaluate(el=>[el.offsetLeft,el.offsetWidth]);
+  const beforeDrawer = await layout();
   await page.locator('button[data-event="veterans"]').and(page.getByRole("button",{name:/Alexis Morgan/})).click();
+  await page.getByRole("dialog",{name:"Correct attendance"}).waitFor();
+  assert.equal(await page.locator("dialog:modal").count(),0);
+  assert.deepEqual(await layout(),beforeDrawer);
   await page.getByLabel("Attendance code").selectOption("P");
   await page
     .getByLabel("Reason for this change")
@@ -245,6 +254,7 @@ try {
     .getByRole("button", { name: "Edit Veterans Day ceremony", exact: true })
     .click();
   await page.getByRole("button", {name:"Review change", exact:true}).waitFor();
+  await page.locator("dialog:modal").waitFor();
   await page.getByRole("button", { name: "Close editor" }).click();
   // Ordinary scoped Flight reader: no private/admin navigation or decision controls.
   await local.db

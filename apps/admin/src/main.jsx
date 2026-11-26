@@ -487,7 +487,7 @@ function App() {
           </main>
         </div>
         {proposal && (
-          <Drawer title="Review change" onClose={() => setProposal(null)}>
+          <Drawer modal title="Review change" onClose={() => setProposal(null)}>
             <div className="fields">
               <h3>{proposal.summary.title}</h3>
               <p>{displayTarget(proposal.summary.target, data?.snapshot)}</p>

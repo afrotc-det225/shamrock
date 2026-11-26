@@ -8,7 +8,7 @@ export async function decodeBrowse(data) {
   const {tables:t, profile} = data.browse, access=data.manifest.access;
   const rows=(table,names)=>JSON.parse(t[table]).map(values=>Object.fromEntries(names.map((name,i)=>[name,values[i]])));
   const columns=(table,names)=>rows(table,names.split(" "));
-  if(profile==="overview") return {...data,birthdayCalendar:JSON.parse(t.birthdays || "[]"),overview:{term:JSON.parse(t.terms)[0]?.[1],
+  if(profile==="overview") return {...data,birthdayFlights:t.flights ? columns("flights","flightId label squadronId") : [], birthdaySquadrons:t.squadrons ? columns("squadrons","squadronId label") : [],birthdayCalendar:JSON.parse(t.birthdays || "[]"),overview:{term:JSON.parse(t.terms)[0]?.[1],
     activeCadets:t.activeCadets,activeEvents:t.activeEvents,pending:t.pending}};
   const flights=columns("flights","flightId label squadronId");
   if(profile==="cadets" || profile==="cadet-details" || profile==="leadership"){

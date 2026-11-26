@@ -127,6 +127,7 @@ export default function Attendance({ snapshot, list, tab="attendance", onTab, re
       {edit && (edit.request ? queue.some(r => r.requestId === edit.request.requestId) : events.some(e=>e.eventId===edit.event.eventId)) && (
         <Editor
           title={edit.request ? "Review excusal" : "Correct attendance"}
+          bottomSheet={!edit.request}
           busy={busy}
           onClose={() => setEdit(null)}
           onSubmit={() =>

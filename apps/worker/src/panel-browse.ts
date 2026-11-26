@@ -56,7 +56,9 @@ export async function browsePanel(env:Env, identity:{environment:string;generati
     count('activeCadets',people,activePeople);count('activeEvents',q.events,"status='active'");
     count('pending',q.requests,"status='Submitted' AND "+activeEvents);
     table('terms',q.terms,'termId,label');
-    table('birthdays',people,"firstName,lastName,substr(dateOfBirth,6,5)",'WHERE '+activePeople+' AND dateOfBirth IS NOT NULL');
+    table('flights',q.flights,'flightId,label,squadronId');
+    table('squadrons',q.squadrons,'squadronId,label');
+    table('birthdays',people,"firstName,lastName,substr(dateOfBirth,6,5),flightId",'WHERE '+activePeople+' AND dateOfBirth IS NOT NULL');
   } else {
     table('flights',q.flights,'flightId,label,squadronId');
     table('terms',q.terms,'termId,label,sortOrder,isCurrent');

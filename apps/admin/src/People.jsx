@@ -11,7 +11,8 @@ import {
   Empty,
 
 } from "./components";
-import { RosterTag, LeadershipChart, textOrder, alphabetic } from "./RosterViews";
+import { cellStyle, flightColors, yearColors } from "./roster-colors";
+import { LeadershipChart, textOrder, alphabetic } from "./RosterViews";
 import { api,name, label, years, statuses, profileFields } from "./api";
 import { compareCadetsForDisplay, compareLeadershipForDisplay } from "../../../packages/domain/src/cadet-display-order";
 export default function People({
@@ -175,7 +176,7 @@ export default function People({
           {field && <Field label={"Filter by "+label(field)} value={match} onChange={e=>setMatch(e.target.value)}/>}</div></details>}
       </section>
       {extra && extended?.binding!==binding && <p role="status">{fieldError || "Loading directory fields…"} {fieldError && <button onClick={()=>setRetry(retry+1)}>Retry</button>}</p>}
-      <p className="result-count">{rows.length} {leadership?"contacts":"cadets"}</p>
+      {(query || flight || year || match || !["current","all"].includes(status)) && <p className="result-count">{rows.length} {leadership?"contacts":"cadets"}</p>}
       {leadership && view==="Organization" ? <LeadershipChart records={rows} roster={s}/> : <Table
         headers={
           leadership
@@ -207,9 +208,9 @@ export default function People({
               </>
             ) : (
               <>
-                <td><RosterTag kind="year" value={p.asYear}/></td>
-                <td>
-                  <RosterTag value={flightOf(p)?.label} squadron={squadronOf(flightOf(p))}/>
+                <td className="formation" style={cellStyle(yearColors(p.asYear))}>{p.asYear || "—"}</td>
+                <td className="formation" style={cellStyle(flightColors(flightOf(p)?.label,squadronOf(flightOf(p))))}>
+                  {flightOf(p)?.label || "Unassigned"}
                 </td>
                 <td>
                   <Status>{p.flightPathStatus}</Status>

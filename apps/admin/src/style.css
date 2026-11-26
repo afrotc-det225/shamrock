@@ -782,39 +782,6 @@ blockquote {
     transition: background-color 0.13s ease;
   }
 }
-/* Desktop inspectors share the page width; they never hide the schedule's status or actions. */
-@media (min-width: 1200px) {
-  .app:has(dialog[open]) main {
-    margin-right: 430px;
-    padding: 30px 24px;
-  }
-  .app:has(dialog[open]) .toolbar {
-    gap: 10px;
-    flex-wrap: wrap;
-  }
-  .app:has(dialog[open]) .toolbar .search {
-    flex-basis: 100%;
-    max-width: none;
-  }
-  .drawer {
-    top: 64px;
-    height: calc(100vh - 64px);
-    max-height: calc(100vh - 64px);
-  }
-  .drawer::backdrop {
-    background: transparent;
-  }
-  .app:has(dialog[open]) .heading {
-    gap: 12px;
-  }
-  .app:has(dialog[open]) th,
-  .app:has(dialog[open]) td {
-    padding: 12px;
-  }
-  .app:has(dialog[open]) .heading p {
-    font-size: 13px;
-  }
-}
 .search {
   overflow: hidden;
 }
@@ -830,25 +797,6 @@ blockquote {
 }
 .search input:focus-visible {
   outline: 0;
-}
-@media (min-width: 1380px) {
-  .app:has(dialog[open]) .toolbar {
-    flex-wrap: nowrap;
-  }
-  .app:has(dialog[open]) .toolbar .search {
-    flex-basis: auto;
-    min-width: 180px;
-  }
-  .app:has(dialog[open]) .toolbar .field {
-    min-width: 155px;
-  }
-  .app:has(dialog[open]) .toolbar .field > span {
-    position: absolute;
-    width: 1px;
-    height: 1px;
-    overflow: hidden;
-    clip: rect(0, 0, 0, 0);
-  }
 }
 /* Notre Dame AFROTC-inspired palette and open-license, locally served type. */
 :root {
@@ -1227,26 +1175,6 @@ tr:hover td {
 .event-type.llab::before {
   background: #426a9c;
 }
-.attendance-rate {
-  display: inline-flex;
-  flex-direction: column;
-  gap: 5px;
-  font-variant-numeric: tabular-nums;
-  min-width: 55px;
-}
-.rate-track {
-  display: block;
-  height: 3px;
-  width: 55px;
-  background: #e1e7ee;
-  border-radius: 2px;
-  overflow: hidden;
-}
-.rate-track > span {
-  height: 100%;
-  display: block;
-  background: #52749c;
-}
 .review-needed {
   color: #8d352e;
   font-weight: 600;
@@ -1287,9 +1215,6 @@ tr:hover td {
   .success,
   .error {
     animation: message-enter 160ms ease-out;
-  }
-  .rate-track > span {
-    transition: width 220ms ease;
   }
 }
 @keyframes inspector-enter {
@@ -1354,7 +1279,7 @@ tr:hover td {
 html {
   scrollbar-gutter: stable;
 }
-html:has(dialog[open]) {
+html:has(dialog:modal) {
   overflow: hidden;
 }
 .table-scroll th {
@@ -1403,6 +1328,7 @@ html:has(dialog[open]) {
   margin-bottom: 12px;
 }
 .drawer {
+  z-index: 60;
   top: 0;
   height: 100dvh;
   max-height: 100dvh;
@@ -1468,32 +1394,16 @@ html:has(dialog[open]) {
   display:inline-block; padding:.23rem .55rem; border-radius:4px;
   background:#edf0f3; color:#344657; font-size:.8rem; font-weight:650; white-space:nowrap;
 }
-.roster-tag.blue {background:#e1f2fb;color:#17465c}
-.roster-tag.blue[data-value="bravo"] {background:#a4d2ed;color:#13374f}
-.roster-tag.blue[data-value="charlie"] {background:#285979;color:#ffffff}
-.roster-tag.gold {background:#fff0c7;color:#553c0a}
-.roster-tag.gold[data-value="echo"] {background:#edc274;color:#493311}
-.roster-tag.gold[data-value="foxtrot"] {background:#795620;color:#ffffff}
-/* AS years use an independent violet scale, with senior cohorts in deeper shades. */
-.roster-tag.year {background:#efedf7;color:#413959;border-inline-start:3px solid currentColor}
-.roster-tag.year[data-value="as150"] {background:#e4dff2;color:#483e60}
-.roster-tag.year[data-value="as200"],.roster-tag.year[data-value="as250"] {background:#d6cdeb;color:#423359}
-.roster-tag.year[data-value="as300"],.roster-tag.year[data-value="as500"] {background:#665782;color:#ffffff}
-.roster-tag.year[data-value="as400"],.roster-tag.year[data-value="as700"],
-.roster-tag.year[data-value="as800"],.roster-tag.year[data-value="as900"] {background:#493b61;color:#ffffff}
-.roster-tag.year[data-value="af civ"] {background:#edf0f3;color:#344657}
 .field-picker,.result-count,.attendance-matrix caption {font-size:.85rem;color:var(--muted)}
 .field-picker {margin:.65rem 0}.field-picker summary {cursor:pointer;color:var(--green);font-weight:650}.field-picker .toolbar {margin-top:.65rem}
 .result-count {margin:.75rem 0}
 .matrix-scroll {overflow:auto;max-height:70vh;border:1px solid var(--border);border-radius:6px;isolation:isolate}
 .attendance-matrix {border-spacing:0;border-collapse:separate;width:max-content;min-width:100%;font-variant-numeric:tabular-nums}
-.attendance-matrix caption {text-align:left;padding:.65rem;position:sticky;left:0;width:fit-content;max-width:85vw}
 .attendance-matrix thead th {position:sticky;top:0;z-index:2;padding:.5rem .45rem;background:#244f40;color:white;white-space:normal;max-width:6.5rem;text-transform:none;letter-spacing:normal}
 .attendance-matrix th:first-child {position:sticky;left:0;text-align:left;min-width:9rem}
 .attendance-matrix thead th:first-child {z-index:3}
 .attendance-matrix tbody th {z-index:1;background:white;text-transform:none;font-size:.82rem;letter-spacing:normal;border-top:1px solid var(--border);padding:.25rem .5rem}
 .attendance-matrix td {text-align:center;padding:.18rem .35rem}
-.attendance-matrix .attendance-rate {min-width:3rem}
 .attendance-matrix .mark-cell {padding:0;border:1px solid white;border-width:1px 1px 0 0;min-width:3.5rem;background:#f8f9fa;font-weight:700}
 .mark-cell button,.mark-cell>span {display:block;box-sizing:border-box;width:100%;min-height:1.85rem;padding:.23rem;border:0;border-radius:0;background:transparent;color:inherit;font:inherit;text-align:center}
 .mark-cell button:hover,.mark-cell button:focus-visible {outline:2px solid currentColor;outline-offset:-3px;background:transparent}
@@ -1524,23 +1434,57 @@ html:has(dialog[open]) {
 .attendance-summary dl {display:grid;grid-template-columns:repeat(3,1fr);gap:.5rem;margin:0}
 .attendance-summary dt,.birthdays p {color:#52655f;font-size:.85rem}
 .attendance-summary dd {font-size:clamp(1.2rem,2.3vw,2rem);font-weight:700;margin:.25rem 0}
-.bars,.birthdays ul,.org-branches ul {list-style:none;padding:0;margin:0}
-.bars li {display:grid;grid-template-columns:minmax(4.3rem,auto) 1fr 3.3rem;align-items:center;gap:.6rem;margin:.55rem 0;font-size:.83rem}
-.bars strong {text-align:right;font-variant-numeric:tabular-nums}
-.bar-track {background:#e9efec;height:.55rem;border-radius:2px;overflow:hidden}
-.bar-track i {display:block;background:#427762;height:100%}
+.birthdays ul,.org-branches ul {list-style:none;padding:0;margin:0}
 .birthdays li,.org-layout dl div {display:flex;justify-content:space-between;gap:.5rem;font-size:.86rem;padding:.45rem 0;border-bottom:1px solid var(--border)}
-.trend .insight {border:0;padding:0}.trend .insight h3 {font-weight:400;font-size:.85rem}
 .org-layout {display:grid;gap:.75rem}.org-layout h3 {margin-bottom:.65rem}
 .org-cards {display:grid;grid-template-columns:repeat(auto-fit,minmax(12rem,1fr));gap:.4rem}
 .org-card {display:flex;flex-direction:column;gap:.23rem;padding:.55rem .75rem;background:#f4f7f6;border-left:3px solid #738d83;font-size:.85rem}
 .org-card span {color:#485c53}.org-branches {margin:0}.org-branches li {border-left:2px solid #bdcbc5;margin:0 0 0 .75rem;padding:.65rem 0 0 .65rem}
 .org-layout dt {font-weight:650}.org-layout dd {margin:0}
 @media(max-width:720px){.insights-grid,.org-branches {grid-template-columns:minmax(0,1fr)}.org-cards{grid-template-columns:1fr}.matrix-scroll{max-width:100%;max-height:65vh}.attendance-summary dt{min-height:2.2em}}
-.plot-axis {display:flex;justify-content:space-between;margin:0 4rem 0 4.9rem;font-size:.72rem;color:var(--muted)}
-.dot-track {height:2px;background:#c3d3ca;position:relative;margin-inline:4px}
-.dot-track i {position:absolute;top:50%;width:.56rem;height:.56rem;border-radius:50%;background:#28644d;transform:translate(-50%,-50%)}
-.coverage,.trend-chart figcaption {color:var(--muted);font-size:.78rem;margin:.8rem 0 0}
-.trend-chart {margin:.6rem 0}.trend-chart svg {height:5.8rem;width:100%}.trend-chart figcaption {margin:0}
-.term-values {list-style:none;display:flex;justify-content:space-between;gap:.5rem;padding:0;font-size:.8rem}
-.term-values strong {display:block;font-variant-numeric:tabular-nums}
+.coverage {color:var(--muted);font-size:.78rem;margin:.8rem 0 0}
+
+.attendance-matrix {table-layout:fixed;min-width:0}
+.attendance-matrix thead th {max-width:none;line-height:1.22;padding:.42rem .18rem;font-size:.76rem}
+.event-line {display:block;min-height:1.22em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-align:center}
+.attendance-matrix .matrix-percent,.formation {font-weight:650;text-align:center;font-variant-numeric:tabular-nums}
+.drawer:not(:modal) {box-shadow:-5px 0 20px #182b4524}
+.chart-panel {min-width:0;overflow:hidden}
+.chart-panel h3,.birthdays h3 {color:#22344f;letter-spacing:-.018em}
+.chart-scroll {overflow-x:auto}
+.chart-scroll svg {width:100%;display:block}
+.chart-scroll text {fill:#546274;font:12px system-ui,sans-serif}
+.chart-scroll .plot-value {fill:#1d3048;font-weight:650;font-size:11px}
+.grid-rule {stroke:#dbe1e8;stroke-width:1}
+.chart-legend,.roster-bars,.birthday-week {list-style:none;padding:0}
+.chart-legend {display:flex;flex-wrap:wrap;gap:.8rem;justify-content:center;margin:.35rem 0}
+.chart-legend li {display:flex;align-items:center;gap:.3rem;font-size:.8rem}
+.chart-legend i {width:.65rem;height:.65rem;border-radius:2px}
+.chart-values {font-size:.76rem;margin-top:.6rem;color:#4a596b}
+.chart-values summary {cursor:pointer;width:fit-content}
+.chart-values table {width:100%}
+.chart-panel header {align-items:baseline;flex-wrap:wrap}
+.chart-panel header select,.chart-panel header button {min-height:1.9rem;font-size:.8rem;width:auto;padding:.28rem .55rem}
+.insights-grid>.attendance-summary {grid-column:auto;border-top:1px solid var(--border)}
+.roster-bars li {display:grid;grid-template-columns:4.5rem 1fr 2rem;align-items:center;gap:.65rem;font-size:.82rem;margin:.55rem 0}
+.roster-bars i {display:block;height:.9rem;border-radius:0 3px 3px 0}
+.roster-bars li>div {border-left:1px solid #b7c2d0;background:#f4f6f8}
+.birthday-month {font-weight:650;color:#23334b}
+.birthday-week {display:grid;grid-template-columns:repeat(7,1fr);gap:2px;margin:.6rem 0}
+.birthday-week li {display:grid;justify-items:center;gap:.2rem;background:#f1f4f7;border:0;padding:.5rem .1rem}
+.birthday-week small {font-size:.7rem;color:#4f5e71}
+.birthday-week b {font-size:1.17rem}
+.birthday-week [aria-current=date] {box-shadow:inset 0 -3px #32587c}
+.birthday-dots {height:5px;display:flex;gap:2px}
+.birthday-dots i {width:5px;height:5px;border-radius:100%}
+.birthdays .birthday-agenda li {display:flex;align-items:center;justify-content:flex-start;border-left:3px solid;padding:.4rem .6rem;margin-top:.35rem}
+.birthday-agenda time {font-size:.76rem;color:#526173}
+.birthday-agenda span {margin-left:auto;padding:.18rem .4rem;font-size:.74rem}
+
+@media(max-width:640px) {
+  .drawer.cell-editor {inset:auto 0 0;margin:0;width:100%;height:48dvh;max-height:48dvh;border:1px solid var(--border);border-radius:12px 12px 0 0;overflow-y:auto}
+  .cell-editor>header {padding:.6rem 1rem}
+  .cell-editor>header h2 {font-size:1.2rem}
+  .cell-editor .fields {padding:.5rem 0;margin:0 1rem}
+  .cell-editor footer {padding:.5rem 1rem}
+}

@@ -1,6 +1,5 @@
 import React, { useRef } from "react";
-import { AttendanceRate } from "./components";
-import { RosterTag } from "./RosterViews";
+import { cellStyle, flightColors, rateStyle } from "./roster-colors";
 
 const meanings = {
   P: "Present",
@@ -28,6 +27,28 @@ export function AttendanceKey() {
       </dl>
     </details>
   );
+}
+
+function eventHeading(event) {
+  const label = (event.columnLabel || event.label).trim();
+  if (
+    event.trainingWeek != null &&
+    /^(mando|secondary|llab)$/.test(event.eventType) &&
+    /TW[ -]?\d/i.test(label)
+  )
+    return [
+      "TW-" + event.trainingWeek,
+      { llab: "LLAB", secondary: "Secondary", mando: "Mando" }[event.eventType],
+    ];
+  const words = label.split(/\s+/);
+  let cut = 1;
+  for (let i = 2; i < words.length; i++)
+    if (
+      Math.abs(words.slice(0, i).join(" ").length - label.length / 2) <
+      Math.abs(words.slice(0, cut).join(" ").length - label.length / 2)
+    )
+      cut = i;
+  return [words.slice(0, cut).join(" "), words.slice(cut).join(" ")];
 }
 
 function moveFocus(e) {
@@ -70,12 +91,20 @@ export function AttendanceMatrix({
       tabIndex={0}
       aria-label="Scrollable attendance matrix"
     >
-      <table className="attendance-matrix" onKeyDown={moveFocus}>
-        <caption>
-          {rows.length} cadets · {events.length} events
-          {!readOnly &&
-            " · Select an eligible attendance cell to review or change it."}
-        </caption>
+      <table
+        className="attendance-matrix"
+        aria-label="Attendance"
+        style={{ width: 356 + 68 * events.length }}
+        onKeyDown={moveFocus}
+      >
+        <colgroup>
+          <col style={{ width: 152 }} />
+          <col style={{ width: 74 }} />
+          <col span="2" style={{ width: 65 }} />
+          {events.length > 0 && (
+            <col span={events.length} style={{ width: 68 }} />
+          )}
+        </colgroup>
         <thead>
           <tr>
             {["Cadet", "Flight", "Overall", "LLAB"].map((h) => (
@@ -85,7 +114,11 @@ export function AttendanceMatrix({
             ))}
             {events.map((e) => (
               <th scope="col" key={e.eventId} title={e.label}>
-                {e.columnLabel || e.label}
+                {eventHeading(e).map((line, i) => (
+                  <span className="event-line" key={i}>
+                    {line}
+                  </span>
+                ))}
               </th>
             ))}
           </tr>
@@ -98,15 +131,20 @@ export function AttendanceMatrix({
                 <th scope="row">
                   {row.lastName}, {row.firstName}
                 </th>
-                <td>
-                  <RosterTag value={row.flight} squadron={row.squadron} />
+                <td
+                  className="formation"
+                  style={cellStyle(flightColors(row.flight, row.squadron))}
+                >
+                  {row.flight || "—"}
                 </td>
-                <td>
-                  <AttendanceRate value={row.overall} />
-                </td>
-                <td>
-                  <AttendanceRate value={row.llab} />
-                </td>
+                {[row.overall, row.llab].map((r, i) => {
+                  const v = r?.noCountedAttendance ? null : r?.percentage;
+                  return (
+                    <td key={i} className="matrix-percent" style={rateStyle(v)}>
+                      {Number.isFinite(v) ? (100 * v).toFixed(1) + "%" : "—"}
+                    </td>
+                  );
+                })}
                 {events.map((e) => {
                   const c = byEvent.get(e.eventId),
                     editable =

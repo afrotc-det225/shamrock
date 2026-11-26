@@ -1,4 +1,5 @@
 import React from "react";
+import { cellStyle, flightColors } from "./roster-colors";
 import { name } from "./api";
 
 export const textOrder = (a, b) =>
@@ -11,19 +12,8 @@ export const alphabetic = (a, b) =>
   textOrder(a.firstName, b.firstName) ||
   textOrder(a.personId, b.personId);
 
-export function RosterTag({ value, kind, squadron }) {
-  const label = value || "Unassigned";
-  const family =
-    kind === "year"
-      ? "year"
-      : ["blue", "gold"].includes(squadron?.toLowerCase())
-        ? squadron.toLowerCase()
-        : "neutral";
-  return (
-    <span className={"roster-tag " + family} data-value={label.toLowerCase()}>
-      {label}
-    </span>
-  );
+export function RosterTag({ value, squadron }) {
+  return <span className="roster-tag" style={cellStyle(flightColors(value,squadron))}>{value || "Unassigned"}</span>;
 }
 
 // Squadron membership comes from the current flight catalog. Explicit supervisory links

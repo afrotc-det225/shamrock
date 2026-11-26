@@ -3,13 +3,8 @@ import { api } from "./api";
 import { Select } from "./components";
 import { toEastern } from "./time";
 
-const percent = (n) =>
-  n == null
-    ? "—"
-    : new Intl.NumberFormat("en-US", {
-        style: "percent",
-        maximumFractionDigits: 1,
-      }).format(n);
+import { WingCharts, percent } from "./WingCharts";
+import { flightColors, cellStyle } from "./roster-colors";
 const dayMs = 86400000;
 const dayLabel = (date, weekday = false) =>
   new Intl.DateTimeFormat("en-US", {
@@ -18,20 +13,24 @@ const dayLabel = (date, weekday = false) =>
     day: "numeric",
     ...(weekday ? { weekday: "short" } : {}),
   }).format(date);
-function Birthdays({ calendar, now }) {
+function Birthdays({ calendar, now, flights, squadrons }) {
   const [week, setWeek] = useState(0);
   const today = new Date(toEastern(now).slice(0, 10) + "T00:00Z");
   const first = new Date(+today + (week * 7 - today.getUTCDay()) * dayMs),
     end = new Date(+first + 6 * dayMs);
   const roster = calendar
-    .flatMap(([given, last, md]) => {
+    .flatMap(([given, last, md, flightId]) => {
       if (!/^\d\d-\d\d$/.test(md)) return [];
       return [...new Set([first.getUTCFullYear(), end.getUTCFullYear()])]
         .map(
           (year) => new Date(Date.UTC(year, +md.slice(0, 2) - 1, +md.slice(3))),
         )
         .filter((d) => d >= first && d <= end)
-        .map((d) => ({ date: d, who: [given, last].join(" ") }));
+        .map((d) => ({
+          date: d,
+          who: [given, last].join(" "),
+          flight: flights.find((f) => f.flightId === flightId),
+        }));
     })
     .sort((a, b) => a.date - b.date || a.who.localeCompare(b.who));
   return (
@@ -49,195 +48,64 @@ function Birthdays({ calendar, now }) {
           ]}
         />
       </header>
-      <p>
-        {dayLabel(first)} – {dayLabel(end)}
-      </p>
-      {roster.length ? (
-        <ul>
-          {roster.map((r, i) => (
-            <li key={i}>
-              <strong>{r.who}</strong>
-              <time>{dayLabel(r.date, true)}</time>
+      <div className="birthday-month">
+        {new Intl.DateTimeFormat("en-US", {
+          month: "short",
+          day: "numeric",
+          year: "numeric",
+          timeZone: "UTC",
+        }).formatRange(first, end)}
+      </div>
+      <ol className="birthday-week">
+        {Array.from({ length: 7 }, (_, i) => {
+          const date = new Date(+first + i * dayMs),
+            day = roster.filter((r) => +r.date === +date);
+          return (
+            <li key={i} aria-current={+date === +today ? "date" : undefined}>
+              <small>
+                {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"][i]}
+              </small>
+              <b>{date.getUTCDate()}</b>
+              <div className="birthday-dots">
+                {day.map((r, j) => (
+                  <i
+                    key={j}
+                    style={{
+                      background: flightColors(
+                        r.flight?.label,
+                        squadrons.find(
+                          (s) => s.squadronId === r.flight?.squadronId,
+                        )?.label,
+                      )[2],
+                    }}
+                  />
+                ))}
+              </div>
             </li>
-          ))}
+          );
+        })}
+      </ol>
+      {roster.length ? (
+        <ul className="birthday-agenda">
+          {roster.map((r, i) => {
+            const colors = flightColors(
+              r.flight?.label,
+              squadrons.find((s) => s.squadronId === r.flight?.squadronId)
+                ?.label,
+            );
+            return (
+              <li key={i} style={{ borderLeftColor: colors[2] }}>
+                <time>{dayLabel(r.date, true)}</time>
+                <strong>{r.who}</strong>
+                {r.flight && (
+                  <span style={cellStyle(colors)}>{r.flight.label} Flight</span>
+                )}
+              </li>
+            );
+          })}
         </ul>
       ) : (
         <p>No birthdays this week.</p>
-      )}
-    </section>
-  );
-}
-function Bars({ title, items, counts = false }) {
-  const maximum = counts ? Math.max(1, ...items.map((i) => i.value || 0)) : 1;
-  const observed = items.map((i) => i.value).filter(Number.isFinite);
-  const floor = observed.length
-    ? Math.min(0.9, Math.floor(Math.min(...observed) * 10) / 10)
-    : 0;
-  return (
-    <section className="insight">
-      <h3>{title}</h3>
-      {!counts && (
-        <div className="plot-axis" aria-hidden="true">
-          <span>{percent(floor)}</span>
-          <span>100%</span>
-        </div>
-      )}
-      <ul className="bars">
-        {items.map((i) => (
-          <li key={i.label}>
-            <span>{i.label}</span>
-            {counts ? (
-              <span aria-hidden="true" className="bar-track">
-                <i style={{ width: (100 * (i.value || 0)) / maximum + "%" }} />
-              </span>
-            ) : (
-              <span aria-hidden="true" className="dot-track">
-                {i.value != null && (
-                  <i
-                    style={{
-                      left: (100 * (i.value - floor)) / (1 - floor) + "%",
-                    }}
-                  />
-                )}
-              </span>
-            )}
-            <strong>{counts ? i.value : percent(i.value)}</strong>
-          </li>
-        ))}
-      </ul>
-    </section>
-  );
-}
-const average = (values) =>
-  values.length ? values.reduce((a, b) => a + b, 0) / values.length : null;
-function SemesterTrend({ dashboard, nowTerm }) {
-  const [show, setShow] = useState(false),
-    [terms, setTerms] = useState(null),
-    [error, setError] = useState(""),
-    [metric, setMetric] = useState("overall");
-  useEffect(() => {
-    if (!show) return;
-    const controller = new AbortController(),
-      opts = { signal: controller.signal };
-    (async () => {
-      const { semesters } = await api("/history/list", undefined, opts);
-      const normalize = (v) =>
-        String(v)
-          .toLowerCase()
-          .split(/[^a-z0-9]+/)
-          .sort()
-          .join(" ");
-      const series = [];
-      for (const item of semesters || []) {
-        if (normalize(item.label) === normalize(nowTerm)) continue;
-        const file = await api(
-          "/history/report",
-          { version: item.version },
-          opts,
-        );
-        series.push({
-          label: item.label,
-          overall: average(
-            file.rows.map((r) => r.overall).filter(Number.isFinite),
-          ),
-          llab: average(file.rows.map((r) => r.llab).filter(Number.isFinite)),
-        });
-      }
-      if (!controller.signal.aborted) setTerms(series);
-    })().catch((e) => {
-      if (!controller.signal.aborted) setError(e.message);
-    });
-    return () => controller.abort();
-  }, [show, nowTerm]);
-  const series = [
-    ...(terms || []),
-    {
-      label: nowTerm || "Current",
-      overall: dashboard.averageOverall,
-      llab: dashboard.averageLlab,
-    },
-  ];
-  const values = series.map((i) => i[metric]).filter(Number.isFinite);
-  const floor = Math.min(0.9, ...values.map((v) => Math.floor(v * 10) / 10));
-  const coords = series.map((t, i) => ({
-    x: 8 + (84 * i) / Math.max(series.length - 1, 1),
-    y: 8 + (68 * (1 - t[metric])) / (1 - floor),
-  }));
-  return (
-    <section className="insight trend">
-      <h3>Attendance by semester</h3>
-      {!show ? (
-        <button
-          onClick={() => {
-            setError("");
-            setShow(true);
-          }}
-        >
-          Compare semesters
-        </button>
-      ) : error ? (
-        <p role="alert">
-          {error} <button onClick={() => setShow(false)}>Close</button>
-        </p>
-      ) : terms ? (
-        <>
-          <Select
-            label="Attendance measure"
-            value={metric}
-            onChange={setMetric}
-            options={[
-              { value: "overall", label: "Overall" },
-              { value: "llab", label: "LLAB" },
-            ]}
-          />
-          <figure className="trend-chart">
-            <svg
-              viewBox="0 0 100 84"
-              preserveAspectRatio="none"
-              aria-hidden="true"
-            >
-              {[8, 42, 76].map((y) => (
-                <line
-                  key={y}
-                  x1="4"
-                  y1={y}
-                  x2="96"
-                  y2={y}
-                  stroke="#d7e2dc"
-                  vectorEffect="non-scaling-stroke"
-                />
-              ))}
-              {coords.map(
-                (p, i) =>
-                  i > 0 &&
-                  series[i][metric] != null &&
-                  series[i - 1][metric] != null && (
-                    <line
-                      key={i}
-                      x1={coords[i - 1].x}
-                      y1={coords[i - 1].y}
-                      x2={p.x}
-                      y2={p.y}
-                      stroke="#28644d"
-                      strokeWidth="3"
-                      vectorEffect="non-scaling-stroke"
-                    />
-                  ),
-              )}
-            </svg>
-            <figcaption>Scale {percent(floor)}–100%</figcaption>
-          </figure>
-          <ul className="term-values">
-            {series.map((t) => (
-              <li key={t.label}>
-                {t.label}
-                <strong>{percent(t[metric])}</strong>
-              </li>
-            ))}
-          </ul>
-        </>
-      ) : (
-        <p role="status">Loading semester averages…</p>
       )}
     </section>
   );
@@ -247,6 +115,8 @@ export default function OverviewInsights({
   snapshot,
   reporting,
   birthdayCalendar,
+  birthdayFlights,
+  birthdaySquadrons,
   reportingTime,
   captureKey,
   manifest,
@@ -281,18 +151,30 @@ export default function OverviewInsights({
         if (!controller.signal.aborted) setError(e.message);
       });
     return () => controller.abort();
-  }, [reporting, !!overview, captureKey, viewAsRevision, revision, retry, requestedCapture, context]);
+  }, [
+    reporting,
+    !!overview,
+    captureKey,
+    viewAsRevision,
+    revision,
+    retry,
+    requestedCapture,
+    context,
+  ]);
   const d =
     reporting?.dashboard ||
     (loaded && loaded.context === context ? loaded.dashboard : null);
   const term =
     overview?.term || snapshot?.terms.find((t) => t.isCurrent)?.label;
+  const flights = birthdayFlights || snapshot?.flights || [],
+    squadrons = birthdaySquadrons || snapshot?.squadrons || [];
   const calendar =
     birthdayCalendar ||
     reporting?.dashboard.birthdays.map((b) => [
       b.firstName,
       b.lastName,
       b.dateOfBirth.slice(5),
+      snapshot?.people.find((p) => p.personId === b.personId)?.flightId,
     ]) ||
     [];
   return (
@@ -321,32 +203,17 @@ export default function OverviewInsights({
                   " with no counted attendance"}
             </p>
           </section>
-          <Bars
-            title="Overall attendance by flight"
-            items={d.attendanceByFlight.map((f) => ({
-              label: f.flight,
-              value: f.percentage,
-            }))}
-          />
-          <Bars
-            title="Cadets by AS year"
-            counts
-            items={d.rosterByYear
-              .filter((r) => r.cadets)
-              .map((r) => ({ label: r.asYear, value: r.cadets }))}
-          />
-          <Bars
-            title="Overall attendance by AS year"
-            items={d.attendanceByYear
-              .filter((r) => r.terms[0]?.percentage != null)
-              .map((r) => ({ label: r.asYear, value: r.terms[0].percentage }))}
-          />
         </>
       ) : (
         <section className="insight">
           <h3>Wing attendance</h3>
           {requestedCapture !== context ? (
-            <button onClick={() => { setError(""); setRequestedCapture(context); }}>
+            <button
+              onClick={() => {
+                setError("");
+                setRequestedCapture(context);
+              }}
+            >
               Show attendance charts
             </button>
           ) : error ? (
@@ -358,8 +225,22 @@ export default function OverviewInsights({
           )}
         </section>
       )}
-      <Birthdays calendar={calendar} now={reportingTime || Date.now()} />
-      {d && meta?.hosted && <SemesterTrend dashboard={d} nowTerm={term} />}
+      <Birthdays
+        flights={flights}
+        squadrons={squadrons}
+        calendar={calendar}
+        now={reportingTime || Date.now()}
+      />
+      {d && (
+        <WingCharts
+          key={context}
+          dashboard={d}
+          term={term}
+          flights={flights}
+          squadrons={squadrons}
+          hosted={meta?.hosted}
+        />
+      )}
     </div>
   );
 }

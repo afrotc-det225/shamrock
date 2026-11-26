@@ -1,4 +1,5 @@
-import React, { useEffect, useRef, useContext, createContext } from "react";
+import React, { useEffect, useRef, useId, useContext, createContext } from "react";
+import { createPortal } from "react-dom";
 export const EditorError = createContext("");
 export const EditorSuspended = createContext(false);
 import { X, Search, Check, Clock3, Minus, CircleAlert } from "lucide-react";
@@ -99,49 +100,36 @@ export function Status({ children }) {
     </span>
   );
 }
-export function AttendanceRate({ value }) {
-  if (!value || value.noCountedAttendance)
-    return <span className="muted">—</span>;
-  const percent = Math.max(
-    0,
-    Math.min(100, Math.round(value.percentage * 1000)/10),
-  );
-  return (
-    <span className="attendance-rate">
-      <span>{percent}%</span>
-      <span className="rate-track" aria-hidden="true">
-        <span style={{ width: `${percent}%` }} />
-      </span>
-    </span>
-  );
-}
-export function Drawer({ title, children, onClose }) {
-  const ref = useRef(), suspended = useContext(EditorSuspended);
-  useEffect(() => {
-    // Close the native top layer during an outage without discarding form state.
-    // Hiding an ancestor alone leaves showModal() siblings inert.
-    if (suspended) ref.current.close();
-    else if (!ref.current.open) ref.current.showModal();
-    return () => ref.current?.close();
-  }, [suspended]);
-  return (
-    <dialog
-      ref={ref}
-      className="drawer"
-      onCancel={(e) => {
-        e.preventDefault();
-        onClose();
-      }}
-    >
-      <header>
-        <h2>{title}</h2>
-        <button aria-label="Close editor" onClick={onClose}>
-          <X size={21} />
-        </button>
-      </header>
-      {children}
-    </dialog>
-  );
+export function Drawer({ title, children, onClose, modal=false, bottomSheet=false }) {
+  const ref=useRef(null), close=useRef(onClose), suspended=useContext(EditorSuspended);
+  close.current=onClose;
+  const titleId=useId();
+  useEffect(()=>{
+    if(suspended)return;
+    const el=ref.current, mobile=matchMedia("(max-width: 640px)");
+    const opener=document.activeElement;
+    function open() {
+      if(el.open)el.close();
+      if(modal || (mobile.matches && !bottomSheet))el.showModal();
+      else el.show();
+    }
+    function escape(e) {
+      if (e.key !== "Escape" || document.querySelector("dialog:modal")) return;
+      const openDrawers = document.querySelectorAll("dialog[open]");
+      if (openDrawers[openDrawers.length-1]===el) {
+        e.preventDefault();close.current();
+      }
+    }
+    open(); mobile.addEventListener("change",open); document.addEventListener("keydown",escape);
+    return ()=>{mobile.removeEventListener("change",open);document.removeEventListener("keydown",escape);
+      const inside=el.contains(document.activeElement);
+      el.close(); if(inside && opener?.isConnected)opener.focus({preventScroll:true});};
+  },[modal,bottomSheet,suspended]);
+  return createPortal(<dialog ref={ref} className={bottomSheet?"drawer cell-editor":"drawer"} aria-labelledby={titleId}
+    onCancel={e=>{e.preventDefault();onClose();}}>
+    <header><h2 id={titleId}>{title}</h2><button aria-label="Close editor" onClick={onClose}><X size={21}/></button></header>
+    {children}
+  </dialog>,document.body);
 }
 export function Editor({
   title,
@@ -150,10 +138,11 @@ export function Editor({
   busy,
   children,
   note = "",
+  bottomSheet = false,
 }) {
   const error = useContext(EditorError);
   return (
-    <Drawer title={title} onClose={onClose}>
+    <Drawer title={title} onClose={onClose} bottomSheet={bottomSheet}>
       <form
         onSubmit={(e) => {
           e.preventDefault();

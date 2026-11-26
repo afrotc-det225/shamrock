@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import { rateStyle, yearColors, cellStyle } from "./roster-colors";
 import { Heading, Select, SearchBox, Table, Empty } from "./components";
 import { api } from "./api";
 import { loadHistory } from "../history-client";
@@ -55,7 +56,6 @@ export default function History() {
     {progress && <p role="status">{progress}</p>}
     {catalog?.length === 0 && <Empty>No archived reports.</Empty>}
     {report && <>
-      <p className="history-caption">{report.rows.length} cadets · Saved attendance and percentages</p>
       {(report.summary.unresolvedRows > 0 || report.summary.formulaMismatches > 0) &&
         <p className="notice">{report.summary.unresolvedRows > 0 ? `${report.summary.unresolvedRows} historical identities are not linked to the current Directory. ` : ""}
           {report.summary.formulaMismatches > 0 ? `${report.summary.formulaMismatches} saved percentages differ from their recorded formulas. ` : ""}
@@ -64,8 +64,8 @@ export default function History() {
         {rows.map(row => <tr key={row.rowId}>
           <td>{[row.firstName, row.lastName].filter(Boolean).join(" ")}
             {row.identityStatus === "unresolved" && <small className="history-unlinked">Historical record</small>}</td>
-          <td>{row.asYear}</td><td>{row.flight || "—"}</td>
-          <td>{percentage(row.overall)}</td><td>{percentage(row.llab)}</td>
+          <td style={cellStyle(yearColors(row.asYear))}>{row.asYear}</td><td>{row.flight || "—"}</td>
+          <td style={rateStyle(row.overall)}>{percentage(row.overall)}</td><td style={rateStyle(row.llab)}>{percentage(row.llab)}</td>
           {row.codes.map((code, index) => <td className="history-code" data-mark={code} key={index}>{String(code ?? "")}</td>)}
         </tr>)}
       </Table>
