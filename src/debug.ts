@@ -22,9 +22,15 @@ namespace Debug {
     sourceName: string | null;
   }
 
-  function describeSpreadsheet(id: string): SheetSummary[] {
+  interface SourceNames {
+    spreadsheets: Map<string, string | null>;
+    forms: Map<string, string | null>;
+  }
+
+  function describeSpreadsheet(id: string, names: SourceNames): SheetSummary[] {
     if (!id) return [];
     const ss = SpreadsheetApp.openById(id);
+    names.spreadsheets.set(id, ss.getName());
     return ss.getSheets().map((s) => {
       const cols = Math.max(1, s.getLastColumn());
       const headers = s.getRange(1, 1, 2, cols).getValues();
@@ -38,7 +44,7 @@ namespace Debug {
     });
   }
 
-  function describeForms(): FormSummary[] {
+  function describeForms(names: SourceNames): FormSummary[] {
     const ids = [
       Config.getScriptProperty(Config.PROPERTY_KEYS.ATTENDANCE_FORM_ID),
       Config.getScriptProperty(Config.PROPERTY_KEYS.EXCUSAL_REQUEST_FORM_ID),
@@ -47,6 +53,8 @@ namespace Debug {
 
     return ids.map((id) => {
       const f = FormApp.openById(id);
+      const title = f.getTitle();
+      names.forms.set(id, title);
       let destinationId: string | null = null;
       try {
         destinationId = (f as any).getDestinationId?.() || null;
@@ -54,32 +62,47 @@ namespace Debug {
         destinationId = null;
       }
       return {
-        title: f.getTitle(),
+        title,
         id,
         destinationId,
       };
     });
   }
 
-  function describeTriggers(): TriggerSummary[] {
+  function describeTriggers(names: SourceNames): TriggerSummary[] {
     const triggers = ScriptApp.getProjectTriggers();
     const frontendId = Config.getFrontendId();
     const backendId = Config.getBackendId();
 
-    const resolveSheetName = (id: string | null): string | null => {
+    const resolveSourceName = (id: string | null, source: GoogleAppsScript.Script.TriggerSource | null): string | null => {
       if (!id) return null;
+      // Form IDs must never be passed to SpreadsheetApp. Clock and other
+      // non-Sheets/Form sources do not need a file lookup for this diagnostic.
+      const isSpreadsheet = source === ScriptApp.TriggerSource.SPREADSHEETS;
+      const isForm = source === ScriptApp.TriggerSource.FORMS;
+      if (!isSpreadsheet && !isForm) return null;
+      const cache = isSpreadsheet ? names.spreadsheets : names.forms;
+      if (cache.has(id)) return cache.get(id)!;
+      let name: string | null = null;
       try {
-        return SpreadsheetApp.openById(id).getName();
-      } catch (err) {
-        Log.warn(`Unable to resolve sheet name for id=${id}: ${err}`);
-        return null;
+        name = isSpreadsheet ? SpreadsheetApp.openById(id).getName() : FormApp.openById(id).getTitle();
+      } catch {
+        Log.warn('Unable to resolve a trigger source name; the diagnostic will leave it blank.');
       }
+      cache.set(id, name);
+      return name;
     };
 
     return triggers.map((t) => {
+      let source: GoogleAppsScript.Script.TriggerSource | null = null;
+      try {
+        source = t.getTriggerSource();
+      } catch {
+        // An unavailable source type must not be guessed from its ID.
+      }
       let type = 'UNKNOWN';
       try {
-        type = String((t as any).getEventType?.() || t.getTriggerSource());
+        type = String((t as any).getEventType?.() ?? source ?? 'UNKNOWN');
       } catch {
         // ignore
       }
@@ -89,7 +112,9 @@ namespace Debug {
       } catch {
         sourceId = null;
       }
-      const sourceName = resolveSheetName(sourceId) || (sourceId === frontendId ? 'FRONTEND (by id match)' : sourceId === backendId ? 'BACKEND (by id match)' : null);
+      const sourceName = resolveSourceName(sourceId, source) || (source === ScriptApp.TriggerSource.SPREADSHEETS
+        ? sourceId === frontendId ? 'FRONTEND (by id match)' : sourceId === backendId ? 'BACKEND (by id match)' : null
+        : null);
       return {
         handler: t.getHandlerFunction(),
         type,
@@ -99,26 +124,26 @@ namespace Debug {
     });
   }
 
-  export function dumpShamrockStructure(): void {
+  function structureSnapshot() {
     const frontendId = Config.getFrontendId();
     const backendId = Config.getBackendId();
-    const payload = {
-      frontend: describeSpreadsheet(frontendId),
-      backend: describeSpreadsheet(backendId),
-      forms: describeForms(),
-      triggers: describeTriggers(),
+    const names: SourceNames = { spreadsheets: new Map(), forms: new Map() };
+    return {
+      frontend: describeSpreadsheet(frontendId, names),
+      backend: describeSpreadsheet(backendId, names),
+      forms: describeForms(names),
+      triggers: describeTriggers(names),
     };
+  }
+
+  export function dumpShamrockStructure(): void {
+    const payload = structureSnapshot();
     Logger.log(JSON.stringify(payload, null, 2));
   }
 
   export function dumpShamrockStructureToDrive(): void {
-    const frontendId = Config.getFrontendId();
-    const backendId = Config.getBackendId();
     const payload = {
-      frontend: describeSpreadsheet(frontendId),
-      backend: describeSpreadsheet(backendId),
-      forms: describeForms(),
-      triggers: describeTriggers(),
+      ...structureSnapshot(),
       generated_at: new Date().toISOString(),
     };
     const blob = Utilities.newBlob(JSON.stringify(payload, null, 2), 'application/json', `shamrock-structure-${Date.now()}.json`);

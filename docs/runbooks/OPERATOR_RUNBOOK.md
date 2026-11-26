@@ -86,6 +86,7 @@ Post-deploy validation checklist:
 - Submit a test excusal request and confirm it appears in Excusals Backend.
 - Change an excusal decision and confirm derived attendance updates.
 - Run a harmless menu action, such as Show menu help, and confirm Audit Backend has matching `started` and `ok` rows with the same `run_id`.
+- Structure diagnostics resolve spreadsheet and Form trigger names through their respective services, reuse names already read during the snapshot, and leave unavailable source names blank. Clock triggers require no file lookup; a Form trigger must not produce a spreadsheet-open error.
 
 ## 5. Daily Operations
 
