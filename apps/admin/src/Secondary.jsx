@@ -1,8 +1,8 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import OverviewInsights from "./OverviewInsights";
-import { ToolbarPopover } from "./ToolbarPopover";
-import { Activity, Send } from "lucide-react";
+import { Send } from "lucide-react";
 import { Heading, Table, Status, Empty } from "./components";
+import {readUsage} from "./read-usage";
 import { api } from "./api";
 import { currentExcusalRequests } from "./attendance-events.mjs";
 import { useReceipts, ReceiptStatus } from "./receipts";
@@ -77,33 +77,40 @@ export function History({ rows, retry, busy }) {
     </Table>
   );
 }
-export function System({ snapshot, history, receiptsDeferred, reportingTime, captureKey, retry, busy }) {
+function ReadUsage() {
+  const [usage,setUsage]=useState(readUsage);
+  useEffect(()=>{const timer=setInterval(()=>setUsage(readUsage()),1000);return ()=>clearInterval(timer);},[]);
+  return <section className="form-section"><h2>Database usage in this tab</h2>
+    <Table headers={["Period","API requests","Receipt requests","D1 rows read"]}>
+      {[["Last 60 seconds",usage.minute],["Since opening",usage.tab]].map(([period,c])=>
+        <tr key={period}><td>{period}</td><td>{c.requests}</td><td>{c.receipts}</td>
+        <td>{c.unknown ? `${c.rows} measured · ${c.unknown} unmeasured` : c.rows}</td></tr>)}
+    </Table></section>;
+}
+export function System({ snapshot, meta, history, receiptsDeferred, reportingTime, captureKey, retry, busy }) {
   const receipt = useReceipts({ history, receiptsDeferred, reportingTime, captureKey });
+  const [checks,setChecks]=useState(null),[checking,setChecking]=useState(false),[failed,setFailed]=useState(false);
+  const findings={PEOPLE_MISSING_PROFILES:"Cadets missing directory profiles",EVENTS_MISSING_DETAILS:"Events missing details",
+    FLIGHTS_MISSING_SQUADRON:"Flights without a squadron",EVENTS_MISSING_ROSTER:"Events without a roster"};
+  async function checkCatalog(){
+    setChecking(true);setFailed(false);setChecks(null);
+    try {setChecks(snapshot?.diagnostics ?? (await api("/system/diagnostics")).diagnostics);}
+    catch {setFailed(true);} finally {setChecking(false);}
+  }
   return (
     <>
-      <Heading title="System">
-        <ToolbarPopover icon={Activity} label="Diagnostics">
-          {snapshot.diagnostics.length ? (
-            <Table headers={["Finding", "Count"]}>
-              {snapshot.diagnostics.map((d) => (
-                <tr key={d.code}>
-                  <td>{d.code}</td>
-                  <td>{d.count}</td>
-                </tr>
-              ))}
-            </Table>
-          ) : (
-            <p>No catalog issues were reported.</p>
-          )}
-        </ToolbarPopover>
-      </Heading>
-      <div className="notice">
-        Spreadsheet and Form sync may finish after a change is saved.
-      </div>
+      <Heading title="System" />
+      {meta?.hosted && <ReadUsage />}
+      <section className="form-section">
+        <h2>Catalog checks</h2>
+        <button disabled={checking} onClick={checkCatalog}>{checking ? "Checking…" : "Check catalog"}</button>
+        {failed && <p role="alert">Catalog checks could not be loaded. Try again.</p>}
+        {checks && (checks.length ? <Table headers={["Finding","Count"]}>{checks.map(d=><tr key={d.code}><td>{findings[d.code] || d.code}</td><td>{d.count}</td></tr>)}</Table> : <p role="status">No catalog issues were reported.</p>)}
+      </section>
       <section className="form-section">
         <h2>Change history</h2>
         <ReceiptStatus receipt={receipt} />
-        {receipt.rows !== null && <History rows={receipt.rows} retry={retry} busy={busy} />}
+        {receipt.rows !== null && (receipt.rows.length ? <History rows={receipt.rows} retry={retry} busy={busy} /> : <Empty>No saved changes yet.</Empty>)}
       </section>
     </>
   );

@@ -154,6 +154,10 @@ export default {
         if (browse) state.headers.set("Server-Timing", `browse;desc="${backend.browseSource}"`);
         return secure(state);
       }
+      if (request.method === "GET" && url.pathname === "/api/system/diagnostics") {
+        const view=await backend.send("/v1/admin/panel/browse",{...backend.identity(),profile:"diagnostics"});
+        return secure(json({diagnostics:Object.entries(view.tables).filter(([,count])=>count>0).map(([code,count])=>({code,count}))}));
+      }
       if (request.method === "GET" && url.pathname === "/api/receipts") {
         const before = await backend.panelAuthority();
         if (!before.access.capabilities.fullSnapshot)

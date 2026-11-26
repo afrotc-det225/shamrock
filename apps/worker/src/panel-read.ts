@@ -128,7 +128,7 @@ export async function readPanelContext(env:Env, principal:string) {
 }
 
 /** Signed adapter route; principalId must come from the panel server's verified session, never browser JSON. */
-export async function panelSnapshotPage(env: Env, input: unknown, authorityOnly = false): Promise<PanelPage> {
+export async function panelSnapshotPage(env: Env, input: unknown, authorityOnly: boolean | "bookmark" = false): Promise<PanelPage> {
     if (!input || typeof input !== 'object' || Array.isArray(input)) fail(400, 'INVALID_PANEL_REQUEST');
     const req = input as Row;
     const selected = Object.hasOwn(req, 'sections');
@@ -147,16 +147,18 @@ export async function panelSnapshotPage(env: Env, input: unknown, authorityOnly 
     if (section === 'verify' && offset !== 0 || section !== 'manifest' && section !== 'verify' && offset > FRONTEND_SECTION_BOUNDS[section]) fail(400, 'INVALID_PANEL_REQUEST');
     const {first,access,control,revision} = await readPanelContext(env,principal);
     if (expected && (expected.operations !== revision.operations || expected.administration !== revision.administration || expected.access !== revision.access)) fail(409, 'SNAPSHOT_CHANGED');
+    const response: PanelPage = { contractVersion: PANEL_PAGE_VERSION, environment: env.ENVIRONMENT as PanelPage['environment'], generation: Number(env.GENERATION), section, revision, scope: { termId: String(control.termId), currentTermId: String(control.termId) }, access };
+    // All authority inputs came from one transactional D1 batch. There are no business rows to fence.
+    if (authorityOnly === "bookmark") return {...response, section:'verify', verified:true};
     const {cte, bind} = scopedPanelSource(principal, access.flightIds, section === "manifest" ? "counts" : "page");
     const allQueries = panelSectionQueries(), statements = authorityStatements(env, principal), dataIndex = statements.length;
     if (!authorityOnly && section === 'manifest' && selectedSections.length) statements.push(env.DB.prepare(`${cte} SELECT ${selectedSections.map(s => `(SELECT COUNT(*) ${allQueries[s].countFrom ?? allQueries[s].from}) AS ${s}`).join(',')}`).bind(...bind));
-    else if (!authorityOnly && section !== 'verify' && section !== 'manifest') {
+    else if (section !== 'verify' && section !== 'manifest') {
         const q = allQueries[section];
         statements.push(env.DB.prepare(`${cte} SELECT ${q.select} ${q.from} ORDER BY ${q.order} LIMIT ? OFFSET ?`).bind(...bind, q.limit + 1, offset));
     }
     const second = await env.DB.batch<Row>(statements);
     if (JSON.stringify(first) !== JSON.stringify(second.slice(0, dataIndex).map(r => r.results))) fail(409, 'SNAPSHOT_CHANGED');
-    const response: PanelPage = { contractVersion: PANEL_PAGE_VERSION, environment: env.ENVIRONMENT as PanelPage['environment'], generation: Number(env.GENERATION), section, revision, scope: { termId: String(control.termId), currentTermId: String(control.termId) }, access };
     if (authorityOnly || section === 'verify') return { ...response, section: 'verify', verified: true };
     if (section === 'manifest') {
         const counts = second[dataIndex]?.results[0] ?? {}, sections = selectedSections.map(section => ({ section, count: Number(counts[section]) }));
@@ -174,11 +176,11 @@ export async function panelSnapshotPage(env: Env, input: unknown, authorityOnly 
     return { ...response, offset, nextOffset: source.length > rows.length ? offset + rows.length : null, rows };
 }
 
-/** A fresh, double-fenced access/revision read without recounting business records. */
-export async function panelReadAuthority(env: Env, input: unknown): Promise<PanelPage> {
+/** A single coherent access/revision read without recounting business records. */
+export async function panelReadAuthority(env: Env, input: unknown, bookmark?:string): Promise<PanelPage> {
     if (!input || typeof input !== 'object' || Array.isArray(input)
         || Object.keys(input).sort().join(',') !== 'environment,generation,principalId') fail(400, 'INVALID_PANEL_REQUEST');
-    return panelSnapshotPage(env, { ...(input as Row), section: 'manifest', offset: 0, revision: null }, true);
+    return panelSnapshotPage(env, { ...(input as Row), section: 'manifest', offset: 0, revision: null }, bookmark ? 'bookmark' : true);
 }
 
 /** Capture exactly the authority inputs used by resolvePanelAccess, including out-of-band revocation.

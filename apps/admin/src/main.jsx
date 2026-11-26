@@ -38,7 +38,7 @@ const pages = [
   ["System", Settings],
 ];
 const profileFor = (page,tab) => ({"Cadets":"cadets","Leadership":"leadership","Attendance & excusals":tab,
-  "Semester":"semester","Overview":"overview","Events":"events","History":"access","Assistant":"access"}[page] || "full");
+  "Semester":"semester","Overview":"overview","Events":"events","History":"access","Assistant":"access","System":"access"}[page] || "full");
 function App() {
   const [attendanceTab,setAttendanceTab] = useState("attendance");
   const [page, setPage] = useState("Events"),

@@ -2,6 +2,7 @@ import { eventZone } from "./time";
 import { decodeBrowse } from "./browse";
 import { hydrateReporting } from "./reporting";
 import { loadSnapshot, loadEventsList } from "../snapshot-client";
+import {beginApiRead} from "./read-usage";
 let csrf;
 let retainedCapture;
 let retainedEvents;
@@ -15,6 +16,7 @@ export async function api(path, body, options = {}) {
   const matchingProfile = previous?.browse ? previous.browse.profile === profile : !wantsBrowse;
   const conditional = previous?.transport === "paged-v1" && matchingProfile &&
     (profile !== "events" || previous.eventsList || previous.snapshot);
+  const measured=beginApiRead(path);
   const response = await fetch(`/api${path}${path === "/state" ? `?profile=${encodeURIComponent(profile)}` : ""}`, {
     method: body === undefined ? "GET" : "POST",
     headers: {
@@ -27,6 +29,7 @@ export async function api(path, body, options = {}) {
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),
     signal: options.signal,
   });
+  measured(response);
   let data = await response.json();
   options.signal?.throwIfAborted();
   if (!response.ok) {
@@ -201,6 +204,7 @@ export const displayDate = (value, timeZone = eventZone) =>
     : "Not scheduled";
 
 export async function logout() {
+  const measured=beginApiRead(path);
   const response = await fetch("/auth/logout", {
     method: "POST",
     headers: { "x-shamrock-csrf": csrf || "" },

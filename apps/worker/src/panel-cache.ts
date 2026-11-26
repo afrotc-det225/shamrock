@@ -33,8 +33,30 @@ export async function cachedPanelRead(env: ReadEnv, url: URL, body: string, load
     if (hit) return new Response(hit.body,{headers:{'X-Shamrock-D1-Rows-Read':String(rowsRead),'Content-Type':'application/json; charset=utf-8',
       'Cache-Control':'no-store','Server-Timing':'panel;desc="edge"'}});
   } catch { return load(); }
-  const response = await load(version);
-  if (!response.ok || (await primaryVersion(env.DB)).bookmark !== version) return response;
+  // Keep exact signed request results through edge eviction. A newer primary
+  // bookmark makes older bytes unreachable even after an out-of-band revocation.
+  // Attendance and Semester already have a shared projection and correction path.
+  const input=env.WING_MATRICES ? JSON.parse(body) : {};
+  const persist=env.WING_MATRICES && !input.entryAuditId && (
+    url.pathname==='/v1/admin/panel/access' || url.pathname==='/v1/admin/history/list' || url.pathname==='/v1/admin/snapshot/page' ||
+    url.pathname==='/v1/admin/panel/browse' && !['attendance','semester','cadet-details'].includes(input.profile));
+  const key=persist ? 'signed-read-v1/'+(await cacheAddress(url.origin,'/',[
+    env.ENVIRONMENT,env.GENERATION,env.BRIDGE_KEY_ID,url.pathname,body,version])).split('/').pop() : null;
+  let saved:string|null=null;
+  if (key) {
+    try { saved=await env.WING_MATRICES!.get(key); } catch { /* Rebuild from D1. */ }
+  }
+  const response = saved===null ? await load(version) : new Response(saved,{headers:{
+    'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store','Server-Timing':'panel;desc="stored"'
+  }});
+  if (!response.ok) return response;
+  if ((await primaryVersion(env.DB)).bookmark !== version) {
+    throw new HttpError(409,'SNAPSHOT_CHANGED','Reload the current records.');
+  }
+  if (key && saved===null) {
+    try { await env.WING_MATRICES!.put(key,await response.clone().text(),{expirationTtl:86400}); }
+    catch { /* A storage limit or outage leaves the database response usable. */ }
+  }
   // Keep private records inside the named Worker cache; never cache the HTTP response publicly.
   try {
     await edge.put(address,new Response(response.clone().body,{headers:immutableCacheHeaders}));

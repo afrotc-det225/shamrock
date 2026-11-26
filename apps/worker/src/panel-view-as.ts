@@ -165,7 +165,7 @@ export async function panelBrowse(env:Env,input:unknown,wingCache?:WingTableCach
       !profiles.includes(req.profile as Profile)) throw new HttpError(400,'INVALID_PANEL_REQUEST','Invalid page.');
   const actor = {environment:env.ENVIRONMENT,generation:Number(env.GENERATION),principalId:req.principalId};
   if (!preview) return browsePanel(env,actor,req.profile as Profile,wingCache);
-  if (req.profile==='semester') return fail(403,'NOT_AUTHORIZED');
+  if (req.profile==='semester' || req.profile==='diagnostics') return fail(403,'NOT_AUTHORIZED');
   if (!id(req.entryAuditId)||!id(req.targetPersonId)) return fail(400,'INVALID_VIEW_AS_REQUEST');
   const {query,binding}=await readBinding(env,req.principalId,req.targetPersonId,req.entryAuditId);
   if(!binding.targetPrincipalId)return fail(403,'NOT_AUTHORIZED');

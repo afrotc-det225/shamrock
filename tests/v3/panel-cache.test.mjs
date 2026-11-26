@@ -26,9 +26,25 @@ test('an unchanged primary version reuses only the exact private read; writes an
   version='two';
   const revoked=()=>Promise.reject(Error('revoked'));
   await assert.rejects(read('wing',revoked),/revoked/);
-  await read('wing',async()=>{version='three';return load();});
+  await assert.rejects(read('wing',async()=>{version='three';return load();}),{code:'SNAPSHOT_CHANGED'});
   assert.equal(await (await read('wing',load)).text(),'4');
   version=null;
   assert.equal(await (await read('wing',load)).text(),'5');
   assert.equal(await (await read('wing',load)).text(),'6');
+});
+
+test('a stored access check is bound to the exact signed caller and primary bookmark',async t=>{
+  const original=Object.getOwnPropertyDescriptor(globalThis,'caches');
+  Object.defineProperty(globalThis,'caches',{configurable:true,value:{open:async()=>({match:async()=>undefined,put:async()=>{}})}});
+  t.after(()=>original?Object.defineProperty(globalThis,'caches',original):delete globalThis.caches);
+  const entries=new Map();let version='before';
+  const env={ENVIRONMENT:'staging',GENERATION:'1',BRIDGE_KEY_ID:'fixture',
+    DB:{withSession:()=>({prepare:()=>({run:async()=>({meta:{rows_read:0}})}),getBookmark:()=>version})},
+    WING_MATRICES:{get:async k=>entries.get(k)??null,put:async(k,v)=>entries.set(k,v)}};
+  const read=(actor,load)=>cachedPanelRead(env,new URL('https://example.invalid/v1/admin/panel/access'),JSON.stringify({principalId:actor}),load);
+  const denied=async()=>new Response(null,{status:403});
+  await read('allowed',async()=>new Response('allowed'));
+  assert.match((await read('allowed',denied)).headers.get('server-timing'),/stored/);
+  assert.equal((await read('other',denied)).status,403);
+  version='revoked';assert.equal((await read('allowed',denied)).status,403);
 });

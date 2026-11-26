@@ -1,4 +1,5 @@
 import {attendanceDelta} from './panel-delta.js';
+import { meterPanelReads } from './panel-read-meter.js';
 import { cachedPanelRead, wingAttendanceCache } from './panel-cache.js';
 import { acceptCatalogCommand, readOrganizationalCatalog } from './organizational-catalog.js';
 import { captureExcusalScopes, excusalDecisionPermission } from './excusal-scope.js';
@@ -470,7 +471,7 @@ async function getReceipt(env: Env, url: URL): Promise<unknown> {
   return JSON.parse(row.receipt);
 }
 
-export default {
+const worker = {
   async fetch(request: Request, env: Env): Promise<Response> {
     try {
       configuration(env);
@@ -526,7 +527,7 @@ export default {
       if(url.pathname==='/v1/admin/event-rosters/apply'&&!url.search)return json(await applyEventRoster(env,input));
       if(url.pathname==='/v1/admin/event-rosters/refresh'&&!url.search)return json(await refreshEventRoster(env,input));
       if (url.pathname === '/v1/admin/directory/review-authorize' && !url.search) return json(await authorizeDirectoryReview(env, input));
-      if (url.pathname === '/v1/admin/history/list' && !url.search) return json(await listLegacyHistory(env, input));
+      if (url.pathname === '/v1/admin/history/list' && !url.search) return await cachedPanelRead(env,url,body,async()=>json(await listLegacyHistory(env,input)));
       if (url.pathname === '/v1/admin/history/requests' && !url.search) return json(await listLegacyRequestHistory(env, input));
       if (url.pathname === '/v1/admin/history/summary' && !url.search) return json(await retainedHistorySummary(env, input));
       if (url.pathname === '/v1/admin/history/page' && !url.search) return json(await legacyHistoryPage(env, input));
@@ -548,7 +549,7 @@ export default {
       });
       if (url.pathname === '/v1/admin/panel/attendance-delta' && !url.search)
         return await cachedPanelRead(env,url,body,async () => json(await attendanceDelta(env,input)));
-      if (url.pathname === '/v1/admin/panel/access' && !url.search) return await cachedPanelRead(env,url,body,async () => json(await panelReadAuthority(env,input)));
+      if (url.pathname === '/v1/admin/panel/access' && !url.search) return await cachedPanelRead(env,url,body,async bookmark => json(await panelReadAuthority(env,input,bookmark)));
       if (url.pathname === '/v1/admin/panel/view-as/authorize' && !url.search) return json(await authorizePanelViewAs(env, input));
       if (url.pathname === '/v1/admin/panel/view-as/page' && !url.search) return json(await panelViewAsPage(env, input));
       if (url.pathname === '/v1/admin/panel/view-as/access' && !url.search) return await cachedPanelRead(env,url,body,async () => json(await panelViewAsAuthority(env,input)));
@@ -588,4 +589,16 @@ export default {
         : 'The operation failed; check its receipt before retrying.' } }, 500);
     }
   },
+};
+
+export default {
+  async fetch(request:Request,env:Env):Promise<Response> {
+    const path=new URL(request.url).pathname;
+    if (!env.DB || !['/v1/admin/panel/access','/v1/admin/panel/browse','/v1/admin/panel/attendance-delta',
+      '/v1/admin/snapshot/page','/v1/admin/history/list','/v1/admin/panel/view-as/access'].includes(path)) return worker.fetch(request,env);
+    const meter=meterPanelReads(env.DB);
+    const response=await worker.fetch(request,{...env,DB:meter.db});
+    if (response.ok) response.headers.set('X-Shamrock-D1-Rows-Read',String(meter.rows()??'unknown'));
+    return response;
+  }
 };

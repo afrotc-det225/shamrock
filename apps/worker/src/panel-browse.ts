@@ -6,7 +6,7 @@ import {baselineRevisionSql} from './corrections.js';
 import {HttpError} from './http-error.js';
 type Env = {DB:D1Database;ENVIRONMENT:string;GENERATION:string};
 type Query = {select:string;from:string;order:string};
-export const profiles = ['cadets','cadet-details','leadership','attendance','excusals','overview','semester'] as const;
+export const profiles = ['cadets','cadet-details','leadership','attendance','excusals','overview','semester','diagnostics'] as const;
 export type Profile = typeof profiles[number];
 const error = (code:string,status=409) => new HttpError(status,code,'Reload the page to read current records.');
 
@@ -51,6 +51,14 @@ export async function browsePanel(env:Env, identity:{environment:string;generati
     if(profile==='leadership'){
       table('contacts',leadershipCatalogQuery,'contactId,version,personId,lastName,firstName,rank,role,email,officeLocation,active,reportsTo');
     }
+  } else if(profile==='diagnostics') {
+    const counts:Record<string,string>={
+      PEOPLE_MISSING_PROFILES:"SELECT count(*) FROM people p WHERE NOT EXISTS(SELECT 1 FROM directory_profiles d WHERE d.person_id=p.person_id) AND p.person_id IN(SELECT person_id FROM scoped_people)",
+      EVENTS_MISSING_DETAILS:"SELECT count(*) FROM events e WHERE e.active=1 AND NOT EXISTS(SELECT 1 FROM event_details d WHERE d.event_id=e.event_id)",
+      FLIGHTS_MISSING_SQUADRON:"SELECT count(*) FROM ("+q.flights.select+" "+q.flights.from+") WHERE squadronId IS NULL",
+      EVENTS_MISSING_ROSTER:"SELECT count(*) FROM ("+q.events.select+" "+q.events.from+") WHERE hasRoster=0",
+    };
+    for(const [code,sql] of Object.entries(counts)) selects.push("SELECT '"+code+"' AS name, ("+sql+") AS payload");
   } else if(profile==='semester') {
     table('people',directoryCatalogQuery,'personId,version,firstName,lastName,rank,asYear,role,flightId,flightPathStatus');
     table('terms',q.terms,'termId,label,sortOrder,isCurrent');
