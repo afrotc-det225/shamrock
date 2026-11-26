@@ -98,6 +98,7 @@ export default {
         const profile = url.searchParams.get("profile");
         if (profile !== null && !["events", "access", "full", ...browseProfiles].includes(profile))
           throw new PanelError("INVALID_REQUEST", "Reload SHAMROCK.");
+        if (profile==="semester" && preview) throw new PanelError("VIEW_AS_READ_ONLY","Exit View as to use this page.",403);
         if (preview && preview.status !== "ready")
           return secure(json({ viewAs: previewResponse(preview), snapshot: null,
             meta: { hosted: true, viewAsEnabled: true } }));
@@ -119,6 +120,7 @@ export default {
             if (delta.available) return secure(json({attendanceDelta:delta,captureKey:backend.binding,reportingTime:Date.now()}));
           }
         }
+        if (profile==="semester" && !authority?.access.capabilities.fullSnapshot) throw new PanelError("FORBIDDEN","This page is outside your access.",403);
         const scopedStart = profile === "events" && authority && !authority.access.capabilities.fullSnapshot;
         let browse;
         if (browsing || scopedStart) {

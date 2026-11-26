@@ -31,6 +31,7 @@ import {
 } from '../../../packages/domain/src/index.js';
 
 export interface Env {
+  WING_MATRICES?: KVNamespace;
   DB: D1Database;
   ENVIRONMENT: string;
   GENERATION: string;

@@ -6,14 +6,15 @@ import {baselineRevisionSql} from './corrections.js';
 import {HttpError} from './http-error.js';
 type Env = {DB:D1Database;ENVIRONMENT:string;GENERATION:string};
 type Query = {select:string;from:string;order:string};
-export const profiles = ['cadets','cadet-details','leadership','attendance','excusals','overview'] as const;
+export const profiles = ['cadets','cadet-details','leadership','attendance','excusals','overview','semester'] as const;
 export type Profile = typeof profiles[number];
 const error = (code:string,status=409) => new HttpError(status,code,'Reload the page to read current records.');
 
 export async function browsePanel(env:Env, identity:{environment:string;generation:number;principalId:string}, profile:Profile, wingCache?:WingTableCache) {
   if (!profiles.includes(profile)) throw error('INVALID_PANEL_REQUEST',400);
   if (env.ENVIRONMENT!==identity.environment || Number(env.GENERATION)!==identity.generation) throw error('WRONG_GENERATION');
-  const {first,access,control,revision} = await readPanelContext(env,identity.principalId);
+  const authority = await readPanelContext(env,identity.principalId);
+  const {first,access,control,revision} = authority;
   const wing = access.capabilities.fullSnapshot;
   if (!wing && profile !== 'attendance' && profile !== 'excusals') throw error('NOT_AUTHORIZED',403);
   const source = wing ? {cte:scopeCte,bind:[null]} : scopedPanelSource(identity.principalId,access.flightIds,'browse');
@@ -50,6 +51,11 @@ export async function browsePanel(env:Env, identity:{environment:string;generati
     if(profile==='leadership'){
       table('contacts',leadershipCatalogQuery,'contactId,version,personId,lastName,firstName,rank,role,email,officeLocation,active,reportsTo');
     }
+  } else if(profile==='semester') {
+    table('people',directoryCatalogQuery,'personId,version,firstName,lastName,rank,asYear,role,flightId,flightPathStatus');
+    table('terms',q.terms,'termId,label,sortOrder,isCurrent');
+    table('flights',q.flights,'flightId,label');
+    table('events',q.events,'termId,eventType,trainingWeek,status,startAt,endAt');
   } else if(profile==='overview') {
     const count=(name:string, query:Query, where:string)=>{
       selects.push(`SELECT '${name}' AS name, count(*) AS payload FROM (SELECT `+query.select+' '+query.from+') WHERE '+where);
@@ -103,6 +109,6 @@ export async function browsePanel(env:Env, identity:{environment:string;generati
     if (Object.values(tables).some(s=>s===null) || Object.values(tables).reduce<number>((n,s)=>n+String(s).length,0)>900000) throw error('BROWSE_TOO_LARGE');
     return tables;
   };
-  const tables = wing && profile === 'attendance' && wingCache ? await wingCache({termId:String(control.termId),principalId:identity.principalId,revision},load) : await load();
+  const tables = wing && (profile === 'attendance' || profile === 'semester') && wingCache ? await wingCache({profile,termId:String(control.termId),principalId:identity.principalId,revision,authority},load) : await load();
   return {profile,scope:{termId:control.termId,currentTermId:control.termId},revision,tables};
 }

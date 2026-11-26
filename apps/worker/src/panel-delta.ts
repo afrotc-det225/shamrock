@@ -2,14 +2,15 @@ import {authorityStatements,readPanelContext} from './panel-read.js';
 import {HttpError} from './http-error.js';
 
 type Env = {DB:D1Database; ENVIRONMENT:string; GENERATION:string};
-export async function attendanceDelta(env:Env,input:unknown) {
+export type PanelContext = Awaited<ReturnType<typeof readPanelContext>>;
+export async function attendanceDelta(env:Env,input:unknown, current?:PanelContext) {
   const req=input as Record<string,unknown> | null;
   if (!req || Object.keys(req).sort().join(',')!=='access,administration,environment,from,generation,principalId,termId' ||
       req.environment!==env.ENVIRONMENT || req.generation!==Number(env.GENERATION) ||
       typeof req.principalId!=='string' || typeof req.termId!=='string' || typeof req.access!=='string' ||
       !Number.isSafeInteger(req.from) || Number(req.from)<0 || !Number.isSafeInteger(req.administration))
     throw new HttpError(400,'INVALID_PANEL_REQUEST','Reload the current attendance matrix.');
-  const {first,access,control,revision}=await readPanelContext(env,req.principalId);
+  const {first,access,control,revision}=current ?? await readPanelContext(env,req.principalId);
   if (!access.capabilities.fullSnapshot) throw new HttpError(403,'NOT_AUTHORIZED','Reload with current access.');
   const size=revision.operations-Number(req.from);
   if (size<1 || size>64 || req.termId!==control.termId || req.access!==revision.access ||

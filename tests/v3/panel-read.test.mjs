@@ -430,3 +430,31 @@ test('new Wing viewers reuse the base after a correction; Flight views bypass sh
     const scoped=await read('flight');assert.notDeepEqual(scoped.tables.people,updated.tables.people);
     assert.deepEqual(hits,['wing-edge','wing-delta']);
 });
+
+test('a cold Wing viewer uses private storage and replays a correction; a Flight cannot read the stored matrix',async t=>{
+    const {wingAttendanceCache}=await import('../../.build/v3/apps/worker/src/panel-cache.js');
+    const {panelBrowse}=await import('../../.build/v3/apps/worker/src/panel-view-as.js');
+    const f=await fixture(t),kv=new Map(),hits=[];
+    const original=Object.getOwnPropertyDescriptor(globalThis,'caches');
+    Object.defineProperty(globalThis,'caches',{configurable:true,value:{open:async()=>({match:async()=>undefined,put:async()=>{}})}});
+    t.after(()=>original?Object.defineProperty(globalThis,'caches',original):delete globalThis.caches);
+    let bookmark='original',gets=0;
+    const env={...f.env,BRIDGE_KEY_ID:'fixture',WING_MATRICES:{
+        get:async k=>{gets++;return kv.has(k)?JSON.parse(kv.get(k)):null;},put:async(k,v)=>kv.set(k,v)
+    },DB:{prepare:s=>f.db.prepare(s),batch:s=>f.db.batch(s),withSession:()=>({
+        prepare:()=>({run:async()=>({meta:{rows_read:0}})}),getBookmark:()=>bookmark})}};
+    const browse=(principalId,profile='attendance')=>panelBrowse(env,{environment:'local',generation:1,principalId,profile},
+        wingAttendanceCache(env,new URL('https://fixture.invalid/browse'),bookmark,s=>hits.push(s)));
+    const first=await browse('owner');assert.equal(kv.size,1);
+    assert.deepEqual((await browse('owner')).tables,first.tables);assert.deepEqual(hits,['wing-stored']);
+    const edit=await f.send(f.command('flight','stored-edit','attendance.correct',correctionPayload()),'/v1/admin/panel/commands');
+    assert.equal(edit.status,200);bookmark='edited';
+    const patched=await browse('owner');assert.equal(hits.at(-1),'wing-delta');
+    const truth=await f.send({environment:'local',generation:1,principalId:'owner',profile:'attendance'},'/v1/admin/panel/browse');
+    assert.deepEqual(patched.tables,truth.body.tables);assert.deepEqual((await browse('owner')).tables,patched.tables);
+    assert.equal(hits.at(-1),'wing-stored');const before=gets;await browse('flight');assert.equal(gets,before);
+    await assert.rejects(browse('flight','semester'),{status:403});
+    const semester=await browse('owner','semester');assert.deepEqual(Object.keys(semester.tables).sort(),['events','flights','people','terms']);
+    assert.deepEqual((await browse('owner','semester')).tables,semester.tables);assert.equal(hits.at(-1),'wing-stored');
+    assert.equal(kv.size,2);
+});

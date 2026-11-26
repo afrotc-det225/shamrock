@@ -255,3 +255,11 @@ in one guarded transaction, leaving commands paused. Its explicit review bound i
 160 statements / 512 KiB. The transaction refuses any existing application object,
 including an older SHAMROCK database. It is only initial provisioning; existing
 staging databases still require the versioned backup/restore upgrade procedure.
+
+### Stored Wing Attendance and Semester views
+
+Bind `WING_MATRICES` on the real-data staging backend to a dedicated private Workers KV namespace. Use a separate namespace for each database, including detached rehearsal copies. Give the panel access through its existing signed backend binding. The namespace contains cadet data and must stay private. No scheduled refresh or paid service is required.
+
+After a successful Wing authorization, a cold viewer can reuse a compiled projection for the current term and primary database bookmark. Attendance and Semester use separate keys. A first build, an expired entry or an unavailable store falls back to the ordinary fenced D1 read. Exact hits do not rewrite KV. Entries expire seven days after writing. A recent Attendance base can accept up to 64 consecutive same-term corrections after a second authority check. Other changes require a fresh capture. The Semester projection includes just the roster planning fields, flights, term and schedule inputs. Receipts and transition operations keep their existing authorization and validation paths.
+
+For a rehearsal, compare the full payload from a fresh cache origin with a separate D1 rebuild. Check cold and repeat visits, then apply a correction or clear to a detached copy and repeat the comparison. On the November real-data fixture a stored cold visit to either view read 34 D1 rows and an edge hit read zero. An initial Attendance build read 11,416 rows and an initial Semester build read 289. These counts cover the backend browse request. Login, authorization bootstrap, receipts and operator commands can make additional requests. Failed or delayed KV writes can cause another build. Monitor KV operations alongside D1 reads. [Workers KV pricing](https://developers.cloudflare.com/kv/platform/pricing/)

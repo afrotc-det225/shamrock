@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { PanelError } from "../errors.mjs";
-export const browseProfiles = ["cadets","cadet-details","leadership","attendance","excusals","overview"];
+export const browseProfiles = ["cadets","cadet-details","leadership","attendance","excusals","overview","semester"];
 const cache = new Map();
 // Each entry is private to the current actor, preview entry, effective scope and data revisions.
 export async function browseState(backend, authority, requested) {

@@ -38,7 +38,7 @@ const pages = [
   ["System", Settings],
 ];
 const profileFor = (page,tab) => ({"Cadets":"cadets","Leadership":"leadership","Attendance & excusals":tab,
-  "Overview":"overview","Events":"events","History":"access","Assistant":"access"}[page] || "full");
+  "Semester":"semester","Overview":"overview","Events":"events","History":"access","Assistant":"access"}[page] || "full");
 function App() {
   const [attendanceTab,setAttendanceTab] = useState("attendance");
   const [page, setPage] = useState("Events"),
@@ -471,7 +471,7 @@ function App() {
                 )}{" "}
                 {page === "Attendance & excusals" && <Attendance {...common} tab={data.browse?.profile || attendanceTab} onTab={changeAttendanceTab} />}{" "}
                 {!scoped && page === "History" && <History key={JSON.stringify([data.captureKey, data.manifest?.revision?.access, preview?.entryAuditId])} />}
-                {!preview && !scoped && page === "Semester" && <Semester {...common} />}{" "}
+                {!preview && !scoped && page === "Semester" && <Semester {...common} snapshot={data.snapshot || data.list} />}{" "}
                 {!scoped && page === "Overview" && (
                   <Overview key={JSON.stringify([data.captureKey,data.viewAsRevision])} {...common} navigate={navigate} />
                 )}{" "}
@@ -490,12 +490,12 @@ function App() {
           <Drawer modal title="Review change" onClose={() => setProposal(null)}>
             <div className="fields">
               <h3>{proposal.summary.title}</h3>
-              <p>{displayTarget(proposal.summary.target, data?.snapshot)}</p>
+              <p>{displayTarget(proposal.summary.target, data?.snapshot || data?.list)}</p>
               <dl className="review">
                 {proposal.summary.changes.map((c, i) => (
                   <React.Fragment key={i}>
                     <dt>{label(c.field)}</dt>
-                    <dd>{displayValue(c.value, data?.snapshot, c.field)}</dd>
+                    <dd>{displayValue(c.value, data?.snapshot || data?.list, c.field)}</dd>
                   </React.Fragment>
                 ))}
               </dl>
@@ -540,7 +540,7 @@ function App() {
 }
 function displayTarget(target, s) {
   if (!s) return target;
-  const request = s.requests.find((r) => r.requestId === target);
+  const request = s.requests?.find((r) => r.requestId === target);
   if (request)
     return `${
       request.personDisplayName ||
@@ -549,7 +549,7 @@ function displayTarget(target, s) {
         .map((p) => `${p.firstName} ${p.lastName}`)
         .join("")
     } · ${s.events.find((e) => e.eventId === request.eventId)?.label || "Excusal"}`;
-  return s.events.find((e) => e.eventId === target)?.label || target;
+  return s.events?.find((e) => e.eventId === target)?.label || target;
 }
 function displayValue(value, s, key) {
   if (key === "name") {

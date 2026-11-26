@@ -11,7 +11,7 @@ const revisionOf = data => JSON.stringify([data?.captureKey,data?.manifest?.scop
 export async function api(path, body, options = {}) {
   const profile = options.profile || "full";
   const previous = path === "/state" ? retainedViews.get(profile) || retainedState : null;
-  const wantsBrowse = ["cadets","cadet-details","leadership","overview","attendance","excusals"].includes(profile);
+  const wantsBrowse = ["cadets","cadet-details","leadership","overview","attendance","excusals","semester"].includes(profile);
   const matchingProfile = previous?.browse ? previous.browse.profile === profile : !wantsBrowse;
   const conditional = previous?.transport === "paged-v1" && matchingProfile &&
     (profile !== "events" || previous.eventsList || previous.snapshot);

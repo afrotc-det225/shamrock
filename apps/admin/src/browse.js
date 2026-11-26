@@ -10,6 +10,12 @@ export async function decodeBrowse(data) {
   const columns=(table,names)=>rows(table,names.split(" "));
   if(profile==="overview") return {...data,birthdayFlights:t.flights ? columns("flights","flightId label squadronId") : [], birthdaySquadrons:t.squadrons ? columns("squadrons","squadronId label") : [],birthdayCalendar:JSON.parse(t.birthdays || "[]"),overview:{term:JSON.parse(t.terms)[0]?.[1],
     activeCadets:t.activeCadets,activeEvents:t.activeEvents,pending:t.pending}};
+  if(profile==='semester') return {...data,list:{
+    terms:columns('terms','termId label sortOrder isCurrent').map(t=>({...t,isCurrent:!!t.isCurrent})),
+    people:columns('people','personId version firstName lastName rank asYear role flightId flightPathStatus'),
+    events:columns('events','termId eventType trainingWeek status startAt endAt'),
+    flights:columns('flights','flightId label'),
+  }};
   const flights=columns("flights","flightId label squadronId");
   if(profile==="cadets" || profile==="cadet-details" || profile==="leadership"){
     const people=columns("people","personId version flightId lastName firstName rank asYear flightPathStatus email role"+(profile!=="leadership"?" afsc university classYear cipCode cipBroadArea":"")+(profile==="cadet-details"?" phone dorm homeTown homeState dateOfBirth photoLink":""))
