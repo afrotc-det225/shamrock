@@ -465,6 +465,77 @@ namespace AttendanceService {
     SheetUtils.appendRows(sheet, logs);
   }
 
+  /** Coordinate attendance writers without releasing a caller's existing script lock. */
+  export function withWriteLock<T>(work: () => T): T {
+    const lock = LockService.getScriptLock();
+    if (lock.hasLock()) return work();
+    lock.waitLock(120000);
+    try {
+      return work();
+    } finally {
+      try { SpreadsheetApp.flush(); } finally { lock.releaseLock(); }
+    }
+  }
+
+  export interface AttendanceLogBatch {
+    sheet: GoogleAppsScript.Spreadsheet.Sheet;
+    updates: { range: string; values: string[][] }[];
+  }
+
+  /** Resolve all targets once, by identity and canonical event header, before persistence. */
+  export function prepareAttendanceLogBatch(entries: Record<string, any>[]): AttendanceLogBatch {
+    const sheet = SheetUtils.getSheet(Config.getBackendId(), 'Attendance Matrix Backend');
+    if (!sheet || sheet.getLastRow() < 3) throw new Error('Attendance backend matrix is missing; no manual edit was logged.');
+    const table = SheetUtils.readTable(sheet);
+    const headers = table.headers;
+    if (headers.filter(h => h === ATT_HEADER_LAST).length !== 1 || headers.filter(h => h === ATT_HEADER_FIRST).length !== 1)
+      throw new Error('Attendance backend identity headers are ambiguous.');
+    const identities = new Map<string, number[]>();
+    table.rows.forEach((row, index) => {
+      const identity = cadetKey(row), matches = identities.get(identity) || [];
+      matches.push(index + 3); identities.set(identity, matches);
+    });
+    const cells = new Map<number, Map<number, string>>();
+    entries.forEach(entry => {
+      const event = String(entry['event'] || '').trim();
+      const matches = headers.map((header, index) => header === event ? index + 1 : 0).filter(Boolean);
+      const cadets = parseCadetEntries(String(entry['cadets'] || ''));
+      if (matches.length !== 1 || matches[0] <= ATTENDANCE_MACHINE_HEADERS.length || !cadets.length) throw new Error('Attendance backend event column is missing or ambiguous.');
+      const col = matches[0], rows = cells.get(col) || new Map<number, string>();
+      cadets.forEach(cadet => {
+        const targets = identities.get(buildKey(cadet.last, cadet.first));
+        if (!targets || targets.length !== 1) throw new Error('Attendance backend cadet identity is missing or ambiguous.');
+        rows.set(targets[0], String(entry['attendance_type'] ?? '').trim());
+      });
+      cells.set(col, rows);
+    });
+    // Coalesce adjacent rows only. Unrelated values/formulas/pending edits are never rewritten.
+    const updates: AttendanceLogBatch['updates'] = [];
+    cells.forEach((rows, col) => {
+      const ordered = Array.from(rows.keys()).sort((a, b) => a - b);
+      let run: number[] = [];
+      const add = () => {
+        if (!run.length) return;
+        updates.push({ range: `'${sheet.getName().replace(/'/g, "''")}'!${colToLetter(col)}${run[0]}:${colToLetter(col)}${run[run.length - 1]}`,
+          values: run.map(row => [rows.get(row)!]) });
+      };
+      ordered.forEach(row => {
+        if (run.length && row !== run[run.length - 1] + 1) { add(); run = []; }
+        run.push(row);
+      });
+      add();
+    });
+    return { sheet, updates };
+  }
+
+  /** Backend-only sparse mirror; caller has already persisted the complete attendance log batch. */
+  export function applyPreparedAttendanceLogBatch(batch: AttendanceLogBatch): void {
+    if (!batch.updates.length) return;
+    const service = (globalThis as any).Sheets?.Spreadsheets?.Values;
+    if (!service?.batchUpdate) throw new Error('Sheets API is unavailable; attendance log is saved but its backend mirror is pending.');
+    service.batchUpdate({ valueInputOption: 'RAW', data: batch.updates }, batch.sheet.getParent().getId());
+  }
+
   /**
    * Apply a single attendance backend log entry to the Attendance Matrix Backend (and mirror to frontend).
    * This lets us process new submissions incrementally without a full rebuild.
@@ -598,6 +669,10 @@ namespace AttendanceService {
   }
 
   export function rebuildMatrix() {
+    return withWriteLock(rebuildMatrixLocked);
+  }
+
+  function rebuildMatrixLocked() {
     const backendId = Config.getBackendId();
     const frontendId = Config.getFrontendId();
     const directory = readDirectory();
@@ -841,6 +916,10 @@ namespace AttendanceService {
   }
 
   export function fillUnexcusedAndNotify() {
+    return withWriteLock(fillUnexcusedAndNotifyLocked);
+  }
+
+  function fillUnexcusedAndNotifyLocked() {
     const backendId = Config.getBackendId();
     if (!backendId) {
       Log.warn('Cannot fill unexcused: backend ID missing');

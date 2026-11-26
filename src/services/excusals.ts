@@ -174,8 +174,10 @@ SHAMROCK Automations`;
       cadets: `${lastName}, ${firstName}`,
     };
 
-    appendAttendanceLogs([logEntry]);
-    AttendanceService.applyAttendanceLogEntry(logEntry);
+    AttendanceService.withWriteLock(() => {
+      appendAttendanceLogs([logEntry]);
+      AttendanceService.applyAttendanceLogEntry(logEntry);
+    });
   }
 
   /**
@@ -1086,7 +1088,7 @@ SHAMROCK Automations`;
         error: err,
       });
     } finally {
-      lock.releaseLock();
+      try { SpreadsheetApp.flush(); } finally { lock.releaseLock(); }
     }
   }
 
@@ -1193,7 +1195,7 @@ SHAMROCK Automations`;
     if (updated > 0) repairAttendancePresentation();
     Log.info(`Processed ${pending.length} management decision edit(s): updated=${updated}, missing=${missing}`);
     } finally {
-      lock.releaseLock();
+      try { SpreadsheetApp.flush(); } finally { lock.releaseLock(); }
     }
   }
 
@@ -1610,7 +1612,7 @@ SHAMROCK Automations`;
       attendancePreserved: attendance.preserved,
     };
     } finally {
-      lock.releaseLock();
+      try { SpreadsheetApp.flush(); } finally { lock.releaseLock(); }
     }
   }
 

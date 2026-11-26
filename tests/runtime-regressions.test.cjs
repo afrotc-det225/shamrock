@@ -45,12 +45,27 @@ function readTable(s) {
   return { headers: s.cells[0], rows: s.cells.slice(2).map(row => Object.fromEntries(s.cells[0].map((h, i) => [h, row[i]]))) };
 }
 
-function attendanceSubmissionFixture(readEmail) {
-  const appended = [], applied = [], sleeps = [];
+function attendanceSubmissionFixture(readEmail, fail = '') {
+  const appended = [], applied = [], sleeps = [], order = [];
+  let locked = false;
   const { FormHandlers } = load(['forms/handlers.ts'], {
     Config: { getBackendId: () => '', getFrontendId: () => '', getBackendSheet: () => ({}) },
-    SheetUtils: { appendRows: (_, rows) => appended.push(...rows) },
-    AttendanceService: { applyAttendanceLogEntry: row => applied.push(row) },
+    SheetUtils: { appendRows: (_, rows) => {
+      assert.equal(locked, true);
+      order.push('append');
+      if (fail === 'append') throw Error('append failed');
+      appended.push(...rows);
+    } },
+    AttendanceService: {
+      withWriteLock(fn) { locked = true; try { return fn(); } finally { locked = false; order.push('unlock'); } },
+      applyAttendanceLogEntry(row) {
+        assert.equal(locked, true);
+        assert.equal(appended.length > 0, true);
+        order.push('mirror');
+        if (fail === 'mirror') throw Error('mirror failed');
+        applied.push(row);
+      },
+    },
     SetupService: { applyAttendanceBackendFormattingPublic() {} },
     FormService: { isAttendanceCadetQuestionTitle: title => title.startsWith('Cadets (') },
     Utilities: { sleep: delay => sleeps.push(delay) },
@@ -64,8 +79,22 @@ function attendanceSubmissionFixture(readEmail) {
       ['Cadets (Secondary) AS200', ['Example, Cadet']],
     ].map(([title, value]) => ({ getItem: () => ({ getTitle: () => title }), getResponse: () => value })),
   } };
-  return { run: () => FormHandlers.onAttendanceFormSubmit(event), appended, applied, sleeps };
+  return { run: () => FormHandlers.onAttendanceFormSubmit(event), appended, applied, sleeps, order };
 }
+
+test('attendance form commits the log before mirroring and releases the write lock after failures', () => {
+  const normal = attendanceSubmissionFixture(() => 'cadet@example.test');
+  normal.run();
+  assert.deepEqual(normal.order, ['append', 'mirror', 'unlock']);
+  const appendFailure = attendanceSubmissionFixture(() => 'cadet@example.test', 'append');
+  assert.throws(appendFailure.run, /append failed/);
+  assert.deepEqual(appendFailure.order, ['append', 'unlock']);
+  assert.equal(appendFailure.applied.length, 0);
+  const mirrorFailure = attendanceSubmissionFixture(() => 'cadet@example.test', 'mirror');
+  assert.throws(mirrorFailure.run, /mirror failed/);
+  assert.deepEqual(mirrorFailure.order, ['append', 'mirror', 'unlock']);
+  assert.equal(mirrorFailure.appended.length, 1, 'durable record survives an interrupted projection');
+});
 
 test('transient responder email failures recover before one attendance write', () => {
   let reads = 0;

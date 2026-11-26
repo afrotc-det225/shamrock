@@ -89,58 +89,74 @@ namespace AuditService {
   }
 
   export function log(entry: AuditEntry): void {
+    logBatch([entry]);
+  }
+
+  /** One append for a related batch; actor/context are captured once per operation. */
+  export function logBatch(entries: AuditEntry[]): boolean {
+    if (!entries.length) return true;
     try {
-      const backendId = entry.backendId || Config.getBackendId();
+      const backendId = entries[0].backendId || Config.getBackendId();
+      if (entries.some(entry => entry.backendId && entry.backendId !== backendId)) throw new Error('Audit batch spans multiple backends.');
       if (!backendId) {
-        Log.warn(`Audit skipped for action=${entry.action}: backend spreadsheet ID missing.`);
-        return;
+        Log.warn(`Audit skipped for batch: backend spreadsheet ID missing.`);
+        return false;
       }
 
       const auditSheet = SheetUtils.getSheet(backendId, 'Audit Backend');
       if (!auditSheet) {
-        Log.warn(`Audit skipped for action=${entry.action}: Audit Backend sheet not found.`);
-        return;
+        Log.warn(`Audit skipped for batch: Audit Backend sheet not found.`);
+        return false;
       }
 
       const headers = SheetUtils.ensureSchemaColumns(auditSheet);
       const context = activeSpreadsheetContext();
-      const row: Record<string, any> = {};
-      headers.forEach((h) => (row[h] = ''));
+      const actor = actorEmail(), key = actorKey(), timestamp = new Date();
+      const rows = entries.map(entry => {
+        const row: Record<string, any> = {};
+        headers.forEach((h) => (row[h] = ''));
 
-      row['audit_id'] = Utilities.getUuid();
-      row['timestamp'] = new Date();
-      row['actor_email'] = entry.actorEmail || actorEmail();
-      row['actor_key'] = actorKey();
-      row['role'] = entry.role || 'operator';
-      row['action'] = entry.action;
-      row['action_label'] = entry.actionLabel || '';
-      row['category'] = entry.category || '';
-      row['target_sheet'] = entry.targetSheet || '';
-      row['target_table'] = entry.targetTable || '';
-      row['target_key'] = entry.targetKey || '';
-      row['target_range'] = entry.targetRange || '';
-      row['event_id'] = entry.eventId || '';
-      row['request_id'] = entry.requestId || '';
-      row['field'] = entry.field || '';
-      row['old_value'] = safeString(entry.oldValue);
-      row['new_value'] = safeString(entry.newValue);
-      row['result'] = entry.result || '';
-      row['reason'] = entry.reason || '';
-      row['notes'] = entry.notes || '';
-      row['source'] = entry.source || 'AuditService';
-      row['version'] = entry.version || 'v2';
-      row['run_id'] = entry.runId || '';
-      row['duration_ms'] = entry.durationMs ?? '';
-      row['severity'] = entry.severity || (entry.result === 'failed' ? 'ERROR' : 'INFO');
-      row['error_message'] = errorMessage(entry.error);
-      row['error_stack'] = errorStack(entry.error);
-      row['metadata_json'] = safeJson(entry.metadata);
-      row['spreadsheet_id'] = context.spreadsheetId;
-      row['spreadsheet_name'] = context.spreadsheetName;
+        row['audit_id'] = Utilities.getUuid();
+        row['timestamp'] = timestamp;
+        row['actor_email'] = entry.actorEmail || actor;
+        row['actor_key'] = key;
+        row['role'] = entry.role || 'operator';
+        row['action'] = entry.action;
+        row['action_label'] = entry.actionLabel || '';
+        row['category'] = entry.category || '';
+        row['target_sheet'] = entry.targetSheet || '';
+        row['target_table'] = entry.targetTable || '';
+        row['target_key'] = entry.targetKey || '';
+        row['target_range'] = entry.targetRange || '';
+        row['event_id'] = entry.eventId || '';
+        row['request_id'] = entry.requestId || '';
+        row['field'] = entry.field || '';
+        row['old_value'] = safeString(entry.oldValue);
+        row['new_value'] = safeString(entry.newValue);
+        row['result'] = entry.result || '';
+        row['reason'] = entry.reason || '';
+        row['notes'] = entry.notes || '';
+        row['source'] = entry.source || 'AuditService';
+        row['version'] = entry.version || 'v2';
+        row['run_id'] = entry.runId || '';
+        row['duration_ms'] = entry.durationMs ?? '';
+        row['severity'] = entry.severity || (entry.result === 'failed' ? 'ERROR' : 'INFO');
+        row['error_message'] = errorMessage(entry.error);
+        row['error_stack'] = errorStack(entry.error);
+        row['metadata_json'] = safeJson(entry.metadata);
+        row['spreadsheet_id'] = context.spreadsheetId;
+        row['spreadsheet_name'] = context.spreadsheetName;
 
-      SheetUtils.appendRows(auditSheet, [row]);
+        return row;
+      });
+      const requiredRows = Math.max(3, auditSheet.getLastRow() + 1) + rows.length - 1;
+      const maxRows = auditSheet.getMaxRows();
+      if (requiredRows > maxRows) auditSheet.insertRowsAfter(maxRows, requiredRows - maxRows);
+      SheetUtils.appendRows(auditSheet, rows);
+      return true;
     } catch (err) {
-      Log.warn(`Audit logging failed for action=${entry.action}: ${err}`);
+      Log.warn(`Audit logging failed for batch: ${err}`);
+      return false;
     }
   }
 }

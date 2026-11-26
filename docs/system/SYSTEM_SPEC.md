@@ -85,6 +85,8 @@ The backend workbook is authoritative.
 
 - Directory and Events are maintained in the backend and propagated forward to the frontend. Excusals are maintained in Excusals Backend and the separate Excusals Management workbook.
 - Attendance is derived from backend logs and decisions.
+- Authorized frontend Attendance edits are an explicit input exception: the entire edited data rectangle is resolved by cadet identity and current event header and persisted as append-only Attendance Backend records, with linked per-cell audit entries. Saved logs remain durable if a later mirror or audit fails. Blank clears are records, not missing input. Bulk old values are unknown unless independently captured.
+- Manual attendance writes, Form attendance commits, matrix rebuilds, initial excusal attendance effects and weekly closeout share the script write lock with excusal decisions. Saved logs precede derived updates. Human spreadsheet edits and external writes are outside that lock; incident recovery requires a quiet window and fresh input verification.
 
 ### 4.3 Cadre & Leadership Ownership
 Default ownership model:

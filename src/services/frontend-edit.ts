@@ -251,95 +251,148 @@ namespace FrontendEditService {
     }
   }
 
+  /** Persist every edited cadet/event pair before updating its derived backend view. */
   function applyAttendanceEdit(e: GoogleAppsScript.Events.SheetsOnEdit) {
     const range = e?.range;
     const sheet = range?.getSheet();
     if (!sheet || sheet.getName() !== 'Attendance') return;
-
-    const row = range.getRow();
-    const col = range.getColumn();
-    if (row < 3) return; // headers occupy rows 1/2
-
-    const headerRow1 = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0].map((h) => String(h || '').trim());
-    const headerRow2 = sheet.getRange(2, 1, 1, sheet.getLastColumn()).getValues()[0].map((h) => String(h || '').trim());
-    const header = headerRow1[col - 1] || headerRow2[col - 1] || '';
-    if (!header) return;
-
     const fixedColumnCount = Schemas.getTabSchema('Attendance')?.machineHeaders?.length || 7;
-    if (col <= fixedColumnCount) {
-      Log.info(`[Attendance] Ignoring edit to fixed column '${header}' at row ${row}.`);
-      return;
-    }
-
-    const eventRows = SheetUtils.readTable(Config.getBackendSheet('Events Backend')).rows;
-    const normalizedHeader = header.toLowerCase();
-    const isManagedEvent = eventRows.some((eventRow) => [
-      eventRow['event_id'],
-      eventRow['display_name'],
-      eventRow['attendance_column_label'],
-    ].some((candidate) => String(candidate || '').trim().toLowerCase() === normalizedHeader));
-    if (!isManagedEvent) {
-      Log.warn(`[Attendance] Ignoring edit to unrecognized event column '${header}' at row ${row}.`);
-      return;
-    }
-
-    const rowValues = sheet.getRange(row, 1, 1, headerRow1.length).getValues()[0];
-    const normalize = (v: any) => String(v || '').toLowerCase();
-    const lastIdx = headerRow1.findIndex((h) => h.toLowerCase() === 'last_name');
-    const firstIdx = headerRow1.findIndex((h) => h.toLowerCase() === 'first_name');
-    const lastRaw = lastIdx >= 0 ? String(rowValues[lastIdx] || '') : '';
-    const firstRaw = firstIdx >= 0 ? String(rowValues[firstIdx] || '') : '';
-    const last = normalize(lastRaw);
-    const first = normalize(firstRaw);
-    const targetKey = last && first ? `${last},${first}` : `${sheet.getName()}!R${row}C${col}`;
-
-    const newValue = String(e?.value ?? range.getValue() ?? '');
-    const oldValue = String((e as any)?.oldValue ?? '');
-    if (newValue === oldValue) return;
-
+    const firstRow = Math.max(3, range.getRow());
+    const lastRow = Math.min(sheet.getLastRow(), range.getLastRow());
+    const firstCol = Math.max(fixedColumnCount + 1, range.getColumn());
+    const lastCol = Math.min(sheet.getLastColumn(), range.getLastColumn());
+    if (lastRow < firstRow || lastCol < firstCol) return;
+    const singleCell = range.getNumRows() === 1 && range.getNumColumns() === 1;
+    const normalize = (value: any) => String(value ?? '').trim();
+    const key = (last: any, first: any) => JSON.stringify([normalize(last).toLowerCase(), normalize(first).toLowerCase()]);
+    const read = () => sheet.getRange(1, 1, sheet.getLastRow(), sheet.getLastColumn()).getValues();
+    // Capture before waiting; a lock does not freeze human edits or sorts in Sheets.
+    const captured = read();
+    const headers = captured[0].map(normalize);
+    const lastIdx = headers.indexOf('last_name'), firstIdx = headers.indexOf('first_name');
     const backendId = Config.getBackendId();
-    // Append to Attendance Backend log as an admin submission reflecting the edit.
+    let persisted = false;
+    const runId = Utilities.getUuid();
     try {
-      const logSheet = SheetUtils.getSheet(backendId, 'Attendance Backend');
-      if (logSheet) {
-        const logHeaders = Schemas.BACKEND_TABS.find((t) => t.name === 'Attendance Backend')?.machineHeaders || [];
-        const rowObj: Record<string, any> = {};
-        logHeaders.forEach((h) => (rowObj[h] = ''));
-        rowObj['submission_id'] = Utilities.getUuid();
-        rowObj['submitted_at'] = new Date();
-        rowObj['event'] = header;
-        // Preserve explicit clears; do NOT default to P
-        rowObj['attendance_type'] = newValue;
-        rowObj['email'] = actorEmail() || 'unknown';
-        rowObj['name'] = 'Admin';
-        rowObj['flight'] = '';
-        rowObj['cadets'] = lastRaw && firstRaw ? `${lastRaw}, ${firstRaw}` : targetKey;
-
-        const values = logHeaders.map((h) => rowObj[h] ?? '');
+      AttendanceService.withWriteLock(() => {
+        if (PauseService.isPaused()) throw new Error('Attendance edit stopped because automation is paused.');
+        if (lastIdx < 0 || firstIdx < 0 || headers.filter(h => h === 'last_name').length !== 1 || headers.filter(h => h === 'first_name').length !== 1)
+          throw new Error('Attendance identity headers are missing or ambiguous.');
+        const events = SheetUtils.readTable(Config.getBackendSheet('Events Backend')).rows;
+        const aliases = new Map<string, Set<string>>();
+        const canonicalCounts = new Map<string, number>();
+        const excludedCanonicals = new Set<string>();
+        events.forEach(event => {
+          const canonical = normalize(event['display_name'] || event['attendance_column_label'] || event['event_id']);
+          if (!canonical) return;
+          const excluded = /third\s*hour/i.test(`${event['event_id'] || ''} ${event['event_type'] || ''} ${canonical}`)
+            || ['cancelled', 'canceled', 'inactive', 'archived', 'n/a'].includes(normalize(event['status']).toLowerCase());
+          if (excluded) excludedCanonicals.add(canonical);
+          canonicalCounts.set(canonical, (canonicalCounts.get(canonical) || 0) + 1);
+          [event['event_id'], event['display_name'], event['attendance_column_label']].forEach(alias => {
+            const value = normalize(alias).toLowerCase();
+            if (!value) return;
+            const matches = aliases.get(value) || new Set<string>();
+            matches.add(canonical); aliases.set(value, matches);
+          });
+        });
+        const columns = new Map<number, string>();
+        for (let col = firstCol; col <= lastCol; col++) {
+          const header = headers[col - 1];
+          const matches = aliases.get(header.toLowerCase());
+          if (!header || !matches || matches.size !== 1)
+            throw new Error('Attendance includes a stale or ambiguous event header; no edits were logged.');
+          const canonical = Array.from(matches)[0];
+          if (excludedCanonicals.has(canonical) || canonicalCounts.get(canonical) !== 1 || headers.slice(fixedColumnCount).filter(h => aliases.get(h.toLowerCase())?.has(canonical)).length !== 1)
+            throw new Error('Attendance includes duplicate event columns; no edits were logged.');
+          columns.set(col, canonical);
+        }
+        const identities = new Map<string, number>();
+        captured.slice(2).forEach(row => {
+          const identity = key(row[lastIdx], row[firstIdx]);
+          identities.set(identity, (identities.get(identity) || 0) + 1);
+        });
+        const logs: Record<string, any>[] = [];
+        const audits: AuditService.AuditEntry[] = [];
+        let actor = '';
+        try { actor = String(e.user?.getEmail() || '').toLowerCase(); } catch { /* Editor identity may be unavailable. */ }
+        actor ||= actorEmail() || 'unknown';
+        const timestamp = new Date();
+        for (let row = firstRow; row <= lastRow; row++) {
+          const values = captured[row - 1];
+          const last = normalize(values?.[lastIdx]), first = normalize(values?.[firstIdx]);
+          if (!last || !first || /[;,=]/.test(last + first) || /\(AS[^)]*\)/i.test(last + first) || identities.get(key(last, first)) !== 1)
+            throw new Error('Attendance includes a missing or ambiguous cadet identity; no edits were logged.');
+          columns.forEach((event, col) => {
+            const value = normalize(values[col - 1]);
+            if (value !== '' && !Arrays.ATTENDANCE_CODES.includes(value))
+              throw new Error('Attendance includes an unsupported code; no edits were logged.');
+            // e.value/oldValue exist only for single-cell edits. Never infer bulk old values.
+            if (singleCell && value !== normalize(e.value))
+              throw new Error('Attendance changed again before this edit was processed; no edits were logged.');
+            const oldValue = singleCell ? normalize(e.oldValue) : '';
+            if (singleCell && e.oldValue !== undefined && oldValue === value) return;
+            // Retain a batch identity in the durable log even if the append
+            // response is lost before the individual audit records are saved.
+            const submissionId = `manual-${runId}-${row}-${col}`;
+            logs.push({ submission_id: submissionId, submitted_at: timestamp, event,
+              attendance_type: value, email: actor, name: 'Admin', flight: '', cadets: `${last}, ${first}` });
+            audits.push({ backendId, action: 'edit', result: 'ok', actorEmail: actor,
+              role: 'frontend_editor', targetSheet: 'Attendance', targetTable: 'attendance_matrix',
+              targetRange: `Attendance!${attendanceColumnLetter(col)}${row}`, targetKey: `${last.toLowerCase()},${first.toLowerCase()}`,
+              field: event, oldValue, newValue: value, requestId: submissionId, runId,
+              source: 'onFrontendEdit', version: 'v2',
+              metadata: { editedRange: range.getA1Notation(), oldValueKnown: singleCell && e.oldValue !== undefined } });
+          });
+        }
+        if (!logs.length) return;
+        // Validate every matrix target before appending so a stale matrix cannot silently drop a correction.
+        const mirror = AttendanceService.prepareAttendanceLogBatch(logs);
+        const current = read();
+        if (current.length !== captured.length || JSON.stringify(current[0]) !== JSON.stringify(captured[0]))
+          throw new Error('Attendance layout changed while the edit was waiting; no edits were logged.');
+        for (let row = firstRow; row <= lastRow; row++) {
+          if (key(current[row - 1]?.[lastIdx], current[row - 1]?.[firstIdx]) !== key(captured[row - 1][lastIdx], captured[row - 1][firstIdx])
+              || columns.size && Array.from(columns.keys()).some(col => normalize(current[row - 1]?.[col - 1]) !== normalize(captured[row - 1][col - 1])))
+            throw new Error('Attendance changed while the edit was waiting; no edits were logged.');
+        }
+        const logSheet = SheetUtils.getSheet(backendId, 'Attendance Backend');
+        if (!logSheet) throw new Error('Attendance Backend is missing; no edits were logged.');
+        const logHeaders = logSheet.getRange(1, 1, 1, logSheet.getLastColumn()).getValues()[0].map(normalize);
+        const required = Schemas.BACKEND_TABS.find(tab => tab.name === 'Attendance Backend')?.machineHeaders || [];
+        if (!required.length || required.some(header => logHeaders.filter(h => h === header).length !== 1))
+          throw new Error('Attendance Backend headers are incomplete; no edits were logged.');
         const nextRow = Math.max(3, logSheet.getLastRow() + 1);
-        logSheet.getRange(nextRow, 1, 1, logHeaders.length).setValues([values]);
-
-        // Incrementally apply the change to backend/front matrices (no full rebuild).
-        AttendanceService.applyAttendanceLogEntry(rowObj);
-      }
+        const requiredRows = nextRow + logs.length - 1;
+        const maxRows = logSheet.getMaxRows();
+        if (requiredRows > maxRows) logSheet.insertRowsAfter(maxRows, requiredRows - maxRows);
+        logSheet.getRange(nextRow, 1, logs.length, logHeaders.length).setValues(logs.map(log => logHeaders.map(header => log[header] ?? '')));
+        SpreadsheetApp.flush();
+        persisted = true;
+        // Frontend cells already contain the human edits. Never rewrite them from a stale capture.
+        try {
+          AttendanceService.applyPreparedAttendanceLogBatch(mirror);
+        } catch (err) {
+          audits.forEach(audit => { audit.result = 'failed'; audit.notes = 'Attendance log saved; derived backend mirror requires repair.'; });
+          AuditService.logBatch(audits);
+          throw new Error('Attendance edit log was saved, but the derived backend mirror did not finish.');
+        }
+        if (!AuditService.logBatch(audits)) throw new Error('Attendance edit log was saved, but its audit batch was not confirmed.');
+        Log.info(`[Attendance] Saved ${logs.length} manual attendance correction(s).`);
+      });
     } catch (err) {
-      Log.warn(`Unable to append attendance edit log: ${err}`);
+      AuditService.log({ backendId, action: 'edit', result: 'failed', role: 'frontend_editor',
+        targetSheet: 'Attendance', targetTable: 'attendance_matrix', targetRange: `Attendance!${range.getA1Notation()}`,
+        source: 'onFrontendEdit', runId, notes: persisted ? 'Attendance log saved; verify derived mirror before refreshing.' : 'No completed attendance append was confirmed; inspect the log before retrying.',
+        error: err });
+      throw err;
     }
+  }
 
-    logAuditEntry({
-      backendId,
-      targetRange: `${sheet.getName()}!${range.getA1Notation()}`,
-      targetKey,
-      header,
-      oldValue,
-      newValue,
-      targetSheet: 'Attendance',
-      targetTable: 'attendance_matrix',
-      role: 'frontend_editor',
-      source: 'onFrontendEdit',
-      action: 'edit',
-    });
-    Log.info(`[Attendance] ${targetKey} ${header} updated: \"${oldValue}\" -> \"${newValue}\"`);
+  function attendanceColumnLetter(column: number): string {
+    let label = '';
+    for (let value = column; value > 0; value = Math.floor((value - 1) / 26)) label = String.fromCharCode(65 + (value - 1) % 26) + label;
+    return label;
   }
 
   export function onEdit(e: GoogleAppsScript.Events.SheetsOnEdit) {
@@ -353,6 +406,10 @@ namespace FrontendEditService {
       applyLeadershipEdit(e);
       applyAttendanceEdit(e);
     } catch (err) {
+      if (e?.range?.getSheet()?.getName() === 'Attendance') {
+        Log.warn('Frontend attendance edit did not complete; inspect its audit result before retrying.');
+        throw err;
+      }
       Log.warn(`Frontend onEdit failed: ${err}`);
     }
   }

@@ -1165,15 +1165,16 @@ function onExcusalsManagementEdit(e: GoogleAppsScript.Events.SheetsOnEdit) {
   ExcusalsService.handleExcusalsManagementEdit(e);
 }
 
-// Installable onEdit for frontend spreadsheet: mirror allowed Directory edits back to backend with audit + propagation.
+// Installable onEdit for frontend spreadsheet: persist supported edits with audit + propagation.
 function onFrontendEdit(e: GoogleAppsScript.Events.SheetsOnEdit) {
   const sheet = e?.range?.getSheet();
   const range = e?.range;
   if (sheet && range) {
     const sheetName = sheet.getName();
     const notation = range.getA1Notation();
-    const newVal = String((e as any)?.value ?? range.getValue() ?? '').substring(0, 50);
-    Log.info(`[Frontend] ${sheetName} ${notation} -> "${newVal}"`);
+    // A pasted range has no single event value. Do not log cell contents or
+    // imply that the top-left value describes every edited cadet/event.
+    Log.info(`[Frontend] ${sheetName} ${notation} edit received.`);
   }
   FrontendEditService.onEdit(e);
 }

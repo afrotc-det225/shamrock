@@ -319,16 +319,15 @@ namespace FormHandlers {
 				cadets: cadetField,
 			});
 
-			// Incrementally apply the new log entry to the matrices (no full rebuild).
-			AttendanceService.applyAttendanceLogEntry({
-				event: eventName,
-				attendance_type: 'P',
-				cadets: cadetField,
-			});
 		});
 
 		if (backendRows.length > 0) {
-			appendToBackend('Attendance Backend', backendRows);
+			// Persist every event before updating derived cells. A failed mirror can
+			// then be repaired by replay without losing the submitted attendance.
+			AttendanceService.withWriteLock(() => {
+				appendToBackend('Attendance Backend', backendRows);
+				backendRows.forEach((entry) => AttendanceService.applyAttendanceLogEntry(entry));
+			});
 			SetupService.applyAttendanceBackendFormattingPublic();
 			const frontendId = Config.getFrontendId();
 			if (frontendId) {
@@ -339,7 +338,7 @@ namespace FormHandlers {
 					Log.warn(`Unable to restore Attendance input presentation after submission: ${err}`);
 				}
 			}
-			Log.info(`Processed attendance submission: ${selectedEvents.length} event(s) from ${submittedByEmail}`);
+			Log.info(`Processed attendance submission: ${selectedEvents.length} event(s).`);
 		}
 
 		// Deliberately omit email receipt for attendance submissions per policy.

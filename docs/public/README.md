@@ -146,6 +146,7 @@ Attendance event columns are grouped by training week and ordered Mando, Seconda
 ### Operator Entry Points
 
 - Attendance Form submit trigger.
+- Authorized frontend Attendance cell edits, pastes and clears through the installed edit trigger.
 - Backend SHAMROCK menu actions for rebuilds, formatting, and bulk fills.
 - Events Backend definitions.
 
@@ -162,6 +163,8 @@ Attendance event columns are grouped by training week and ordered Mando, Seconda
 - Normal Directory/Event refreshes update existing Attendance Form questions and choices in place, avoiding full-form question recreation and repeated linked-sheet columns. Within each cadet subsection, the questions are restored to the canonical senior-to-junior AS-year order. Question labels use forms such as `Cadets (Delta) AS400 (Mando)` and `Cadets (Delta) AF Civ (Mando)`, without a duplicated `AS` prefix.
 - Roster question ordering retries temporary Forms failures without recreating questions. Setup keeps one correct submit trigger per form handler and removes stale or duplicate copies.
 - A blank attendance effect remains blank after rebuilding, including a withdrawn request with no prior attendance. Incremental updates match cadets and event headers separately in each workbook so a different frontend sort does not update another cadet.
+- Manual Attendance pastes persist every affected cadet/event, including explicit clears, before updating the backend matrix. They do not re-write the frontend range. Each correction has a linked audit record; stale or ambiguous headers/identities are rejected. Form submissions also persist their log before updating derived cells.
+- For a restored frontend with unlogged historical edits, use the [dry-run recovery procedure](../runbooks/ATTENDANCE_EDIT_RECOVERY.md). Neither a top-left audit value nor the current sorted row positions proves an entire historical paste. Unexplained differences block a refresh.
 - Attendance parsing recognizes those canonical question labels and retains compatibility with legacy duplicated-`AS` labels. The backend Attendance menu can repair blank cadet lists or missing event rows from preserved raw form responses without overwriting populated log rows.
 - The explicit `Rebuild Attendance Form (archive responses)` action briefly closes the form, preserves the existing linked response tab as a hidden timestamped archive, links a fresh clean response tab, verifies that it has no duplicate header names, and restores the prior open/closed state.
 - Directory and Excusals have matching explicit archive-and-relink rebuild actions. Routine setup and refreshes preserve their existing question IDs; structural rebuilds are reserved for schema repair and transitions.
@@ -171,6 +174,7 @@ Attendance event columns are grouped by training week and ordered Mando, Seconda
 
 - Submit a controlled attendance response.
 - Confirm the response is appended to Attendance Backend.
+- In an isolated test workbook, paste different codes over multiple cadets and events, clear a subset, and sort the rows. Confirm one log/audit record per affected cell, correct backend targets, and no writes to unrelated cells or fixed columns before testing replay.
 - Rebuild attendance and confirm the frontend matrix updates deterministically.
 - Change a roster field that affects Attendance, allow periodic Directory reconciliation to run, and confirm all active Attendance rows retain the standard table formatting, attendance-code validation, and protections.
 - Confirm Events Backend, Attendance, and both event-selection forms contain no POC Third Hour choices or columns after refreshing event artifacts.

@@ -125,6 +125,8 @@ Post-deploy validation checklist:
 
 ### 5.3 Attendance processing
 - Attendance submissions append to Attendance Backend.
+- Authorized manual edits in frontend Attendance support single cells and rectangular pastes/clears. Each affected cadet/event is saved in Attendance Backend before the derived backend mirror is updated. Headers and fixed columns are excluded; stale/ambiguous event or identity mappings stop the operation. Check the failed execution and audit before retrying an uncertain append.
+- If restored frontend values disagree with the attendance log after a refresh, preserve the restored workbook and follow [Attendance edit recovery](ATTENDANCE_EDIT_RECOVERY.md). Do not refresh again until every surviving mismatch has been reviewed. Pause alone does not stop Forms or weekly closeout.
 - Transient Google failures while reading the responder email are retried up to three times before processing starts. Permission errors and exhausted retries remain failed executions; check the preserved response before recovering a missing submission. The retry never repeats attendance writes or notifications.
 - Frontend Attendance matrix is derived; rebuild is available via admin menu.
 - Treat frontend attendance as derived state. Rebuild it instead of manually patching formulas or event columns.
