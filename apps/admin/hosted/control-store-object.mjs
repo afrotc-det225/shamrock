@@ -1,3 +1,4 @@
+import { reserve } from "./openai-assistant.mjs";
 import { DurableObject } from "cloudflare:workers";
 import { createHash } from "node:crypto";
 import baseSchema from "./schema.sql";
@@ -115,6 +116,8 @@ export class StagingPanelStore extends DurableObject {
       } catch { fail(); }
     });
   }
+
+  reserveAssistant() { return reserve(this.ctx.storage, Date.now()); }
 
   status() { return this.ready; }
 

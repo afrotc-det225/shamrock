@@ -1,3 +1,5 @@
+import guide from "../README.md";
+const operatorGuide = guide.split("## Operator guide\n")[1].split("## Hosted staging Assistant")[0].trim();
 import handler from "./panel-handler.mjs";
 import { panelControlStore } from "./control-store.mjs";
 export { StagingPanelStore } from "./control-store-object.mjs";
@@ -14,7 +16,7 @@ export default {
       if (/^\d+$/.test(count ?? "")) rows+=Number(count); else measured=false;
       return result;
     }};
-    const response=await handler.fetch(request,{...env,BACKEND:backend},panelControlStore);
+    const response=await handler.fetch(request,{...env,operatorGuide,BACKEND:backend},panelControlStore);
     if(response.ok) response.headers.set("X-Shamrock-D1-Rows-Read",measured?String(rows):"unknown");
     return response;
   },

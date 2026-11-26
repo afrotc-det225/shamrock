@@ -127,7 +127,7 @@ export function Assistant({ meta }) {
     [error, setError] = useState("");
   const send = async (e) => {
     e.preventDefault();
-    if (!text.trim()) return;
+    if (busy || !text.trim()) return;
     const next = [...messages, { role: "user", content: text.trim() }].slice(
       -15,
     );
@@ -150,9 +150,9 @@ export function Assistant({ meta }) {
         title="Assistant"
       />
       <div className="notice">
-        CRC access and usage limits may change, and this feature may be retired.
+        {meta.hosted ? "Ask about SHAMROCK procedures. Your question and recent chat are sent to OpenAI. Keep cadet details and secrets out of chat." : <>CRC access and usage limits may change, and this feature may be retired.
         Administrator tools work independently. This version can explain
-        procedures; it cannot change records, modify code or repair bugs.
+        procedures; it cannot change records, modify code or repair bugs.</>}
       </div>
       <p className="hint">
         {meta.assistantAvailable
@@ -177,7 +177,7 @@ export function Assistant({ meta }) {
         <textarea
           aria-label="Ask SHAMROCK"
           placeholder="How do I prepare the next semester?"
-          maxLength={6000}
+          maxLength={meta.hosted ? 1000 : 6000}
           value={text}
           onChange={(e) => setText(e.target.value)}
           disabled={!meta.assistantAvailable}

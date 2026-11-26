@@ -70,6 +70,14 @@ The panel handles identities and version checks. Operators never enter record ID
 API requests, SQL, or version numbers. When a record has changed, reload and review;
 never guess a version, use zero, or increment it manually.
 
+## Hosted staging Assistant
+
+Only the configured Google subject with current Wing access can ask a question. View as disables chat. The Assistant receives the operator guide and at most five recent messages, on explicit submission. Keep private information out of questions. No records are automatically included. This is procedure help.
+
+The real-data staging Worker requires secret bindings `ASSISTANT_OWNER_SUB` and `ASSISTANT_KEY`. Match the subject to the verified maintainer login. Rotate the dedicated restricted Responses-write key before its expiry. Review model prices and the credit grant at rotation. Remove the key binding to disable service. Keep paid recharge off for a credit-only installation.
+
+Both hostnames share the existing panel Durable Object. Before dispatch it reserves a slot atomically, including on provider errors. Limits are one request per 30 seconds, eight per rolling day and 200 per rolling 32 days. Preserve that ledger across releases. Changing the control-store generation disables the Assistant pending review. At the published GPT-5.4 mini prices, budgeting two cents per request allows up to $4 per rolling period. The text-only request has a 10,000-byte limit, 700 output tokens and no model tools or automatic retries.
+
 ## Optional CRC connection
 
 The tested model is `qwen3.5:122b`, selected after a live model-catalog check and a

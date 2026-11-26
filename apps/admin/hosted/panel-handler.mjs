@@ -1,3 +1,4 @@
+import { available, answer, model } from "./openai-assistant.mjs";
 import { authRoute, session, csrfCheck } from "./auth.mjs";
 import { HostedBackend } from "./backend.mjs";
 import { ProposalStore } from "./store.mjs";
@@ -147,7 +148,8 @@ export default {
               fictional: backend.dataset === "fictional",
               hosted: true,
               viewAsEnabled: env.VIEW_AS_ENABLED === "1",
-              assistantAvailable: false,
+              assistantAvailable: available(env, user, preview) && manifest.access.capabilities.fullSnapshot,
+              model,
               transitionPolicy: TRANSITION_POLICY,
             },
           });
@@ -208,12 +210,11 @@ export default {
           json(await service.transition(url.searchParams.get("id"))),
         );
       }
-      if (url.pathname === "/api/chat")
-        throw new PanelError(
-          "ASSISTANT_UNAVAILABLE",
-          "The optional assistant is not connected. All administrator tools still work.",
-          503,
-        );
+      if (request.method === "POST" && url.pathname === "/api/chat") {
+        if (!available(env, user, preview) || !(await backend.panelAuthority()).access.capabilities.fullSnapshot)
+          throw new PanelError("FORBIDDEN", "Assistant access is restricted.", 403);
+        return secure(json(await answer(env, body, env.operatorGuide)));
+      }
       throw new PanelError("NOT_FOUND", "This action is unavailable.", 404);
     } catch (error) {
       const limited = dailyLimitResponse(error, url);
