@@ -1,3 +1,4 @@
+import {storeEnvironment} from "./site.mjs";
 import { PanelError } from "../errors.mjs";
 
 export const controlStoreName = (origin, generation) =>
@@ -6,6 +7,7 @@ export const controlStoreName = (origin, generation) =>
 // The binding is private to the staging Worker. Browser requests never supply
 // SQL, the object name, its environment, or its bootstrap payload.
 export function panelControlStore(env) {
+  env = storeEnvironment(env);
   let origin;
   try { origin = new URL(env.APP_ORIGIN); } catch {}
   const generation = Number(env.GENERATION);

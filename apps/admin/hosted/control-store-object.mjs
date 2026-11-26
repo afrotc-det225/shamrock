@@ -1,3 +1,4 @@
+import {storeEnvironment} from "./site.mjs";
 import { reserve } from "./openai-assistant.mjs";
 import { DurableObject } from "cloudflare:workers";
 import { createHash } from "node:crypto";
@@ -80,6 +81,7 @@ function validateCall(statements) {
 export class StagingPanelStore extends DurableObject {
   constructor(ctx, env) {
     super(ctx, env);
+    env = storeEnvironment(env);
     ctx.blockConcurrencyWhile(async () => {
       try {
         const origin = new URL(env.APP_ORIGIN);

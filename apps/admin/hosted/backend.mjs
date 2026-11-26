@@ -1,3 +1,4 @@
+import {isUnifiedSite} from "./site.mjs";
 import { createHash, createHmac } from "node:crypto";
 import { PanelError } from "../errors.mjs";
 import { boundedJson } from "./http.mjs";
@@ -33,7 +34,7 @@ export class HostedBackend {
       !origin.port;
     if (
       env.ENVIRONMENT !== "staging" ||
-      !(dataset === "fictional" && origin.hostname.includes("staging") || realStaging) ||
+      !(dataset === "fictional" && origin.hostname.includes("staging") || realStaging || isUnifiedSite(env)) ||
       origin.protocol !== "https:" ||
       origin.origin !== env.BACKEND_ORIGIN ||
       !env.BACKEND ||
@@ -63,7 +64,7 @@ export class HostedBackend {
     this.binding = createHash("sha256")
       .update(
         JSON.stringify([
-          env.BACKEND_ORIGIN,
+          isUnifiedSite(env) ? env.RECEIPT_BINDING_ORIGIN : env.BACKEND_ORIGIN,
           this.generation,
           principalId,
           env.SOURCE_KIND,

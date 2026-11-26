@@ -540,7 +540,7 @@ export default function CadetWorkspace({ session }) {
       {notice && <p role="status">{notice}</p>}
       {!state && !error && <p role="status">Loading your workspace…</p>}
       {state && !preview && !state.writable && (
-        <p>Staging submissions are paused.</p>
+        <p>Submissions are paused.</p>
       )}
       {state?.profile && !state.linked && !preview && (
         <button

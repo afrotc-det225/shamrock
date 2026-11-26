@@ -1,3 +1,4 @@
+import {isUnifiedSite} from "./site.mjs";
 import { available, answer, model } from "./openai-assistant.mjs";
 import { authRoute, session, csrfCheck, sha } from "./auth.mjs";
 import { HostedBackend } from "./backend.mjs";
@@ -27,7 +28,7 @@ export default {
         env.ENVIRONMENT !== "staging" ||
         (!canonical && url.origin !== env.APP_ORIGIN) ||
         url.protocol !== "https:" ||
-        !env.APP_ORIGIN.includes("staging")
+        (!isUnifiedSite(env) && !env.APP_ORIGIN.includes("staging"))
       )
         throw new PanelError(
           "INVALID_HOST",
@@ -39,7 +40,7 @@ export default {
         env = { ...env, PANEL_DB: controlStoreFactory(env) };
       if (canonical) env = { ...env, APP_ORIGIN: url.origin };
       if (url.pathname === "/health")
-        return secure(json({ status: "ok", environment: "staging",
+        return secure(json({ status: "ok", ...(isUnifiedSite(env) ? {service:"SHAMROCK"} : {environment:"staging"}),
           ...(env.PANEL_DB?.status ? { controlStore: await env.PANEL_DB.status() } : {}) }));
       const runner = /^\/api\/assistant-runner\/(assistant-sandbox-[a-zA-Z0-9_-]+\.js)$/.exec(url.pathname);
       if (runner && request.method === "GET") {

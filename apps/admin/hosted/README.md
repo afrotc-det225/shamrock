@@ -452,14 +452,10 @@ first-name ordering as the spreadsheet Directory. Leadership keeps its separate
 cadre, operational-role and rank ordering. Sorting is local to the displayed
 list and never changes stable record IDs, snapshot paging or authorization.
 
-### Permanent frontend address during real-data staging
+### SHAMROCK site and release
 
-The Worker in `wrangler.canonical.jsonc` forwards the original request over a
-private service binding. It has no database, credentials or scheduled jobs.
-The panel accepts the permanent origin only for the named real-data staging
-installation. Browser cookies are host-only. OAuth and CSRF use the browser's
-actual origin, while the installation keeps its existing control store for
-identity, pending proposals and cleanup. Register both exact callback URIs
-during this overlap. Deploy the compatible panel first, then the entry Worker.
-Verify sign-in and a scoped Sheet readback before sharing the address.
-A future production release needs its own authorized installation and bindings.
+Use **https://shamrock.det225.workers.dev/** for cadets and staff. Google returns to `/auth/callback`. The same Worker serves the panel, static files and the signed `/v1/` API. Internal panel reads call the records handler in-process. Only the hourly panel cleanup is scheduled. The live Google Sheets installation remains independently operated until cutover.
+
+Use `wrangler.canonical.jsonc` as the template for the named Worker. Supply the existing private binding IDs, secrets and key IDs from the installation. Preserve the authentication Durable Object namespace, its original installation origin, and the original receipt-binding origin on upgrades. Those values identify existing sessions and receipts. The persisted command environment and generation must still match D1.
+
+The fictional regression database is reachable only with its independently verified adapter signature. It has separate credentials, storage and mail settings. Browser accounts always use the cadet database. Older Google adapter configurations keep their saved checkpoints and send signed API calls to the canonical address. Verify both signers, all signed-out denials, Google’s exact callback, the health of the existing control store, and closed write gates after deployment.

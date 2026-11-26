@@ -1,5 +1,7 @@
 import guide from "../README.md";
 const operatorGuide = guide.split("## Operator guide\n")[1].split("## Hosted staging Assistant")[0].trim();
+import records from "../../worker/src/index.ts";
+import { isUnifiedSite, recordsEnvironment, siteOrigin } from "./site.mjs";
 import handler from "./panel-handler.mjs";
 import { panelControlStore } from "./control-store.mjs";
 export { StagingPanelStore } from "./control-store-object.mjs";
@@ -8,7 +10,18 @@ export { StagingPanelStore } from "./control-store-object.mjs";
 // The legacy D1 binding is retained only for the bounded migration and rollback.
 export default {
   async fetch(request,env) {
-    if (!new URL(request.url).pathname.startsWith("/api/")) return handler.fetch(request,env,panelControlStore);
+    const url = new URL(request.url);
+    if (isUnifiedSite(env)) {
+      if (url.origin !== siteOrigin) {
+        if ((request.method === "GET" || request.method === "HEAD") && url.pathname === "/")
+          return Response.redirect(siteOrigin + "/", 302);
+        return new Response("Unknown SHAMROCK address.", {status:403});
+      }
+      const local = {fetch: upstream => records.fetch(upstream, recordsEnvironment(upstream, env))};
+      if (url.pathname.startsWith("/v1/")) return local.fetch(request);
+      env = {...env, BACKEND:local};
+    }
+    if (!url.pathname.startsWith("/api/")) return handler.fetch(request,env,panelControlStore);
     let rows=0, measured=true;
     const backend={fetch:async upstream=>{
       const result=await env.BACKEND.fetch(upstream);

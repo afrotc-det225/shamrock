@@ -1,5 +1,7 @@
 # SHAMROCK
 
+The cadet and leadership site is [SHAMROCK](https://shamrock.det225.workers.dev/). Google sign-in, the web panel and the signed spreadsheet API share this address. The D1 rollout is still separate from the operational Google Sheets installation.
+
 **System for Headcount & Accountability of Manpower, Readiness, Oversight, and Cadet Keeping**
 
 This repository contains the **Apps Script codebase**, developed locally in **VS Code with TypeScript**, and deployed to Google Apps Script using **clasp**.

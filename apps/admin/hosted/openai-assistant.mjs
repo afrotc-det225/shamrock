@@ -1,10 +1,11 @@
+import {isUnifiedSite} from "./site.mjs";
 import { areas, maintenanceRequest, proposalResult } from "./maintenance.mjs";
 import { PanelError } from "../errors.mjs";
 
 export const model = "gpt-5.4-mini-2026-03-17";
 export function available(env, user, preview) {
   return !preview && env.ENVIRONMENT === "staging" && env.STAGING_DATASET === "real" &&
-    env.BACKEND_SERVICE_NAME === "shamrock-real-parity" && String(env.GENERATION) === "1" &&
+    (isUnifiedSite(env) || env.BACKEND_SERVICE_NAME === "shamrock-real-parity") && String(env.GENERATION) === "1" &&
     Boolean(env.ASSISTANT_KEY && env.ASSISTANT_OWNER_SUB && env.PANEL_DB?.reserveAssistant) &&
     env.ASSISTANT_OWNER_SUB === user.google_sub;
 }
@@ -64,8 +65,8 @@ export async function answer(env, body, guide, send = fetch) {
     if (!r.ok) {
       const explanations = {
         400: "The model rejected the request settings.",
-        401: "The staging credential needs renewal.",
-        403: "The provider denied the staging request.",
+        401: "The assistant credential needs renewal.",
+        403: "The provider denied the request.",
         404: "The configured model is unavailable.",
         429: "The provider has reached a usage or rate limit.",
       };

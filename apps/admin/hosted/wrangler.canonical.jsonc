@@ -1,8 +1,33 @@
 {
   "name": "shamrock",
-  "main": "canonical-entry.mjs",
+  "main": "../../../.build/admin/hosted-worker.mjs",
   "compatibility_date": "2026-11-16",
+  "compatibility_flags": ["nodejs_compat"],
   "workers_dev": true,
   "preview_urls": false,
-  "services": [{"binding": "STAGING_PANEL", "service": "shamrock-admin-staging"}]
+  "assets": {"directory":"../dist", "binding":"ASSETS", "run_worker_first":["/api/*","/auth/*","/v1/*","/health"]},
+  "durable_objects": {"bindings":[{"name":"AUTH_STORE","class_name":"StagingPanelStore"}]},
+  "migrations": [{"tag":"auth-store-v1","new_sqlite_classes":["StagingPanelStore"]}],
+  "d1_databases": [
+    {"binding":"DB","database_name":"EXISTING_CADET_DATABASE_NAME","database_id":"REPLACE_WITH_EXISTING_CADET_DATABASE_ID"},
+    {"binding":"REHEARSAL_DB","database_name":"EXISTING_REHEARSAL_DATABASE_NAME","database_id":"REPLACE_WITH_EXISTING_REHEARSAL_DATABASE_ID"}
+  ],
+  "kv_namespaces": [
+    {"binding":"WING_MATRICES","id":"REPLACE_WITH_EXISTING_MATRIX_NAMESPACE"},
+    {"binding":"HISTORY_FILES","id":"REPLACE_WITH_EXISTING_HISTORY_NAMESPACE"}
+  ],
+  "vars": {
+    "APP_ORIGIN":"https://shamrock.det225.workers.dev",
+    "BACKEND_ORIGIN":"https://shamrock.det225.workers.dev",
+    "BACKEND_SERVICE_NAME":"shamrock",
+    "AUTH_STORE_ORIGIN":"https://shamrock-admin-staging.det225.workers.dev",
+    "RECEIPT_BINDING_ORIGIN":"https://shamrock-real-parity.det225.workers.dev",
+    "AUTH_STORE_VERSION":"1","GENERATION":"1","ENVIRONMENT":"staging","STAGING_DATASET":"real",
+    "VIEW_AS_ENABLED":"1","SOURCE_KIND":"test","SOURCE_RESOURCE":"admin-staging-web",
+    "BRIDGE_KEY_ID":"REPLACE_WITH_CADET_KEY_ID","REHEARSAL_KEY_ID":"REPLACE_WITH_DIFFERENT_REHEARSAL_KEY_ID",
+    "REHEARSAL_GENERATION":"1"
+  },
+  // Preserve private Google, assistant, bridge and owner-mail bindings during deployment.
+  "observability":{"enabled":false},
+  "triggers":{"crons":["17 * * * *"]}
 }

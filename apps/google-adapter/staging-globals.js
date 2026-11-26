@@ -1,6 +1,15 @@
 // Apps Script discovers top-level function declarations, not IIFE object methods.
 // Keep these entry points separate from the current production script and menus.
 // Run from the editor so Google can prompt for any missing publication permissions.
+// Reuse existing signed paths and stored checkpoints while moving transport to the shared site.
+var shamrockHttp_ = {
+  fetch: function (url, options) {
+    var former = /^https:\/\/shamrock-(?:real-parity|staging)\.det225\.workers\.dev(\/v1\/.*)$/;
+    var match = typeof url === 'string' && former.exec(url);
+    return UrlFetchApp.fetch(match ? 'https://shamrock.det225.workers.dev' + match[1] : url, options);
+  }
+};
+
 function shamrockV3StagingAuthorizePublication() {
   ScriptApp.requireScopes(ScriptApp.AuthMode.FULL, [
     'https://www.googleapis.com/auth/drive',
@@ -41,7 +50,7 @@ function shamrockV3StagingHost_() {
   return SHAMROCKV3.createNativeStagingHost({
     PropertiesService: PropertiesService,
     Utilities: Utilities,
-    UrlFetchApp: UrlFetchApp,
+    UrlFetchApp: shamrockHttp_,
     ScriptApp: ScriptApp,
     Session: Session,
     FormApp: FormApp,
@@ -54,7 +63,7 @@ function shamrockV3StagingFrontend_() {
   return SHAMROCKV3.createNativeFrontendRuntime({
     PropertiesService: PropertiesService,
     Utilities: Utilities,
-    UrlFetchApp: UrlFetchApp,
+    UrlFetchApp: shamrockHttp_,
     ScriptApp: ScriptApp,
     Session: Session,
     LockService: LockService
@@ -63,7 +72,7 @@ function shamrockV3StagingFrontend_() {
 
 function shamrockV3StagingMaintenance_() {
   return SHAMROCKV3.createNativeMaintenanceRuntime({
-    PropertiesService: PropertiesService, Utilities: Utilities, UrlFetchApp: UrlFetchApp,
+    PropertiesService: PropertiesService, Utilities: Utilities, UrlFetchApp: shamrockHttp_,
     ScriptApp: ScriptApp, Session: Session, LockService: LockService
   });
 }
@@ -74,7 +83,7 @@ function shamrockV3StagingTransitionArchive(transitionId) { return shamrockV3Sta
 function shamrockV3StagingTransitionCommand(input) { return shamrockV3StagingMaintenance_().command(input); }
 function shamrockV3StagingForms_() {
   return SHAMROCKV3.createNativeFormsRuntime({ PropertiesService: PropertiesService, Utilities: Utilities,
-    UrlFetchApp: UrlFetchApp, ScriptApp: ScriptApp, Session: Session, FormApp: FormApp, LockService: LockService });
+    UrlFetchApp: shamrockHttp_, ScriptApp: ScriptApp, Session: Session, FormApp: FormApp, LockService: LockService });
 }
 
 function shamrockV3StagingSetup() {
@@ -107,7 +116,7 @@ function shamrockV3StagingRepairPresentation() { return shamrockV3StagingHost_()
 function shamrockV3StagingImportConfig() {
   return SHAMROCKV3.importStagingConfiguration({
     PropertiesService: PropertiesService,
-    UrlFetchApp: UrlFetchApp,
+    UrlFetchApp: shamrockHttp_,
     ScriptApp: ScriptApp,
     Session: Session
   });
@@ -115,7 +124,7 @@ function shamrockV3StagingImportConfig() {
 function shamrockV3StagingResume() { return shamrockV3StagingHost_().resume(); }
 function shamrockV3StagingFlush() {
   return SHAMROCKV3.runScheduledStaging({ PropertiesService: PropertiesService, Utilities: Utilities,
-    UrlFetchApp: UrlFetchApp, ScriptApp: ScriptApp, Session: Session, FormApp: FormApp,
+    UrlFetchApp: shamrockHttp_, ScriptApp: ScriptApp, Session: Session, FormApp: FormApp,
     SpreadsheetApp: SpreadsheetApp, LockService: LockService, MailApp: MailApp });
 }
 function shamrockV3StagingFrontendRefresh() { return shamrockV3StagingFrontend_().refresh(); }
@@ -140,7 +149,7 @@ function shamrockV3ManagedDirectorySubmit(e) { return shamrockV3StagingForms_().
 function shamrockV3ManagedFormReplay(key, responseId) { return shamrockV3StagingForms_().replay(key, responseId); }
 
 function shamrockV3NativeInput_() { return SHAMROCKV3.createNativeFrontendInput({ PropertiesService: PropertiesService, Utilities: Utilities,
-  UrlFetchApp: UrlFetchApp, ScriptApp: ScriptApp, Session: Session, FormApp: FormApp, LockService: LockService }); }
+  UrlFetchApp: shamrockHttp_, ScriptApp: ScriptApp, Session: Session, FormApp: FormApp, LockService: LockService }); }
 function shamrockV3NativeInputSetup() { return shamrockV3NativeInput_().setup(); }
 function shamrockV3NativeInputPause() { return shamrockV3NativeInput_().pause(); }
 function shamrockV3NativeInputResume() { return shamrockV3NativeInput_().resume(); }
@@ -152,19 +161,19 @@ function shamrockV3NativeConfirmationReplay(responseId) { return shamrockV3Nativ
 
 function shamrockV3NativeInputReviewQueue() { return shamrockV3NativeInput_().reviewQueue(); }
 
-function shamrockV3NativePermissions_() { return SHAMROCKV3.createNativePermissionRuntime({PropertiesService: PropertiesService, Utilities: Utilities, UrlFetchApp: UrlFetchApp, ScriptApp: ScriptApp, Session: Session, LockService: LockService}); }
+function shamrockV3NativePermissions_() { return SHAMROCKV3.createNativePermissionRuntime({PropertiesService: PropertiesService, Utilities: Utilities, UrlFetchApp: shamrockHttp_, ScriptApp: ScriptApp, Session: Session, LockService: LockService}); }
 function shamrockV3NativePermissionsRefresh() { return shamrockV3NativePermissions_().refresh(); }
 function shamrockV3NativePermissionsPause() { return shamrockV3NativePermissions_().pause(); }
 function shamrockV3NativePermissionsControl() { return shamrockV3NativePermissions_().applyControl(); }
 
 function shamrockV3ManagedPendingReplayQueue() { return shamrockV3StagingForms_().pendingReplayQueue(); }
 function shamrockV3ManagedReviewReplay(input) { return shamrockV3StagingForms_().reviewReplay(input); }
-function shamrockV3OwnerMail_() { return SHAMROCKV3.createNativeOwnerMailRuntime({PropertiesService:PropertiesService,Utilities:Utilities,UrlFetchApp:UrlFetchApp,ScriptApp:ScriptApp,Session:Session,LockService:LockService,MailApp:MailApp}); }
+function shamrockV3OwnerMail_() { return SHAMROCKV3.createNativeOwnerMailRuntime({PropertiesService:PropertiesService,Utilities:Utilities,UrlFetchApp: shamrockHttp_,ScriptApp:ScriptApp,Session:Session,LockService:LockService,MailApp:MailApp}); }
 function shamrockV3OwnerMailControl() { return shamrockV3OwnerMail_().applyControl(); }
 function shamrockV3OwnerMailFlush() { return shamrockV3OwnerMail_().flush(); }
 function shamrockV3OwnerMailPause() { return shamrockV3OwnerMail_().pause(); }
 function shamrockV3OwnerMailStatus() { return shamrockV3OwnerMail_().status(); }
-function shamrockV3History_() { return SHAMROCKV3.createNativeHistoryRuntime({PropertiesService:PropertiesService,Utilities:Utilities,UrlFetchApp:UrlFetchApp,ScriptApp:ScriptApp,Session:Session,LockService:LockService}); }
+function shamrockV3History_() { return SHAMROCKV3.createNativeHistoryRuntime({PropertiesService:PropertiesService,Utilities:Utilities,UrlFetchApp: shamrockHttp_,ScriptApp:ScriptApp,Session:Session,LockService:LockService}); }
 function shamrockV3HistorySetup() { return shamrockV3History_().setup(); }
 function shamrockV3HistoryPause() { return shamrockV3History_().pause(); }
 function shamrockV3HistoryContinue() {
@@ -177,4 +186,4 @@ function shamrockV3HistoryStart() {
   if(Session.getActiveUser().getEmail().trim().toLowerCase()!==host.expectedAutomationEmail)throw Error('Run historical publication as the configured automation owner.');
   var runtime=shamrockV3History_();return runtime.resume(runtime.setup().bindingHash);
 }
-function shamrockV3StagingImportCredential() { return SHAMROCKV3.importStagingCredential({PropertiesService:PropertiesService,Utilities:Utilities,UrlFetchApp:UrlFetchApp,ScriptApp:ScriptApp,Session:Session,LockService:LockService}); }
+function shamrockV3StagingImportCredential() { return SHAMROCKV3.importStagingCredential({PropertiesService:PropertiesService,Utilities:Utilities,UrlFetchApp: shamrockHttp_,ScriptApp:ScriptApp,Session:Session,LockService:LockService}); }
