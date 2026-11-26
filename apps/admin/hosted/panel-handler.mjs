@@ -10,10 +10,17 @@ import { dailyLimitResponse } from "./provider-errors.mjs";
 export default {
   async fetch(request, env, controlStoreFactory) {
     const url = new URL(request.url);
+    // The permanent host is a second entrance to this same real-data staging
+    // installation. Keep the control store, pending proposals and cleanup job shared.
+    const canonical = url.origin === "https://shamrock.det225.workers.dev" &&
+      env.APP_ORIGIN === "https://shamrock-admin-staging.det225.workers.dev" &&
+      env.STAGING_DATASET === "real" &&
+      env.BACKEND_SERVICE_NAME === "shamrock-real-parity" &&
+      env.BACKEND_ORIGIN === "https://shamrock-real-parity.det225.workers.dev";
     try {
       if (
         env.ENVIRONMENT !== "staging" ||
-        url.origin !== env.APP_ORIGIN ||
+        (!canonical && url.origin !== env.APP_ORIGIN) ||
         url.protocol !== "https:" ||
         !env.APP_ORIGIN.includes("staging")
       )
@@ -25,6 +32,7 @@ export default {
       if (controlStoreFactory && (url.pathname === "/health" ||
           url.pathname.startsWith("/auth/") || url.pathname.startsWith("/api/")))
         env = { ...env, PANEL_DB: controlStoreFactory(env) };
+      if (canonical) env = { ...env, APP_ORIGIN: url.origin };
       if (url.pathname === "/health")
         return secure(json({ status: "ok", environment: "staging",
           ...(env.PANEL_DB?.status ? { controlStore: await env.PANEL_DB.status() } : {}) }));
