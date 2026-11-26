@@ -48,7 +48,8 @@ function scopedQueries():typeof queries {
   result.people.from+=' WHERE d.person_id IN(SELECT person_id FROM scoped_people)';
   result.contacts.from+=' AND ((c.person_id IS NULL AND c.active=1) OR c.person_id IN(SELECT person_id FROM scoped_people))';
   result.terms.from+=' WHERE is_current=1 OR term_id IN(SELECT term_id FROM selected_term)';
-  result.events.from+=' WHERE e.event_id IN(SELECT event_id FROM scoped_events)';
+  result.events.from+=' WHERE d.term_id=(SELECT term_id FROM selected_term)';
+  result.events.order='d.display_order,d.event_id';
   result.eventRosters.from+=' WHERE m.event_id IN(SELECT event_id FROM scoped_events)';
   result.eventFlights.from+=' WHERE event_id IN(SELECT event_id FROM scoped_events)';
   result.observations.from+=' WHERE o.event_id IN(SELECT event_id FROM scoped_events)';

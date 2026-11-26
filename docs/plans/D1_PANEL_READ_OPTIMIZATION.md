@@ -54,3 +54,9 @@ A November 25 offline comparison against the refreshed staging-data copy found
 one signed backend call and writes zero rows. The reproducible command is
 `scripts/rehearse-panel-reads.mjs`. A new isolate pays the cold cost. No KV,
 R2, persistent cache, or additional scheduled refresh is needed.
+
+Filtering event details directly by term and ordering on its existing
+`event_details_term_order` index reduced the same cold sample further to 400
+rows. SQLite's query plan uses the term/order index and a primary-key lookup
+on events. The before/after comparison checks every returned event against the
+original paged transport. This change adds no index maintenance or stored copy.
