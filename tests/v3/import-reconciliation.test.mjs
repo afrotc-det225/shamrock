@@ -74,7 +74,7 @@ test('saved formula range exclusions remain explicit while every excluded effect
   assert.equal(entry.credit.overall.matches,true);assert.deepEqual(entry.formulaCoverage.excludedEventColumns,[9]);assert.equal(entry.events[2].code,'A');
 });
 
-test('a first-name change needs a unique email, matching surname, birth date and phone throughout the archive',()=>{
+test('a change to either name requires one shared name, unique email, birth date and phone throughout the archive',()=>{
   const phone='(202) 555-0123';
   function reconcile(overrides={},duplicate=false) {
     const archived={...person,first_name:'Former',phone:'+1 202-555-0123',...overrides};
@@ -96,7 +96,15 @@ test('a first-name change needs a unique email, matching surname, birth date and
   assert.equal(archive.rows[0].personEvidence.anchorKind,'current-email-surname-birthdate-phone');
   assert.equal(archive.rows[0].identityLabels[1],'former');
   assert.equal(archive.rows[0].events[0].code,'P');
-  for(const fields of [{phone:''},{phone:'202-555-0124'},{dob:''},{dob:'2007-02-01'},{last_name:'Different'}]){
+  const surnameChange={first_name:person.first_name,last_name:'Previous'};
+  const former=reconcile(surnameChange).archive;
+  assert.equal(former.rows[0].personId,current.personId);
+  assert.equal(former.sourceRoster[0].personId,current.personId);
+  assert.equal(former.rows[0].identityLabels[0],'previous');
+  assert.equal(former.rows[0].personEvidence.anchorKind,'current-email-firstname-birthdate-phone');
+  assert.equal(reconcile({...surnameChange,dob:''}).archive.rows[0].personId,null);
+  assert.equal(reconcile(surnameChange,true).archive.rows[0].personId,null);
+  for(const fields of [{first_name:''},{phone:''},{phone:'202-555-0124'},{dob:''},{dob:'2007-02-01'},{last_name:'Different'}]){
     assert.equal(reconcile(fields).archive.rows[0].personId,null);
   }
   assert.equal(reconcile({},true).archive.rows[0].personId,null);

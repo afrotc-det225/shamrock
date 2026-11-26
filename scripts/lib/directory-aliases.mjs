@@ -6,7 +6,6 @@ function phoneDigits(value) {
   const digits = number.replace(/\D/g, '').replace(/^1(?=\d{10}$)/, '');
   return /^\d{10}$/.test(digits) ? digits : null;
 }
-export const aliasEvidence = 'current-email-surname-birthdate-phone';
 
 export function directoryAliases(records) {
   const byEmail = new Map(), links = new Map();
@@ -19,11 +18,17 @@ export function directoryAliases(records) {
   for (const rows of byEmail.values()) {
     const anchors = rows.filter(r => r.currentPersonId);
     if (anchors.length !== 1 || new Set(rows.map(r => r.sheet)).size !== rows.length) continue;
-    const anchor = anchors[0], surname = normalized(anchor.lastName), phone = phoneDigits(anchor.phone);
-    if (!surname || !normalized(anchor.firstName) || !phone || !/^\d{4}-\d{2}-\d{2}$/.test(anchor.birthDate)) continue;
-    if (!rows.every(r => normalized(r.lastName) === surname && r.birthDate === anchor.birthDate && phoneDigits(r.phone) === phone)) continue;
+    const anchor = anchors[0], phone = phoneDigits(anchor.phone);
+    if (!phone || !/^\d{4}-\d{2}-\d{2}$/.test(anchor.birthDate)) continue;
+    if (!rows.every(r => normalized(r.firstName) && normalized(r.lastName) &&
+      r.birthDate === anchor.birthDate && phoneDigits(r.phone) === phone)) continue;
+    // All copies must share the same name component. A chain of partially matching names is ambiguous.
+    const sameSurname = rows.every(r => normalized(r.lastName) === normalized(anchor.lastName));
+    const sameFirstName = rows.every(r => normalized(r.firstName) === normalized(anchor.firstName));
+    if (sameSurname === sameFirstName) continue;
+    const changedField = sameSurname ? 'firstName' : 'lastName';
     for (const row of rows) {
-      if (normalized(row.firstName) && normalized(row.firstName) !== normalized(anchor.firstName))
+      if (normalized(row[changedField]) !== normalized(anchor[changedField]))
         links.set(row.occurrenceId, anchor.currentPersonId);
     }
   }
