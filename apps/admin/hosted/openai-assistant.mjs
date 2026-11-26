@@ -50,7 +50,7 @@ export async function answer(env, body, guide, send = fetch) {
     throw new PanelError("ASSISTANT_LIMIT", "Assistant usage limit reached. Try again later.", 429);
   try {
     const r = await send("https://api.openai.com/v1/responses", {
-      method: "POST", redirect: "error", signal: AbortSignal.timeout(30_000),
+      method: "POST", redirect: "manual", signal: AbortSignal.timeout(30_000),
       headers: {Authorization: "Bearer " + env.ASSISTANT_KEY, "Content-Type": "application/json"},
       body: payload,
     });

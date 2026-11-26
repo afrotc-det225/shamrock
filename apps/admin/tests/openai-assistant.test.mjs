@@ -31,6 +31,7 @@ test("bounded text-only call ignores client settings and fails closed before dis
   const send = async (_, options) => {
     sent++;
     const q = JSON.parse(options.body);
+    assert.equal(options.redirect,"manual");
     assert.equal(q.model,model); assert.equal(q.max_output_tokens,700); assert.equal(q.store,false);
     assert.equal(q.tools,undefined); assert.equal(q.reasoning.effort,"none"); assert.ok(Buffer.byteLength(options.body)<=10000);
     return Response.json({output:[{type:"message",content:[{type:"output_text",text:"Review the correction."}]}]});
