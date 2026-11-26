@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { Drawer, Field, Select, Table } from './components';
 import { api, displayDate, eventTypes } from './api';
 import { meetingDefault, rescheduleEvent } from './schedule.mjs';
-import { toEastern } from './time';
+import { toEastern, zoneLabel } from './time';
 
 export default function BulkSchedule({snapshot:s, term, onClose, onSaved}) {
   const [type,setType]=useState('mando'), [from,setFrom]=useState(toEastern(new Date().toISOString()).slice(0,10));
@@ -43,7 +43,7 @@ export default function BulkSchedule({snapshot:s, term, onClose, onSaved}) {
       <Select label="Event type" value={type} options={Object.entries(eventTypes).map(([value,label])=>({value,label}))} onChange={v=>{setType(v);setMeeting(meetingDefault(s.events.filter(e=>e.termId===term),v,meeting));}}/>
       <Field label="Events on or after" type="date" required value={from} onChange={e=>setFrom(e.target.value)}/>
       <Select label="New weekday" value={meeting.weekday} onChange={v=>setMeeting({...meeting,weekday:Number(v)})} options={['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'].map((label,value)=>({label,value}))}/>
-      <Field label="Start time (Eastern)" type="time" required value={`${String(meeting.hour).padStart(2,'0')}:${String(meeting.minute).padStart(2,'0')}`} onChange={e=>{const [hour,minute]=e.target.value.split(':').map(Number);setMeeting({...meeting,hour,minute});}}/>
+      <Field label={`Start time (${zoneLabel()})`} type="time" required value={`${String(meeting.hour).padStart(2,'0')}:${String(meeting.minute).padStart(2,'0')}`} onChange={e=>{const [hour,minute]=e.target.value.split(':').map(Number);setMeeting({...meeting,hour,minute});}}/>
       <Field label="Duration (minutes)" type="number" required min="1" max="720" value={meeting.durationMinutes} onChange={e=>setMeeting({...meeting,durationMinutes:Number(e.target.value)})}/>
       <p>{rows.length} events selected. Dates stay within their training week.</p>
       {error&&<p role="alert" className="error">{error}</p>}

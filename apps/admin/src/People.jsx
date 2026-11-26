@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState,useEffect } from "react";
 import { Plus, Pencil } from "lucide-react";
 import {
   Heading,
@@ -9,12 +9,13 @@ import {
   Table,
   Status,
   Empty,
-  FlightLabel,
+
 } from "./components";
-import { name, label, years, statuses, profileFields } from "./api";
+import { RosterTag, LeadershipChart, textOrder, alphabetic } from "./RosterViews";
+import { api,name, label, years, statuses, profileFields } from "./api";
 import { compareCadetsForDisplay, compareLeadershipForDisplay } from "../../../packages/domain/src/cadet-display-order";
 export default function People({
-  snapshot, list, withFullData,
+  snapshot, list, withFullData, captureKey, manifest, viewAsRevision,
   propose,
   busy,
   leadership = false,
@@ -79,13 +80,37 @@ export default function People({
         ),
       });
   };
-  const rows = (leadership ? s.leadership : s.people).filter(
-    (p) =>
-      (!flight || p.flightId === flight) &&
-      `${name(p)} ${p.email} ${p.role}`
-        .toLowerCase()
-        .includes(query.toLowerCase()),
-  ).sort(leadership ? compareLeadershipForDisplay : compareCadetsForDisplay);
+  const [sort,setSort]=useState("seniority"), [status,setStatus]=useState("current"), [year,setYear]=useState(""),
+    [field,setField]=useState(""), [match,setMatch]=useState(""), [view,setView]=useState("List");
+  const flightOf = p => s.flights.find(f=>f.flightId===p.flightId);
+  const squadronOf = f => s.squadrons?.find(q=>q.squadronId===f?.squadronId)?.label;
+  const visibleField = field && !leadership;
+  const [extended,setExtended]=useState(null),[fieldError,setFieldError]=useState(""),[retry,setRetry]=useState(0);
+  const extra = !snapshot && ["phone","dorm","homeTown","homeState","dateOfBirth","photoLink"].includes(field);
+  const binding=JSON.stringify([captureKey,manifest?.revision,viewAsRevision]);
+  useEffect(()=>{
+    if(!extra || extended?.binding===binding)return;
+    const controller=new AbortController();
+    setFieldError("");
+    api("/state",undefined,{profile:"cadet-details",signal:controller.signal}).then(data=>{
+      if(JSON.stringify([data.captureKey,data.manifest?.revision,data.viewAsRevision])!==binding)throw Error("Directory access or records changed. Refresh the page.");
+      setExtended({binding,people:data.list?.people || data.snapshot.people});
+    }).catch(e=>{if(!controller.signal.aborted)setFieldError(e.message);});
+    return ()=>controller.abort();
+  },[extra,binding,extended?.binding,retry]);
+  const directory=extra ? extended?.binding===binding ? extended.people : [] : s.people;
+  const rows = (leadership ? s.leadership : directory).filter(p=>{
+    if (!leadership && (flight && p.flightId!==flight || year && p.asYear!==year ||
+      status==="current" && ["Dropped","Commissioned"].includes(p.flightPathStatus) ||
+      !["current","all"].includes(status) && p.flightPathStatus!==status ||
+      field && match && !String(p[field] ?? "").toLowerCase().includes(match.toLowerCase()))) return false;
+    return [name(p),p.email,p.role,p.rank].join(" ").toLowerCase().includes(query.toLowerCase());
+  }).sort(leadership ? compareLeadershipForDisplay : (a,b)=>{
+    if (sort==="name") return alphabetic(a,b);
+    if (sort==="flight") return textOrder(flightOf(a)?.label,flightOf(b)?.label) || compareCadetsForDisplay(a,b);
+    return compareCadetsForDisplay(a,b);
+  });
+  const selectField = key => {setField(key);setMatch("");};
   const basic = leadership
     ? ["firstName", "lastName", "rank", "role", "email", "cellPhone"]
     : [
@@ -138,27 +163,24 @@ export default function People({
             value={query}
             onChange={setQuery}
           />
-          {!leadership && (
-            <Select
-              label="Flight"
-              value={flight}
-              onChange={setFlight}
-              options={[
-                { value: "", label: "All Flights" },
-                ...s.flights.map((f) => ({
-                  value: f.flightId,
-                  label: f.label,
-                })),
-              ]}
-            />
-          )}
+          {leadership ? <Select label="View" value={view} onChange={setView} options={["List","Organization"]}/> : <>
+            <Select label="Flight" value={flight} onChange={setFlight} options={[{value:"",label:"All flights"},...s.flights.map(f=>({value:f.flightId,label:f.label})).sort((a,b)=>textOrder(a.label,b.label))]}/>
+            <Select label="AS year" value={year} onChange={setYear} options={[{value:"",label:"All AS years"},...years]}/>
+            <Select label="Roster status" value={status} onChange={setStatus} options={[{value:"current",label:"Current roster"},{value:"all",label:"All statuses"},...statuses]}/>
+            <Select label="Sort by" value={sort} onChange={setSort} options={[{value:"seniority",label:"AS year, then name"},{value:"flight",label:"Flight, then AS year"},{value:"name",label:"Last name"}]}/>
+          </>}
         </div>
+        {!leadership && <details className="field-picker"><summary>More fields{field ? " · "+label(field) : ""}</summary>
+          <div className="toolbar"><Select label="Show field" value={field} onChange={selectField} options={[{value:"",label:"Choose a field"},...profileFields.filter(k=>!["firstName","lastName","asYear","flightPathStatus"].includes(k)).map(k=>({value:k,label:label(k)}))]}/>
+          {field && <Field label={"Filter by "+label(field)} value={match} onChange={e=>setMatch(e.target.value)}/>}</div></details>}
       </section>
-      <Table
+      {extra && extended?.binding!==binding && <p role="status">{fieldError || "Loading directory fields…"} {fieldError && <button onClick={()=>setRetry(retry+1)}>Retry</button>}</p>}
+      <p className="result-count">{rows.length} {leadership?"contacts":"cadets"}</p>
+      {leadership && view==="Organization" ? <LeadershipChart records={rows} roster={s}/> : <Table
         headers={
           leadership
             ? ["Name", "Role", "Email", "Office", ""]
-            : ["Name", "AS year", "Flight", "Status", ""]
+            : ["Name", "AS year", "Flight", "Status", ...(visibleField?[label(field)]:[]), ""]
         }
       >
         {rows.map((p) => (
@@ -185,17 +207,16 @@ export default function People({
               </>
             ) : (
               <>
-                <td>{p.asYear}</td>
+                <td><RosterTag kind="year" value={p.asYear}/></td>
                 <td>
-                  <FlightLabel>
-                    {s.flights.find((f) => f.flightId === p.flightId)?.label}
-                  </FlightLabel>
+                  <RosterTag value={flightOf(p)?.label} squadron={squadronOf(flightOf(p))}/>
                 </td>
                 <td>
                   <Status>{p.flightPathStatus}</Status>
                 </td>
               </>
             )}
+            {visibleField && <td>{String(p[field] || "—")}</td>}
             <td>
               <button
                 className="icon"
@@ -208,7 +229,7 @@ export default function People({
             </td>
           </tr>
         ))}
-      </Table>
+      </Table>}
       {!rows.length && <Empty>No records match your search.</Empty>}
       {edit && (
         <Editor

@@ -72,7 +72,7 @@ test('browse profiles use effective View as scope for lists, attendance and excu
  const {host,local,person}=await fixture(t,false);
  const input={...local.backend.identity(),targetPersonId:person.personId,entryAuditId:host.preview.entry_audit_id};
  const read=profile=>local.backend.post('/v1/admin/panel/browse',{...input,profile});
- for(const profile of ['cadets','leadership','overview']) await assert.rejects(()=>read(profile),e=>e.status===403);
+ for(const profile of ['cadets','cadet-details','leadership','overview']) await assert.rejects(()=>read(profile),e=>e.status===403);
  const list=await read('attendance');
  assert.deepEqual(JSON.parse(list.tables.flights).map(f=>f[0]),['alpha']);
  assert(JSON.parse(list.tables.people).every(p=>p[5]==='alpha'));

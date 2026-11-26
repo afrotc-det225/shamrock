@@ -8,14 +8,14 @@ export async function decodeBrowse(data) {
   const {tables:t, profile} = data.browse, access=data.manifest.access;
   const rows=(table,names)=>JSON.parse(t[table]).map(values=>Object.fromEntries(names.map((name,i)=>[name,values[i]])));
   const columns=(table,names)=>rows(table,names.split(" "));
-  if(profile==="overview") return {...data,overview:{term:JSON.parse(t.terms)[0]?.[1],
+  if(profile==="overview") return {...data,birthdayCalendar:JSON.parse(t.birthdays || "[]"),overview:{term:JSON.parse(t.terms)[0]?.[1],
     activeCadets:t.activeCadets,activeEvents:t.activeEvents,pending:t.pending}};
   const flights=columns("flights","flightId label squadronId");
-  if(profile==="cadets" || profile==="leadership"){
-    const people=columns("people","personId version flightId lastName firstName rank asYear flightPathStatus email role")
+  if(profile==="cadets" || profile==="cadet-details" || profile==="leadership"){
+    const people=columns("people","personId version flightId lastName firstName rank asYear flightPathStatus email role"+(profile!=="leadership"?" afsc university classYear cipCode cipBroadArea":"")+(profile==="cadet-details"?" phone dorm homeTown homeState dateOfBirth photoLink":""))
       .map(p=>({...p,active:operationallyActive(p)}));
-    if(profile==="cadets") return {...data,list:{flights,people}};
-    const contacts=columns("contacts","contactId version personId lastName firstName rank role email officeLocation active")
+    if(profile!=="leadership") return {...data,list:{flights,people,squadrons:t.squadrons ? columns("squadrons","squadronId label") : []}};
+    const contacts=columns("contacts","contactId version personId lastName firstName rank role email officeLocation active reportsTo")
       .map(c=>({...c,active:!!c.active}));
     const list=await mergeCatalogs({flights,squadrons:columns("squadrons","squadronId label"),people:[]},people,contacts);
     return {...data,list};

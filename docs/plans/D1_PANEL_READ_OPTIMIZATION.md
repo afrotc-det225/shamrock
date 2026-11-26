@@ -86,3 +86,15 @@ Release the staging backend before the panel, retaining existing bindings and Hi
 ```sh
 node scripts/rehearse-panel-browse.mjs PRIVATE_EXPORT.sqlite GENERATION
 ```
+
+### Operator views in the staging panel
+
+Attendance opens as a semester matrix. Filter by flight, training week and event type, or sort by overall attendance. Select an eligible cell to open its versioned correction. Arrow keys move between editable cells. Flight scope and View as use the same server-side permission checks as the list. Excusals opens on submitted requests and can show completed decisions.
+
+The Cadets list uses the spreadsheet’s AS-year and name order. Current roster hides Dropped and Commissioned. The roster status selector can show either group. More fields displays and filters an additional Directory column. Academic fields are included in the list. Additional personal fields use a separate Wing-authorized Directory read on demand. The Leadership organization view groups recorded roles by flight and squadron and lists explicit reporting lines for contacts with a supervisor.
+
+Overview loads counts and the birthday calendar first. Only month and day are needed for birthdays. The flight and AS-year plots reuse the authorized Attendance view and shared credit calculations. Semester comparisons load versioned History files on request. Event dates display the abbreviation for the event instant in the detachment scheduling zone, including daylight-saving changes.
+
+The matrix uses native row and column headers for comparison, following the [GOV.UK table guidance](https://design-system.service.gov.uk/components/table/). Charts pair each point or bar with its numeric value, following [U.S. Web Design System visualization guidance](https://designsystem.digital.gov/components/data-visualizations/).
+
+The web palette keeps routine presence quiet and gives pending requests and absences greater contrast. Attendance and History share code colors, with literal marks retained for archived codes. Blue and Gold squadron flights use separate hue families, while AS years use a violet scale. All labels remain visible in monochrome. Check the foreground and background of each mark against the [WCAG contrast guidance](https://www.w3.org/WAI/WCAG22/Understanding/contrast-minimum.html).

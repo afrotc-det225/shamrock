@@ -1,6 +1,6 @@
-const zone = "America/Indiana/Indianapolis";
+export const eventZone = "America/Indiana/Indianapolis";
 const formatter = new Intl.DateTimeFormat("sv-SE", {
-  timeZone: zone,
+  timeZone: eventZone,
   year: "numeric",
   month: "2-digit",
   day: "2-digit",
@@ -8,6 +8,10 @@ const formatter = new Intl.DateTimeFormat("sv-SE", {
   minute: "2-digit",
   hourCycle: "h23",
 });
+export function zoneLabel(value) {
+  return new Intl.DateTimeFormat("en-US",{timeZone:eventZone,timeZoneName:value?"short":"shortGeneric"})
+    .formatToParts(value ? new Date(value) : new Date()).find(part=>part.type==="timeZoneName").value;
+}
 export const toEastern = (value) =>
   value ? formatter.format(new Date(value)).replace(" ", "T") : "";
 export function fromEastern(value) {

@@ -1,3 +1,4 @@
+import { eventZone } from "./time";
 import { decodeBrowse } from "./browse";
 import { hydrateReporting } from "./reporting";
 import { loadSnapshot, loadEventsList } from "../snapshot-client";
@@ -10,7 +11,7 @@ const revisionOf = data => JSON.stringify([data?.captureKey,data?.manifest?.scop
 export async function api(path, body, options = {}) {
   const profile = options.profile || "full";
   const previous = path === "/state" ? retainedViews.get(profile) || retainedState : null;
-  const wantsBrowse = ["cadets","leadership","overview","attendance","excusals"].includes(profile);
+  const wantsBrowse = ["cadets","cadet-details","leadership","overview","attendance","excusals"].includes(profile);
   const matchingProfile = previous?.browse ? previous.browse.profile === profile : !wantsBrowse;
   const conditional = previous?.transport === "paged-v1" && matchingProfile &&
     (profile !== "events" || previous.eventsList || previous.snapshot);
@@ -173,7 +174,7 @@ export const profileFields = [
   "flightPathStatus",
   "photoLink",
 ];
-export const displayDate = (value) =>
+export const displayDate = (value, timeZone = eventZone) =>
   value
     ? new Intl.DateTimeFormat("en-US", {
         month: "short",
@@ -181,7 +182,7 @@ export const displayDate = (value) =>
         hour: "2-digit",
         minute: "2-digit",
         hour12: false,
-        timeZone: "America/Indiana/Indianapolis",
+        timeZone, timeZoneName: "short",
       }).format(new Date(value))
     : "Not scheduled";
 

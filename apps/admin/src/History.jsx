@@ -66,7 +66,7 @@ export default function History() {
             {row.identityStatus === "unresolved" && <small className="history-unlinked">Historical record</small>}</td>
           <td>{row.asYear}</td><td>{row.flight || "—"}</td>
           <td>{percentage(row.overall)}</td><td>{percentage(row.llab)}</td>
-          {row.codes.map((code, index) => <td className="history-code" key={index}>{String(code ?? "")}</td>)}
+          {row.codes.map((code, index) => <td className="history-code" data-mark={code} key={index}>{String(code ?? "")}</td>)}
         </tr>)}
       </Table>
       {!rows.length && <Empty>No matching cadets.</Empty>}

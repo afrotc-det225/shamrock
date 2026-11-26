@@ -473,7 +473,7 @@ function App() {
                 {!scoped && page === "History" && <History key={JSON.stringify([data.captureKey, data.manifest?.revision?.access, preview?.entryAuditId])} />}
                 {!preview && !scoped && page === "Semester" && <Semester {...common} />}{" "}
                 {!scoped && page === "Overview" && (
-                  <Overview {...common} navigate={navigate} />
+                  <Overview key={JSON.stringify([data.captureKey,data.viewAsRevision])} {...common} navigate={navigate} />
                 )}{" "}
                 {!preview && !scoped && page === "System" && (
                   <System {...common} retry={apply} />

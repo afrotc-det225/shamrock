@@ -125,7 +125,7 @@ try {
     .click();
   await page.getByLabel("Events on or after").fill("2026-01-01");
   await page.getByLabel("New weekday").selectOption("3");
-  await page.getByLabel("Start time (Eastern)").fill("07:00");
+  await page.getByLabel(/^Start time \(/).fill("07:00");
   await page
     .getByRole("button", { name: "Review schedule", exact: true })
     .click();
@@ -147,6 +147,12 @@ try {
   assert.deepEqual(afterSchedule.requests, beforeSchedule.requests);
   assert.deepEqual(afterSchedule.observations, beforeSchedule.observations);
   await navigate("Cadets");
+  await page.getByLabel("Sort by", {exact:true}).selectOption("flight");
+  await page.getByText("More fields", {exact:true}).click();
+  await page.getByLabel("Show field", {exact:true}).selectOption("afsc");
+  await page.getByLabel("Filter by AFSC", {exact:true}).fill("no-such-field-value");
+  assert.equal(await page.getByRole("button", {name:"Edit Alex Morgan", exact:true}).count(), 0);
+  await page.getByLabel("Filter by AFSC", {exact:true}).fill("");
   await page
     .getByRole("button", { name: "Edit Alex Morgan", exact: true })
     .click();
@@ -169,12 +175,22 @@ try {
   await apply();
   assert.equal((await service.snapshot()).requests[0].status, "Denied");
   await page.getByRole("button", { name: "Attendance", exact: true }).click();
-  await page.getByLabel("Event", { exact: true }).selectOption("veterans");
-  await page
-    .getByRole("row")
-    .filter({ hasText: "Alexis Morgan" })
-    .getByRole("button", { name: "Correct" })
-    .click();
+  await page.getByText("Attendance code key", {exact:true}).click();
+  const contrasts = await page.locator(".code-key dt").evaluateAll(nodes => {
+    function luminance(color) {
+      const [r,g,b] = color.match(/[\d.]+/g).slice(0,3).map(v => Number(v)/255)
+        .map(v => v <= .04045 ? v/12.92 : ((v+.055)/1.055)**2.4);
+      return .2126*r + .7152*g + .0722*b;
+    }
+    return nodes.map(node => {
+      const style = getComputedStyle(node);
+      const colors = [luminance(style.color),luminance(style.backgroundColor)];
+      return (Math.max(...colors)+.05)/(Math.min(...colors)+.05);
+    });
+  });
+  assert.equal(contrasts.length, 10);
+  assert(Math.min(...contrasts) >= 4.5, "Attendance code text must remain legible on its fill.");
+  await page.locator('button[data-event="veterans"]').and(page.getByRole("button",{name:/Alexis Morgan/})).click();
   await page.getByLabel("Attendance code").selectOption("P");
   await page
     .getByLabel("Reason for this change")
@@ -244,10 +260,11 @@ try {
     1,
   );
   assert.equal(
-    await page.getByRole("button", { name: "Correct", exact: true }).count(),
+    await page.locator(".mark-cell button").count(),
     0,
   );
   await page.getByRole("button", { name: /Excusals \(/ }).click();
+  await page.getByLabel("Decision status").selectOption("");
   await page
     .getByText("Fictional scheduling conflict.", { exact: true })
     .waitFor();

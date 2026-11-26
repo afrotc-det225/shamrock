@@ -7,14 +7,18 @@ import {
   Table,
   Status,
   Empty,
-  FlightLabel,
-  AttendanceRate,
+
+  SearchBox,
 } from "./components";
-import { name } from "./api";
+import { AttendanceMatrix, AttendanceKey } from "./AttendanceMatrix";
+import { compareCadetsForDisplay } from "../../../packages/domain/src/cadet-display-order";
+import { alphabetic, textOrder } from "./RosterViews";
+import { name,eventTypes } from "./api";
 import { currentExcusalRequests } from "./attendance-events.mjs";
 export default function Attendance({ snapshot, list, tab="attendance", onTab, reporting, propose, busy, readOnly = false }) {
   const s = snapshot || list;
-  const [selectedEvent, setEvent] = useState(""),
+  const [eventType,setEventType]=useState(""), [week,setWeek]=useState(""), [query,setQuery]=useState(""),
+    [sort,setSort]=useState("seniority"), [queueStatus,setQueueStatus]=useState("Submitted"),
     [flight, setFlight] = useState(""),
     [edit, setEdit] = useState(null),
     [reason, setReason] = useState(""),
@@ -23,22 +27,27 @@ export default function Attendance({ snapshot, list, tab="attendance", onTab, re
   const canCorrect = (p) =>
     !scoped ||
     s.access.capabilities.attendanceCorrectionFlightIds.includes(p.flightId);
-  const reported = new Set(reporting?.matrices.flatMap(m => m.eventColumns.map(e => e.eventId)));
-  const events = s.events.filter(e => reported.has(e.eventId));
-  const event = events.some(e => e.eventId === selectedEvent) ? selectedEvent : events[0]?.eventId || "";
-  const queue = currentExcusalRequests(s);
-  const requests = queue.filter(r => !flight || r.flightId === flight);
-  const matrix = reporting?.matrices?.find(
-    (m) => m.termId === s.events.find((e) => e.eventId === event)?.termId,
-  );
-  const correction = (p) => {
-    setReason("");
-    setCode(
-      matrix?.rows
-        .find((r) => r.personId === p.personId)
-        ?.cells.find((c) => c.eventId === event)?.effectiveCode || "P",
-    );
-    setEdit({ person: p, event: s.events.find((e) => e.eventId === event) });
+  const termId=s.terms.find(t=>t.isCurrent)?.termId;
+  const matrix=reporting?.matrices.find(m=>m.termId===termId);
+  const catalog=new Map(s.events.map(e=>[e.eventId,e]));
+  const events=(matrix?.eventColumns || []).map(e=>catalog.get(e.eventId)).filter(Boolean);
+  const weeks=[...new Set(events.map(e=>e.trainingWeek).filter(w=>w!=null))].sort((a,b)=>a-b);
+  const columns=events.filter(e=>(!eventType || e.eventType===eventType) && (!week || String(e.trainingWeek)===week));
+  const search = text => text.toLowerCase().includes(query.trim().toLowerCase());
+  const rows=(matrix?.rows || []).filter(p=>(!flight || p.flightId===flight) && search(name(p))).sort((a,b)=>{
+    if(sort==="name")return alphabetic(a,b);
+    if(sort==="overall")return (a.overall.noCountedAttendance ? Infinity : a.overall.percentage)-(b.overall.noCountedAttendance ? Infinity : b.overall.percentage) || alphabetic(a,b);
+    if(sort==="flight")return textOrder(a.flight,b.flight) || compareCadetsForDisplay(a,b);
+    return compareCadetsForDisplay(a,b);
+  });
+  const queue=currentExcusalRequests(s);
+  const people=new Map(s.people.map(p=>[p.personId,p]));
+  const requests=queue.filter(r=>(!flight || r.flightId===flight) && (!queueStatus || queueStatus===r.status) &&
+    search((r.personDisplayName || name(people.get(r.personId)))+" "+(catalog.get(r.eventId)?.label || "")));
+  const correction=(person,event,currentCode)=>{
+    setReason("");setCode(currentCode);
+    const base=s.attendanceVersions.find(v=>v.personId===person.personId && v.eventId===event.eventId);
+    setEdit({person,event,baseVersion:base?.version || 0});
   };
   return (
     <>
@@ -60,17 +69,12 @@ export default function Attendance({ snapshot, list, tab="attendance", onTab, re
           </button>
         </div>
         <div className="toolbar">
-          {tab === "attendance" && (
-            <Select
-              label="Event"
-              value={event}
-              onChange={setEvent}
-              options={events.map((e) => ({
-                value: e.eventId,
-                label: e.label,
-              }))}
-            />
-          )}
+          <SearchBox placeholder={tab==="attendance"?"Find a cadet":"Find cadet or event"} value={query} onChange={setQuery}/>
+          {tab==="attendance" ? <>
+            <Select label="Event type" value={eventType} onChange={setEventType} options={[{value:"",label:"All events"},...Object.entries(eventTypes).map(([value,label])=>({value,label}))]}/>
+            <Select label="Training week" value={week} onChange={setWeek} options={[{value:"",label:"All weeks"},...weeks.map(w=>({value:String(w),label:"TW-"+w}))]}/>
+            <Select label="Sort by" value={sort} onChange={setSort} options={[{value:"seniority",label:"AS year, then name"},{value:"name",label:"Last name"},{value:"flight",label:"Flight"},{value:"overall",label:"Lowest overall"}]}/>
+          </> : <Select label="Decision status" value={queueStatus} onChange={setQueueStatus} options={[{value:"",label:"All decisions"},...new Set(["Submitted",...queue.map(r=>r.status)])]}/>}
           <Select
             label="Flight"
             value={flight}
@@ -83,49 +87,8 @@ export default function Attendance({ snapshot, list, tab="attendance", onTab, re
         </div>
       </section>
       {tab === "attendance" ? (
-        <Table
-          headers={["Cadet", "Flight", "Attendance", "Overall", "LLAB", ""]}
-        >
-          {s.people
-            .filter(
-              (p) =>
-                (!flight || p.flightId === flight) &&
-                s.events
-                  .find((e) => e.eventId === event)
-                  ?.eligiblePersonIds?.includes(p.personId),
-            )
-            .map((p) => {
-              const row = matrix?.rows.find((r) => r.personId === p.personId),
-                cell = row?.cells.find((c) => c.eventId === event);
-              return (
-                <tr key={p.personId}>
-                  <td>{name(p)}</td>
-                  <td>
-                    <FlightLabel>
-                      {s.flights.find((f) => f.flightId === p.flightId)?.label}
-                    </FlightLabel>
-                  </td>
-                  <td>
-                    <Status>{cell?.effectiveCode || "Blank"}</Status>
-                    {cell?.needsReview && (
-                      <small className="review-needed">Needs review</small>
-                    )}
-                  </td>
-                  <td>
-                    <AttendanceRate value={row?.overall} />
-                  </td>
-                  <td>
-                    <AttendanceRate value={row?.llab} />
-                  </td>
-                  <td>
-                    {canCorrect(p) && (
-                      <button disabled={readOnly} onClick={() => correction(p)}>Correct</button>
-                    )}
-                  </td>
-                </tr>
-              );
-            })}
-        </Table>
+        <><AttendanceKey/><AttendanceMatrix rows={rows} events={columns} canCorrect={canCorrect} onEdit={correction} readOnly={readOnly || busy}/>
+        {(!rows.length || !columns.length) && <Empty>No attendance matches these filters.</Empty>}</>
       ) : (
         <Table headers={["Cadet / event", "Request", "Reason", "Status", ""]}>
           {requests.map((r) => (
@@ -160,7 +123,8 @@ export default function Attendance({ snapshot, list, tab="attendance", onTab, re
           ))}
         </Table>
       )}
-      {edit && (edit.request ? queue.some(r => r.requestId === edit.request.requestId) : reported.has(edit.event.eventId)) && (
+      {tab==="excusals" && !requests.length && <Empty>No requests match these filters.</Empty>}
+      {edit && (edit.request ? queue.some(r => r.requestId === edit.request.requestId) : events.some(e=>e.eventId===edit.event.eventId)) && (
         <Editor
           title={edit.request ? "Review excusal" : "Correct attendance"}
           busy={busy}
@@ -178,12 +142,7 @@ export default function Attendance({ snapshot, list, tab="attendance", onTab, re
                 : {
                     personId: edit.person.personId,
                     eventId: edit.event.eventId,
-                    expectedBaseVersion:
-                      s.attendanceVersions.find(
-                        (v) =>
-                          v.personId === edit.person.personId &&
-                          v.eventId === edit.event.eventId,
-                      )?.version || 0,
+                    expectedBaseVersion: edit.baseVersion,
                     expectedEventVersion: edit.event.version,
                     code: code || null,
                     reason,

@@ -11,7 +11,7 @@ import {
   Empty,
 } from "./components";
 import { eventTypes, displayDate, name } from "./api";
-import { toEastern, fromEastern } from "./time";
+import { toEastern, fromEastern, zoneLabel } from "./time";
 import BulkSchedule from "./BulkSchedule";
 export default function Events({ snapshot, eventsList, propose, busy, refresh, readOnly = false, withFullData }) {
   const s = snapshot || eventsList;
@@ -132,7 +132,7 @@ export default function Events({ snapshot, eventsList, propose, busy, refresh, r
           />
         </div>
       </section>
-      <Table headers={["Event", "Type", "Date & time · Eastern", "Status", ""]}>
+      <Table headers={["Event", "Type", "Date & time", "Status", ""]}>
         {rows.map((e) => (
           <tr key={e.eventId}>
             <td>
@@ -146,7 +146,7 @@ export default function Events({ snapshot, eventsList, propose, busy, refresh, r
                 {eventTypes[e.eventType] || e.eventType}
               </span>
             </td>
-            <td>{displayDate(e.startAt)}</td>
+            <td>{e.startAt ? <time dateTime={e.startAt}>{displayDate(e.startAt,e.timeZone)}</time> : "Not scheduled"}</td>
             <td>
               <Status>{e.status}</Status>
             </td>
@@ -204,13 +204,13 @@ export default function Events({ snapshot, eventsList, propose, busy, refresh, r
             }))}
           />
           <Field
-            label="Starts (Eastern time)"
+            label={`Starts (${zoneLabel(edit.startAt)})`}
             type="datetime-local"
             value={toEastern(edit.startAt)}
             onChange={(e) => setTime("startAt", e.target.value)}
           />
           <Field
-            label="Ends (Eastern time)"
+            label={`Ends (${zoneLabel(edit.endAt)})`}
             type="datetime-local"
             value={toEastern(edit.endAt)}
             onChange={(e) => setTime("endAt", e.target.value)}

@@ -1,10 +1,11 @@
 import React, { useState } from "react";
+import OverviewInsights from "./OverviewInsights";
 import { Send } from "lucide-react";
 import { Heading, Table, Status, Empty } from "./components";
 import { api } from "./api";
 import { currentExcusalRequests } from "./attendance-events.mjs";
 import { useReceipts, ReceiptStatus } from "./receipts";
-export function Overview({ snapshot: s, overview, reporting, history, receiptsDeferred, reportingTime, captureKey, navigate, readOnly = false }) {
+export function Overview({ snapshot: s, overview, reporting, history, receiptsDeferred, reportingTime, captureKey, navigate, readOnly = false, ...details }) {
   const d = reporting?.dashboard;
   const receipt = useReceipts({ history, receiptsDeferred, reportingTime, captureKey, enabled: !readOnly });
   return (
@@ -33,6 +34,7 @@ export function Overview({ snapshot: s, overview, reporting, history, receiptsDe
           <span>Pending excusals</span>
         </div>
       </div>
+      <OverviewInsights {...details} overview={overview} snapshot={s} reporting={reporting} reportingTime={reportingTime} captureKey={captureKey}/>
       {!readOnly && <section className="form-section">
         <h2>Recent changes</h2>
         <ReceiptStatus receipt={receipt} />

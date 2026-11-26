@@ -1181,18 +1181,6 @@ tr:hover td {
   background: #eef0f3;
   color: #556170;
 }
-.flight-label {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  white-space: nowrap;
-}
-.flight-label > span {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  flex: none;
-}
 .person-cell {
   display: flex;
   align-items: center;
@@ -1474,3 +1462,85 @@ html:has(dialog[open]) {
 .session-confirmed { color: var(--green, #176344); font-size: .78rem; font-weight: 600; letter-spacing: .04em; }
 .outage-actions { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 16px; }
 .records-unavailable .login-form > p { line-height: 1.6; }
+
+/* Squadron hue identifies the formation; steps in lightness distinguish its flights. */
+.roster-tag {
+  display:inline-block; padding:.23rem .55rem; border-radius:4px;
+  background:#edf0f3; color:#344657; font-size:.8rem; font-weight:650; white-space:nowrap;
+}
+.roster-tag.blue {background:#e1f2fb;color:#17465c}
+.roster-tag.blue[data-value="bravo"] {background:#a4d2ed;color:#13374f}
+.roster-tag.blue[data-value="charlie"] {background:#285979;color:#ffffff}
+.roster-tag.gold {background:#fff0c7;color:#553c0a}
+.roster-tag.gold[data-value="echo"] {background:#edc274;color:#493311}
+.roster-tag.gold[data-value="foxtrot"] {background:#795620;color:#ffffff}
+/* AS years use an independent violet scale, with senior cohorts in deeper shades. */
+.roster-tag.year {background:#efedf7;color:#413959;border-inline-start:3px solid currentColor}
+.roster-tag.year[data-value="as150"] {background:#e4dff2;color:#483e60}
+.roster-tag.year[data-value="as200"],.roster-tag.year[data-value="as250"] {background:#d6cdeb;color:#423359}
+.roster-tag.year[data-value="as300"],.roster-tag.year[data-value="as500"] {background:#665782;color:#ffffff}
+.roster-tag.year[data-value="as400"],.roster-tag.year[data-value="as700"],
+.roster-tag.year[data-value="as800"],.roster-tag.year[data-value="as900"] {background:#493b61;color:#ffffff}
+.roster-tag.year[data-value="af civ"] {background:#edf0f3;color:#344657}
+.field-picker,.result-count,.attendance-matrix caption {font-size:.85rem;color:var(--muted)}
+.field-picker {margin:.65rem 0}.field-picker summary {cursor:pointer;color:var(--green);font-weight:650}.field-picker .toolbar {margin-top:.65rem}
+.result-count {margin:.75rem 0}
+.matrix-scroll {overflow:auto;max-height:70vh;border:1px solid var(--border);border-radius:6px;isolation:isolate}
+.attendance-matrix {border-spacing:0;border-collapse:separate;width:max-content;min-width:100%;font-variant-numeric:tabular-nums}
+.attendance-matrix caption {text-align:left;padding:.65rem;position:sticky;left:0;width:fit-content;max-width:85vw}
+.attendance-matrix thead th {position:sticky;top:0;z-index:2;padding:.5rem .45rem;background:#244f40;color:white;white-space:normal;max-width:6.5rem;text-transform:none;letter-spacing:normal}
+.attendance-matrix th:first-child {position:sticky;left:0;text-align:left;min-width:9rem}
+.attendance-matrix thead th:first-child {z-index:3}
+.attendance-matrix tbody th {z-index:1;background:white;text-transform:none;font-size:.82rem;letter-spacing:normal;border-top:1px solid var(--border);padding:.25rem .5rem}
+.attendance-matrix td {text-align:center;padding:.18rem .35rem}
+.attendance-matrix .attendance-rate {min-width:3rem}
+.attendance-matrix .mark-cell {padding:0;border:1px solid white;border-width:1px 1px 0 0;min-width:3.5rem;background:#f8f9fa;font-weight:700}
+.mark-cell button,.mark-cell>span {display:block;box-sizing:border-box;width:100%;min-height:1.85rem;padding:.23rem;border:0;border-radius:0;background:transparent;color:inherit;font:inherit;text-align:center}
+.mark-cell button:hover,.mark-cell button:focus-visible {outline:2px solid currentColor;outline-offset:-3px;background:transparent}
+.mark-cell sup {margin-left:.15rem}
+/* Keep routine presence quiet so unresolved and pending marks stand out in a full semester. */
+[data-mark="P"] {--mark-bg:#edf5f1;color:#31584b}
+[data-mark="T"] {--mark-bg:#f4e8d8;color:#694219}
+[data-mark="R"] {--mark-bg:#ffd180;color:#563305}
+[data-mark="A"] {--mark-bg:#ffc6aa;color:#602910}
+[data-mark="U"] {--mark-bg:#823c50;color:#ffffff}
+[data-mark="D"] {--mark-bg:#efd4de;color:#692d48}
+[data-mark="E"] {--mark-bg:#dcebf9;color:#214766}
+[data-mark="ES"] {--mark-bg:#d8efef;color:#165659}
+[data-mark="MED"] {--mark-bg:#e9e0f2;color:#56386a}
+[data-mark="excluded"],[data-mark="N/A"] {--mark-bg:#edf0f3;color:#505f6b}
+.attendance-matrix .mark-cell[data-mark],.history-code[data-mark] {background-color:var(--mark-bg, #fafbfc)}
+.code-key {margin:.4rem 0 .75rem;font-size:.84rem}
+.code-key summary {width:fit-content;cursor:pointer;color:var(--green);font-weight:650}
+.code-key dl {display:flex;flex-wrap:wrap;gap:.45rem 1rem}
+.code-key dl div {display:flex;align-items:center;gap:.4rem}
+.code-key dt {background:var(--mark-bg);border-radius:3px;padding:.2rem .4rem;min-width:2.2em;text-align:center;font-weight:700}
+.code-key dd {margin:0}
+.insights-grid,.org-branches {display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:1rem;margin:1rem 0}
+.insight,.org-layout section {padding:1rem 1.15rem;border:1px solid var(--border);border-radius:7px;background:#fff}
+.insight h3,.org-layout h3 {margin:0 0 .9rem;font-size:1rem;color:#203f36}
+.insight header {display:flex;justify-content:space-between;align-items:center;gap:.4rem}
+.attendance-summary {grid-column:1/-1;border-top:3px solid var(--green)}
+.attendance-summary dl {display:grid;grid-template-columns:repeat(3,1fr);gap:.5rem;margin:0}
+.attendance-summary dt,.birthdays p {color:#52655f;font-size:.85rem}
+.attendance-summary dd {font-size:clamp(1.2rem,2.3vw,2rem);font-weight:700;margin:.25rem 0}
+.bars,.birthdays ul,.org-branches ul {list-style:none;padding:0;margin:0}
+.bars li {display:grid;grid-template-columns:minmax(4.3rem,auto) 1fr 3.3rem;align-items:center;gap:.6rem;margin:.55rem 0;font-size:.83rem}
+.bars strong {text-align:right;font-variant-numeric:tabular-nums}
+.bar-track {background:#e9efec;height:.55rem;border-radius:2px;overflow:hidden}
+.bar-track i {display:block;background:#427762;height:100%}
+.birthdays li,.org-layout dl div {display:flex;justify-content:space-between;gap:.5rem;font-size:.86rem;padding:.45rem 0;border-bottom:1px solid var(--border)}
+.trend .insight {border:0;padding:0}.trend .insight h3 {font-weight:400;font-size:.85rem}
+.org-layout {display:grid;gap:.75rem}.org-layout h3 {margin-bottom:.65rem}
+.org-cards {display:grid;grid-template-columns:repeat(auto-fit,minmax(12rem,1fr));gap:.4rem}
+.org-card {display:flex;flex-direction:column;gap:.23rem;padding:.55rem .75rem;background:#f4f7f6;border-left:3px solid #738d83;font-size:.85rem}
+.org-card span {color:#485c53}.org-branches {margin:0}.org-branches li {border-left:2px solid #bdcbc5;margin:0 0 0 .75rem;padding:.65rem 0 0 .65rem}
+.org-layout dt {font-weight:650}.org-layout dd {margin:0}
+@media(max-width:720px){.insights-grid,.org-branches {grid-template-columns:minmax(0,1fr)}.org-cards{grid-template-columns:1fr}.matrix-scroll{max-width:100%;max-height:65vh}.attendance-summary dt{min-height:2.2em}}
+.plot-axis {display:flex;justify-content:space-between;margin:0 4rem 0 4.9rem;font-size:.72rem;color:var(--muted)}
+.dot-track {height:2px;background:#c3d3ca;position:relative;margin-inline:4px}
+.dot-track i {position:absolute;top:50%;width:.56rem;height:.56rem;border-radius:50%;background:#28644d;transform:translate(-50%,-50%)}
+.coverage,.trend-chart figcaption {color:var(--muted);font-size:.78rem;margin:.8rem 0 0}
+.trend-chart {margin:.6rem 0}.trend-chart svg {height:5.8rem;width:100%}.trend-chart figcaption {margin:0}
+.term-values {list-style:none;display:flex;justify-content:space-between;gap:.5rem;padding:0;font-size:.8rem}
+.term-values strong {display:block;font-variant-numeric:tabular-nums}

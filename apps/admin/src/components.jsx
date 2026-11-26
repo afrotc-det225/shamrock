@@ -99,26 +99,12 @@ export function Status({ children }) {
     </span>
   );
 }
-export function FlightLabel({ children }) {
-  const value = String(children || "Unassigned");
-  const colors = ["#426a9c", "#8a6624", "#32766e", "#765a91"];
-  const index = Math.max(
-    0,
-    ["alpha", "bravo", "charlie", "delta"].indexOf(value.toLowerCase()),
-  );
-  return (
-    <span className="flight-label">
-      <span aria-hidden="true" style={{ background: colors[index] }} />
-      {value}
-    </span>
-  );
-}
 export function AttendanceRate({ value }) {
   if (!value || value.noCountedAttendance)
     return <span className="muted">—</span>;
   const percent = Math.max(
     0,
-    Math.min(100, Math.round(value.percentage * 100)),
+    Math.min(100, Math.round(value.percentage * 1000)/10),
   );
   return (
     <span className="attendance-rate">

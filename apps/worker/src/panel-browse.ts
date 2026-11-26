@@ -4,7 +4,7 @@ import {scopeCte, semesterQueries, directoryCatalogQuery, leadershipCatalogQuery
 import {HttpError} from './http-error.js';
 type Env = {DB:D1Database;ENVIRONMENT:string;GENERATION:string};
 type Query = {select:string;from:string;order:string};
-export const profiles = ['cadets','leadership','attendance','excusals','overview'] as const;
+export const profiles = ['cadets','cadet-details','leadership','attendance','excusals','overview'] as const;
 export type Profile = typeof profiles[number];
 const error = (code:string,status=409) => new HttpError(status,code,'Reload the page to read current records.');
 
@@ -17,7 +17,7 @@ export async function browsePanel(env:Env, identity:{environment:string;generati
   const source = wing ? {cte:scopeCte,bind:[null]} : scopedPanelSource(identity.principalId,access.flightIds,true);
   const q = wing ? semesterQueries : panelSectionQueries();
   const people = wing ? directoryCatalogQuery : q.people;
-  const limits:Record<string,number>={people:2000,contacts:2000,flights:50,squadrons:20,terms:20,events:200,eligible:100000,baselines:25000,observations:10000,corrections:10000,requests:5000};
+  const limits:Record<string,number>={people:2000,contacts:2000,birthdays:2000,flights:50,squadrons:20,terms:20,events:200,eligible:100000,baselines:25000,observations:10000,corrections:10000,requests:5000};
   const names:string[]=[], statements:D1PreparedStatement[]=[];
   // Aggregate in SQLite. Large roster/fact sections use small numeric event and person
   // references; JSON parsing and reporting work belongs to the browser.
@@ -33,12 +33,13 @@ export async function browsePanel(env:Env, identity:{environment:string;generati
   const eventRef='(SELECT rowid FROM events e WHERE e.event_id=x.eventId)';
   const activeEvents="eventId IN (SELECT event_id FROM event_details WHERE term_id=(SELECT term_id FROM terms WHERE is_current=1) AND status='active')";
   const activePeople="flightPathStatus NOT IN ('Inactive','Commissioned','Dropped')";
-  if(profile==='cadets'||profile==='leadership') {
-    table('people',people,'personId,version,flightId,lastName,firstName,rank,asYear,flightPathStatus,email,role');
+  if(profile==='cadets'||profile==='cadet-details'||profile==='leadership') {
+    table('people',people,'personId,version,flightId,lastName,firstName,rank,asYear,flightPathStatus,email,role'+(profile!=='leadership'?',afsc,university,classYear,cipCode,cipBroadArea':'')+
+      (profile==='cadet-details'?',phone,dorm,homeTown,homeState,dateOfBirth,photoLink':''));
     table('flights',q.flights,'flightId,label,squadronId');
+    table('squadrons',q.squadrons,'squadronId,label');
     if(profile==='leadership'){
-      table('squadrons',q.squadrons,'squadronId,label');
-      table('contacts',leadershipCatalogQuery,'contactId,version,personId,lastName,firstName,rank,role,email,officeLocation,active');
+      table('contacts',leadershipCatalogQuery,'contactId,version,personId,lastName,firstName,rank,role,email,officeLocation,active,reportsTo');
     }
   } else if(profile==='overview') {
     const count=(name:string, query:Query, where:string)=>{
@@ -48,6 +49,7 @@ export async function browsePanel(env:Env, identity:{environment:string;generati
     count('activeCadets',people,activePeople);count('activeEvents',q.events,"status='active'");
     count('pending',q.requests,"status='Submitted' AND "+activeEvents);
     table('terms',q.terms,'termId,label');
+    table('birthdays',people,"firstName,lastName,substr(dateOfBirth,6,5)",'WHERE '+activePeople+' AND dateOfBirth IS NOT NULL');
   } else {
     table('flights',q.flights,'flightId,label,squadronId');
     table('terms',q.terms,'termId,label,sortOrder,isCurrent');

@@ -52,15 +52,22 @@ async function run(file, generation) {
       const {reporting} = runtime.hydrateReporting({snapshot:full,reportingTime:now});
       const active = new Set(full.events.filter(e=>e.status==='active').map(e=>e.eventId));
       const requests = full.requests.filter(r=>active.has(r.eventId));
-      for (const profile of wing ? ['cadets','leadership','attendance','excusals','overview'] : ['attendance','excusals']) {
+      for (const profile of wing ? ['cadets','cadet-details','leadership','attendance','excusals','overview'] : ['attendance','excusals']) {
         const browse = await runtime.panelBrowse(env,{...identity,profile});
         const data = await runtime.decodeBrowse({browse,manifest,reportingTime:now});
-        if (profile==='cadets' || profile==='leadership') {
+        if (profile==='cadets' || profile==='cadet-details' || profile==='leadership') {
           const fields = 'personId lastName firstName version email asYear rank flightId flightPathStatus';
           assert.deepEqual(pick(data.list.people,fields),pick(full.people,fields));
         }
+        if (profile==='cadets' || profile==='cadet-details') {
+          const fields = 'personId afsc university classYear cipCode cipBroadArea' + (profile==='cadet-details'?' phone dorm homeTown homeState dateOfBirth photoLink':'');
+          assert.deepEqual(pick(data.list.people,fields),pick(full.people,fields));
+        }
+        if (profile==='overview') {
+          assert.deepEqual(data.birthdayCalendar, full.people.filter(p=>p.active && p.dateOfBirth).map(p=>[p.firstName,p.lastName,p.dateOfBirth.slice(5)]));
+        }
         if (profile==='leadership') {
-          const fields = 'contactId firstName lastName role rank email officeLocation';
+          const fields = 'contactId firstName lastName role rank email officeLocation reportsTo';
           assert.deepEqual(pick(data.list.leadership,fields),pick(full.leadership,fields));
         }
         if (profile==='attendance') {

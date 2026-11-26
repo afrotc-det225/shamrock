@@ -1,3 +1,4 @@
+import { zoneLabel } from "./time";
 import React, { useState } from "react";
 import { Heading, Field, Select, Table } from "./components";
 import { name, years, statuses, api } from "./api";
@@ -193,7 +194,7 @@ export default function Semester({
             {Object.entries(schedule).map(([key, value]) => (
               <fieldset key={key}>
                 <legend>
-                  {key === "mando" ? "Mando PT" : "LLAB"} · Eastern time
+                  {key === "mando" ? "Mando PT" : "LLAB"} · {zoneLabel()}
                 </legend>
                 <Select
                   label="Weekday"
