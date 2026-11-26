@@ -11,7 +11,7 @@ export async function api(path, body, options = {}) {
     method: body === undefined ? "GET" : "POST",
     headers: {
       ...(body === undefined ? {} : { "content-type": "application/json", "x-shamrock-csrf": csrf || "" }),
-      ...(previous?.transport === "paged-v1" ? {"x-shamrock-capture": encodeURIComponent(JSON.stringify({
+      ...(previous?.transport === "paged-v1" && (profile !== "events" || previous.eventsList || previous.snapshot) ? {"x-shamrock-capture": encodeURIComponent(JSON.stringify({
         captureKey:previous.captureKey,revision:previous.manifest.revision,viewAsRevision:previous.viewAsRevision??null,
       }))} : {}),
     },
@@ -54,8 +54,8 @@ export async function api(path, body, options = {}) {
         data.manifest.revision, data.manifest.access, data.manifest.scope, data.viewAsRevision]);
       if (options.profile === "access" && data.manifest.access.capabilities.fullSnapshot) return data;
       if (options.profile === "events" && !data.viewAs && data.manifest.access.capabilities.fullSnapshot && retainedCapture?.key !== key) {
-        data.eventsList = retainedEvents?.key === key ? retainedEvents.eventsList :
-          await loadEventsList(data, (nextPath,nextBody)=>api(nextPath,nextBody,{signal:options.signal}),options.onProgress);
+        data.eventsList = data.eventsList ?? (retainedEvents?.key === key ? retainedEvents.eventsList :
+          await loadEventsList(data, (nextPath,nextBody)=>api(nextPath,nextBody,{signal:options.signal}),options.onProgress));
         options.signal?.throwIfAborted();
         retainedEvents = {key,eventsList:data.eventsList};
         return data;

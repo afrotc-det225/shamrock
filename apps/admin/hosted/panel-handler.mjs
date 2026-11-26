@@ -6,6 +6,7 @@ import { PanelError } from "../errors.mjs";
 import { json, boundedJson, secure } from "./http.mjs";
 import { TRANSITION_POLICY } from "../../../packages/domain/src/transitions.ts";
 import { previewFromSession, previewResponse, changePreview } from "./view-as.mjs";
+import { eventsState } from "./events-list.mjs";
 import { dailyLimitResponse } from "./provider-errors.mjs";
 export default {
   async fetch(request, env, controlStoreFactory) {
@@ -97,10 +98,16 @@ export default {
           return secure(json({captureUnchanged:true,captureKey:backend.binding,
             viewAs:previewResponse(preview),viewAsRevision:backend.viewRevision,
             reportingTime:Date.now()}));
-        const manifest = await backend.panelManifest(profile === null ? undefined : []);
+        const events = profile === "events" && !preview ? await eventsState(backend) : null;
+        const authority = events?.authority ?? (profile && !preview ? await backend.panelAuthority() : null);
+        const manifest = authority?.access.capabilities.fullSnapshot
+          ? {...authority, section:"manifest", sections:[], partial:true}
+          : await backend.panelManifest();
+
         return secure(
           json({
             manifest,
+            ...(events ? {eventsList:events.eventsList} : {}),
             ...(backend.snapshotManifest ? {snapshotManifest:backend.snapshotManifest} : {}),
             transport: "paged-v1",
             captureKey: backend.binding,

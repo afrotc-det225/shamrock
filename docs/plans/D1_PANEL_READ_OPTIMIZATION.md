@@ -36,3 +36,21 @@ The reusable offline rehearsal also passed against all 94 tables and 25,575 rows
 6. Once the hosted D1 daily allowance is available, deploy only to isolated staging and run a bounded real-data rehearsal. Recheck free-tier usage and permission behavior. Keep the native spreadsheet publisher and production untouched.
 
 The account's exhausted D1 allowance prevented hosted real-data acceptance during this work period. Do not repeatedly query a quota-exhausted database or claim this local checkpoint is deployed.
+
+### Events repeat-read implementation
+
+For the signed-in Wing reader, the hosted panel now reads only the current term
+and its event pages. A fresh authority response supplies the data and access
+revisions. The panel verifies the same authority after the final page on a
+miss. A warm isolate can reuse the result for five minutes after a fresh access
+check; its cache holds at most sixteen lists of at most 128 KiB each. Each key
+includes the authenticated backend binding, term and revisions. Scoped users
+and View as keep their separate permission paths. The browser keeps its
+conditional revision check. Private HTTP responses still use no-store.
+
+A November 25 offline comparison against the refreshed staging-data copy found
+1,541 D1 rows read for the previous transfer, 757 for a cold Events list, and
+70 for a warm list. All returned the same event content. The warm read requires
+one signed backend call and writes zero rows. The reproducible command is
+`scripts/rehearse-panel-reads.mjs`. A new isolate pays the cold cost. No KV,
+R2, persistent cache, or additional scheduled refresh is needed.

@@ -64,10 +64,10 @@ async function main() {
     }
     phase = 'runtime-build';
     const artifact = path.join(dir,'runtime.mjs');
-    const built = await build({absWorkingDir:root,stdin:{contents:`export { default as worker } from './apps/worker/src/index.ts'; export { HostedBackend } from './apps/admin/hosted/backend.mjs'; export { loadEventsList } from './apps/admin/snapshot-client.ts';`,resolveDir:root,loader:'ts'},outfile:artifact,bundle:true,platform:'node',format:'esm',target:'es2022',external:['node:*','cloudflare:*'],metafile:true});
+    const built = await build({absWorkingDir:root,stdin:{contents:`export { default as worker } from './apps/worker/src/index.ts'; export { HostedBackend } from './apps/admin/hosted/backend.mjs'; export { eventsState } from './apps/admin/hosted/events-list.mjs'; export { loadEventsList } from './apps/admin/snapshot-client.ts';`,resolveDir:root,loader:'ts'},outfile:artifact,bundle:true,platform:'node',format:'esm',target:'es2022',external:['node:*','cloudflare:*'],metafile:true});
     const sourceInputs = {};
     for (const name of Object.keys(built.metafile.inputs).filter(n=>n!=='<stdin>' && !n.includes('node_modules/')).sort()) sourceInputs[name]=sha(await fs.readFile(path.resolve(root,name)));
-    const {worker,HostedBackend,loadEventsList} = await import(pathToFileURL(artifact));
+    const {worker,HostedBackend,eventsState,loadEventsList} = await import(pathToFileURL(artifact));
     mf = new Miniflare({modules:true,script:'export default {fetch(){return new Response("Offline read rehearsal")}}',compatibilityDate:'2026-07-01',d1Databases:{DB:'offline-panel-rehearsal'},log:new Log(LogLevel.NONE)});
     const native = await mf.getD1Database('DB');
     phase = 'clone-schema';
@@ -99,12 +99,16 @@ async function main() {
     };
     const state=await measure('initial',async()=>{const b=backend();const manifest=await b.panelManifest([]);return {manifest,captureKey:b.binding,...(b.snapshotManifest?{snapshotManifest:b.snapshotManifest}:{})};});
     let first;
-    await measure('events',async()=>{first=await loadEventsList(state,(_path,input)=>backend().page(input));});
-    await measure('repeatEvents',async()=>{const repeat=await loadEventsList(state,(_path,input)=>backend().page(input));check(JSON.stringify(first)===JSON.stringify(repeat),'READ_REHEARSAL_REPEAT_CHANGED');});
+    await measure('events',async()=>{first=(await eventsState(backend())).eventsList;});
+    await measure('repeatEvents',async()=>{const repeat=(await eventsState(backend())).eventsList;check(JSON.stringify(first)===JSON.stringify(repeat),'READ_REHEARSAL_REPEAT_CHANGED');});
     await measure('unchanged',async()=>{check(await backend().captureUnchanged(encodeURIComponent(JSON.stringify({captureKey:state.captureKey,revision:state.manifest.revision,viewAsRevision:null}))),'READ_REHEARSAL_REVISION_CHANGED');});
+    meter.begin('reference');
+    const reference=await loadEventsList(state,(_path,input)=>backend().page(input));
+    const referenceCost=meter.end();
+    check(JSON.stringify(reference)===JSON.stringify(first),'READ_REHEARSAL_OUTPUT_CHANGED');
     const assessed=evaluateReadBudgets(samples,config);
     const sourceDirty = !!execFileSync('git',['status','--porcelain','--',...Object.keys(sourceInputs)],{cwd:root,encoding:'utf8'}).trim();
-    const proof={formatVersion:1,kind:'offline-panel-read-rehearsal',sourceCommit,sourceDirty,runtimeSha256:sha(await fs.readFile(artifact)),sourceInputsSha256:sha(JSON.stringify(sourceInputs)),sourceSha256:sha(await fs.readFile(sourceFile)),schemaVersion:evidence.ledger.length,tables:tables.length,copiedRows,profiles:assessed,passed:assessed.every(s=>s.passed),providerCalls:0,productionChanges:0,limitations:['Repeat reads measure the current implementation; a cache hit is not assumed.','Cross-principal, View as, revocation and mutation invalidation are not covered by this rehearsal.','Local D1 row counters are not hosted CPU or daily-capacity acceptance.']};
+    const proof={formatVersion:1,kind:'offline-panel-read-rehearsal',sourceCommit,sourceDirty,runtimeSha256:sha(await fs.readFile(artifact)),sourceInputsSha256:sha(JSON.stringify(sourceInputs)),sourceSha256:sha(await fs.readFile(sourceFile)),schemaVersion:evidence.ledger.length,tables:tables.length,copiedRows,profiles:assessed,referenceRows:referenceCost.localRowsRead,passed:assessed.every(s=>s.passed),providerCalls:0,productionChanges:0,limitations:['Repeat reads use the same warm isolate; cold isolates repeat the bounded initial load.','Cross-principal, View as, revocation and mutation invalidation are not covered by this rehearsal.','Local D1 row counters are not hosted CPU or daily-capacity acceptance.']};
     await fs.writeFile(path.join(dir,'proof.private.json'),JSON.stringify(proof,null,2)+'\n',{mode:0o600,flag:'wx'});
     console.log(JSON.stringify(proof));if(!proof.passed)process.exitCode=1;
   } finally {source.close();await mf?.dispose();}
