@@ -440,7 +440,7 @@ function App() {
               </div>
             )}
             {blockedPreview ? <div><p>{viewAsStatus[preview.status] || "This account cannot be previewed."}</p>
-              {preview.status === "starting" && <button disabled={busy} onClick={()=>viewAs({personId:preview.personId})}>Retry view</button>}</div> : !data || (!data.snapshot && !browseReady && !["History", "Assistant"].includes(page) && !(page === "Events" && data.eventsList)) ? (
+              {preview.status === "starting" && <button disabled={busy} onClick={()=>viewAs({personId:preview.personId})}>Retry view</button>}</div> : !data || (!data.snapshot && !browseReady && !["History", "Assistant", "System"].includes(page) && !(page === "Events" && data.eventsList)) ? (
               <section className="loading-panel" aria-busy={!error}>
                 {error ? (
                   <button
