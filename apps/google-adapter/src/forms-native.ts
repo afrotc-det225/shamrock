@@ -123,9 +123,9 @@ export function createNativeFormsRuntime(services: NativeFormsServices) {
     }
     function nativeItems(binding: ManagedFormBinding, response: { items: any[] }) {
       const items = services.FormApp.openById(binding.formId).getItems?.();
-      if (!items || items.length !== response.items.length || items.some((item, index) => item.getIndex() !== index
+      if (!items || items.length !== response.items.length || items.some((item, index) => (response.items[index].pageBreakItem || response.items[index].itemId === binding.attendanceLayout?.questionTemplateItemId) && (item.getIndex() !== index
         || item.getTitle() !== (response.items[index].title ?? '')
-        || Boolean(response.items[index].pageBreakItem) !== (String(item.getType()) === 'PAGE_BREAK'))) fail('forms_layout', 'Native Form item order, title or type changed during layout verification.');
+        || Boolean(response.items[index].pageBreakItem) !== (String(item.getType()) === 'PAGE_BREAK')))) fail('forms_layout', 'Native Form item order, title or type changed during layout verification.');
       return items;
     }
     function read(binding: ManagedFormBinding): NativeFormRead {
@@ -156,11 +156,16 @@ export function createNativeFormsRuntime(services: NativeFormsServices) {
     }
     function setSubmitContinuation(binding: ManagedFormBinding, sectionId: string) {
       if (!binding.attendanceLayout || !services.FormApp.PageNavigationType) fail('forms_layout', 'The native continuation provider is unavailable.');
-      const response = read(binding);
-      if (response.acceptingResponses) fail('forms_fence', 'Additive Form layout requires closed intake.');
-      const index = response.items.findIndex(i => i.itemId === sectionId && i.pageBreakItem);
-      if (index < 0 || !['CONTINUE', 'SUBMIT'].includes(response.pageBreakNavigation?.[sectionId]?.action ?? '')) fail('forms_layout', 'A new section has unexpected continuation state.');
-      nativeItems(binding, response)[index].asPageBreakItem().setGoToPage(services.FormApp.PageNavigationType.SUBMIT);
+      const form = services.FormApp.openById(binding.formId);
+      if (form.isAcceptingResponses()) fail('forms_fence', 'Additive Form layout requires closed intake.');
+      const response = api(forms(binding.formId));
+      const index = response.items.findIndex((i: any) => i.itemId === sectionId && i.pageBreakItem);
+      const items = form.getItems?.(), item = items?.[index];
+      if (!items || items.length !== response.items.length || !item || item.getIndex() !== index
+        || String(item.getType()) !== 'PAGE_BREAK' || item.getTitle() !== (response.items[index].title ?? '')) fail('forms_layout', 'The section changed before navigation was applied.');
+      const page = item.asPageBreakItem(), action = String(page.getPageNavigationType());
+      if (!['CONTINUE', 'SUBMIT'].includes(action) || api(`${forms(binding.formId)}?fields=revisionId`).revisionId !== response.revisionId) fail('forms_layout', 'A new section has unexpected continuation state.');
+      if (action === 'CONTINUE') page.setGoToPage(services.FormApp.PageNavigationType.SUBMIT);
     }
     function isolation(requireResponders = false) {
       for (const b of config.forms) { const info = file(b.formId, owner, b.allowedEditors); if (info.name !== b.expectedTitle || info.mimeType !== 'application/vnd.google-apps.form') fail('forms_isolation', 'The bound staging Form changed.'); }

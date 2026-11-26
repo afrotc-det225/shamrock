@@ -128,9 +128,8 @@ export function consumeFormsRefresh(io: FormsRefreshPorts): { status: 'disabled'
           for (const sectionId of plan.continuations) {
             currentClaim();
             if (after.pageBreakNavigation?.[sectionId]?.action !== 'SUBMIT') io.forms.setSubmitContinuation(plan.binding, sectionId);
-            after = io.forms.read(plan.binding);
-            if (!verifyFormBeforeContinuations(plan, after)) fail('forms_readback', 'A Form changed while finishing new section navigation.');
           }
+          after = io.forms.read(plan.binding);
         }
         if (!verifyNativeFormPlan(plan, after)) fail('forms_readback', 'Native Form choices did not verify; intake remains closed.');
       }
