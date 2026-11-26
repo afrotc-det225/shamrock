@@ -341,3 +341,5 @@ than a filled selection box. Flight labels, event types and decision states have
 color cues alongside text; attendance rates include a small proportional bar
 without introducing new pass/fail thresholds. Editors and feedback use brief
 transitions only when the user has not requested reduced motion.
+
+In the real-data staging panel, **History → Semester** opens the latest saved attendance sheet. Choose an earlier semester to view its roster, saved Overall and LLAB percentages, and event codes. Flight and cadet-name filters apply within the selected semester. The duplicate backend matrix and alternate workbook copies are retained for reconciliation. The [History runbook](../../docs/runbooks/D1_HISTORY_REPORTS.md#semester-reports-in-the-staging-web-panel) covers publication after an import.

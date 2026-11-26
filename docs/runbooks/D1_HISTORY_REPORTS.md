@@ -130,3 +130,18 @@ CPU by 37–51% and the complete local page-processing median by 5–18%. These
 measurements exclude provider queries, bridge authentication and Worker isolate
 startup. They are not a hosted Free-tier CPU pass: repeat cold/warm provider
 measurements on the exact deployed release before claiming capacity.
+
+## Semester reports in the staging web panel
+
+The semester selector presents one report per term, oldest first. It opens the latest term by default. The source is the newest completed capture of the main workbook's semester sheet. The matching backend matrix and historical external workbooks remain available through the existing evidence and native publication paths. Preserve the main sheet's literal codes, saved percentages, unresolved identities and blank cells. Never combine records from two snapshots by cell position. An unlabeled external copy requires a unique match on the complete event header sequence and roster identity labels.
+
+After importing or correcting history, prepare the versioned files from the verified, private staging SQLite export. From the repository root run:
+
+```sh
+npm run build:v3
+node scripts/prepare-history-files.mjs /private/path/to/staging.sqlite .build/new-history-release
+```
+
+The destination must be new. It contains private data. The command prints only semester, counts and sizes. Compare the three outputs to their main workbook captures before publishing. Using the SHAMROCK staging account, bind a dedicated private Workers KV namespace as `HISTORY_FILES` on the real-data staging panel. Upload `files.private.json` and verify its keys and hashes before uploading `catalog.private.json` to the same namespace with `wrangler kv bulk put --namespace-id <staging-namespace> --remote <file>`. Keep all four keys outside the static asset directory. Repeating publication of identical bytes is safe. Allow for KV propagation. If the D1 source inventory changes before the matching catalog is ready, the panel shows a publication error. Retain the previous files for rollback. Native History continues to use its existing bounded reader.
+
+The catalog key includes generation and the exact D1 source IDs and digests. Each semester file is addressed by the SHA-256 of its bytes. The web API checks current Wing History access, catalog membership and the file digest. It rechecks effective access after the read, including actor/target checks in View as. Both the list and file use the existing authenticated session and no-store HTTP responses. The browser receives display fields only, can filter by name and flight locally, and cancels superseded loads. A scoped cadet must be denied even with a known version. After release verify all three options, the latest term's row and event counts, one report request per selection, no requests on filter changes and denial after access revocation.

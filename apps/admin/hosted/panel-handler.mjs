@@ -8,6 +8,7 @@ import { TRANSITION_POLICY } from "../../../packages/domain/src/transitions.ts";
 import { previewFromSession, previewResponse, changePreview } from "./view-as.mjs";
 import { eventsState } from "./events-list.mjs";
 import { dailyLimitResponse } from "./provider-errors.mjs";
+import { semesterHistory } from "./semester-history.mjs";
 export default {
   async fetch(request, env, controlStoreFactory) {
     const url = new URL(request.url);
@@ -84,7 +85,7 @@ export default {
         return secure(json(await changePreview(env, user,
           new HostedBackend(env, user.principal_id), body)));
       if (preview && ![
-        "GET /api/state", "POST /api/page", "GET /api/history/list", "POST /api/history/page",
+        "GET /api/state", "POST /api/page", "GET /api/history/list", "POST /api/history/page", "POST /api/history/report",
       ].includes(`${request.method} ${url.pathname}`))
         throw new PanelError("VIEW_AS_READ_ONLY", "Exit View as before making changes.", 403);
       if (url.pathname === "/api/state" && request.method === "GET") {
@@ -139,6 +140,13 @@ export default {
       }
       if (request.method === "POST" && url.pathname === "/api/page")
         return secure(json(await backend.page(body)));
+      if (env.HISTORY_FILES && url.pathname === "/api/history/list" && request.method === "GET")
+        return secure(await semesterHistory(backend, env.HISTORY_FILES, null));
+      if (env.HISTORY_FILES && url.pathname === "/api/history/report" && request.method === "POST") {
+        if (!body || typeof body.version !== "string" || !/^[a-f0-9]{64}$/.test(body.version))
+          throw new PanelError("INVALID_REQUEST", "Select a semester from History.");
+        return secure(await semesterHistory(backend, env.HISTORY_FILES, body));
+      }
       if (request.method === "GET" && url.pathname === "/api/history/list")
         return secure(json(await backend.historyPage(null)));
       if (request.method === "POST" && url.pathname === "/api/history/page")

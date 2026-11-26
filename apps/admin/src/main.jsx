@@ -460,7 +460,7 @@ function App() {
                   <People key="leadership" leadership {...common} />
                 )}{" "}
                 {page === "Attendance & excusals" && <Attendance {...common} />}{" "}
-                {!scoped && page === "History" && <History />}
+                {!scoped && page === "History" && <History key={JSON.stringify([data.captureKey, data.manifest?.revision?.access, preview?.entryAuditId])} />}
                 {!preview && !scoped && page === "Semester" && <Semester {...common} />}{" "}
                 {!scoped && page === "Overview" && (
                   <Overview {...common} navigate={navigate} />

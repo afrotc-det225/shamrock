@@ -60,3 +60,17 @@ Filtering event details directly by term and ordering on its existing
 rows. SQLite's query plan uses the term/order index and a primary-key lookup
 on events. The before/after comparison checks every returned event against the
 original paged transport. This change adds no index maintenance or stored copy.
+
+## November 25 web read-path review
+
+| Surface | Work on open | Where work belongs |
+| --- | --- | --- |
+| Sign-in | Session storage is independent of operational D1. Records require a separate access check. | Keep Google and the session check off repeated row loads. |
+| Events | The Wing reader requests the current term and events. The protected five-minute cache rechecks authority. | Retain the narrow list and fetch full records when an editor is opened. The earlier real-data rehearsal measured 400 cold and 70 warm D1 row reads. |
+| History | Each retained source formerly required a manifest, roster pages, roughly one request per two cadets, and final verification. Source formulas were evaluated during each browse. | Materialize the allowed display fields at import. One authenticated immutable file serves one semester. Keep the catalog and current authority checks on the server. Filter the downloaded matrix locally. |
+| Cadets and Leadership | Both use the complete capture when it is missing. That includes sections a directory or contacts list does not display. | Introduce paged, field-limited directory and contact reads keyed to current term and access. Defer detailed records to the editor. Validate ordinary accounts and View as independently. |
+| Attendance and excusals | Wing browsing and edit workflows share a complete snapshot. Scope-specific pages have their own transport. | Project by term and permitted flight or squadron. Send totals and visible rows first. Fetch private reasons and edit versions only for the authorized detail or action. |
+| Overview | The browser computes current reporting from the hydrated capture. | A term-level summary could avoid transferring the roster and every observation. Invalidate on attendance, excusal, event, roster and reporting-date changes. |
+| Refresh and writes | The browser conditionally reuses an unchanged capture. Commands still check current authority and versions. | Keep current write checks and avoid using an archive or cached list as command authority. |
+
+Only the History change in this review alters the running read path. The other projections require cold/warm measurements and parity checks before implementation. Compare network trips, bytes, rows read and Worker CPU separately. Native Google publication has a different job: bounded, resumable batches remain useful there.
