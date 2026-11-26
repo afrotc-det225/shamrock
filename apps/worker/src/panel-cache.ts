@@ -4,6 +4,9 @@ import {attendanceDelta} from './panel-delta.js';
 import type {PanelRevision} from '../../../packages/domain/src/panel-read.js';
 import {HttpError} from './http-error.js';
 
+// Exact-version entries remain unreachable after the primary advances. Keeping them
+// through a training afternoon avoids rebuilding unchanged data every ten minutes.
+const immutableCacheHeaders = {'Cache-Control':'max-age=14400'};
 type ReadEnv = { DB: D1Database; ENVIRONMENT: string; GENERATION: string; BRIDGE_KEY_ID: string };
 async function primaryVersion(db: D1Database) {
   const session = db.withSession('first-primary');
@@ -34,7 +37,7 @@ export async function cachedPanelRead(env: ReadEnv, url: URL, body: string, load
   if (!response.ok || (await primaryVersion(env.DB)).bookmark !== version) return response;
   // Keep private records inside the named Worker cache; never cache the HTTP response publicly.
   try {
-    await edge.put(address,new Response(response.clone().body,{headers:{'Cache-Control':'max-age=600'}}));
+    await edge.put(address,new Response(response.clone().body,{headers:immutableCacheHeaders}));
   } catch { /* Eviction and cache outages leave the fenced database response usable. */ }
   if (!response.headers.has('Server-Timing')) response.headers.set('Server-Timing','panel;desc="database"');
   return response;
@@ -91,7 +94,7 @@ export function wingAttendanceCache(env: ReadEnv, url: URL, bookmark: string, on
         if (rebuilt) await edge.put(slot,new Response(JSON.stringify({termId:context.termId,
           operations:context.revision.operations,administration:context.revision.administration,tables}),
           {headers:{'Cache-Control':'max-age=600'}}));
-        await edge.put(address,new Response(JSON.stringify(tables),{headers:{'Cache-Control':'max-age=600'}}));
+        await edge.put(address,new Response(JSON.stringify(tables),{headers:immutableCacheHeaders}));
       } catch { /* A full or unavailable cache still permits this authorized read. */ }
     }
     return tables;
