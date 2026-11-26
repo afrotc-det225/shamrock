@@ -24,7 +24,7 @@ export async function cachedPanelRead(env: ReadEnv, url: URL, body: string, load
   if (env.ENVIRONMENT !== 'staging' || typeof caches === 'undefined' || !env.DB.withSession) return load();
   const {bookmark:version,rowsRead} = await primaryVersion(env.DB);
   if (!version) return load();
-  const input=JSON.parse(body);
+  const input=env.WING_MATRICES || url.pathname==='/v1/admin/panel/browse' ? JSON.parse(body) : {};
   const parts=[env.ENVIRONMENT,env.GENERATION,env.BRIDGE_KEY_ID,url.pathname,body,version];
   if (url.pathname==='/v1/admin/panel/browse' && input.profile==='leadership') parts.push('contact-phones-v1');
   const address = await cacheAddress(url.origin,'/_private/read/',parts);
