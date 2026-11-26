@@ -255,10 +255,12 @@ export default function OverviewInsights({
 }) {
   const [loaded, setLoaded] = useState(null),
     [error, setError] = useState(""),
-    [retry, setRetry] = useState(0);
+    [retry, setRetry] = useState(0),
+    [requestedCapture, setRequestedCapture] = useState(null);
   const revision = JSON.stringify(manifest?.revision);
+  const context = JSON.stringify([captureKey, viewAsRevision, revision]);
   useEffect(() => {
-    if (reporting || !overview) return;
+    if (reporting || !overview || requestedCapture !== context) return;
     const controller = new AbortController();
     setLoaded(null);
     setError("");
@@ -273,16 +275,16 @@ export default function OverviewInsights({
           JSON.stringify(data.manifest?.revision) !== revision
         )
           throw Error("The roster or your access changed. Refresh Overview.");
-        setLoaded({ revision, dashboard: data.reporting.dashboard });
+        setLoaded({ context, dashboard: data.reporting.dashboard });
       })
       .catch((e) => {
         if (!controller.signal.aborted) setError(e.message);
       });
     return () => controller.abort();
-  }, [reporting, !!overview, captureKey, viewAsRevision, revision, retry]);
+  }, [reporting, !!overview, captureKey, viewAsRevision, revision, retry, requestedCapture, context]);
   const d =
     reporting?.dashboard ||
-    (loaded && loaded.revision === revision ? loaded.dashboard : null);
+    (loaded && loaded.context === context ? loaded.dashboard : null);
   const term =
     overview?.term || snapshot?.terms.find((t) => t.isCurrent)?.label;
   const calendar =
@@ -343,7 +345,11 @@ export default function OverviewInsights({
       ) : (
         <section className="insight">
           <h3>Wing attendance</h3>
-          {error ? (
+          {requestedCapture !== context ? (
+            <button onClick={() => { setError(""); setRequestedCapture(context); }}>
+              Show attendance charts
+            </button>
+          ) : error ? (
             <p role="alert">
               {error} <button onClick={() => setRetry(retry + 1)}>Retry</button>
             </p>

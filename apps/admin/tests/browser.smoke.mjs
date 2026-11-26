@@ -19,6 +19,8 @@ try {
       viewport: { width: 1488, height: 1056 },
     }),
     errors = [];
+  let testOverview = false;
+  const overviewRequests = [];
   let stateReads = 0,
     pageReads = 0;
   const requestedSections = [];
@@ -41,6 +43,13 @@ try {
       transport: "paged-v1",
       reportingTime: Date.now(),
     });
+    const profile = new URL(route.request().url()).searchParams.get("profile");
+    if (testOverview && ["overview", "attendance"].includes(profile)) {
+      overviewRequests.push(profile);
+      data.browse = await host.post("/v1/admin/panel/browse", {...host.identity(), profile});
+      data.captureKey = "fictional-overview";
+      delete data.captureUnchanged;
+    }
     await route.fulfill({ response, status: 200, json: data });
   });
   await page.route("**/api/page", async (route) => {
@@ -212,7 +221,18 @@ try {
     .getByRole("button", { name: "Spring 2027 · Check progress" })
     .click();
   await page.getByText("Status: proposed. Archive: pending.").waitFor();
-  for (const title of ["Overview", "Leadership", "System", "Events"])
+  testOverview = true;
+  // A fresh browser load starts with the Events list and no retained full snapshot.
+  await page.reload();
+  await page.getByRole("button", {name:"Edit Veterans Day ceremony",exact:true}).waitFor();
+  await navigate("Overview");
+  await page.getByRole("button", {name:"Show attendance charts"}).waitFor();
+  assert.deepEqual(overviewRequests, ["overview"]);
+  await page.getByRole("button", {name:"Show attendance charts"}).click();
+  await page.getByRole("heading", {name:"Overall attendance by flight"}).waitFor();
+  assert.deepEqual(overviewRequests, ["overview", "attendance"]);
+  testOverview = false;
+  for (const title of ["Leadership", "System", "Events"])
     await navigate(title);
   await page.setViewportSize({ width: 390, height: 844 });
   assert.equal(
@@ -224,11 +244,7 @@ try {
   await page
     .getByRole("button", { name: "Edit Veterans Day ceremony", exact: true })
     .click();
-  assert.ok(
-    await page
-      .getByRole("button", { name: "Review change", exact: true })
-      .isVisible(),
-  );
+  await page.getByRole("button", {name:"Review change", exact:true}).waitFor();
   await page.getByRole("button", { name: "Close editor" }).click();
   // Ordinary scoped Flight reader: no private/admin navigation or decision controls.
   await local.db

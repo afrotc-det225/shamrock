@@ -95,7 +95,7 @@ export function createNativeFormsRuntime(services: NativeFormsServices) {
     if(config.retention&&[config.retention.indexFileId,config.retention.archiveFolderId].some(id=>[config.stateFileId,config.intakeFileId,...config.forms.map(f=>f.formId)].includes(id)))fail('forms_configuration','Retention storage must be separate from live resources.');
     const retention=config.retention?createNativeRetention(services,config.retention,owner,config.generation,signer):undefined;
     const catalogArchive=retention?createFormCatalogArchive(retention,signer):undefined;
-    const transport=createPagedFrontendTransport(createGoogleTransport(services.UrlFetchApp),adapter,signer,()=>Math.floor(now()/1000));
+    const transport=createPagedFrontendTransport(createGoogleTransport(services.UrlFetchApp),adapter,signer,()=>Math.floor(now()/1000),undefined,true);
     const enabled = () => props.getProperty(FORMS_PROPERTIES.pause) !== 'true' && config.enabled;
     const intakeEnabled = () => props.getProperty(FORMS_PROPERTIES.intakePause) !== 'true' && config.intakeEnabled && props.getProperty(HOST_PROPERTIES.enabled) !== 'true';
     function request(path: string, body: unknown) {

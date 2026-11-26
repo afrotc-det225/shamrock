@@ -1,3 +1,4 @@
+import type { FormCatalogSnapshot } from './forms-publication.js';
 /** Additive Attendance layout. Existing item/question identities are never replaced. */
 import { AdapterError, type Signer } from './index.js';
 import type { FrontendSnapshot } from '../../../packages/domain/src/admin.js';
@@ -29,7 +30,7 @@ function matches(p: FrontendSnapshot['people'][number], filter: FormRosterFilter
     && (!filter.asYears || filter.asYears.includes(p.asYear)) && (!filter.universities || filter.universities.includes(p.university))
     && (!filter.excludeUniversities || !filter.excludeUniversities.includes(p.university));
 }
-export function expandAttendanceLayout(snapshot: FrontendSnapshot, configured: ManagedFormBinding, original: NativeFormRead, signer: Signer, previous?: FormEdition): LayoutExpansion {
+export function expandAttendanceLayout(snapshot: FormCatalogSnapshot, configured: ManagedFormBinding, original: NativeFormRead, signer: Signer, previous?: FormEdition): LayoutExpansion {
   const layout = configured.attendanceLayout;
   if (!layout || layout.version !== 1 || layout.review !== 'OPTIONAL_UNVALIDATED_CHECKBOX_AND_SUBMIT_SECTIONS_REVIEWED'
     || configured.key !== 'attendance' || !original.pageBreakNavigation) fail('A reviewed native Attendance layout and continuation readback are required.');

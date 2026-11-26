@@ -36,11 +36,11 @@ function transfer(kind='frontend.refresh',mutate=x=>x,options={}){
   if(historical)assert.equal(b.claimToken,undefined);else assert.equal(b.claimToken,'claim');
   const data={people:s.people.map(p=>({...p,virtualContactId:'cadet:'+sha(p.personId)})),contacts:[],flights:s.flights,squadrons:s.squadrons,terms:s.terms.map(({roster,...t})=>({...t,isCurrent:Number(t.isCurrent)})),events:s.events.map(({eligiblePersonIds,...e})=>({...e,hasRoster:1})),eventRosters:s.events.map(e=>({eventId:e.eventId,personId:'cadet'})),eventFlights:s.eventFlights,observations:s.observations,requests:s.requests,corrections:s.corrections,termRosters:s.terms.flatMap(t=>(t.roster??[]).map(p=>({...p,termId:t.termId}))),legacyBaselines:[]};
   const common={contractVersion:FRONTEND_PAGE_VERSION,section:b.section,revision,scope:{termId,currentTermId:'current'}};
-  const result=b.section==='manifest'?{...common,environment:'staging',generation:2,sections:FRONTEND_SECTIONS.map(section=>({section,count:data[section].length})),previousTerms:options.nativeTerms??terms.filter(t=>!t.isCurrent).map(({roster,isCurrent,...t})=>t).reverse(),diagnostics:[],...(!historical?{effect}:{})}:b.section==='verify'?{...common,verified:true,...(!historical?{effect}:{})}:{...common,offset:0,rows:data[b.section],nextOffset:null};
+  const result=b.section==='manifest'?{...common,environment:'staging',generation:2,...(b.sections?{partial:true}:{}),sections:(b.sections??FRONTEND_SECTIONS).map(section=>({section,count:data[section].length})),previousTerms:options.nativeTerms??terms.filter(t=>!t.isCurrent).map(({roster,isCurrent,...t})=>t).reverse(),diagnostics:[],...(!historical?{effect}:{})}:b.section==='verify'?{...common,verified:true,...(!historical?{effect}:{})}:{...common,offset:0,rows:data[b.section],nextOffset:null};
   return {status:200,body:JSON.stringify(mutate(result,b,calls))};
  }};
  const original={method:'POST',url:config.baseUrl+'/v1/admin/effects/project',headers:{},body:JSON.stringify({environment:'staging',generation:2,principalId:'reader',workerId:'worker',effectId:'effect',claimToken:'claim'})};
- return {calls,run:()=>JSON.parse(createPagedFrontendTransport(transport,config,signer,()=>100,options.reviewed).send(original).body)};
+ return {calls,run:()=>JSON.parse(createPagedFrontendTransport(transport,config,signer,()=>100,options.reviewed,options.formsCatalogOnly).send(original).body)};
 }
 test('native frontend fetches two bounded historical terms and rechecks its lease; Forms only fetch current semester',()=>{
  const f=transfer(),result=f.run();assert.equal(result.snapshot.events.length,1);assert.equal(result.snapshot.dashboardHistory.terms.length,2);assert.deepEqual(buildCoherentFrontendReporting(result.snapshot,date).dashboard,buildFrontendReporting(snapshotToFrontendReportingInput(full(),date)).dashboard);
@@ -85,4 +85,14 @@ test('changed selected digest, duplicate native period, malformed counts or fina
  const overlapping=retainedOptions();overlapping.nativeTerms=[{termId:'native-overlap',label:'Latest source',sortOrder:2}];assert.throws(()=>transfer('frontend.refresh',x=>x,overlapping).run(),/overlap/);
  const bad=retainedOptions();bad.reviewed.terms[0].snapshotId='unreviewed-copy';assert.throws(()=>transfer('frontend.refresh',x=>x,bad).run());
  const forms=transfer('forms.refresh',x=>x,retainedOptions());forms.run();assert.equal(forms.calls.filter(c=>c.path==='/v1/admin/history/summary').length,0);
+});
+
+test('Forms publication requests only its catalog and verifies the same lease and revision',()=>{
+ const f=transfer('forms.refresh', x=>x,{formsCatalogOnly:true}), catalog=f.run().snapshot;
+ assert.deepEqual(f.calls.map(c=>c.b.section),['manifest','people','flights','terms','events','eventFlights','verify']);
+ assert.equal(catalog.events.length,1);assert.equal(catalog.people.length,1);assert.equal(catalog.legacyBaselines,undefined);
+ for(const field of ['scope','effect','revision']){
+   const changed=transfer('forms.refresh',(p,b)=>b.section==='verify'?{...p,[field]:{}}:p,{formsCatalogOnly:true});
+   assert.throws(()=>changed.run());
+ }
 });

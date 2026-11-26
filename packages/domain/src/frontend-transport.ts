@@ -3,6 +3,7 @@ import { directoryLeadershipRole, operationallyActive, type DirectoryRecord, typ
 /** Internal bounded transport. It reconstructs the existing snapshot before any publication. */
 export const FRONTEND_PAGE_VERSION = 'frontend-pages-v1' as const;
 export const FRONTEND_SECTIONS = ['people','contacts','flights','squadrons','terms','events','eventRosters','eventFlights','observations','requests','corrections','termRosters','legacyBaselines'] as const;
+export const FORM_CATALOG_SECTIONS = ['people','flights','terms','events','eventFlights'] as const;
 export type FrontendSection = typeof FRONTEND_SECTIONS[number];
 export const FRONTEND_SECTION_BOUNDS: Record<FrontendSection,number> = {people:500,contacts:200,flights:50,squadrons:20,terms:20,events:200,eventRosters:100000,eventFlights:10000,observations:10000,requests:5000,corrections:10000,termRosters:10000,legacyBaselines:25000};
 export const FRONTEND_PAGE_MAX_BYTES = 128000;
@@ -15,7 +16,8 @@ export interface FrontendPageManifest {
   effect?:{effectId:string;kind:string};
   scope?:FrontendReadScope;previousTerms?:{termId:string;label:string;sortOrder:number}[];
 }
-export interface FrontendDataPage {contractVersion:typeof FRONTEND_PAGE_VERSION;section:FrontendSection;offset:number;nextOffset:number|null;revision:SnapshotRevision;rows:Record<string,unknown>[];scope?:FrontendReadScope;}
+export interface BaselinePageKey {personId:string;eventId:string}
+export interface FrontendDataPage {nextBaselineKey?:BaselinePageKey;contractVersion:typeof FRONTEND_PAGE_VERSION;section:FrontendSection;offset:number;nextOffset:number|null;revision:SnapshotRevision;rows:Record<string,unknown>[];scope?:FrontendReadScope;}
 export interface FrontendVerifyPage {contractVersion:typeof FRONTEND_PAGE_VERSION;section:'verify';revision:SnapshotRevision;verified:true;effect?:{effectId:string;kind:string};scope?:FrontendReadScope;}
 export type FrontendPage = FrontendPageManifest|FrontendDataPage|FrontendVerifyPage;
 function check(condition: unknown): asserts condition {

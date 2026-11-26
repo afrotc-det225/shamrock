@@ -1,9 +1,11 @@
 /** Read a complete coherent snapshot through bounded requests before exposing it to a writer. */
 import {summarizeNativeTerm,summarizeRetainedTerm,type FrontendDashboardSnapshot} from './frontend-history-summary.js';
 import {parseReviewedRetainedHistory,validateRetainedHistorySummary,RETAINED_HISTORY_SUMMARY_VERSION,type ReviewedRetainedHistory,type ReviewedRetainedTerm} from '../../../packages/domain/src/retained-history-summary.js';
+import {operationallyActive,type DirectoryRecord} from '../../../packages/domain/src/admin.js';
+import type {FormCatalogSnapshot} from './forms-publication.js';
 import {AdapterError,type AdapterConfig,type Signer,type Transport} from './index.js';
-import {assembleFrontendSnapshotPages,FRONTEND_PAGE_VERSION,FRONTEND_PAGE_MAX_BYTES,FRONTEND_SECTIONS,FRONTEND_SECTION_BOUNDS,
-  type FrontendPageManifest,type FrontendDataPage,type FrontendVerifyPage} from '../../../packages/domain/src/frontend-transport.js';
+import {FORM_CATALOG_SECTIONS,assembleFrontendSnapshotPages,FRONTEND_PAGE_VERSION,FRONTEND_PAGE_MAX_BYTES,FRONTEND_SECTIONS,FRONTEND_SECTION_BOUNDS,
+  type BaselinePageKey,type FrontendPageManifest,type FrontendDataPage,type FrontendVerifyPage} from '../../../packages/domain/src/frontend-transport.js';
 
 export const FRONTEND_TRANSFER_LIMITS={pages:512,bytes:5*1024*1024,seconds:120} as const;
 function fail(message:string):never{throw new AdapterError('frontend_pages',message);}
@@ -14,7 +16,7 @@ const revision=(value:any)=>record(value)&&Object.keys(value).sort().join(',')==
 const sameRevision=(a:any,b:any)=>revision(a)&&revision(b)&&a.operations===b.operations&&a.administration===b.administration;
 
 /** Only the two read paths are substituted. Commands, claims and receipts retain their exact transport. */
-export function createPagedFrontendTransport(transport:Transport,config:AdapterConfig,signer:Signer,nowSeconds:()=>number,reviewedRetainedHistory?:ReviewedRetainedHistory):Transport{
+export function createPagedFrontendTransport(transport:Transport,config:AdapterConfig,signer:Signer,nowSeconds:()=>number,reviewedRetainedHistory?:ReviewedRetainedHistory, formsCatalogOnly=false):Transport{
   const retained=reviewedRetainedHistory===undefined?undefined:parseReviewedRetainedHistory(reviewedRetainedHistory,signer.sha256);
   return{send(original){
     const effect=original.url===config.baseUrl+'/v1/admin/effects/project';
@@ -27,9 +29,9 @@ export function createPagedFrontendTransport(transport:Transport,config:AdapterC
     const path=effect?'/v1/admin/effects/project/page':'/v1/admin/snapshot/page',start=nowSeconds();let count=0,total=0;
     if(!Number.isSafeInteger(start)||start<0)fail('The snapshot clock is invalid.');
     const before=()=>{const now=nowSeconds();if(!Number.isSafeInteger(now)||now<start||now-start>=FRONTEND_TRANSFER_LIMITS.seconds)fail('The coherent transfer exceeded its time budget; no partial snapshot was returned.');return now;};
-    const page=(section:string,offset:number,rev:unknown,requestBase=base,requestPath=path):any=>{
+    const page=(section:string,offset:number,rev:unknown,requestBase=base,requestPath=path,afterBaseline?:BaselinePageKey):any=>{
       const timestamp=String(before());if(++count>FRONTEND_TRANSFER_LIMITS.pages)fail('The coherent transfer exceeded its page budget.');
-      const body=JSON.stringify({...requestBase,section,offset,revision:rev});
+      const body=JSON.stringify({...requestBase,section,offset,revision:rev,...(afterBaseline?{afterBaseline}:{})});
       const response=transport.send({method:'POST',url:config.baseUrl+requestPath,body,headers:{'x-shamrock-key-id':config.keyId,'x-shamrock-timestamp':timestamp,
         'x-shamrock-signature':signer.hmacSha256(`POST\n${requestPath}\n${timestamp}\n${signer.sha256(body)}`)}});
       before();
@@ -42,26 +44,51 @@ export function createPagedFrontendTransport(transport:Transport,config:AdapterC
       return value;
     };
     const read=(requestBase:any,requestPath:string,isEffect:boolean,expectedRevision?:unknown)=>{
-      const fetchPage=(section:string,offset:number,rev:unknown)=>page(section,offset,rev,requestBase,requestPath);
-      const manifest=fetchPage('manifest',0,null) as FrontendPageManifest;
+      const fetchPage=(section:string,offset:number,rev:unknown,after?:BaselinePageKey)=>page(section,offset,rev,requestBase,requestPath,after);
+      const formsOnly=formsCatalogOnly&&isEffect;
+      const expectedSections=formsOnly?FORM_CATALOG_SECTIONS:FRONTEND_SECTIONS;
+      const manifest=page('manifest',0,null,formsOnly?{...requestBase,sections:FORM_CATALOG_SECTIONS}:requestBase,requestPath) as FrontendPageManifest;
       if(manifest.environment!==base.environment||manifest.generation!==base.generation||!Array.isArray(manifest.sections)
-        ||manifest.sections.length!==FRONTEND_SECTIONS.length||manifest.sections.some((s,i)=>!record(s)||s.section!==FRONTEND_SECTIONS[i]||!Number.isSafeInteger(s.count)||s.count<0||s.count>FRONTEND_SECTION_BOUNDS[s.section])
+        ||(manifest.partial===true)!==formsOnly||manifest.sections.length!==expectedSections.length||manifest.sections.some((s,i)=>!record(s)||s.section!==expectedSections[i]||!Number.isSafeInteger(s.count)||s.count<0||s.count>FRONTEND_SECTION_BOUNDS[s.section])
         ||!Array.isArray(manifest.diagnostics)||manifest.diagnostics.some(d=>!record(d)||typeof d.code!=='string'||!Number.isSafeInteger(d.count)||d.count<0)
         ||isEffect&&(!manifest.effect||manifest.effect.effectId!==base.effectId||!['frontend.refresh','forms.refresh'].includes(manifest.effect.kind))
         ||!isEffect&&manifest.effect!==undefined||expectedRevision!==undefined&&!sameRevision(manifest.revision,expectedRevision))fail('The coherent snapshot manifest does not match its request or capacity bounds.');
       if(manifest.scope&&(!id(manifest.scope.termId)||!id(manifest.scope.currentTermId)||manifest.scope.termId!==(requestBase.termId??manifest.scope.currentTermId)))fail('The snapshot semester does not match its request.');
+      if(formsOnly&&manifest.effect?.kind!=='forms.refresh')fail('Forms require their own publication lease.');
       const pages:FrontendDataPage[]=[];
-      for(const section of manifest.sections){let offset=0;
-        do{const next=fetchPage(section.section,offset,manifest.revision) as FrontendDataPage;
+      for(const section of manifest.sections){let offset=0;let after:BaselinePageKey|undefined;
+        do{const next=fetchPage(section.section,offset,manifest.revision,after) as FrontendDataPage;
           if(next.offset!==offset||!Array.isArray(next.rows)||next.rows.some(r=>!record(r))||next.rows.length>512||offset+next.rows.length>section.count
             ||next.rows.length===0&&section.count!==0||next.nextOffset!==(offset+next.rows.length<section.count?offset+next.rows.length:null))fail('A snapshot page was missing, repeated or incomplete.');
+          after=next.nextBaselineKey;
+          if(after&&(section.section!=='legacyBaselines'||!id(after.personId)||!id(after.eventId)||after.personId!==next.rows.at(-1)?.personId||after.eventId!==next.rows.at(-1)?.eventId))fail('Invalid baseline page continuation.');
           pages.push(next);offset+=next.rows.length;
         }while(offset<section.count);
       }
       const verify=fetchPage('verify',0,manifest.revision) as FrontendVerifyPage;
+      if(formsOnly){
+        if(verify.verified!==true||JSON.stringify(verify.effect)!==JSON.stringify(manifest.effect)||
+          JSON.stringify(verify.scope)!==JSON.stringify(manifest.scope)||pages.some(p=>JSON.stringify(p.scope)!==JSON.stringify(manifest.scope)))fail('The Forms catalog changed during transfer.');
+        const rows=(section:string)=>pages.filter(p=>p.section===section).flatMap(p=>p.rows);
+        const terms=rows('terms').map(t=>({termId:String(t.termId),isCurrent:t.isCurrent===1}));
+        const events=rows('events').map(({hasRoster,...e})=>e) as FormCatalogSnapshot['events'];
+        if(!manifest.scope||terms.filter(t=>t.isCurrent).length!==1||terms.find(t=>t.isCurrent)?.termId!==manifest.scope.termId||
+          manifest.scope.currentTermId!==manifest.scope.termId||events.some(e=>e.termId!==manifest.scope!.termId))fail('Forms require the current semester.');
+        const formsInput:FormCatalogSnapshot={environment:manifest.environment,generation:manifest.generation,revision:manifest.revision,terms,events,
+          people:rows('people').map(({virtualContactId,...p})=>({...p,active:operationallyActive(p as unknown as DirectoryRecord)})) as DirectoryRecord[],
+          flights:rows('flights') as FormCatalogSnapshot['flights'],eventFlights:rows('eventFlights') as FormCatalogSnapshot['eventFlights']};
+        return {manifest,formsInput};
+      }
       try{return{manifest,snapshot:assembleFrontendSnapshotPages(manifest,pages,verify) as FrontendDashboardSnapshot};}catch{return fail('The complete snapshot failed final coherence verification.');}
     };
-    const {manifest,snapshot}=read(base,path,effect);
+    const publication=read(base,path,effect);
+    if(publication.formsInput){
+      before();
+      const body=JSON.stringify({effect:publication.manifest.effect,snapshot:publication.formsInput});
+      if(bytes(body)>FRONTEND_TRANSFER_LIMITS.bytes)fail('The Forms catalog exceeded its reviewed bound.');
+      return {status:200,body};
+    }
+    const {manifest,snapshot}=publication;
     if(effect&&manifest.effect?.kind==='frontend.refresh'&&manifest.scope){
       if(!Array.isArray(manifest.previousTerms)||manifest.previousTerms.length>2||new Set(manifest.previousTerms.map(t=>t.termId)).size!==manifest.previousTerms.length)fail('The Dashboard comparison catalog is incomplete.');
       const current=snapshot.terms.find(t=>t.isCurrent);
@@ -89,7 +116,7 @@ export function createPagedFrontendTransport(transport:Transport,config:AdapterC
         if(term.retained)return summarizeRetainedTerm(term.retained,retainedSummaries.find(summary=>summary.snapshotId===term.retained!.snapshotId)!);
         const historical=read({environment:base.environment,generation:base.generation,principalId:base.principalId,termId:term.termId},'/v1/admin/snapshot/page',false,manifest.revision);
         if(historical.manifest.scope?.currentTermId!==current.termId||historical.manifest.scope.termId!==term.termId)fail('The Dashboard semester changed during transfer.');
-        const summary=summarizeNativeTerm(historical.snapshot,term.termId);
+        const summary=summarizeNativeTerm(historical.snapshot!,term.termId);
         if(summary.sortOrder!==term.sortOrder||summary.label!==term.label)fail('The Dashboard term metadata changed during transfer.');
         return summary;
       });

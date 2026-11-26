@@ -1,6 +1,7 @@
+import type { FormCatalogSnapshot } from './forms-publication.js';
 /** Resumable all-Form publication. A private checkpoint precedes every native mutation. */
 import { AdapterError, type AdapterConfig, type Signer } from './index.js';
-import type { FrontendSnapshot, SnapshotRevision } from '../../../packages/domain/src/admin.js';
+import type { SnapshotRevision } from '../../../packages/domain/src/admin.js';
 import { formReadFingerprint, formsCanonical, planNativeFormPublication, retainFormEdition, verifyNativeFormPlan, verifyFormBeforeContinuations,
   type FormEdition, type ManagedFormBinding, type NativeFormPlan, type NativeFormRead } from './forms-publication.js';
 
@@ -22,7 +23,7 @@ export interface FormsRefreshPorts {
   state: { load(): FormsState; save(state: FormsState): void };
   /** Archive exact catalogs before reducing active history; preserve all pending plans. */
   retainCatalog?(state:FormsState,incoming:FormEdition[]):Record<string,FormEdition>;
-  effects: { claim(): FormsClaim | null; project(claim: FormsClaim): { effect: { effectId: string; kind: string }; snapshot: FrontendSnapshot }; ack(claim: FormsClaim): void };
+  effects: { claim(): FormsClaim | null; project(claim: FormsClaim): { effect: { effectId: string; kind: string }; snapshot: FormCatalogSnapshot }; ack(claim: FormsClaim): void };
   forms: { read(binding: ManagedFormBinding): NativeFormRead; setAccepting(binding: ManagedFormBinding, enabled: boolean): void;
     write(binding: ManagedFormBinding, requests: Record<string, unknown>[], requiredRevisionId: string): void;
     setSubmitContinuation?(binding: ManagedFormBinding, sectionId: string): void };

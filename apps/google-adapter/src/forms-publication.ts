@@ -3,6 +3,10 @@ import { AdapterError, type Signer } from './index.js';
 import { expandAttendanceLayout, type AttendanceLayout, type AttendanceRule, type PageContinuation } from './forms-layout.js';
 import type { FrontendSnapshot, SnapshotRevision, DirectoryRecord } from '../../../packages/domain/src/admin.js';
 
+export type FormCatalogSnapshot = Pick<FrontendSnapshot,'environment'|'generation'|'revision'|'people'|'flights'|'eventFlights'> & {
+  terms: Pick<FrontendSnapshot['terms'][number],'termId'|'isCurrent'>[];
+  events: Omit<FrontendSnapshot['events'][number],'eligiblePersonIds'>[];
+};
 export interface NativeFormRead {
   formId: string; revisionId: string; info: Record<string, unknown>;
   settings: { emailCollectionType: string; [key: string]: unknown };
@@ -81,13 +85,13 @@ export function verifyFormBeforeContinuations(plan: NativeFormPlan, actual: Nati
   }
   return verifyNativeFormPlan(plan, normalized);
 }
-function frozenScopes(snapshot: FrontendSnapshot, filter: FormRosterFilter): FrozenFormScope[] {
+function frozenScopes(snapshot: FormCatalogSnapshot, filter: FormRosterFilter): FrozenFormScope[] {
   return snapshot.flights.filter(f => !filter.flightIds || filter.flightIds.includes(f.flightId)).map(f => ({unitId: f.flightId, rosterVersion: f.rosterVersion,
     coveredPersonIds: snapshot.people.filter(p => p.active && p.flightId === f.flightId
       && (!filter.asYears || filter.asYears.includes(p.asYear)) && (!filter.universities || filter.universities.includes(p.university))
       && (!filter.excludeUniversities || !filter.excludeUniversities.includes(p.university))).map(p => p.personId).sort()})).filter(s => s.coveredPersonIds.length);
 }
-function choiceCandidates(snapshot: FrontendSnapshot, source: FormChoiceSource, key: ManagedFormBinding['key'], termId: string) {
+function choiceCandidates(snapshot: FormCatalogSnapshot, source: FormChoiceSource, key: ManagedFormBinding['key'], termId: string) {
   const choices: { label: string; key: string; reference: Omit<RetainedChoice, 'editionId' | 'questionId'> | Record<string, unknown> }[] = [];
 
   if (source.kind === 'events') {
@@ -118,7 +122,7 @@ function choiceCandidates(snapshot: FrontendSnapshot, source: FormChoiceSource, 
   }
   return choices;
 }
-export function planNativeFormPublication(input: { snapshot: FrontendSnapshot; binding: ManagedFormBinding; current: NativeFormRead; signer: Signer; previousEdition?: FormEdition }): NativeFormPlan {
+export function planNativeFormPublication(input: { snapshot: FormCatalogSnapshot; binding: ManagedFormBinding; current: NativeFormRead; signer: Signer; previousEdition?: FormEdition }): NativeFormPlan {
   const { snapshot, signer } = input;
   const configured = input.binding, original = input.current;
   const expanded = configured.attendanceLayout ? expandAttendanceLayout(snapshot, configured, original, signer, input.previousEdition) : undefined;

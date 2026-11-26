@@ -989,3 +989,38 @@ test('scheduled and excusal scoped notice revalidation inherits the pending even
  await assert.rejects(readNotificationContext(f.env,'admin',f.plan.payload),{code:'EVENT_ROSTERS_PENDING'});
  await assert.rejects(readNotificationContext(f.env,'admin',{kind:'excusal',asOf:f.plan.payload.asOf,requestId:'pending-scope-request'}),{code:'EVENT_ROSTERS_PENDING'});assert.equal(await f.count('notification_intents'),0);
 });
+
+test('current baseline continuations preserve attendance order and bound late-page reads', async t => {
+  const f = await fixture(t);
+  assert.equal((await f.send(command('event.upsert'))).status, 200);
+  const sha = createHash('sha256').update('example').digest('hex');
+  await f.db.batch([
+    f.db.prepare("INSERT INTO legacy_import_runs VALUES('run',?,?,?,'fixture','staging',1,'complete',1,1,1,1,1,'{}','2026-01-01','2026-01-01')").bind(sha, sha, sha),
+    f.db.prepare("INSERT INTO legacy_source_occurrences VALUES('run','row',?,'matrix','evidence-only','{}','[]',NULL,'[]')").bind(sha),
+    f.db.prepare("WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM n WHERE i<513) INSERT INTO people SELECT printf('example-%03d',i),'Example' FROM n"),
+    f.db.prepare("INSERT INTO legacy_attendance_baselines SELECT person_id,person_id,'event-one',NULL,'run','row',7 FROM people"),
+  ]);
+  const path = '/v1/admin/snapshot/page';
+  const manifest = await f.send(read({section:'manifest', sections:['legacyBaselines'], offset:0, revision:null}), path);
+  assert.equal(manifest.status, 200);
+  const request = read({section:'legacyBaselines', offset:0, revision:manifest.body.revision});
+  const first = await f.send(request, path);
+  assert.equal(first.body.rows.length, 256);
+  assert.deepEqual(first.body.nextBaselineKey, {personId:'example-256', eventId:'event-one'});
+  const secondRequest = {...request, offset:256, afterBaseline:first.body.nextBaselineKey};
+  const second = await f.send(secondRequest, path);
+  assert.deepEqual(second.body.rows, (await f.send({...request, offset:256}, path)).body.rows);
+  let reads = 0;
+  const DB = {prepare:sql=>f.db.prepare(sql), batch:async statements=>{
+    const results = await f.db.batch(statements);
+    reads = results.reduce((total,r)=>total+r.meta.rows_read,0);
+    return results;
+  }};
+  const last = await frontendSnapshotPage({...f.env,DB}, {...request, offset:512, afterBaseline:second.body.nextBaselineKey});
+  assert.deepEqual(last.rows.map(r=>[r.personId,r.code]), [['example-513',null]]);
+  assert.equal(last.nextOffset, null);
+  assert(reads<80, `Last single-record page read ${reads} rows`);
+  for (const [overrides,status] of [[{principalId:'outsider'},403],[{termId:'term-prior'},400],[{afterBaseline:{}},400],[{revision:{administration:999,operations:999}},409]]) {
+    assert.equal((await f.send({...secondRequest,...overrides},path)).status,status);
+  }
+});
