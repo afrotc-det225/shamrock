@@ -4,7 +4,7 @@ import { effectiveAccessGrants, effectiveAdminGrants, effectivePermissionMembers
 import { excusalDecisionRowPermission, excusalScopeJoin, excusalScopeSelect } from './excusal-scope.js';
 import { HttpError } from './http-error.js';
 import { permissionSourceRevisionSql } from './permissions.js';
-import { pairRevisionSql } from './corrections.js';
+import { baselineRevisionSql, pairRevisionSql } from './corrections.js';
 import type { CommandScopeGuard } from './command-scope.js';
 
 interface Env { DB: D1Database; ENVIRONMENT: string; GENERATION: string; }
@@ -62,7 +62,7 @@ function queries() {
         observations: { select: `'observation:'||o.observation_id AS factId,o.person_id AS personId,o.event_id AS eventId,a.audit_id AS 'order',o.code`, from: 'FROM attendance_observations o JOIN attendance_reports r ON r.report_id=o.report_id JOIN audit_events a ON a.command_id=r.command_id WHERE o.event_id IN(SELECT event_id FROM scoped_events) AND o.person_id IN(SELECT person_id FROM scoped_people)', order: 'o.observation_id', limit: 256 },
         requests: { select: `r.request_id AS requestId,r.person_id AS personId,p.display_name AS personDisplayName,r.event_id AS eventId,r.unit_id AS flightId,${excusalScopeSelect},COALESCE(a.audit_id,0) AS 'order',(r.origin='legacy' AND r.last_command_id IS NULL) AS legacyStateOnly,r.status,r.requested_outcome AS requestedOutcome,r.version,r.reason,r.submitted_at AS submittedAt,r.updated_at AS updatedAt,r.decided_at AS decidedAt,r.decision_reason AS decisionReason,r.can_decide AS canDecide`, from: `FROM visible_requests r JOIN people p ON p.person_id=r.person_id ${excusalScopeJoin} LEFT JOIN audit_events a ON a.command_id=r.last_command_id`, order: 'r.request_id', limit: 32 },
         corrections: { select: `'correction:'||c.correction_id AS factId,c.person_id AS personId,c.event_id AS eventId,a.audit_id AS 'order',c.code`, from: 'FROM attendance_corrections c JOIN audit_events a ON a.command_id=c.command_id WHERE c.event_id IN(SELECT event_id FROM scoped_events) AND c.person_id IN(SELECT person_id FROM scoped_people)', order: 'a.audit_id', limit: 256 },
-        legacyBaselines: { select: 'b.baseline_id AS baselineId,b.person_id AS personId,b.event_id AS eventId,b.code', from: "FROM legacy_attendance_baselines b JOIN legacy_import_runs i ON i.import_run_id=b.import_run_id AND i.state='complete' WHERE b.event_id IN(SELECT event_id FROM scoped_events) AND b.person_id IN(SELECT person_id FROM scoped_people)", countFrom: "FROM legacy_attendance_baselines b WHERE b.import_run_id IN(SELECT import_run_id FROM legacy_import_runs WHERE state='complete') AND b.event_id IN(SELECT event_id FROM scoped_events) AND b.person_id IN(SELECT person_id FROM scoped_people)", order: 'b.person_id,b.event_id', limit: 256 },
+        legacyBaselines: { select: `b.baseline_id AS baselineId,b.person_id AS personId,b.event_id AS eventId,b.code,${baselineRevisionSql} AS baselineRevision`, from: "FROM legacy_attendance_baselines b JOIN legacy_import_runs i ON i.import_run_id=b.import_run_id AND i.state='complete' WHERE b.event_id IN(SELECT event_id FROM scoped_events) AND b.person_id IN(SELECT person_id FROM scoped_people)", countFrom: "FROM legacy_attendance_baselines b WHERE b.import_run_id IN(SELECT import_run_id FROM legacy_import_runs WHERE state='complete') AND b.event_id IN(SELECT event_id FROM scoped_events) AND b.person_id IN(SELECT person_id FROM scoped_people)", order: 'b.person_id,b.event_id', limit: 256 },
     };
     return queries;
 }
@@ -189,7 +189,7 @@ export async function preparePanelAuthorization(env: Env, input: unknown): Promi
     let from: string, select: string, targetValues: (string | number | null)[], selectValues: (string | number | null)[] = [];
     if (decision) {
         const permission = excusalDecisionRowPermission(principal);
-        from = `FROM excusal_records r JOIN event_details d ON d.event_id=r.event_id WHERE r.request_id=?
+        from = `FROM excusal_records r JOIN event_details d ON d.event_id=r.event_id WHERE r.request_id=? AND d.status='active'
           AND (r.origin='native' OR EXISTS(SELECT 1 FROM legacy_operational_adoptions a WHERE a.adoption_id=r.legacy_adoption_id AND a.state='complete'))
           AND (?=1 OR EXISTS(SELECT 1 FROM terms t WHERE t.term_id=d.term_id AND t.is_current=1)) AND ${permission.sql}`;
         select = 'r.version AS expectedVersion,r.status,r.requested_outcome AS requestedOutcome,r.reason,r.decision_reason AS decisionReason';
@@ -197,6 +197,7 @@ export async function preparePanelAuthorization(env: Env, input: unknown): Promi
     } else {
         from = `FROM event_details d JOIN event_roster_members m ON m.event_id=d.event_id AND m.version=d.version
           LEFT JOIN directory_profiles p ON p.person_id=m.person_id WHERE d.event_id=? AND m.person_id=?
+          AND (d.status='active' OR EXISTS(SELECT 1 FROM terms t WHERE t.term_id=d.term_id AND t.is_current=0))
           AND EXISTS(SELECT 1 FROM principals actor JOIN ${effectiveAdminGrants} g ON g.principal_id=actor.principal_id WHERE actor.principal_id=? AND actor.active=1
             AND g.capability='attendance.correct' AND (g.scope_kind='wing' AND g.scope_key='*' OR g.scope_kind='flight' AND g.scope_key=m.flight_id))
           AND (?=1 OR (EXISTS(SELECT 1 FROM terms t WHERE t.term_id=d.term_id AND t.is_current=1)
@@ -206,7 +207,7 @@ export async function preparePanelAuthorization(env: Env, input: unknown): Promi
         select = `d.version AS expectedEventVersion,m.flight_id AS flightId,(${pairRevisionSql}) AS expectedBaseVersion`;
         const flights = JSON.stringify(access.capabilities.attendanceCorrectionFlightIds);
         targetValues = [String(target.eventId), String(target.personId), principal, full, flights, flights];
-        selectValues = Array.from({ length: 3 }, () => [String(target.eventId), String(target.personId)]).flat();
+        selectValues = [String(target.eventId), String(target.personId)];
     }
     const rows = await env.DB.batch<Row>([env.DB.prepare(source.sql).bind(...source.values), env.DB.prepare(`SELECT ${select} ${from}`).bind(...selectValues, ...targetValues)]);
     if (rows[0].results[0]?.revision !== sourceValue) return fail(409, 'SNAPSHOT_CHANGED');

@@ -60,6 +60,48 @@ test('decision publication preserves unsent edits and detects a recorded-version
   assert.equal(plan.expectedAfter.rows[0][1].userEnteredValue.stringValue, 'Denied');
 });
 
+test('retired event requests leave active Blue/Gold queues and preserve pending cell edits for review', () => {
+  const original = snapshot();
+  for (const status of ['cancelled', 'inactive', 'archived']) {
+    const source = structuredClone(original);
+    source.events[0].status = status;
+    const before = buildExcusalPublicationTables(binding(original)), after = buildExcusalPublicationTables(binding(source));
+    assert.equal(source.requests.length, 2);
+    for (const [i, queue] of after.entries()) {
+      assert.deepEqual(queue.rows, []);
+      const input = excusalInput(before[i]);
+      input.baseline.slots = { headers: input.current.headers, keys: [before[i].rows[0].key] };
+      input.table = queue;
+      const clean = planExcusalPublication(input);
+      assert.equal(clean.nextBaseline.rows[0].retired, true);
+      assert.deepEqual(clean.nextBaseline.rows[0].commandBindings, {});
+      input.current.rows[0][1] = frontendLiteralCell('Denied');
+      const pending = planExcusalPublication(input);
+      assert.equal(pending.diagnostics[0].code, 'retired-row-with-edit');
+      assert.equal(pending.retainedDrafts[0].value, 'Denied');
+      assert.deepEqual(pending.requests, []);
+    }
+  }
+});
+
+test('both squadron queues publish recorded decisions with a single value-only write and no rewrite on retry', () => {
+  for (const table of buildExcusalPublicationTables(binding(snapshot()))) {
+    const input = excusalInput(table);
+    const row = table.rows[0];
+    row.values.decision = 'Denied';
+    row.versions.decision++;
+    row.commandBindings.decision.expectedVersion = row.versions.decision;
+    input.revision = { ...input.revision, operations: input.revision.operations + 1 };
+    const plan = planExcusalPublication(input);
+    assert.deepEqual(plan.requests, [{ updateCells: {
+      range: { sheetId: input.current.sheetId, startRowIndex: 2, endRowIndex: 3, startColumnIndex: 1, endColumnIndex: 2 },
+      rows: [{ values: [{ userEnteredValue: { stringValue: 'Denied' } }] }], fields: 'userEnteredValue',
+    } }]);
+    const retry = planExcusalPublication({ ...input, current: plan.expectedAfter, baseline: plan.nextBaseline });
+    assert.deepEqual(retry.requests, []);
+  }
+});
+
 test('new decision rows inherit the native arrow rule and require targeted validation read-back', () => {
   const table = buildExcusalPublicationTables(binding(snapshot()))[0], input = excusalInput(table);
   const added = structuredClone(table.rows[0]); added.key = 'request-second'; added.values.request_id = added.key; added.values.decision = null; added.versions.decision = 1; added.commandBindings.decision = { operation: 'excusal.decide', entityId: added.key, field: 'decision', expectedVersion: 1 }; table.rows.push(added);

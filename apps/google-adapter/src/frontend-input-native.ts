@@ -5,16 +5,17 @@ import { createPermissionContext } from './permissions-context.js';
 import { createNativePermissionRuntime } from './permissions-host.js';
 import { assertPermissionFenceClear } from './permissions-refresh.js';
 import { INPUT_REORDER_PROPERTY, runPausedNativeReorder, type NativeInputSetupReceipt, type NativeReorderRequest } from './frontend-reorder-native.js';
-import type { FrontendTableRead } from './frontend-publication.js';
+import type { FrontendDraft, FrontendTableRead } from './frontend-publication.js';
 /** Optional native edit and verified-email confirmation host. No IO during module loading. */
 import {AdapterError,type Signer} from './index.js';
 import {createGoogleSigner,createGoogleTransport} from './apps-script.js';
 import {createPagedFrontendTransport} from './frontend-page-client.js';
+import {FRONTEND_PAGE_VERSION,FRONTEND_SECTION_BOUNDS,FRONTEND_PAGE_MAX_BYTES} from '../../../packages/domain/src/frontend-transport.js';
 import {HOST_PROPERTIES,parseStagingHostConfig} from './staging-host.js';
 import {CONFIG_FILE_ID_PROPERTY} from './staging-config.js';
 import {FRONTEND_PROPERTIES,createNativeFrontendRuntime,type NativeFrontendInputSession,type NativeFrontendServices} from './frontend-runtime.js';
-import {assertImmutableInputSlots,bindImmutableInputSlots,captureFrontendEdit,commandsForCapturedEdit,inputCanonical,nativeInputValue,type InputPrincipal,type InputSurfaceBinding,type NativeEditEvidence,type CapturedFrontendEdit} from './frontend-input.js';
-import {deliverFrontendInputs,inputSurfaceState,retainCapturedInput,supersedeUnattemptedInput,type FrontendInputJournal,type InputJournalPorts,type InputJournalEntry} from './frontend-input-journal.js';
+import {attendanceReadEvidence,assertImmutableInputSlots,bindImmutableInputSlots,captureFrontendEdit,commandsForCapturedEdit,inputCanonical,nativeInputValue,type FrontendInputContext,type InputPrincipal,type InputSurfaceBinding,type NativeEditEvidence,type CapturedFrontendEdit} from './frontend-input.js';
+import {deliverFrontendInputs,inputSurfaceState,retainCapturedInput,planInputReplacement,applyInputReplacement,type FrontendInputJournal,type InputJournalPorts,type InputJournalEntry} from './frontend-input-journal.js';
 
 export const INPUT_PROPERTIES={config:'SHAMROCK_V3_INPUT_CONFIG',pause:'SHAMROCK_V3_INPUT_PAUSED',setup:'SHAMROCK_V3_INPUT_SETUP',controlReceipt:'SHAMROCK_V3_INPUT_CONTROL_RECEIPT',work:'SHAMROCK_V3_INPUT_WORK'} as const;
 export const INPUT_HANDLERS={edit:'shamrockV3NativeFrontendEdit',confirmation:'shamrockV3NativeFrontendConfirm'} as const;
@@ -36,6 +37,7 @@ export interface NativeInputServices extends NativeFrontendServices {
 }
 function fail(code:string,message:string):never{throw new AdapterError(code,message);}
 const copy=<T>(v:T):T=>JSON.parse(JSON.stringify(v));
+const column=(index:number)=>{let result='';for(let n=index+1;n>0;n=Math.floor((n-1)/26))result=String.fromCharCode(65+(n-1)%26)+result;return result;};
 const bytes=(v:string)=>encodeURIComponent(v).replace(/%[A-F0-9]{2}/g,'x').length;
 export function snapshotNativeEdit(e:any):NativeEditEvidence{
   // Read native event evidence immediately, before obtaining a lock or touching a Sheet.
@@ -79,7 +81,10 @@ export function createNativeFrontendInput(services:NativeInputServices,frontend=
       const payload=JSON.stringify(body),timestamp=String(now());if(bytes(payload)>65536)fail('input_capacity','The frozen command exceeds its request bound.');
       const response=transport.send({method:'POST',url:host.workerOrigin+path,body:payload,headers:{'x-shamrock-key-id':host.keyId,'x-shamrock-timestamp':timestamp,'x-shamrock-signature':signer.hmacSha256(`POST\n${path}\n${timestamp}\n${signer.sha256(payload)}`)}});
       const text=response.body;if(bytes(text)>5*1024*1024)fail('input_capacity','The backend response exceeds its reviewed bound.');
-      let value:any;try{value=JSON.parse(text);}catch{return fail('input_transport','The signed delivery result is ambiguous.');}return {status:response.status,body:value};
+      let value:any;try{value=JSON.parse(text);}catch{
+        if(path==='/v1/admin/snapshot/page'&&(response.status===429||response.status>=500))return {status:response.status,body:null};
+        return fail('input_transport','The signed delivery result is ambiguous.');
+      }return {status:response.status,body:value};
     }
     function journal(){let previous:string|undefined;return{load():FrontendInputJournal{
       const value=privateRead(config.journalFileId,owner);if(value.version!==1||value.environment!=='staging'||value.generation!==config.generation||!value.entries)fail('input_state','The input journal belongs to another generation.');previous=inputCanonical(value);return value;
@@ -102,8 +107,67 @@ export function createNativeFrontendInput(services:NativeInputServices,frontend=
     return{host,owner,config,signer,fingerprint,enabled,request,journal,confirmationRead,setupReceipt,retention};
   }
   function pause(){properties.setProperty(INPUT_PROPERTIES.pause,'true');if(properties.getProperty(INPUT_PROPERTIES.pause)!=='true')fail('input_pause','The input pause did not persist.');return{status:'paused'};}
-  function note(edit:NativeEditEvidence,text:string){if(!Number.isSafeInteger(edit.row)||!Number.isSafeInteger(edit.column)||edit.row<3||edit.column<1||edit.rows*edit.columns>250)return;
-    api(`https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(edit.spreadsheetId)}:batchUpdate`,{requests:[{repeatCell:{range:{sheetId:edit.sheetId,startRowIndex:edit.row-1,endRowIndex:edit.row-1+edit.rows,startColumnIndex:edit.column-1,endColumnIndex:edit.column-1+edit.columns},cell:{note:text},fields:'note'}}]});}
+  function inputContext(ctx:NonNullable<ReturnType<typeof context>>,session:NativeFrontendInputSession,attendanceOnly:boolean):FrontendInputContext{
+    const base={environment:'staging' as const,generation:ctx.config.generation,principalId:session.config.principalId};
+    if(!attendanceOnly){
+      const result=ctx.request('/v1/admin/snapshot',base);
+      if(result.status!==200)fail('input_snapshot','The coherent input context is unavailable.');
+      return result.body;
+    }
+    // Corrections need current event targets; pair versions are already frozen
+    // in the publisher checkpoint and the Worker verifies them at commit.
+    const unavailable=()=>fail('input_snapshot','The current Attendance event list could not be verified.');
+    function page(section:string,offset:number,revision:unknown){
+      let result:ReturnType<typeof ctx.request>;
+      try{result=ctx.request('/v1/admin/snapshot/page',{...base,section,offset,revision,...(section==='manifest'?{sections:['events']}:{})});}
+      catch(error){if(error instanceof AdapterError)throw error;return fail('input_snapshot_retry','Attendance event data could not be reached.');}
+      if(result.status===429||result.status>=500||result.status===409&&['SNAPSHOT_CHANGED','SNAPSHOT_IMPORT_ACTIVE','EVENT_ROSTERS_PENDING'].includes(result.body?.error?.code))
+        fail('input_snapshot_retry','Attendance event data is temporarily unavailable.');
+      if(result.status===401||result.status===403)fail('input_snapshot_access','Current authority to read Attendance events could not be established.');
+      if(result.status!==200||result.body?.contractVersion!==FRONTEND_PAGE_VERSION||result.body.section!==section||
+        bytes(JSON.stringify(result.body))>FRONTEND_PAGE_MAX_BYTES||result.body.effect||
+        (revision!==null&&inputCanonical(result.body.revision)!==inputCanonical(revision)))return unavailable();
+      return result.body;
+    }
+    const manifest=page('manifest',0,null),{revision,scope}=manifest,count=manifest.sections?.[0]?.count;
+    if(manifest.environment!==base.environment||manifest.generation!==base.generation||manifest.partial!==true||manifest.sections?.length!==1||
+      manifest.sections[0].section!=='events'||!Number.isSafeInteger(count)||count<0||count>FRONTEND_SECTION_BOUNDS.events||
+      !Number.isSafeInteger(revision?.operations)||revision.operations<0||!Number.isSafeInteger(revision.administration)||revision.administration<0||
+      typeof scope?.termId!=='string'||!scope.termId||scope.termId!==scope.currentTermId)return unavailable();
+    const events:FrontendInputContext['events']=[];
+    while(events.length<count){
+      const data=page('events',events.length,revision);
+      if(inputCanonical(data.scope)!==inputCanonical(scope)||data.offset!==events.length||!Array.isArray(data.rows)||!data.rows.length||
+        data.rows.some((e:any)=>e?.termId!==scope.termId||typeof e.eventId!=='string'||!e.eventId))return unavailable();
+      events.push(...data.rows);
+      if(events.length>count||data.nextOffset!==(events.length<count?events.length:null))return unavailable();
+    }
+    const verified=page('verify',0,revision);
+    if(verified.verified!==true||inputCanonical(verified.scope)!==inputCanonical(scope))return unavailable();
+    return {environment:base.environment,generation:base.generation,events,people:[],leadership:[],flights:[]};
+  }
+  function writeNotes(session:NativeFrontendInputSession,binding:InputSurfaceBinding,drafts:FrontendDraft[],text:string){
+    if(!drafts.length)return;
+    const read=session.read(binding.surface,true,true),table=inputSurfaceState(session.state,binding.surface);
+    assertImmutableInputSlots(table.baseline,read,binding.surface);
+    const requests:{repeatCell:{range:{sheetId:number;startRowIndex:number;endRowIndex:number;startColumnIndex:number;endColumnIndex:number};cell:{note:string};fields:string}}[]=[];
+    // Keep non-SHAMROCK notes verbatim. Group adjacent cadets receiving the
+    // same message so a column fill uses one range even with a long Form link.
+    const positions=drafts.map(d=>({r:table.baseline.slots!.keys.indexOf(d.key),c:read.headers.indexOf(d.header)})).sort((a,b)=>a.c-b.c||a.r-b.r);
+    const anchor=positions[0],linkedGroup=positions.length>1&&text.startsWith('SHAMROCK: Review and confirm these frozen changes:');
+    for(const {r,c} of positions){
+      const message=linkedGroup&&(r!==anchor.r||c!==anchor.c)?`SHAMROCK: Review and confirm these frozen changes: see ${column(anchor.c)}${anchor.r+3}.`:text;
+      if(r<0||c<0)fail('input_slots','The retained status note no longer has an exact physical slot.');
+      const cell=read.rows[r][c] as {note?:string}|undefined,old=cell?.note??'';
+      const keep=old.split('\n').filter(line=>!/^SHAMROCK: (?:Review and confirm these frozen changes:|Saved for delivery\.|This change was not saved\.|This edit was retained for review)/.test(line)).join('\n');
+      const note=message&&keep?keep+'\n'+message:message||keep;
+      if(note===old)continue;
+      const previous=requests.at(-1)?.repeatCell;
+      if(previous?.cell.note===note&&previous.range.startColumnIndex===c&&previous.range.endRowIndex===r+2){previous.range.endRowIndex++;continue;}
+      requests.push({repeatCell:{range:{sheetId:binding.sheetId,startRowIndex:r+2,endRowIndex:r+3,startColumnIndex:c,endColumnIndex:c+1},cell:{note},fields:'note'}});
+    }
+    if(requests.length)api(`https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(binding.spreadsheetId)}:batchUpdate`,{requests});
+  }
   function trustedPrincipals(ctx:NonNullable<ReturnType<typeof context>>){const applied=createPermissionContext(services).applied();if(applied)ctx.config.principals=applied.policy.accounts.filter(a=>a.active).map(a=>({email:a.email,principalId:a.principalId,...(a.personId?{personId:a.personId}:{})}));}
   function checkSession(ctx:NonNullable<ReturnType<typeof context>>,session:NativeFrontendInputSession){
     trustedPrincipals(ctx);
@@ -116,8 +180,8 @@ export function createNativeFrontendInput(services:NativeInputServices,frontend=
   const idleMarker=(ctx:NonNullable<ReturnType<typeof context>>)=>'idle:'+ctx.signer.sha256(inputCanonical([ctx.config.generation,ctx.config.journalFileId]));
   function finish(ctx:NonNullable<ReturnType<typeof context>>,io:InputJournalPorts){if(ctx.retention)compactInputJournal(io,ctx.retention);work(Object.values(io.journal.entries).some(e=>!e.superseded&&e.commands.some(c=>c.status==='queued'||c.status==='committed'&&!c.applied)||e.superseded&&!e.supersededApplied)?'pending':idleMarker(ctx));}
   function ports(ctx:NonNullable<ReturnType<typeof context>>,session:NativeFrontendInputSession):InputJournalPorts{
-    const store=ctx.journal(),journal=store.load();return{journal,state:session.state,saveJournal:value=>{work();store.save(value);},saveState:value=>session.save(value),sha256:text=>ctx.signer.sha256(text),...(ctx.retention?{archivedReceiptHash:(id:string)=>archivedInputReceipt(ctx.retention!,id)}:{}),send:(path,command)=>{const response=ctx.request(path,command);return response.status===409&&response.body?.error?.code==='PERMISSION_FENCE_REQUIRED'?createNativePermissionRuntime(services,frontend).submit(command,session) as ReturnType<typeof ctx.request>:response;},stillVisible(edit){
-      const read=session.read(edit.surface),table=inputSurfaceState(session.state,edit.surface);assertImmutableInputSlots(table.baseline,read,edit.surface);return edit.drafts.every(d=>{const row=table.baseline.slots?.keys.indexOf(d.key),column=read.headers.indexOf(d.header);return row!==undefined&&row>=0&&column>=0&&inputCanonical(nativeInputValue(read.rows[row]?.[column]))===inputCanonical(d.value);});
+    const store=ctx.journal(),journal=store.load();return{journal,state:session.state,saveJournal:value=>{work();store.save(value);},saveState:value=>session.save(value),sha256:text=>ctx.signer.sha256(text),...(ctx.retention?{archivedReceiptHash:(id:string)=>archivedInputReceipt(ctx.retention!,id)}:{}),send:(path,command)=>{const response=ctx.request(path,command);return response.status===409&&response.body?.error?.code==='PERMISSION_FENCE_REQUIRED'?createNativePermissionRuntime(services,frontend).submit(command,session) as ReturnType<typeof ctx.request>:response;},stillVisible(edit,drafts){
+      const read=session.read(edit.surface,true),table=inputSurfaceState(session.state,edit.surface);assertImmutableInputSlots(table.baseline,read,edit.surface);return drafts.every(d=>{const row=table.baseline.slots?.keys.indexOf(d.key),column=read.headers.indexOf(d.header);return row!==undefined&&row>=0&&column>=0&&inputCanonical(nativeInputValue(read.rows[row]?.[column]))===inputCanonical(d.value);});
     }};
   }
   function link(ctx:NonNullable<ReturnType<typeof context>>,edit:CapturedFrontendEdit){const b=ctx.config.confirmation,f=services.FormApp.openById(b.formId),read=ctx.confirmationRead(),setup=ctx.setupReceipt();
@@ -129,16 +193,16 @@ export function createNativeFrontendInput(services:NativeInputServices,frontend=
   }
 
   function status(entry:InputJournalEntry){return entry.superseded?'superseded':entry.commands.length?entry.commands.every(c=>c.applied)?'committed':entry.commands.some(c=>c.status==='conflict')?'conflict':entry.commands.some(c=>c.status==='rejected')?'rejected':'queued':'confirmation-required';}
-  function updateNote(ctx:NonNullable<ReturnType<typeof context>>,entry:InputJournalEntry,io:InputJournalPorts){const s=status(entry);if(entry.superseded||entry.noteStatus===s)return;note(entry.edit.evidence,s==='committed'?'':s==='confirmation-required'?`SHAMROCK: Review and confirm these frozen changes: ${link(ctx,entry.edit)}`:s==='queued'?'SHAMROCK: Saved for delivery. Keep this input while processing finishes.':'SHAMROCK: This change was not saved. The record or your authority changed; ask Wing staff to review the retained draft.');entry.noteStatus=s;io.saveJournal(io.journal);}
+  function updateNote(ctx:NonNullable<ReturnType<typeof context>>,session:NativeFrontendInputSession,entry:InputJournalEntry,io:InputJournalPorts){const s=status(entry);if(entry.superseded||entry.noteStatus===s)return;writeNotes(session,ctx.config.surfaces.find(b=>b.surface===entry.edit.surface)!,entry.edit.drafts,s==='committed'?'':s==='confirmation-required'?`SHAMROCK: Review and confirm these frozen changes: ${link(ctx,entry.edit)}`:s==='queued'?'SHAMROCK: Saved for delivery. Keep this input while processing finishes.':'SHAMROCK: This change was not saved. The record or your authority changed; ask Wing staff to review the retained draft.');entry.noteStatus=s;io.saveJournal(io.journal);}
   function recoverUnclaimed(ctx:NonNullable<ReturnType<typeof context>>,session:NativeFrontendInputSession,io:InputJournalPorts){
     const candidates=ctx.config.surfaces.flatMap(binding=>inputSurfaceState(session.state,binding.surface).drafts.map(draft=>({binding,draft}))).filter(({binding,draft})=>!Object.values(io.journal.entries).some(e=>!e.superseded&&e.edit.surface===binding.surface&&e.edit.drafts.some(d=>inputCanonical(d)===inputCanonical(draft)))).slice(0,10);
     if(!candidates.length)return;
-    const response=ctx.request('/v1/admin/snapshot',{environment:'staging',generation:ctx.config.generation,principalId:session.config.principalId});if(response.status!==200)fail('input_snapshot','The recovery context is unavailable.');
+    const snapshot=inputContext(ctx,session,candidates.every(({binding})=>binding.surface==='attendance'));
     for(const {binding,draft} of candidates){const table=inputSurfaceState(session.state,binding.surface),read=session.read(binding.surface),row=table.baseline.slots?.keys.indexOf(draft.key),column=read.headers.indexOf(draft.header),heldId=`recovery.${ctx.signer.sha256(inputCanonical({binding,draft}))}`;
       try{if(row===undefined||row<0||column<0)fail('input_slots','The retained draft has no physical input slot.');
         const event:NativeEditEvidence={spreadsheetId:binding.spreadsheetId,sheetId:binding.sheetId,row:row+3,column:column+1,rows:1,columns:1,triggerUid:'retained-draft-recovery'};
-        const edit=captureFrontendEdit({event,binding,baseline:table.baseline,drafts:table.drafts,current:read,snapshot:response.body,principals:ctx.config.principals,config:session.adapter,signer:ctx.signer,providerCoordinatesVerified:false,automationEmail:ctx.owner});
-        if(edit.status!=='noop'){const entry=retainCapturedInput(io,edit,[]);updateNote(ctx,entry,io);}delete io.journal.held?.[heldId];
+        const edit=captureFrontendEdit({event,binding,baseline:table.baseline,drafts:table.drafts,current:read,snapshot,principals:ctx.config.principals,config:session.adapter,signer:ctx.signer,providerCoordinatesVerified:false,automationEmail:ctx.owner});
+        if(edit.status!=='noop'){const entry=retainCapturedInput(io,edit,[]);updateNote(ctx,session,entry,io);}delete io.journal.held?.[heldId];
       }catch(error){io.journal.held??={};io.journal.held[heldId]={event:{surface:binding.surface,key:draft.key,header:draft.header},issue:error instanceof AdapterError?error.code:'input-review'};}
     }
     io.saveJournal(io.journal);
@@ -156,7 +220,6 @@ export function createNativeFrontendInput(services:NativeInputServices,frontend=
       if(t.getEventType()!==services.ScriptApp.EventType.ON_EDIT||t.getTriggerSource()!==services.ScriptApp.TriggerSource.SPREADSHEETS)fail('input_reorder','Unexpected native edit trigger type.');
       return{id:String(t.getUniqueId()),bookId:String(t.getTriggerSourceId())};
     });
-    const column=(index:number)=>{let result='';for(let n=index+1;n>0;n=Math.floor((n-1)/26))result=String.fromCharCode(65+(n-1)%26)+result;return result;};
     function read(surface:'directory'|'leadership'|'attendance'|'blue'|'gold'):FrontendTableRead{
       if(surface!=='directory'&&surface!=='leadership')return session.read(surface);
       const binding=ctx.config.surfaces.find(s=>s.surface===surface)!,base=session.read(surface);
@@ -244,18 +307,32 @@ export function createNativeFrontendInput(services:NativeInputServices,frontend=
     onEdit(event:any){const evidence=snapshotNativeEdit(event);return sessionRun((ctx,session)=>{
       const b=ctx.config.surfaces.find(s=>s.spreadsheetId===evidence.spreadsheetId&&s.sheetId===evidence.sheetId);if(!b)return{status:'ignored'};
       if(ctx.setupReceipt().ids[b.spreadsheetId]!==evidence.triggerUid)fail('input_identity','Unexpected native edit trigger.');const io=ports(ctx,session);
+      let attendanceBefore:ReturnType<typeof attendanceReadEvidence>|undefined;
       try{
-        const initial=session.read(b.surface);const captureSequence=supersedeUnattemptedInput(io,b.surface,evidence,initial);deliverFrontendInputs(io);const table=inputSurfaceState(session.state,b.surface),read=session.read(b.surface);
-        const result=ctx.request('/v1/admin/snapshot',{environment:'staging',generation:ctx.config.generation,principalId:session.config.principalId});if(result.status!==200)fail('input_snapshot','The coherent input context is unavailable.');
+        const table=inputSurfaceState(session.state,b.surface);
+        if(b.surface==='attendance')attendanceBefore=attendanceReadEvidence(evidence,session.read(b.surface,true),table.baseline);
+        const snapshot=inputContext(ctx,session,b.surface==='attendance'),read=session.read(b.surface,true);
+        if(attendanceBefore&&inputCanonical(attendanceBefore)!==inputCanonical(attendanceReadEvidence(evidence,read,table.baseline)))
+          fail('input_changed','Attendance changed during capture. Review the original input before submitting.');
+        const replacement=planInputReplacement(io,b.surface,evidence,read);
+        const prior=replacement.entries.flatMap(e=>e.edit.drafts),drafts=table.drafts.filter(d=>!prior.some(p=>inputCanonical(p)===inputCanonical(d)));
         const review=ctx.config.providerReview,verified=Boolean(review?.reviewId&&review.bindingsSha256===ctx.signer.sha256(inputCanonical(ctx.config.surfaces))&&review.filterViewCoordinatesVerified===true&&review.protectedSortDenied===true);
-        const edit=captureFrontendEdit({event:evidence,binding:b,baseline:table.baseline,drafts:table.drafts,current:read,snapshot:result.body,principals:ctx.config.principals,config:session.adapter,signer:ctx.signer,providerCoordinatesVerified:verified,automationEmail:ctx.owner,captureSequence});
-        if(edit.status==='noop'){note(evidence,'');finish(ctx,io);return{status:'noop'};}
-        const entry=retainCapturedInput(io,edit,edit.status==='ready'?commandsForCapturedEdit({edit,principals:ctx.config.principals}):[]);deliverFrontendInputs(io);updateNote(ctx,entry,io);finish(ctx,io);return{status:status(entry),editId:edit.editId};
-      }catch(error){const issue=error instanceof AdapterError?error.code:'input-review';io.journal.held??={};io.journal.held[services.Utilities.getUuid()]={event:copy(evidence),issue};io.saveJournal(io.journal);note(evidence,'SHAMROCK: This edit was retained for review and was not confirmed as saved. Ask Wing staff to resolve the original version before retrying.');throw error;}
+        const edit=captureFrontendEdit({event:evidence,binding:b,baseline:table.baseline,drafts,current:read,snapshot,principals:ctx.config.principals,config:session.adapter,signer:ctx.signer,providerCoordinatesVerified:verified,automationEmail:ctx.owner,captureSequence:replacement.sequence});
+        if(edit.status==='noop'){applyInputReplacement(io,replacement.entries);writeNotes(session,b,prior,'');finish(ctx,io);return{status:'noop'};}
+        const entry=retainCapturedInput(io,edit,edit.status==='ready'?commandsForCapturedEdit({edit,principals:ctx.config.principals}):[],replacement.entries);
+        writeNotes(session,b,prior.filter(p=>!edit.drafts.some(d=>d.key===p.key&&d.header===p.header)),'');
+        deliverFrontendInputs(io);updateNote(ctx,session,entry,io);finish(ctx,io);return{status:status(entry),editId:edit.editId};
+      }catch(error){const issue=error instanceof AdapterError?error.code:'input-review';io.journal.held??={};
+        const held={event:{...copy(evidence),...(attendanceBefore?{attendanceCells:attendanceBefore}:{})},issue};
+        const heldId='edit.'+ctx.signer.sha256(inputCanonical(held));if(!io.journal.held[heldId]){io.journal.held[heldId]=held;io.saveJournal(io.journal);}
+        // A failed binding provides no safe cell for a status note.
+        try{event.source.toast?.('This edit was retained for Wing review. Check its status before retrying.','SHAMROCK');}catch{/* Journal evidence is already retained. */}
+        throw error;}
+
     });},
     flush(options:{force?:boolean}={}){this.applyControl();const configured=context();if(!configured||!configured.enabled())return{status:'paused'};
       if(services.scheduled&&!services.scheduled.reconcile&&!options.force&&properties.getProperty(INPUT_PROPERTIES.work)===idleMarker(configured))return{status:'idle',attempted:0};
-      return sessionRun((ctx,session)=>{const io=ports(ctx,session);recoverUnclaimed(ctx,session,io);const result=deliverFrontendInputs(io);for(const entry of Object.values(io.journal.entries))updateNote(ctx,entry,io);finish(ctx,io);return result;});},
+      return sessionRun((ctx,session)=>{const io=ports(ctx,session);recoverUnclaimed(ctx,session,io);const result=deliverFrontendInputs(io);for(const entry of Object.values(io.journal.entries))updateNote(ctx,session,entry,io);finish(ctx,io);return result;});},
     confirm(event:any){const sourceId=String(event.source.getId()),responseId=String(event.response.getId()),trigger=String(event.triggerUid??'');return sessionRun((ctx,session)=>{
       const b=ctx.config.confirmation;if(sourceId!==b.formId||ctx.setupReceipt().ids[sourceId]!==trigger)fail('input_identity','Unexpected confirmation trigger.');
       const native=api(`${form(b.formId)}/responses/${encodeURIComponent(responseId)}`);if(native.formId!==b.formId||native.responseId!==responseId||!native.respondentEmail||!Number.isFinite(Date.parse(native.lastSubmittedTime)))fail('input_confirmation','Verified native confirmation identity is missing.');
@@ -267,7 +344,7 @@ export function createNativeFrontendInput(services:NativeInputServices,frontend=
       if(entry.commands.length&&inputCanonical(entry.commands.map(c=>c.command))!==inputCanonical(commands))fail('input_confirmation','A dispatched edit cannot change its confirmed actor or command.');
       if(!io.journal.entries[reference])return{status:status(entry),editId:reference,archived:true};
       if(!entry.commands.length){entry.commands=commands.map((command,templateIndex)=>({command,templateIndex,status:'queued',attempted:false}));entry.confirmation={responseId,submittedAt:native.lastSubmittedTime,email:native.respondentEmail};io.saveJournal(io.journal);}
-      deliverFrontendInputs(io);updateNote(ctx,entry,io);finish(ctx,io);return{status:status(entry),editId:reference};
+      deliverFrontendInputs(io);updateNote(ctx,session,entry,io);finish(ctx,io);return{status:status(entry),editId:reference};
     });},
     reviewQueue(){const ctx=context();if(!ctx)fail('input_configuration','Input is not configured.');trustedPrincipals(ctx);const email=services.Session.getActiveUser().getEmail().trim().toLowerCase(),actor=ctx.config.principals.find(p=>p.email.toLowerCase()===email);if(!actor)fail('confirmation_required','Authenticate as a current Wing reviewer.');const result=ctx.request('/v1/admin/snapshot',{environment:'staging',generation:ctx.config.generation,principalId:actor.principalId});if(result.status!==200)fail('confirmation_required','Current Wing frontend authority is required.');return ctx.journal().load();},
     replayConfirmation(responseId:string){const ctx=context();if(!ctx||!ctx.enabled())return{status:'paused'};assertPermissionFenceClear(properties);return this.confirm({source:{getId:()=>ctx.config.confirmation.formId},response:{getId:()=>responseId},triggerUid:ctx.setupReceipt().ids[ctx.config.confirmation.formId]});},

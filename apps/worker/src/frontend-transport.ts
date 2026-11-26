@@ -2,6 +2,7 @@ import { excusalScopeSelect, excusalScopeJoin } from './excusal-scope.js';
 import { effectiveAdminGrants } from './permission-grants.js';
 import { DIRECTORY_FIELDS, operationallyActive, type DirectoryRecord, type SnapshotRevision } from '../../../packages/domain/src/admin.js';
 import { FRONTEND_PAGE_MAX_BYTES, FRONTEND_PAGE_VERSION, FRONTEND_SECTIONS, FRONTEND_SECTION_BOUNDS, type FrontendPage, type FrontendPageManifest, type FrontendSection } from '../../../packages/domain/src/frontend-transport.js';
+import { baselineRevisionSql } from './corrections.js';
 import { HttpError } from './http-error.js';
 interface Env {DB:D1Database;ENVIRONMENT:string;GENERATION:string}
 type Value=string|number|null;
@@ -29,7 +30,7 @@ const queries:Record<FrontendSection,{select:string;from:string;order:string;lim
   requests:{select:`r.request_id AS requestId,r.person_id AS personId,r.event_id AS eventId,r.unit_id AS flightId,${excusalScopeSelect},COALESCE(a.audit_id,0) AS 'order',(r.origin='legacy' AND r.last_command_id IS NULL) AS legacyStateOnly,r.status,r.requested_outcome AS requestedOutcome,r.version,r.reason,r.submitted_at AS submittedAt,r.submitted_by AS submittedBy,r.updated_at AS updatedAt,r.decided_at AS decidedAt,r.decided_by AS decidedBy,r.decision_reason AS decisionReason`,from:requestsFrom,order:'r.request_id',limit:32},
   corrections:{select:`'correction:'||c.correction_id AS factId,c.person_id AS personId,c.event_id AS eventId,a.audit_id AS 'order',c.code`,from:'FROM attendance_corrections c JOIN audit_events a ON a.command_id=c.command_id',order:'a.audit_id',limit:256},
   termRosters:{select:'term_id AS termId,person_id AS personId,last_name AS lastName,first_name AS firstName,as_year AS asYear,flight_id AS flightId,flight_path_status AS flightPathStatus,date_of_birth AS dateOfBirth',from:'FROM term_roster_snapshots',order:'term_id,person_id',limit:128},
-  legacyBaselines:{select:'b.baseline_id AS baselineId,b.person_id AS personId,b.event_id AS eventId,b.code',from:baselineFrom,order:'b.person_id,b.event_id',limit:256},
+  legacyBaselines:{select:`b.baseline_id AS baselineId,b.person_id AS personId,b.event_id AS eventId,b.code,${baselineRevisionSql} AS baselineRevision`,from:baselineFrom,order:'b.person_id,b.event_id',limit:256},
 };
 /** A publication reads one semester. Older evidence remains queryable by an explicit term ID. */
 const scopeCte = `WITH selected_term AS (SELECT term_id FROM terms WHERE term_id=COALESCE(?,(SELECT term_id FROM terms WHERE is_current=1))),

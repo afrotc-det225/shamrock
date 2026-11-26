@@ -26,7 +26,7 @@ test('Worker hides incomplete imports, then exposes exact baseline codes at init
   let snapshot=await frontendSnapshot(env,request);assert.deepEqual(snapshot.legacyBaselines,[]);assert.deepEqual(snapshot.attendanceVersions,[]);
   await db.prepare("UPDATE legacy_import_runs SET state='complete',completed_at='2026-01-01T00:00:00.000Z' WHERE import_run_id='import-fixture'").run();
   snapshot=await frontendSnapshot(env,request);
-  assert.deepEqual(snapshot.legacyBaselines,[{baselineId:'baseline-fixture',personId:'cadet',eventId:'event',code:'P'}]);
+  assert.deepEqual(snapshot.legacyBaselines,[{baselineId:'baseline-fixture',personId:'cadet',eventId:'event',code:'P',baselineRevision:0}]);
   assert.deepEqual(snapshot.attendanceVersions,[{personId:'cadet',eventId:'event',version:0}]);
   assert.deepEqual(snapshot.observations,[]);assert.deepEqual(snapshot.corrections,[]);
   assert.deepEqual(snapshot.revision,{operations:0,administration:0});

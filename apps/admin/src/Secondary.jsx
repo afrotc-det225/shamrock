@@ -2,6 +2,7 @@ import React, { useState } from "react";
 import { Send } from "lucide-react";
 import { Heading, Table, Status, Empty } from "./components";
 import { api } from "./api";
+import { currentExcusalRequests } from "./attendance-events.mjs";
 import { useReceipts, ReceiptStatus } from "./receipts";
 export function Overview({ snapshot: s, reporting, history, receiptsDeferred, reportingTime, captureKey, navigate, readOnly = false }) {
   const d = reporting?.dashboard;
@@ -27,7 +28,7 @@ export function Overview({ snapshot: s, reporting, history, receiptsDeferred, re
         </div>
         <div>
           <strong>
-            {s.requests.filter((r) => r.status === "Submitted").length}
+            {currentExcusalRequests(s).filter(r => r.status === "Submitted").length}
           </strong>
           <span>Pending excusals</span>
         </div>

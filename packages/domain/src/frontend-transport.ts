@@ -18,7 +18,9 @@ export interface FrontendPageManifest {
 export interface FrontendDataPage {contractVersion:typeof FRONTEND_PAGE_VERSION;section:FrontendSection;offset:number;nextOffset:number|null;revision:SnapshotRevision;rows:Record<string,unknown>[];scope?:FrontendReadScope;}
 export interface FrontendVerifyPage {contractVersion:typeof FRONTEND_PAGE_VERSION;section:'verify';revision:SnapshotRevision;verified:true;effect?:{effectId:string;kind:string};scope?:FrontendReadScope;}
 export type FrontendPage = FrontendPageManifest|FrontendDataPage|FrontendVerifyPage;
-const check=(condition:unknown):void=>{if(!condition)throw new Error('INVALID_FRONTEND_PAGE_SEQUENCE');};
+function check(condition: unknown): asserts condition {
+  if (!condition) throw new Error('INVALID_FRONTEND_PAGE_SEQUENCE');
+}
 const sameRevision=(a:SnapshotRevision,b:SnapshotRevision)=>a?.operations===b?.operations&&a?.administration===b?.administration;
 /** Reject missing/duplicate/torn pages. Version zero is derived only from actual imported facts, never guessed. */
 export function assembleFrontendSnapshotPages(manifest:FrontendPageManifest,pages:FrontendDataPage[],verified:FrontendVerifyPage):FrontendSnapshot {
@@ -68,11 +70,21 @@ export function assembleFrontendSnapshotPages(manifest:FrontendPageManifest,page
 
 /** Shared causal pair-version reduction for complete scoped facts. */
 export function frontendAttendanceVersions(rows:readonly Record<string,unknown>[]):FrontendSnapshot['attendanceVersions'] {
-  const versions=new Map<string,{personId:string;eventId:string;version:number}>();
+  const versions=new Map<string,{personId:string;eventId:string;order:number;baselineRevision:number}>();
   for(const row of rows){
-    const personId=String(row.personId),eventId=String(row.eventId),version=typeof row.order==='number'?row.order:0,key=JSON.stringify([personId,eventId]);
-    check(Number.isSafeInteger(version)&&version>=0);const previous=versions.get(key);if(!previous||previous.version<version)versions.set(key,{personId,eventId,version});
+    const personId=String(row.personId),eventId=String(row.eventId),key=JSON.stringify([personId,eventId]);
+    const order=row.order??0, baseline=row.baselineRevision??0;
+    check(typeof order==='number' && Number.isSafeInteger(order) && order>=0);
+    check(typeof baseline==='number' && Number.isSafeInteger(baseline) && baseline>=0);
+    const pair=versions.get(key)??{personId,eventId,order:0,baselineRevision:0};
+    pair.order=Math.max(pair.order,order);
+    pair.baselineRevision=Math.max(pair.baselineRevision,baseline);
+    versions.set(key,pair);
   }
   check(versions.size<=25000);const compare=(a:string,b:string)=>a<b?-1:a>b?1:0;
-  return [...versions.values()].sort((a,b)=>compare(a.personId,b.personId)||compare(a.eventId,b.eventId));
+  return [...versions.values()].map(({personId,eventId,order,baselineRevision})=>{
+    const version=order+baselineRevision;
+    check(Number.isSafeInteger(version));
+    return {personId,eventId,version};
+  }).sort((a,b)=>compare(a.personId,b.personId)||compare(a.eventId,b.eventId));
 }

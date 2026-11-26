@@ -109,7 +109,7 @@ export function buildExcusalPublicationTables(input: {
     if (seen.has(request.requestId)) fail('Duplicate excusal request identity.'); seen.add(request.requestId);
     const event = events.get(request.eventId), person = people.get(request.personId), flight = flights.get(request.flightId);
     if (!event || !person || !flight?.squadronId) fail('An excusal target or its recorded squadron is unavailable.');
-    if (event.termId !== current[0].termId) continue;
+    if (event.termId !== current[0].termId || (event.status !== undefined && event.status !== 'active')) continue;
     if(Object.hasOwn(request,'capturedSquadronId')&&!request.capturedSquadronId)fail('The submitted Squadron capture is unavailable; retain the request for review.');
     const table = tables.find(t => t.squadronId === (request.capturedSquadronId ?? flight.squadronId));
     if (!table) fail('A current request is outside the configured Blue/Gold queues.');

@@ -35,6 +35,8 @@ Reporting holds preserve the existing affected event cell and percentage cells. 
 
 Changed adjacent cells are coalesced into rectangles without spanning dirty gaps. Normal writes use only `userEnteredValue`; file-chip changes use only `userEnteredValue,chipRuns`. Strings beginning `=`, `+` or an apostrophe are encoded as literal `stringValue`, never interpreted as formulas. File chips compare by their actual URI, so Sheets normalizing `@` into a visible filename does not trigger destructive rewrites.
 
+A committed attendance clear removes the entered value. Readback distinguishes a genuinely empty cell from a literal empty string before acknowledging the publication. Attendance fills and Blue/Gold decision updates retain the existing number format, notes and native controls, including cells surrounded by a sparse fill.
+
 Existing formatting, notes, native validation and file chips are not cleared during normal refresh. Row/event growth copies `PASTE_DATA_VALIDATION` from protected hidden seeds, including Plain and Arrow cells whose option colors are also opaque. A public validation rule is checked against the expected local absolute legend reference. Fixed rectangles and production's open-ended single-column ranges are supported; relative references, formulas, reversed ranges and open-ended multi-column ranges are rejected. The copy target remains explicitly bounded. Its native style version comes from a separately reviewed seed registry. Public metadata cannot prove native option colors or Chip-versus-Arrow appearance.
 
 New Attendance rows and event columns receive the measured production layout: 30-pixel body rows, 10-point Roboto body text and uniformly 75-pixel event columns. New event headers use bold 5-point wrapped text. Attendance codes and percentages are bold and centered; identity fields align left. Only new rows/columns are formatted. Existing dimensions, hidden columns, colors, values and validations remain unchanged by the growth layout.
@@ -71,6 +73,8 @@ Blue and Gold use the existing ten columns and a hidden stable request ID inside
 
 The native Apps Script host supplies a `timestampSerial` conversion using `Utilities.formatDate`; it does not require the browser/Node `Intl` implementation. The pure planner validates the canonical timestamp and rejects a non-finite conversion result.
 
+Canceling, archiving or deactivating an event retires its rows from the Blue and Gold decision queues. D1 retains the original requests and decisions. A pending local decision stays on its original row for review while a clean retired row retains its protected identity.
+
 `planExcusalPublication` uses the same keyed baseline, unsent-edit detection, frozen decision drafts, request-version conflict checks, native validation seeds and targeted validation read-back as the Main tables. Existing sorts, opaque native arrow styling and unsent decisions are preserved. Empty/unsupported frozen decision commands are rejected; withdrawing a request is an explicit Withdrawn decision, not a cell clear.
 
 Dashboard and Main can share one workbook transaction; Blue/Gold require their own workbook transaction and recovery checkpoint. There is no atomic transaction spanning the two spreadsheets. A full host integration must retain the original coherent snapshot and both edit fences through all required writes and read-backs, or explicitly report partial publication and hold the affected workflow closed. These pure plans do not add automatic multi-workbook acknowledgement or new edit-command submission by themselves.
@@ -84,6 +88,14 @@ node --test tests/v3/frontend-publication.test.mjs tests/v3/frontend-supplementa
 ```
 
 Tests cover sorted identities, literal strings, dirty cells before trigger capture, version conflicts, frozen drafts and acknowledgement, file-chip normalization, retirement, growth/seeds, event versions, reporting holds, fencing/preconditions, reset guards, read-back failure and a 500-by-128 coalesced update. The provider-shape simulator deliberately does not claim live Google validation behavior or concurrent user interaction evidence.
+
+## Cancelling a published event
+
+The next fenced publication hides the existing Attendance column and closes its edit permission. Its stable header, physical position, formatting and last published values remain available for audit. A cancellation received before the event was ever published creates no column. The active-term matrix and totals use the updated D1 catalog.
+
+If a current event reuses a retired event’s display name, the publisher adds a numbered suffix to the hidden header before assigning the name to the current event. Both events retain their original machine headers and column positions.
+
+A locally changed value, a retained draft, a missing event identity or a stale catalog version stops retirement before the publisher writes. Reconcile the original keyed edit first. A later reactivation with a newer version reuses the same column and restores its previous visibility. Verify the refreshed percentages and both managed Forms after a cancellation.
 
 ## Flight filter views
 

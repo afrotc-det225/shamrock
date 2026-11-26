@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash, createHmac } from 'node:crypto';
-import { consumeFrontendRefresh, consumeFrontendResume, buildSignedFrontendRequest, createNativeFrontendRuntime, buildCoherentFrontendModel, frontendRowLocks, readFrontendValidationRanges, readFrontendDashboardValues, assertNativeAttendanceLayoutRequest } from '../../.build/v3/apps/google-adapter/src/frontend-runtime.js';
+import { consumeFrontendRefresh, consumeFrontendResume, buildSignedFrontendRequest, createNativeFrontendRuntime, buildCoherentFrontendModel, frontendRowLocks, readFrontendValidationRanges, readFrontendDashboardValues, assertNativeAttendanceLayoutRequest, assertNativeFrontendVisibilityRequest } from '../../.build/v3/apps/google-adapter/src/frontend-runtime.js';
 import { frontendLiteralCell, planFrontendPublication } from '../../.build/v3/apps/google-adapter/src/frontend-publication.js';
 import { dashboardReadFingerprint } from '../../.build/v3/apps/google-adapter/src/frontend-supplemental.js';
 import { buildAttendanceGrowthLayout } from '../../.build/v3/apps/google-adapter/src/frontend-layout.js';
@@ -61,6 +61,46 @@ function fixture() {
   };
   return { fx, runtime, claim };
 }
+
+test('native dispatch accepts the fenced event hide and only reopens its proven original visible slot', () => {
+  const {fx, runtime, claim} = fixture(), table = fx.model.tables.find(t => t.kind === 'attendance');
+  const header = 'event:event-1', binding = {sheetId: fx.current.attendance.sheetId, tableId: fx.current.attendance.tableId};
+  const active = copy(table), hidden = [], write = runtime.writeAtomic;
+  fx.state.baselines.attendance.slots = {headers: [...fx.current.attendance.headers], keys: table.rows.map(r => r.key)};
+  table.columns = table.columns.filter(c => c.header !== header);
+  for (const row of table.rows) { delete row.values[header]; delete row.versions[header]; delete row.eventVersions[header]; }
+  table.inactiveEventVersions = {[header]: 2};
+  runtime.writeAtomic = requests => {
+    assert.equal(fx.fenced, true);
+    const context = {binding, before: fx.state.baselines.attendance, plan: fx.state.pending.plans.attendance, read: () => fx.current.attendance};
+    const sheetIds = new Set(kinds.map(k => fx.current[k].sheetId));
+    for (const {updateDimensionProperties: body} of requests) if (body?.fields === 'hiddenByUser') {
+      assertNativeFrontendVisibilityRequest(body, sheetIds, context);
+      hidden.push(body.properties.hiddenByUser);
+      if (!body.properties.hiddenByUser) {
+        for (const mismatch of [{dimension:'ROWS'}, {sheetId:fx.current.directory.sheetId}, {startIndex:0,endIndex:1}, {endIndex:3}]) {
+          assert.throws(() => assertNativeFrontendVisibilityRequest({...body, range:{...body.range,...mismatch}}, sheetIds, context));
+        }
+        for (const changed of [
+          {before:{...context.before,retiredEventColumns:[{header,wasHidden:true}]}},
+          {plan:{...context.plan,requests:[]}}, {read:() => ({...fx.current.attendance,headers:['person_id','event:other']})},
+          {read:() => ({...fx.current.attendance,tableId:'another-table'})},
+        ]) assert.throws(() => assertNativeFrontendVisibilityRequest(body, sheetIds, {...context,...changed}));
+        assert.throws(() => assertNativeFrontendVisibilityRequest(body, sheetIds));
+      }
+    }
+    write(requests);
+  };
+  assert.equal(consumeFrontendRefresh(runtime).status, 'published');
+  assert.ok(fx.current.attendance.hiddenColumns.includes(1));
+  claim.effectId = 'effect-reactivate'; claim.claimToken = 'lease-reactivate';
+  fx.model.revision.administration++;
+  active.rows[0].eventVersions[header] = 3;
+  fx.model.tables[2] = active;
+  assert.equal(consumeFrontendRefresh(runtime).status, 'published');
+  assert.deepEqual(hidden, [true,false]); assert.deepEqual(fx.current.attendance.hiddenColumns, [0]);
+  assert.equal(fx.ack, 2);
+});
 
 test('full-roster photos resume ten-chip batches after lost responses and reject unrelated changes', () => {
   for (const interrupted of [false, true, 'tamper']) {

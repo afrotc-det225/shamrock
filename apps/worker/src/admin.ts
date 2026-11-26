@@ -3,7 +3,7 @@ import { frontendAttendanceVersions } from '../../../packages/domain/src/fronten
 import { markManagedFutureRosters } from './event-rosters.js';
 import { preparePermissionMutation, permissionManagerSql } from './permissions.js';
 import { effectiveAdminGrants } from './permission-grants.js';
-import { attendanceVersionsSql, correctionReceipt } from './corrections.js';
+import { attendanceVersionsSql, baselineRevisionSql, correctionReceipt } from './corrections.js';
 import { adminIdentifier, DIRECTORY_FIELDS, directoryLeadershipRole, operationallyActive, parseAdminCommand, type AdminCommand, type DirectoryRecord, type FrontendSnapshot, type LeadershipRecord, } from '../../../packages/domain/src/admin.js';
 import { HttpError } from './http-error.js';
 interface AdminEnv {
@@ -337,7 +337,7 @@ export async function frontendSnapshot(env: AdminEnv, input: unknown, scope?:Fro
     stmt(env.DB, `SELECT term_id AS termId,person_id AS personId,last_name AS lastName,first_name AS firstName,as_year AS asYear,
       flight_id AS flightId,flight_path_status AS flightPathStatus,date_of_birth AS dateOfBirth
       FROM term_roster_snapshots WHERE ${personFilter("person_id")}${scope?` AND term_id IN(SELECT term_id FROM event_details WHERE ${eventFilter("event_id")})`:""} ORDER BY term_id,person_id LIMIT 10001`,...personParams,...eventParams()),
-    stmt(env.DB, `SELECT b.baseline_id AS baselineId,b.person_id AS personId,b.event_id AS eventId,b.code
+    stmt(env.DB, `SELECT b.baseline_id AS baselineId,b.person_id AS personId,b.event_id AS eventId,b.code,${baselineRevisionSql} AS baselineRevision
       FROM legacy_attendance_baselines b JOIN legacy_import_runs i ON i.import_run_id=b.import_run_id AND i.state='complete'
       WHERE ${facts} AND ${eventFilter("b.event_id","b.person_id")} ORDER BY b.person_id,b.event_id LIMIT 25001`,...eventParams(true)),
   ]);

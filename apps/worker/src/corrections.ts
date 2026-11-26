@@ -1,6 +1,7 @@
 import { effectiveAdminGrants } from './permission-grants.js';
 import { parseAttendanceCorrection, type AttendanceCorrectionCommand } from '../../../packages/domain/src/corrections.js';
 import { HttpError } from './http-error.js';
+import { isDailyD1Limit } from './provider-errors.js';
 import type { CommandScopeGuard } from './command-scope.js';
 
 interface CorrectionEnv { DB: D1Database; ENVIRONMENT: string; GENERATION: string }
@@ -8,22 +9,32 @@ type Value = string | number | null;
 const statement = (db: D1Database, sql: string, ...values: Value[]) => db.prepare(sql).bind(...values);
 const digest = async (value: string) => Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(value))), b => b.toString(16).padStart(2, '0')).join('');
 
-/** One shared causal stream. Each SELECT is indexed by event/person or command. */
-export const pairRevisionSql = `SELECT COALESCE(MAX(revision),0) FROM (
+// Incremental imports advance the administration stream. The original capture is revision zero.
+export const baselineRevisionSql = `CASE WHEN json_extract(i.manifest_json,'$.kind')='reviewed-incremental-staging-refresh'
+  THEN json_extract(i.manifest_json,'$.administrationRevision')+1 ELSE 0 END`;
+function pairBaselineRevision(event: string, person: string) {
+  return `COALESCE((SELECT ${baselineRevisionSql} FROM legacy_attendance_baselines b
+    JOIN legacy_import_runs i ON i.import_run_id=b.import_run_id AND i.state='complete'
+    WHERE b.event_id=${event} AND b.person_id=${person}),0)`;
+}
+export const receiptBaselineRevisionSql = pairBaselineRevision('operation_commands.event_id', 'operation_commands.target_person_id');
+
+/** The reviewed baseline revision plus the newest independent operational audit for this pair. */
+export const pairRevisionSql = `SELECT ${pairBaselineRevision('t.eventId','t.personId')} + COALESCE((SELECT MAX(revision) FROM (
   SELECT MAX(a.audit_id) AS revision FROM attendance_observations o
     JOIN attendance_reports r ON r.report_id=o.report_id JOIN audit_events a ON a.command_id=r.command_id
-    WHERE o.event_id=? AND o.person_id=?
+    WHERE o.event_id=t.eventId AND o.person_id=t.personId
   UNION ALL SELECT MAX(a.audit_id) FROM excusal_records r JOIN audit_events a ON a.command_id=r.last_command_id
-    WHERE r.event_id=? AND r.person_id=?
+    WHERE r.event_id=t.eventId AND r.person_id=t.personId
   UNION ALL SELECT MAX(a.audit_id) FROM attendance_corrections c JOIN audit_events a ON a.command_id=c.command_id
-    WHERE c.event_id=? AND c.person_id=?
-)`;
-export const attendanceVersionsSql = `SELECT personId,eventId,MAX(version) AS version FROM (
-  SELECT o.person_id AS personId,o.event_id AS eventId,a.audit_id AS version FROM attendance_observations o
+    WHERE c.event_id=t.eventId AND c.person_id=t.personId
+)),0) FROM (SELECT ? AS eventId,? AS personId) t`;
+export const attendanceVersionsSql = `SELECT personId,eventId,MAX(operationalRevision)+MAX(baselineRevision) AS version FROM (
+  SELECT o.person_id AS personId,o.event_id AS eventId,a.audit_id AS operationalRevision,0 AS baselineRevision FROM attendance_observations o
     JOIN attendance_reports r ON r.report_id=o.report_id JOIN audit_events a ON a.command_id=r.command_id
-  UNION ALL SELECT r.person_id,r.event_id,COALESCE(a.audit_id,0) FROM excusal_records r LEFT JOIN audit_events a ON a.command_id=r.last_command_id WHERE r.origin='native' OR EXISTS(SELECT 1 FROM legacy_operational_adoptions l WHERE l.adoption_id=r.legacy_adoption_id AND l.state='complete')
-  UNION ALL SELECT c.person_id,c.event_id,a.audit_id FROM attendance_corrections c JOIN audit_events a ON a.command_id=c.command_id
-  UNION ALL SELECT b.person_id,b.event_id,0 FROM legacy_attendance_baselines b JOIN legacy_import_runs i ON i.import_run_id=b.import_run_id AND i.state='complete'
+  UNION ALL SELECT r.person_id,r.event_id,COALESCE(a.audit_id,0),0 FROM excusal_records r LEFT JOIN audit_events a ON a.command_id=r.last_command_id WHERE r.origin='native' OR EXISTS(SELECT 1 FROM legacy_operational_adoptions l WHERE l.adoption_id=r.legacy_adoption_id AND l.state='complete')
+  UNION ALL SELECT c.person_id,c.event_id,a.audit_id,0 FROM attendance_corrections c JOIN audit_events a ON a.command_id=c.command_id
+  UNION ALL SELECT b.person_id,b.event_id,0,${baselineRevisionSql} FROM legacy_attendance_baselines b JOIN legacy_import_runs i ON i.import_run_id=b.import_run_id AND i.state='complete'
 ) GROUP BY personId,eventId ORDER BY personId,eventId LIMIT 25001`;
 function authorization(env: CorrectionEnv, command: AttendanceCorrectionCommand, flightId: string, scope?: CommandScopeGuard) {
   return {
@@ -84,9 +95,11 @@ export async function acceptAttendanceCorrection(env: CorrectionEnv, input: unkn
       statement(env.DB, `INSERT INTO command_assertions(command_id,ok) VALUES(?,(${auth.sql})
         AND (${pairRevisionSql})=?
         AND EXISTS(SELECT 1 FROM event_details d JOIN event_roster_members m ON m.event_id=d.event_id AND m.version=d.version
-          WHERE d.event_id=? AND d.version=? AND m.person_id=? AND m.flight_id=?)
+          WHERE d.event_id=? AND d.version=? AND m.person_id=? AND m.flight_id=?
+          AND (d.status='active' OR EXISTS(SELECT 1 FROM terms t WHERE t.term_id=d.term_id AND t.is_current=0))
+          AND NOT EXISTS(SELECT 1 FROM event_roster_refresh_work w WHERE w.event_id=d.event_id))
         AND NOT EXISTS(SELECT 1 FROM admin_commands WHERE command_id=?))`,
-      command.commandId, ...auth.values, payload.eventId, payload.personId, payload.eventId, payload.personId,
+      command.commandId, ...auth.values,
       payload.eventId, payload.personId, payload.expectedBaseVersion, payload.eventId, payload.expectedEventVersion,
       payload.personId, roster.flightId, command.commandId),
       statement(env.DB, `INSERT INTO command_registry VALUES(?,'operation')`, command.commandId),
@@ -100,7 +113,7 @@ export async function acceptAttendanceCorrection(env: CorrectionEnv, input: unkn
         command.commandId, command.actor.principalId, command.actor.evidence, command.operation, correctionId, now, JSON.stringify(payload)),
       statement(env.DB, `UPDATE operation_commands SET receipt_json=json_object('commandId',command_id,'status','committed',
         'operation',operation,'result',json_object('personId',target_person_id,'eventId',event_id,
-          'version',(SELECT audit_id FROM audit_events WHERE command_id=operation_commands.command_id),'code',?),
+          'version',${receiptBaselineRevisionSql}+(SELECT audit_id FROM audit_events WHERE command_id=operation_commands.command_id),'code',?),
         'pendingEffects',json('true')) WHERE command_id=?`, payload.code, command.commandId),
       statement(env.DB, `INSERT INTO admin_effects(effect_id,command_id,kind,state,created_at) VALUES(?,?,'frontend.refresh','pending',?)`,
         crypto.randomUUID(), command.commandId, now),
@@ -108,10 +121,15 @@ export async function acceptAttendanceCorrection(env: CorrectionEnv, input: unkn
       statement(env.DB, 'SELECT receipt_json AS receipt FROM operation_commands WHERE command_id=?', command.commandId),
     ]);
     return JSON.parse(String(results.at(-1)!.results[0].receipt)) as CorrectionReceipt;
-  } catch {
+  } catch (error) {
+    if (isDailyD1Limit(error)) throw error;
     const raced = await previousReceipt(env, command, hash, scope);
     if (raced) return raced;
-    throw new HttpError(409, 'CORRECTION_CONFLICT', 'Attendance, event roster or authority changed. Reload and review this correction.');
+    if (/command_preconditions|UNIQUE constraint failed/i.test(String(error))) {
+      throw new HttpError(409, 'CORRECTION_CONFLICT', 'Attendance, event roster or authority changed. Reload and review this correction.');
+    }
+    // Let the adapter keep the original command retryable on an infrastructure failure.
+    throw error;
   }
 }
 

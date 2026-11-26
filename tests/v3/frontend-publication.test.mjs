@@ -138,6 +138,107 @@ function attendanceInput(rows = 2, events = 1) {
   return { generation: 1, revision: { operations: 1, administration: 1 }, table: { kind: 'attendance', keyHeader: 'person_id', columns: cols, rows: structuredClone(records) }, current: read(records, cols), baseline: { generation: 1, revision: { operations: 1, administration: 1 }, rows: records }, drafts: [], seeds: [seed], editFenceVerified: true };
 }
 
+test('catalog cancellation hides only its verified clean slot, and reactivation restores its original visibility', () => {
+  const input = attendanceInput(2, 3);
+  const header = 'event:event-1', index = input.current.headers.indexOf(header);
+  input.baseline.slots = { headers: [...input.current.headers], keys: input.baseline.rows.map(r => r.key) };
+  const active = structuredClone(input.table);
+  input.table.columns = input.table.columns.filter(c => c.header !== header);
+  for (const row of input.table.rows) {
+    delete row.values[header]; delete row.versions[header]; delete row.eventVersions[header];
+  }
+  input.table.inactiveEventVersions = { [header]: 2, 'event:never-published': 2 };
+  input.revision.administration++;
+  const original = structuredClone(input);
+  for (const prehidden of [false, true]) {
+    const sample = structuredClone(original);
+    if (prehidden) sample.current.hiddenColumns.push(index);
+    const retired = planFrontendPublication(sample);
+    const after = apply(sample.current, retired.requests);
+    assert.ok(verifyFrontendPublicationReadback(retired, after));
+    assert.deepEqual(after.rows, sample.current.rows);
+    assert.deepEqual(after.headers, sample.current.headers);
+    assert.equal(retired.requests.length, prehidden ? 0 : 1);
+    assert.deepEqual(retired.nextBaseline.retiredEventColumns, [{ header, wasHidden: prehidden }]);
+    assert.ok(after.hiddenColumns.includes(index));
+    assert.ok(retired.nextBaseline.rows.every(r => !r.commandBindings[header]));
+    sample.current = after; sample.baseline = retired.nextBaseline;
+    assert.equal(planFrontendPublication(sample).requests.length, 0);
+    sample.table = structuredClone(active);
+    for (const row of sample.table.rows) row.eventVersions[header] = 3;
+    sample.revision.administration++;
+    const restored = planFrontendPublication(sample), visible = apply(after, restored.requests);
+    assert.equal(visible.hiddenColumns.includes(index), prehidden);
+    assert.equal(verifyFrontendPublicationReadback(restored, visible), true);
+    if (!prehidden) assert.equal(verifyFrontendPublicationReadback(restored, after), false);
+  }
+  const draft = structuredClone(original);
+  draft.drafts.push({ key: 'cadet-0', header, baseVersion: 1, value: 'P', expectedEventVersion: 1 });
+  assert.throws(() => planFrontendPublication(draft), /pending attendance edit/);
+  const dirty = structuredClone(original); dirty.current.rows[0][index] = frontendLiteralCell(null);
+  assert.throws(() => planFrontendPublication(dirty), /changed attendance cell/);
+  const stale = structuredClone(original); stale.table.inactiveEventVersions[header] = 1;
+  assert.throws(() => planFrontendPublication(stale), /version/);
+  const missing = structuredClone(original); delete missing.table.inactiveEventVersions[header];
+  assert.throws(() => planFrontendPublication(missing), /schema migration/);
+  const reused = structuredClone(original), activeColumn = reused.table.columns.find(c => c.header === 'event:event-0');
+  activeColumn.label = reused.current.labels[index];
+  const collision = planFrontendPublication(reused), released = apply(reused.current, collision.requests);
+  assert.deepEqual(released.headers, reused.current.headers); assert.deepEqual(released.rows, reused.current.rows);
+  assert.equal(released.labels[index], 'Event 1 (retired 1)');
+  assert.equal(released.labels[reused.current.headers.indexOf(activeColumn.header)], 'Event 1');
+  assert.equal(collision.requests[0].updateCells.range.startColumnIndex, index);
+  assert.ok(verifyFrontendPublicationReadback(collision, released));
+  assert.equal(planFrontendPublication({...reused, current:released, baseline:collision.nextBaseline}).requests.length, 0);
+});
+
+test('sparse bulk attendance writes preserve native formatting, unsent cells and real blanks on retry', () => {
+  const input = attendanceInput(4, 4);
+  input.current.rows.reverse();
+  for (const [r, row] of input.current.rows.entries()) {
+    for (const [c, cell] of row.entries()) {
+      cell.note = `Fixture note ${r},${c}`;
+      cell.userEnteredFormat.numberFormat = { type: 'TEXT' };
+    }
+  }
+  input.current.rows[0][2].userEnteredValue = { stringValue: 'T' }; // An unsubmitted edit between two writes.
+  const revise = (person, event, code) => {
+    const row = input.table.rows[person], header = `event:event-${event}`;
+    row.values[header] = code;
+    row.versions[header]++;
+  };
+  revise(3, 0, 'P'); revise(3, 2, null);
+  revise(2, 0, 'N/A'); revise(2, 1, null);
+  revise(1, 0, 'P'); revise(1, 1, 'E');
+  input.revision.operations++;
+
+  const plan = planFrontendPublication(input);
+  assert.equal(plan.changedCells, 6);
+  assert.deepEqual(plan.retainedDrafts.map(d => [d.key, d.header, d.value]), [['cadet-3', 'event:event-1', 'T']]);
+  assert.equal(plan.requests.length, 3);
+  const patches = plan.requests.map(({ updateCells }) => {
+    assert.equal(updateCells.fields, 'userEnteredValue');
+    return [updateCells.range.startRowIndex, updateCells.range.startColumnIndex, updateCells.rows.map(r => r.values)];
+  });
+  assert.deepEqual(patches, [
+    [2, 1, [[frontendLiteralCell('P')]]],
+    [2, 3, [[{}]]],
+    [3, 1, [[frontendLiteralCell('N/A'), {}], [frontendLiteralCell('P'), frontendLiteralCell('E')]]],
+  ]);
+  const after = apply(input.current, plan.requests);
+  assert.ok(verifyFrontendPublicationReadback(plan, after));
+  assert.deepEqual(after.rows[0][2], input.current.rows[0][2]);
+  const metadata = rows => rows.map(row => row.map(({ userEnteredValue, ...rest }) => rest));
+  assert.deepEqual(metadata(after.rows), metadata(input.current.rows));
+  const retry = planFrontendPublication({ ...input, current: after, baseline: plan.nextBaseline, drafts: plan.retainedDrafts });
+  assert.deepEqual(retry.requests, []);
+  assert.deepEqual(retry.retainedDrafts, plan.retainedDrafts);
+
+  const incomplete = structuredClone(after);
+  incomplete.rows[0][3].userEnteredValue = { stringValue: '' };
+  assert.equal(verifyFrontendPublicationReadback(plan, incomplete), false);
+});
+
 test('production open-ended legends preserve the exact native control and reject ambiguous references', () => {
   for (const reference of ["'Data Legend'!$M$3:$M", "='Cadet''s Legend'!$D$3:$F$21"]) {
     const input = attendanceInput(0); input.table.rows = attendanceInput(1).table.rows;

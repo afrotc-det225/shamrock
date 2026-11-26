@@ -28,6 +28,19 @@ test('Form publication preserves every question ID, response destination, settin
  const renamed=copy(f);renamed.current.items[0].questionItem.question.questionId='wrong';assert.throws(()=>plan(renamed));
 });
 
+test('Attendance and Excusals Form choices retain Mando when the same week’s LLAB and Secondary are cancelled', () => {
+ for (const key of ['attendance', 'excusals']) {
+  const f = fixture(key), llab = f.snapshot.events[0];
+  llab.status = 'cancelled';
+  f.snapshot.events.push({ ...llab, eventId: 'secondary', eventType: 'secondary', label: 'TW-1 Secondary' },
+    { ...llab, eventId: 'mando', eventType: 'mando', label: 'TW-1 Mando', status: 'active' });
+  f.snapshot.eventFlights.push({ eventId: 'secondary', flightId: 'alpha' }, { eventId: 'mando', flightId: 'alpha' });
+  const row = plan(f).expectedAfter.items[0].questionItem.question.choiceQuestion.options;
+  assert.equal(row.length, 1);
+  assert.match(row[0].value, /TW-1 Mando/);
+ }
+});
+
 test('immutable catalogs retain old event and roster bindings without rebinding labels',()=>{
  const f=fixture(),first=plan(f),old=retainFormEdition({},first.edition);
  const newer=copy(f);newer.snapshot.revision.administration++;newer.snapshot.events[0].version++;newer.snapshot.flights[0].rosterVersion++;newer.snapshot.people[0].lastName='Changed';

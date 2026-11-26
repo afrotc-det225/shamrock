@@ -62,11 +62,14 @@ export function createIncrementalImportPlan({before,desired,evidence,context,rev
     const oldRows=before[table];check(Array.isArray(oldRows),'REFRESH_BEFORE_MISSING');const old=new Map(oldRows.map(r=>[keyOf(r,spec.keys),r]));
     const inserts=[];for(const row of rows){const prior=old.get(keyOf(row,spec.keys));if(prior){check(!['append'].includes(spec.mode),'REFRESH_APPEND_COLLISION');check(same(Object.keys(prior).sort(),[...columns].sort()),'REFRESH_BEFORE_COLUMNS');if(same(prior,row))continue;
         if(spec.version)check(row.version===prior.version+1,'REFRESH_VERSION');
-        if(table==='legacy_attendance_baselines')check(row.person_id===prior.person_id&&row.event_id===prior.event_id,'REFRESH_BASELINE_TARGET');
+        if(table==='legacy_attendance_baselines'){
+          check(row.person_id===prior.person_id&&row.event_id===prior.event_id,'REFRESH_BASELINE_TARGET');
+          check(row.import_run_id===runId,'REFRESH_BASELINE_EVIDENCE');
+        }
         if(table==='leadership_contacts')check(row.person_id===prior.person_id,'REFRESH_CONTACT_TARGET');
         if(table==='excusal_records')check(['person_id','event_id','unit_id','origin','submitted_by','command_id','last_command_id'].every(k=>row[k]===prior[k])&&row.origin==='legacy'&&row.last_command_id===null,'REFRESH_REQUEST_TARGET');
         changes.push({table,columns,keys:spec.keys,before:columns.map(c=>prior[c]),after:columns.map(c=>row[c])});
-      }else{check(['append','upsert'].includes(spec.mode),'REFRESH_EXISTING_KEY_REQUIRED');if(spec.version)check(row.version===1,'REFRESH_VERSION');inserts.push(columns.map(c=>row[c]));}}
+      }else{if(table==='legacy_attendance_baselines')check(row.import_run_id===runId,'REFRESH_BASELINE_EVIDENCE');check(['append','upsert'].includes(spec.mode),'REFRESH_EXISTING_KEY_REQUIRED');if(spec.version)check(row.version===1,'REFRESH_VERSION');inserts.push(columns.map(c=>row[c]));}}
     for(const rows of split(inserts))groups.push({table,columns,rows});
   }
   check(changes.length+groups.reduce((n,g)=>n+g.rows.length,0)>0,'REFRESH_EMPTY');

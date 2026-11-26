@@ -6,8 +6,11 @@ import test from 'node:test';
 import {Miniflare,Log,LogLevel} from 'miniflare';
 import worker from '../../.build/v3/apps/worker/src/index.js';
 import {frontendSnapshotPage} from '../../.build/v3/apps/worker/src/frontend-transport.js';
-import {FRONTEND_SECTIONS} from '../../.build/v3/packages/domain/src/frontend-transport.js';
+import {FRONTEND_SECTIONS,frontendAttendanceVersions} from '../../.build/v3/packages/domain/src/frontend-transport.js';
 import {parseAdminCommand,operationallyActive} from '../../.build/v3/packages/domain/src/admin.js';
+import {buildFrontendReporting} from '../../.build/v3/packages/domain/src/frontend-reporting.js';
+import {snapshotToFrontendReportingInput} from '../../.build/v3/apps/google-adapter/src/frontend-publication.js';
+import {commandsFromManagedForm} from '../../.build/v3/apps/google-adapter/src/forms-intake.js';
 const secret='fictional-admin-test-secret-never-for-deployment';
 const keyId='admin-fixture';
 const directory=new URL('../../database/migrations/',import.meta.url);
@@ -234,16 +237,91 @@ test('correction appends one causal audit and receipt; explicit clear retains or
   assert.equal((await f.db.prepare('SELECT observed_code FROM attendance_current').first()).observed_code,'P');
 });
 
+test('reviewed baseline changes invalidate stale sheet and panel edits and combine with the original audit order', async t => {
+  const f = await correctionFixture(t);
+  const target = {personId:'person-a',eventId:'event-one'};
+  async function seedBaseline(id, revision, code) {
+    const manifest = revision === null ? {} : {kind:'reviewed-incremental-staging-refresh',administrationRevision:revision};
+    const sha = createHash('sha256').update(id).digest('hex');
+    await f.db.batch([
+      f.db.prepare(`INSERT INTO legacy_import_runs VALUES(?,?,?,?,'fixture','staging',1,'complete',
+        1,1,1,1,1,?,'2026-01-01','2026-01-01')`).bind(id,sha,sha,sha,JSON.stringify(manifest)),
+      f.db.prepare("INSERT INTO legacy_source_occurrences VALUES(?,'row',?,'matrix','evidence-only','{}','[]',NULL,'[]')").bind(id,sha),
+      f.db.prepare(`INSERT INTO legacy_attendance_baselines VALUES('baseline','person-a','event-one',?,?,'row',7)
+        ON CONFLICT(person_id,event_id) DO UPDATE SET import_run_id=excluded.import_run_id,code=excluded.code`).bind(code,id),
+    ]);
+  }
+  async function verifyReaders(expected) {
+    const {body:snapshot,status} = await f.send(read(),'/v1/admin/snapshot');
+    assert.equal(status,200);
+    const versions = [{...target,version:expected}];
+    assert.deepEqual(snapshot.attendanceVersions,versions);
+    for (const path of ['/v1/admin/panel/page','/v1/admin/snapshot/page']) {
+      const manifest = await f.send(read({section:'manifest',revision:null,offset:0,sections:['legacyBaselines','corrections']}),path);
+      assert.equal(manifest.status,200,JSON.stringify(manifest.body));
+      const facts = [];
+      for (const section of ['legacyBaselines','corrections']) {
+        const page = await f.send(read({section,revision:manifest.body.revision,offset:0}),path);
+        assert.equal(page.status,200,JSON.stringify(page.body));
+        facts.push(...page.body.rows);
+      }
+      assert.deepEqual(frontendAttendanceVersions(facts),versions);
+    }
+    const authorization = await f.send(read({operation:'attendance.correct',target}),'/v1/admin/panel/authorize');
+    assert.equal(authorization.status,200,JSON.stringify(authorization.body));
+    assert.equal(authorization.body.current.expectedBaseVersion,expected);
+    return snapshot;
+  }
+  await seedBaseline('original',null,'A');
+  await verifyReaders(0);
+  await seedBaseline('changed',7,'N/A');
+  const refreshed = await verifyReaders(8);
+  assert.equal(refreshed.legacyBaselines[0].code,'N/A');
+  assert.equal((await f.send(f.correction)).status,409);
+  assert.equal(await f.count('attendance_corrections'),0);
+  f.correction.payload.expectedBaseVersion = 8;
+  f.correction.payload.code = null;
+  const clear = await f.send(f.correction);
+  assert.equal(clear.status,200,JSON.stringify(clear.body));
+  assert.equal(clear.body.result.version,9);
+  assert.equal((await verifyReaders(9)).corrections[0].order,1);
+  await seedBaseline('later',9,null);
+  assert.equal((await verifyReaders(11)).legacyBaselines[0].code,null);
+  assert.deepEqual(await f.send(f.correction),clear);
+  const stale = structuredClone(f.correction);
+  stale.commandId = stale.source.submissionId = 'later-edit';
+  stale.payload.expectedBaseVersion = 9;
+  stale.payload.code = 'P';
+  assert.equal((await f.send(stale)).status,409);
+  assert.equal(await f.count('attendance_corrections'),1);
+});
+
 test('correction base versions change on requests and decisions and never erase a newer authoritative change', async t => {
   const f=await correctionFixture(t);
+  async function currentCode() {
+    const {body} = await f.send(read(), '/v1/admin/snapshot');
+    const report = buildFrontendReporting(snapshotToFrontendReportingInput(body, '2026-01-02'));
+    return report.matrices.find(matrix => matrix.termId === 'term-current').rows[0].cells[0].effectiveCode;
+  }
   const submit={...f.attendance,commandId:'request-one',source:{...f.attendance.source,submissionId:'request-one'},operation:'excusal.submit',payload:{requestId:'request-one',eventId:'event-one',personId:'person-a',requestedOutcome:'E',reason:'Fictional reason.'}};
-  assert.equal((await f.send(submit,'/v1/commands')).status,200);
+  const submitted = await f.send(submit,'/v1/commands');
+  assert.equal(submitted.status,200);
+  assert.equal(await currentCode(), 'R');
   assert.equal((await f.send(f.correction)).status,409);
   f.correction.payload.expectedBaseVersion=1;
   const decision={...f.attendance,commandId:'decision-one',source:{...f.attendance.source,submissionId:'decision-one'},operation:'excusal.decide',payload:{requestId:'request-one',expectedVersion:1,decision:'Approved',reason:'Fictional decision.'}};
-  assert.equal((await f.send(decision,'/v1/commands')).status,200);
+  const approved = await f.send(decision,'/v1/commands');
+  assert.equal(approved.status,200);
+  assert.deepEqual(await f.send(submit,'/v1/commands'), submitted);
+  assert.equal(await currentCode(), 'E');
   assert.equal((await f.send(f.correction)).status,409);
-  f.correction.payload.expectedBaseVersion=2;assert.equal((await f.send(f.correction)).status,200);
+  f.correction.payload.expectedBaseVersion=2;
+  f.correction.payload.code=null;
+  assert.equal((await f.send(f.correction)).status,200);
+  assert.deepEqual(await f.send(decision,'/v1/commands'), approved);
+  assert.deepEqual(await f.send(submit,'/v1/commands'), submitted);
+  assert.equal(await currentCode(), null);
+  assert.equal(await f.count('audit_events'),3);
   assert.equal((await f.send(read(),'/v1/admin/snapshot')).body.attendanceVersions[0].version,3);
 });
 
@@ -263,6 +341,49 @@ test('event roster history survives Directory transfer, event edits preserve cap
   assert.equal(snapshot.terms.find(t=>t.isCurrent).roster[0].lastName,'New Name');
 });
 
+test('a delayed Google response cannot replace a newer correction and an accepted response can still be retried', async t => {
+  const f = await correctionFixture(t);
+  await f.db.prepare("INSERT INTO adapter_sources VALUES('form','attendance-form',1)").run();
+  const formId = 'form-fixture', resourceKey = 'attendance-form', editionId = 'form-edition';
+  const references = {
+    aaaaaaaaaaaa: {editionId, questionId:'event', kind:'event', eventId:'event-one', expectedEventVersion:1},
+    bbbbbbbbbbbb: {editionId, questionId:'flight', kind:'scope', unitId:'alpha', rosterVersion:2, coveredPersonIds:['person-a']},
+    cccccccccccc: {editionId, questionId:'present', kind:'person', personId:'person-a'},
+  };
+  function nativeCommand(responseId, lastSubmittedTime) {
+    return commandsFromManagedForm({
+      submission: {formId, responseId, lastSubmittedTime, verifiedResponder:true, respondentEmail:'fixture@example.invalid',
+        answers:{event:'Event [sr:aaaaaaaaaaaa]', flight:'Flight [sr:bbbbbbbbbbbb]', present:['Cadet [sr:cccccccccccc]'], completeness:'complete'}},
+      binding: {formId, resourceKey, kind:'attendance', events:['event'], scope:['flight'], present:['present'], completeness:'completeness'},
+      editions: {[editionId]:{editionId, generation:1, formId, resourceKey, references}},
+      config: {environment:'local', generation:1},
+      principals: [{email:'fixture@example.invalid', principalId:'admin'}],
+      signer: {sha256: text => createHash('sha256').update(text).digest('hex')},
+    })[0];
+  }
+  f.correction.payload.code = 'N/A';
+  assert.equal((await f.send(f.correction)).status, 200);
+  const delayed = nativeCommand('arrived-late', new Date(Date.now()-30000).toISOString());
+  const blocked = await f.send(delayed, '/v1/commands');
+  assert.equal(blocked.body.error.code, 'PRECONDITION_CONFLICT');
+  assert.equal(await f.count('attendance_observations'), 0);
+  assert.equal(await f.count('audit_events'), 1);
+  const {body} = await f.send(read(), '/v1/admin/snapshot');
+  const current = buildFrontendReporting(snapshotToFrontendReportingInput(body,'2026-01-02')).matrices.find(m=>m.termId==='term-current');
+  assert.equal(current.rows[0].cells[0].effectiveCode, 'N/A');
+  const newer = nativeCommand('genuinely-later', new Date().toISOString());
+  const accepted = await f.send(newer, '/v1/commands');
+  assert.equal(accepted.status, 200);
+  const clear = structuredClone(f.correction);
+  clear.commandId = clear.source.submissionId = 'later-clear';
+  clear.payload.expectedBaseVersion = 2;
+  clear.payload.code = null;
+  assert.equal((await f.send(clear)).status, 200);
+  assert.deepEqual(await f.send(newer, '/v1/commands'), accepted);
+  assert.equal(await f.count('attendance_observations'), 1);
+  assert.equal(await f.count('audit_events'), 3);
+});
+
 test('event roster validation rejects unknown people and preserves an explicitly empty roster', async t => {
   const f=await fixture(t);const eventCommand=command('event.upsert');eventCommand.payload.eligiblePersonIds=['not-a-person'];
   assert.equal((await f.send(eventCommand)).status,409);assert.equal(await f.count('events'),0);
@@ -273,7 +394,7 @@ test('event roster validation rejects unknown people and preserves an explicitly
 test('correction authority revocation blocks replay and audit failure rolls back registry, receipt, evidence and effect', async t => {
   const f=await correctionFixture(t);
   await f.db.prepare("CREATE TRIGGER reject_correction_audit BEFORE INSERT ON audit_events BEGIN SELECT RAISE(ABORT,'fixture-correction-audit'); END").run();
-  assert.equal((await f.send(f.correction)).status,409);
+  assert.equal((await f.send(f.correction)).status,500);
   for(const table of ['attendance_corrections','operation_commands','audit_events'])assert.equal(await f.count(table),0);
   assert.equal(await f.count('command_registry'),2);
   await f.db.prepare('DROP TRIGGER reject_correction_audit').run();
@@ -281,6 +402,77 @@ test('correction authority revocation blocks replay and audit failure rolls back
   await f.db.prepare("DELETE FROM admin_grants WHERE capability='attendance.correct'").run();
   assert.equal((await f.send(f.correction)).status,403);
   assert.equal((await f.send(null,'/v1/admin/commands/correction-one?principalId=admin','GET')).status,404);
+});
+
+test('a canceled event or queued roster rejects fresh edits and preserves earlier correction receipts', async t => {
+  const f = await correctionFixture(t);
+  const accepted = await f.send(f.correction);
+  assert.equal(accepted.status, 200);
+  const next = structuredClone(f.correction);
+  next.commandId = next.source.submissionId = 'next-edit';
+  next.payload.expectedBaseVersion = accepted.body.result.version;
+  next.payload.code = null;
+  await f.db.batch([
+    f.db.prepare('INSERT INTO event_roster_policies VALUES(?,1,?,1,?,?,?,?,NULL)')
+      .bind('event-one','current-active-flight-v1','["alpha"]','event.upsert','admin','2026-01-01T00:00:00.000Z'),
+    f.db.prepare('INSERT INTO event_roster_refresh_work VALUES(?,?,?)')
+      .bind('event-one','event.upsert','2026-01-01T00:00:00.000Z'),
+  ]);
+  assert.equal((await f.send(next)).body.error.code, 'CORRECTION_CONFLICT');
+  assert.deepEqual(await f.send(f.correction), accepted);
+  const cancel = revised(f.eventCommand);
+  cancel.payload.status = 'cancelled';
+  assert.equal((await f.send(cancel)).status, 200);
+  assert.equal(await f.count('event_roster_refresh_work'), 0);
+  next.payload.expectedEventVersion = 2;
+  assert.equal((await f.send(next)).body.error.code, 'CORRECTION_CONFLICT');
+  assert.deepEqual(await f.send(f.correction), accepted);
+  assert.equal(await f.count('attendance_corrections'), 1);
+  assert.equal(await f.count('audit_events'), 1);
+  // A reviewed correction against the retained event is still possible after term rollover.
+  await f.db.batch([
+    f.db.prepare("UPDATE terms SET is_current=0 WHERE term_id='term-current'"),
+    f.db.prepare("INSERT INTO terms VALUES('next','Following term',3,1)"),
+  ]);
+  assert.equal((await f.send(next)).status, 200);
+  assert.equal((await f.db.prepare("SELECT active FROM events WHERE event_id='event-one'").first()).active, 0);
+});
+
+test('a failed bulk-fill cell keeps the original command retryable across quota and interrupted batch responses', async t => {
+  const f = await correctionFixture(t);
+  const next = structuredClone(f.correction);
+  next.payload.code = 'N/A';
+  let afterBatch = false, afterFailureReads = 0;
+  const limitedDb = {
+    prepare(sql) {
+      if (afterBatch) afterFailureReads++;
+      return f.db.prepare(sql);
+    },
+    async batch() {
+      afterBatch = true;
+      throw new Error("D1_ERROR: daily row write limit reached");
+    },
+  };
+  const limited = await worker.fetch(nativeRequest(next), {...f.env, DB:limitedDb});
+  assert.equal(limited.status, 503);
+  assert.equal((await limited.json()).error.code, 'SERVICE_LIMIT_REACHED');
+  assert.equal(afterFailureReads, 0);
+  assert.equal(await f.count('attendance_corrections'), 0);
+
+  const interrupted = {
+    prepare: sql => f.db.prepare(sql),
+    async batch(statements) {
+      await f.db.batch(statements);
+      throw new Error('Response lost after commit');
+    },
+  };
+  const recovered = await worker.fetch(nativeRequest(next), {...f.env, DB:interrupted});
+  assert.equal(recovered.status, 200);
+  const receipt = await recovered.json();
+  assert.deepEqual((await f.send(next)).body, receipt);
+  assert.equal(receipt.result.code, 'N/A');
+  assert.equal(await f.count('attendance_corrections'), 1);
+  assert.equal(await f.count('audit_events'), 1);
 });
 
 test('correction concurrent delivery commits once and stored source identity prevents duplicate edits', async t => {

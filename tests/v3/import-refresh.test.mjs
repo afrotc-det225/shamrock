@@ -30,6 +30,14 @@ test('exact readback rejects corrupted evidence without trusting its stored fing
 test('target/hash binding and stable target identities reject redirect or retargeting',t=>{
  const f=fixture(t),target={accountId:'fictional-account',databaseId:'fictional-database',name:'Fictional staging',environment:'staging'},observed={...target,generation:1,schemaVersion:16,acceptingCommands:false,notificationMode:'suppressed'};assert.equal(assertIncrementalImportTarget(f.plan,target,observed,f.plan.executionSha256),true);assert.throws(()=>assertIncrementalImportTarget(f.plan,target,{...observed,environment:'production'},f.plan.executionSha256));const changed=structuredClone(f.input);changed.desired.legacy_attendance_baselines[0].person_id='other';assert.throws(()=>createIncrementalImportPlan(changed),/REFRESH_BASELINE_TARGET/);
 });
+test('changed and newly imported attendance cells use evidence from this refresh', t => {
+ const {input}=fixture(t);
+ const row=input.desired.legacy_attendance_baselines[0];
+ row.import_run_id='old';
+ assert.throws(()=>createIncrementalImportPlan(input),/REFRESH_BASELINE_EVIDENCE/);
+ row.baseline_id='new-baseline';
+ assert.throws(()=>createIncrementalImportPlan(input),/REFRESH_BASELINE_EVIDENCE/);
+});
 test('inserted or sorted source contact rows preserve existing person/manual contact IDs',()=>{
  const existing=[{contact_id:'stable-one',person_id:'person-one',last_name:'Example',first_name:'One',email:'one@example.invalid'},{contact_id:'stable-cadre',person_id:null,last_name:'Example',first_name:'Cadre',email:'cadre@example.invalid'}],incoming=[{contact_id:'old-row-one',person_id:'new-person',last_name:'Example',first_name:'New',email:'new@example.invalid'},{...existing[0],contact_id:'old-row-two'},{...existing[1],contact_id:'old-row-three'}];const next=matchRefreshContacts(existing,incoming);assert.deepEqual(next.slice(1).map(r=>r.contact_id),['stable-one','stable-cadre']);assert.notEqual(next[0].contact_id,'stable-one');assert.throws(()=>matchRefreshContacts([...existing,existing[0]],incoming),/REFRESH_CONTACT_AMBIGUOUS/);
 });

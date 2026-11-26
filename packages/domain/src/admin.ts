@@ -159,8 +159,8 @@ export interface FrontendSnapshot {
     order: number;
     code: 'P';
   }[];
-  /** Immutable imported effective state. Initial pair operation version is zero; this is not an observation. */
-  legacyBaselines?: {baselineId:string;personId:string;eventId:string;code:AttendanceCode|null}[];
+  /** A completed baseline refresh advances the pair version independently of operational facts. */
+  legacyBaselines?: {baselineId:string;personId:string;eventId:string;code:AttendanceCode|null;baselineRevision?:number}[];
   corrections: {factId:string;personId:string;eventId:string;order:number;code:AttendanceCode|null}[];
   /** Pairs with no facts are authoritatively version zero. */
   attendanceVersions: {personId:string;eventId:string;version:number}[];

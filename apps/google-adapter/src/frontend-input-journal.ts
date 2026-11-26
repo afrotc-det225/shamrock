@@ -2,7 +2,7 @@
 import {AdapterError} from './index.js';
 import type {FrontendTableRead} from './frontend-publication.js';
 import type {FrontendPublicationState} from './frontend-runtime.js';
-import {assertImmutableInputSlots,inputCanonical,nativeInputValue,reconcileInputReceipt,type CapturedFrontendEdit,type InputCommand,type InputSurface,type NativeEditEvidence} from './frontend-input.js';
+import {assertImmutableInputSlots,inputCanonical,nativeInputBounds,nativeInputValue,reconcileInputReceipt,type CapturedFrontendEdit,type InputCommand,type InputSurface,type NativeEditEvidence} from './frontend-input.js';
 export interface InputDelivery {command:InputCommand;templateIndex:number;status:'queued'|'committed'|'conflict'|'rejected';attempted:boolean;receipt?:unknown;applied?:boolean}
 export interface InputJournalEntry {edit:CapturedFrontendEdit;commands:InputDelivery[];confirmation?:{responseId:string;submittedAt:string;email:string};issue?:string;superseded?:boolean;supersededApplied?:boolean;noteStatus?:string}
 export interface FrontendInputJournal {version:1;environment:'staging';generation:number;entries:Record<string,InputJournalEntry>;held?:Record<string,{event:unknown;issue:string}>;supersededCounts?:Partial<Record<InputSurface,number>>}
@@ -13,7 +13,7 @@ export interface InputJournalPorts {
   archivedReceiptHash?(commandId:string):string|undefined;
   send(path:'/v1/commands'|'/v1/admin/commands',command:InputCommand):{status:number;body:unknown};
   /** Exact current values before a first attempt; a retained ambiguous attempt must retry its original command. */
-  stillVisible(edit:CapturedFrontendEdit):boolean;
+  stillVisible(edit:CapturedFrontendEdit,drafts:CapturedFrontendEdit['drafts']):boolean;
 }
 const copy=<T>(v:T):T=>JSON.parse(JSON.stringify(v));
 function fail(message:string):never{throw new AdapterError('input_journal',message);}
@@ -25,12 +25,16 @@ export function inputSurfaceState(state:FrontendPublicationState,surface:InputSu
   return {baseline:state.baselines[surface],drafts:state.drafts[surface],set(next:ReturnType<typeof reconcileInputReceipt>){state.baselines[surface]=next.baseline;state.drafts[surface]=next.drafts;}};
 }
 /** Journal first, then publisher holds. No signed delivery occurs in this function. */
-export function retainCapturedInput(io:InputJournalPorts,edit:CapturedFrontendEdit,commands:InputCommand[]):InputJournalEntry{
+export function retainCapturedInput(io:InputJournalPorts,edit:CapturedFrontendEdit,commands:InputCommand[],replacements:InputJournalEntry[]=[]):InputJournalEntry{
   if(io.journal.version!==1||io.journal.environment!=='staging'||io.journal.generation!==edit.generation||io.state.generation!==edit.generation)fail('The private journals have different generations.');
   const prior=io.journal.entries[edit.editId];
   if(prior){if(inputCanonical(prior.edit)!==inputCanonical(edit))fail('A frozen input identity cannot change.');return prior;}
   const entry:InputJournalEntry={edit:copy(edit),commands:commands.map((command,templateIndex)=>({command:copy(command),templateIndex,status:'queued',attempted:false}))};
-  io.journal.entries[edit.editId]=entry;io.saveJournal(io.journal);ensureHolds(io,entry);return entry;
+  io.journal.entries[edit.editId]=entry;
+  for(const previous of replacements){previous.superseded=true;previous.issue='replaced-before-dispatch';}
+  io.saveJournal(io.journal);
+  for(const previous of replacements)cleanupSuperseded(io,previous);
+  ensureHolds(io,entry);return entry;
 }
 function ensureHolds(io:InputJournalPorts,entry:InputJournalEntry){
   const table=inputSurfaceState(io.state,entry.edit.surface);let changed=false;
@@ -55,32 +59,43 @@ function cleanupSuperseded(io:InputJournalPorts,entry:InputJournalEntry){
   if(drafts.length!==table.drafts.length){table.set({baseline:table.baseline,drafts});io.saveState(io.state);}
   entry.supersededApplied=true;io.saveJournal(io.journal);
 }
-/** A later native edit may replace only wholly covered, never-dispatched frozen input. Journal before removing holds. */
-export function supersedeUnattemptedInput(io:InputJournalPorts,surface:InputSurface,event:NativeEditEvidence,current:FrontendTableRead):number{
+/** Validate the complete replacement before removing any previously captured draft. */
+export function planInputReplacement(io:InputJournalPorts,surface:InputSurface,event:NativeEditEvidence,current:FrontendTableRead){
   const table=inputSurfaceState(io.state,surface);assertImmutableInputSlots(table.baseline,current,surface);
-  if(![event.row,event.column,event.rows,event.columns].every(n=>Number.isSafeInteger(n)&&n>0)||event.rows*event.columns>250)fail('Invalid superseding edit range.');
+  nativeInputBounds(event,current,surface,table.baseline);
+  const entries:InputJournalEntry[]=[];
   for(const entry of Object.values(io.journal.entries)){
-    if(entry.edit.surface!==surface)continue;
-    if(entry.superseded){cleanupSuperseded(io,entry);continue;}
-    if(entry.commands.some(c=>c.attempted)||entry.edit.evidence.spreadsheetId!==event.spreadsheetId||entry.edit.evidence.sheetId!==event.sheetId)continue;
+    if(entry.edit.surface!==surface||entry.superseded||entry.commands.some(c=>c.attempted)||
+      entry.edit.evidence.spreadsheetId!==event.spreadsheetId||entry.edit.evidence.sheetId!==event.sheetId)continue;
     const positions=entry.edit.drafts.map(d=>({draft:d,row:table.baseline.slots!.keys.indexOf(d.key)+3,column:current.headers.indexOf(d.header)+1}));
     if(!positions.length||positions.some(p=>p.row<3||p.column<1||p.row<event.row||p.row>=event.row+event.rows||p.column<event.column||p.column>=event.column+event.columns))continue;
-    if(!positions.some(p=>inputCanonical(nativeInputValue(current.rows[p.row-3]?.[p.column-1]))!==inputCanonical(p.draft.value)))continue;
-    entry.superseded=true;entry.issue='replaced-before-dispatch';io.saveJournal(io.journal);cleanupSuperseded(io,entry);
+    if(positions.some(p=>inputCanonical(nativeInputValue(current.rows[p.row-3]?.[p.column-1]))!==inputCanonical(p.draft.value)))entries.push(entry);
   }
   const archived=io.journal.supersededCounts?.[surface]??0;if(!Number.isSafeInteger(archived)||archived<0)fail('The retained input capture sequence is invalid.');
-  return archived+Object.values(io.journal.entries).filter(e=>e.edit.surface===surface&&e.superseded).length;
+  return {entries,sequence:archived+Object.values(io.journal.entries).filter(e=>e.edit.surface===surface&&e.superseded).length+entries.length};
+}
+export function applyInputReplacement(io:InputJournalPorts,entries:InputJournalEntry[]){
+  for(const entry of entries){
+    entry.superseded=true;entry.issue='replaced-before-dispatch';io.saveJournal(io.journal);cleanupSuperseded(io,entry);
+  }
 }
 export function deliverFrontendInputs(io:InputJournalPorts,limit=10):{attempted:number;committed:number}{
   if(!Number.isSafeInteger(limit)||limit<1||limit>25)fail('Input delivery exceeds its bounded batch.');
   let attempted=0,committed=0;
+  // Drive serializes entries by key. A replacement can sort before the prior
+  // entry after restart, so complete every superseded hold before any delivery.
+  for(const entry of Object.values(io.journal.entries))if(entry.superseded)cleanupSuperseded(io,entry);
   for(const entry of Object.values(io.journal.entries)){
-    if(entry.superseded){cleanupSuperseded(io,entry);continue;}
+    if(entry.superseded)continue;
     if(entry.edit.status==='noop')continue;
     ensureHolds(io,entry);
+    let visible:boolean|undefined;
     for(const delivery of entry.commands){
       if(delivery.status==='queued'&&attempted<limit){
-        if(!delivery.attempted&&!io.stillVisible(entry.edit)){entry.issue='input-changed-before-dispatch';io.saveJournal(io.journal);continue;}
+        if(!delivery.attempted){
+          visible??=io.stillVisible(entry.edit,entry.commands.filter(c=>c.status==='queued'&&!c.attempted).flatMap(c=>entry.edit.templates[c.templateIndex].drafts));
+          if(!visible){if(entry.issue!=='input-changed-before-dispatch'){entry.issue='input-changed-before-dispatch';io.saveJournal(io.journal);}continue;}
+        }
         delivery.attempted=true;io.saveJournal(io.journal);attempted++;
         let response:{status:number;body:unknown};
         try{response=io.send(entry.edit.templates[delivery.templateIndex].path,delivery.command);}catch{entry.issue='ambiguous-delivery';io.saveJournal(io.journal);continue;}

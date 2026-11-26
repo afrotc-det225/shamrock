@@ -27,6 +27,27 @@ const matrix = result => result.matrices.find(m => m.termId === result.currentTe
 const row = (result, id = 'cadet-a') => matrix(result).rows.find(r => r.personId === id);
 const cell = (result, id = 'cadet-a', eventId = 'event-mando') => row(result, id).cells.find(c => c.eventId === eventId);
 
+test('cancelling current LLAB and Secondary excludes their facts from the matrix and totals while preserving history', () => {
+  const input = fixture();
+  input.events[0].status = 'active';
+  input.events[1].status = 'cancelled';
+  input.events.push(event('event-secondary', { status: 'inactive', type: 'secondary' }));
+  input.terms.push({ termId: 'term-history', label: 'Earlier', sortOrder: 1, roster: input.people });
+  input.events.push(event('event-old', { status: 'archived', termId: 'term-history', type: 'llab' }));
+  input.observations = [
+    observation('fact-present', 'cadet-a', 'event-mando', 'P'),
+    observation('fact-absent', 'cadet-a', 'event-llab', 'A'),
+    observation('fact-other', 'cadet-a', 'event-secondary', 'U'),
+    observation('fact-historical', 'cadet-a', 'event-old', 'E'),
+  ];
+  const report = buildFrontendReporting(input);
+  assert.deepEqual(matrix(report).eventColumns.map(e => e.eventId), ['event-mando']);
+  assert.equal(row(report).overall.denominator, 1);
+  assert.equal(row(report).overall.percentage, 1);
+  assert.equal(row(report).llab.denominator, 0);
+  assert.equal(report.matrices.find(m => m.termId === 'term-history').rows.find(r => r.personId === 'cadet-a').cells[0].effectiveCode, 'E');
+});
+
 test('legacy effective baseline is distinct from observed evidence and genuine operations supersede it', () => {
   const input=fixture();input.legacyBaselines=[{baselineId:'baseline-a',personId:'cadet-a',eventId:'event-mando',code:'P'}];
   let value=cell(buildFrontendReporting(input));assert.equal(value.effectiveCode,'P');assert.equal(value.observedCode,null);assert.equal(value.observationId,null);assert.equal(value.source,'legacy-baseline');

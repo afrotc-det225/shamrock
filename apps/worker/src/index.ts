@@ -250,6 +250,26 @@ async function acceptCommand(env: Env, command: Command, panelScope?: CommandSco
       AND (?='partial' OR (SELECT COUNT(*) FROM memberships WHERE unit_id=? AND active=1)=json_array_length(?))`;
     guard.values.push(report.unitId, report.rosterVersion, JSON.stringify(report.coveredPersonIds), report.unitId,
       report.completeness, report.unitId, JSON.stringify(report.coveredPersonIds));
+    // Managed Google Forms use a stable child ID and Google's lastSubmittedTime in
+    // milliseconds. Older transport fixtures used an ordinal revision instead.
+    if (command.source.kind === 'form' && command.actor.evidence === 'google-form'
+      && /^child\.[a-f0-9]{64}$/.test(command.source.submissionId) && report.presentPersonIds.length) {
+      const submittedAt = new Date(command.source.revision);
+      if (!Number.isFinite(submittedAt.getTime())) throw new HttpError(400, 'INVALID_FORM_REVISION', 'The Google response revision is invalid.');
+      // Check only selected people, inside the same transaction as the evidence.
+      // A delayed first delivery cannot supersede a later edit, approval or import.
+      guard.sql += ` AND NOT EXISTS(
+        SELECT 1 FROM json_each(?) person CROSS JOIN (SELECT ? AS event_id, ? AS submitted_at) response
+        WHERE EXISTS(SELECT 1 FROM attendance_corrections c WHERE c.event_id=response.event_id
+          AND c.person_id=person.value AND c.accepted_at>=response.submitted_at)
+        OR EXISTS(SELECT 1 FROM attendance_observations o WHERE o.event_id=response.event_id
+          AND o.person_id=person.value AND o.accepted_at>=response.submitted_at)
+        OR EXISTS(SELECT 1 FROM excusal_records r WHERE r.event_id=response.event_id
+          AND r.person_id=person.value AND r.last_command_id IS NOT NULL AND r.updated_at>=response.submitted_at)
+        OR EXISTS(SELECT 1 FROM legacy_attendance_baselines b JOIN legacy_import_runs i ON i.import_run_id=b.import_run_id
+          WHERE b.event_id=response.event_id AND b.person_id=person.value AND i.state='complete' AND i.completed_at>=response.submitted_at))`;
+      guard.values.push(JSON.stringify(report.presentPersonIds), report.eventId, submittedAt.toISOString());
+    }
     writes.push(statement(env.DB, `INSERT INTO attendance_reports VALUES (?,?,?,?,?,?,?,?)`,
       report.reportId, report.eventId, report.unitId, report.rosterVersion, report.completeness,
       report.submittedAt, report.submittedBy, command.commandId));

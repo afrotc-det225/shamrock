@@ -43,6 +43,8 @@ export interface FrontendPublicationTable {
   rows: FrontendPublicationRow[];
   holds?: { key: string; header: string; reason: string }[];
   flightViews?: string[];
+  /** Current-term catalog retirements, including events never published to this workbook. */
+  inactiveEventVersions?: Record<string, number>;
 }
 export interface FrontendPublicationModel {
   generation: number;
@@ -74,6 +76,8 @@ export interface FrontendPublicationBaseline {
   rows: FrontendPublicationRow[];
   /** Explicit native-input binding. Physical rows/columns cannot be reassigned. */
   slots?: { headers: string[]; keys: (string | null)[] };
+  /** Preserve the operator's original visibility if the same event is reactivated. */
+  retiredEventColumns?: { header: string; wasHidden: boolean }[];
 }
 export interface FrontendDraft {
   key: string;
@@ -235,12 +239,56 @@ function keyed(rows: readonly FrontendPublicationRow[], columns: readonly Fronte
   return keys;
 }
 
+/** Keep an existing cancelled event in its physical slot. Its last published values
+ * are historical evidence. A later event can never take that column's place. */
+function retainInactiveEventColumns(input: FrontendPublicationInput): FrontendPublicationTable {
+  const { table, current, baseline } = input;
+  if (table.kind !== 'attendance' || !table.inactiveEventVersions) return table;
+  const retained = current.headers.filter(h => Object.hasOwn(table.inactiveEventVersions!, h));
+  if (!retained.length) return table;
+  if (!baseline.slots || !same(baseline.slots.headers, current.headers)) fail('Retiring an event requires verified physical column bindings.');
+  const originals = new Map(baseline.rows.map(row => [row.key, row]));
+  const columns = [...table.columns];
+  const normalizedLabel = (label: string) => label.trim().replace(/\s+/g, ' ').toLowerCase();
+  const usedLabels = new Set(columns.map(c => normalizedLabel(c.label)));
+  const rows = table.rows.map(row => ({ ...row, values: { ...row.values }, versions: { ...row.versions }, eventVersions: { ...row.eventVersions } }));
+  for (const header of retained) {
+    const version = table.inactiveEventVersions[header], index = current.headers.indexOf(header);
+    if (!header.startsWith('event:') || !integer(version, 1) || table.columns.some(c => c.header === header)) fail('Inactive event evidence conflicts with the current catalog.');
+    if (input.drafts.some(d => d.header === header)) fail('Resolve the pending attendance edit before retiring its event column.');
+    let label = current.labels[index];
+    if (usedLabels.has(normalizedLabel(label))) {
+      const original = label.slice(0, 484);
+      let suffix = 1;
+      do { label = `${original} (retired ${suffix++})`; } while (usedLabels.has(normalizedLabel(label)));
+    }
+    usedLabels.add(normalizedLabel(label));
+    const column = { header, label, editable: true };
+    const wasRetired = baseline.retiredEventColumns?.some(c => c.header === header);
+    for (let i = 0; i < current.rows.length; i++) {
+      const key = baseline.slots.keys[i], original = key ? originals.get(key) : undefined;
+      if (key && (!original || !integer(original.eventVersions?.[header], 1) || version < original.eventVersions![header]
+        || (!wasRetired && version === original.eventVersions![header]))) fail('Inactive event version does not follow its published binding.');
+      if (!equal(readValue(current.rows[i][index], column), original?.values[header] ?? null)) fail('Resolve the changed attendance cell before retiring its event column.');
+    }
+    columns.push(column);
+    for (const row of rows) {
+      const old = originals.get(row.key);
+      row.values[header] = old?.values[header] ?? null;
+      row.versions[header] = old?.versions[header] ?? 0;
+      row.eventVersions[header] = version;
+    }
+  }
+  return { ...table, columns, rows };
+}
+
 /** Plan only the explicitly bound existing native Table. Never creates/deletes sheets or sorts rows. */
 export function planFrontendPublication(input: FrontendPublicationInput): FrontendPublicationPlan {
   if (!input.editFenceVerified) fail('A host-verified human-edit and sort fence is required.');
   revision(input.revision); revision(input.baseline.revision);
   if (!integer(input.generation, 1) || input.generation !== input.baseline.generation || input.revision.operations < input.baseline.revision.operations || input.revision.administration < input.baseline.revision.administration) fail('Frontend generation or snapshot revision is stale.');
-  const { table, current } = input;
+  const { current } = input;
+  const table = retainInactiveEventColumns(input);
   if (!['directory', 'leadership', 'attendance', 'excusal'].includes(table.kind) || table.keyHeader !== (table.kind === 'leadership' ? 'contact_id' : table.kind === 'excusal' ? 'request_id' : 'person_id')) fail('Frontend identity must use the correct stable key.');
   if (!Array.isArray(table.columns) || !table.columns.length || table.columns.length > MAX_COLUMNS || new Set(table.columns.map(c => c.header)).size !== table.columns.length) fail('Frontend column schema is invalid.');
   for (const c of table.columns) if (!id(c.header) || typeof c.label !== 'string' || !c.label || c.label.length > 512 || typeof c.editable !== 'boolean' || (c.header === table.keyHeader && c.editable)) fail('Frontend column metadata is invalid.');
@@ -281,6 +329,7 @@ export function planFrontendPublication(input: FrontendPublicationInput): Fronte
   const diagnostics: FrontendPublicationDiagnostic[] = [], retainedDrafts: FrontendDraft[] = [];
   const finalRows = readRows.map(row => Object.fromEntries(headers.map(h => [h, row[h] ?? null])));
   const nextRows = new Map<string, FrontendPublicationRow>();
+  const previousRetirements = new Map(input.baseline.retiredEventColumns?.map(c => [c.header, c.wasHidden]));
   const positions = new Map<string, number>(); readRows.forEach((r, i) => { if (id(r[table.keyHeader])) positions.set(r[table.keyHeader] as string, i); });
   const dirty = (row: Record<string, FrontendValue>, base: FrontendPublicationRow, header: string) => columns.get(header)!.editable && !base.readonlyHeaders?.includes(header) && (!equal(row[header], base.values[header]) || drafts.has(cellKey(base.key, header)));
   // Retire only verified clean rows; an unsent edit pins its row and identity.
@@ -338,7 +387,9 @@ export function planFrontendPublication(input: FrontendPublicationInput): Fronte
       }
       if (base && existingField) {
         if (column.editable && (server.versions[header] < base.versions[header] || (!base.retired && server.versions[header] === base.versions[header] && !equal(serverValue, base.values[header])))) fail('Server field value/version is inconsistent with the last published base.');
-        if (header.startsWith('event:') && server.eventVersions![header] < base.eventVersions![header]) fail('Event catalog version is stale.');
+        if (header.startsWith('event:') && (server.eventVersions![header] < base.eventVersions![header]
+          || (previousRetirements.has(header) && !Object.hasOwn(table.inactiveEventVersions ?? {}, header)
+            && server.eventVersions![header] === base.eventVersions![header]))) fail('Event catalog version is stale.');
         const changedLocally = !equal(local![header], base.values[header]);
         if (!canEdit && changedLocally) fail('Automation-only values changed outside the published baseline.');
         if (canEdit && (changedLocally || draft)) {
@@ -395,9 +446,18 @@ export function planFrontendPublication(input: FrontendPublicationInput): Fronte
     };
     rectangles.forEach(emit); writes = [];
   };
+  // Native Table names are unique even for hidden columns. Release an old display
+  // name before another event takes it, irrespective of their physical order.
+  const relabeledRetirements = new Set<number>();
+  headers.forEach((header, c) => {
+    if (Object.hasOwn(table.inactiveEventVersions ?? {}, header) && labels[c] !== current.labels[c]) {
+      write(1, c, frontendLiteralCell(labels[c])); relabeledRetirements.add(c);
+    }
+  });
+  flushWrites();
   headers.forEach((header, c) => {
     if (c >= current.headers.length) write(0, c, frontendLiteralCell(header));
-    if (labels[c] !== current.labels[c]) write(1, c, frontendLiteralCell(labels[c]));
+    if (labels[c] !== current.labels[c] && !relabeledRetirements.has(c)) write(1, c, frontendLiteralCell(labels[c]));
   });
   flushWrites();
   const resize = () => requests.push({ updateTable: { table: { tableId: current.tableId, range }, fields: 'range' } });
@@ -436,17 +496,29 @@ export function planFrontendPublication(input: FrontendPublicationInput): Fronte
     headers, labels, eventHeaders: table.columns.filter(c => c.header.startsWith('event:')).map(c => c.header), dataEndRow: endRow },
   current.headers, current.range.endRowIndex));
   const keyColumn = headers.indexOf(table.keyHeader);
+  const hiddenColumns = new Set([...current.hiddenColumns, keyColumn]);
+  const retiredEventColumns: NonNullable<FrontendPublicationBaseline['retiredEventColumns']> = [];
+  if (table.kind === 'attendance') for (const [index, header] of headers.entries()) {
+    const inactive = Object.hasOwn(table.inactiveEventVersions ?? {}, header);
+    if (!inactive && !previousRetirements.has(header)) continue;
+    const wasHidden = previousRetirements.get(header) ?? current.hiddenColumns.includes(index);
+    if (inactive) retiredEventColumns.push({ header, wasHidden });
+    const hide = inactive || wasHidden;
+    if (hide) hiddenColumns.add(index); else hiddenColumns.delete(index);
+    if (hide !== current.hiddenColumns.includes(index)) requests.push({ updateDimensionProperties: { range: { sheetId: current.sheetId, dimension: 'COLUMNS', startIndex: index, endIndex: index + 1 }, properties: { hiddenByUser: hide }, fields: 'hiddenByUser' } });
+  }
   if (!current.hiddenColumns.includes(keyColumn)) requests.push({ updateDimensionProperties: { range: { sheetId: current.sheetId, dimension: 'COLUMNS', startIndex: keyColumn, endIndex: keyColumn + 1 }, properties: { hiddenByUser: true }, fields: 'hiddenByUser' } });
   if (!current.machineRowHidden) requests.push({ updateDimensionProperties: { range: { sheetId: current.sheetId, dimension: 'ROWS', startIndex: 0, endIndex: 1 }, properties: { hiddenByUser: true }, fields: 'hiddenByUser' } });
   const flightViews = table.flightViews && current.filterViews ? planFrontendFlightViews({ sheetId: current.sheetId, tableId: current.tableId, headers, flights: table.flightViews, views: current.filterViews }) : undefined;
   if (flightViews) requests.push(...flightViews.requests);
   const batches = batchRequests(requests);
   const nextBaseline: FrontendPublicationBaseline = { generation: input.generation, revision: clone(input.revision), rows: [...nextRows.values()].map(clone),
+    ...(retiredEventColumns.length ? { retiredEventColumns } : {}),
     ...(input.baseline.slots ? { slots: { headers: [...headers], keys: finalRows.map(row => blank(row[table.keyHeader]) ? null : row[table.keyHeader] as string) } } : {}) };
   const expectedAfter: FrontendTableRead = { ...clone(current), headers, labels, rows: expectedRows, range,
     gridRowCount: Math.max(current.gridRowCount, endRow), gridColumnCount: Math.max(current.gridColumnCount, headers.length),
     ...(flightViews ? { filterViews: flightViews.views } : {}),
-    hiddenColumns: [...new Set([...current.hiddenColumns, keyColumn])].sort((a, b) => a - b), machineRowHidden: true };
+    hiddenColumns: [...hiddenColumns].sort((a, b) => a - b), machineRowHidden: true };
   return { requests, batches, diagnostics, complete: diagnostics.length === 0, nextBaseline, retainedDrafts,
     expectedRead: canonical(current), expectedAfter, changedCells, copiedValidationRanges, validationExpectations, requiresVerifiedReadback: true };
 }
@@ -556,7 +628,7 @@ export function snapshotToFrontendReportingInput(snapshot: FrontendSnapshot, asO
     people, flights, squadrons: clone(snapshot.squadrons),
     terms: snapshot.terms.map(t => ({ termId: t.termId, label: t.label, sortOrder: t.sortOrder,
       ...(!t.isCurrent && t.roster ? { roster: clone(t.roster) } : {}) })),
-    events: snapshot.events.map(e => ({ eventId: e.eventId, termId: e.termId, label: e.columnLabel || e.label, type: e.eventType, trainingWeek: e.trainingWeek, displayOrder: e.displayOrder,
+    events: snapshot.events.map(e => ({ eventId: e.eventId, termId: e.termId, label: e.columnLabel || e.label, type: e.eventType, status: e.status, trainingWeek: e.trainingWeek, displayOrder: e.displayOrder,
       eligiblePersonIds: clone((e as typeof e & { eligiblePersonIds?: string[] | null }).eligiblePersonIds ?? null) })),
     observations: clone(snapshot.observations), corrections: clone(snapshot.corrections),
     legacyBaselines: clone(snapshot.legacyBaselines ?? []),
@@ -568,11 +640,18 @@ export function snapshotToFrontendReportingInput(snapshot: FrontendSnapshot, asO
 export function verifyFrontendPublicationReadback(plan: FrontendPublicationPlan, actual: FrontendTableRead): boolean {
   const expected = plan.expectedAfter;
   if (actual.sheetId !== expected.sheetId || actual.tableId !== expected.tableId || !same(actual.range, expected.range) || !same(actual.headers, expected.headers) || !same(actual.labels, expected.labels) || actual.rows.length !== expected.rows.length || !actual.machineRowHidden || expected.hiddenColumns.some(c => !actual.hiddenColumns.includes(c))) return false;
+  if (plan.requests.some(request => {
+    const change = request.updateDimensionProperties as { range?: { dimension: string; startIndex: number }; properties?: { hiddenByUser?: boolean } } | undefined;
+    return change?.range?.dimension === 'COLUMNS' && change.properties?.hiddenByUser === false
+      && !expected.hiddenColumns.includes(change.range.startIndex) && actual.hiddenColumns.includes(change.range.startIndex);
+  })) return false;
   if (expected.filterViews && (!actual.filterViews || !sameFrontendViews(expected.filterViews, actual.filterViews))) return false;
   try {
     return actual.rows.every((row, r) => row.length === expected.headers.length && row.every((cell, c) => {
       const column: FrontendColumn = { header: expected.headers[c], label: expected.labels[c], editable: false, fileChip: !!expected.rows[r][c].chipRuns?.length };
-      return equal(readValue(cell, column), readValue(expected.rows[r][c], column));
+      // At readback an empty string is distinct from the absent value sent for
+      // a clear. Both look blank in Sheets, but only the latter is an empty cell.
+      return same(readValue(cell, column), readValue(expected.rows[r][c], column));
     }));
   } catch { return false; }
 }
@@ -637,6 +716,7 @@ export function buildFrontendPublicationModel(input: {
   }
   const fixed = [['last_name', 'Last Name'], ['first_name', 'First Name'], ['as_year', 'Year'], ['flight', 'Flight'], ['squadron', 'Sqdn'], ['overall_attendance_pct', 'Overall'], ['llab_attendance_pct', 'LLAB']];
   const attendance: FrontendPublicationTable = { kind: 'attendance', keyHeader: 'person_id', flightViews: snapshot.flights.map(f => f.label),
+    inactiveEventVersions: Object.fromEntries(snapshot.events.filter(e => e.termId === matrix.termId && ['cancelled', 'inactive', 'archived'].includes(e.status)).map(e => [`event:${e.eventId}`, e.version])),
     columns: [...fixed.map(([header, label]) => ({ header, label, editable: false })), ...matrix.eventColumns.map(e => ({ header: e.machineHeader, label: e.label, editable: true, seedKey: 'attendance:code' })), { header: 'person_id', label: 'Person ID', editable: false }], rows: [], holds: [] };
   for (const r of matrix.rows) {
     const values: Record<string, FrontendValue> = { last_name: r.lastName, first_name: r.firstName, as_year: r.asYear, flight: r.flight, squadron: r.squadron, overall_attendance_pct: r.overall.percentage, llab_attendance_pct: r.llab.percentage, person_id: r.personId };

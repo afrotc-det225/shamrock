@@ -1,5 +1,5 @@
 import test from 'node:test';import assert from 'node:assert/strict';import {createHash} from 'node:crypto';
-import {retainCapturedInput,deliverFrontendInputs,supersedeUnattemptedInput} from '../../.build/v3/apps/google-adapter/src/frontend-input-journal.js';
+import {retainCapturedInput,deliverFrontendInputs,planInputReplacement,applyInputReplacement} from '../../.build/v3/apps/google-adapter/src/frontend-input-journal.js';
 const copy=x=>structuredClone(x),hash=x=>createHash('sha256').update(x).digest('hex');
 function fixture(){
  const draft={key:'person',header:'event:event',value:'P',baseVersion:3,expectedEventVersion:2,command:{operation:'attendance.correct',entityId:'person',field:'event',expectedVersion:3}};
@@ -38,6 +38,9 @@ test('an unknown editor can retain frozen input without creating any authoritati
  const f=fixture(),io=f.open();f.edit.status='confirmation-required';delete f.edit.principalId;retainCapturedInput(io,f.edit,[]);deliverFrontendInputs(io);assert.equal(f.fx.sendCount,0);assert.equal(f.fx.storedState.drafts.attendance.length,1);
 });
 
+function supersedeUnattemptedInput(io,surface,event,current){
+ const plan=planInputReplacement(io,surface,event,current);applyInputReplacement(io,plan.entries);return plan.sequence;
+}
 function replacementFixture(){
  const f=fixture();f.edit.evidence={spreadsheetId:'book',sheetId:1,row:3,column:2,rows:1,columns:1,triggerUid:'trigger'};
  f.fx.storedState.baselines.attendance.slots={headers:['person_id','event:event'],keys:['person']};
@@ -50,4 +53,16 @@ test('supersession journals before dropping only never-attempted holds and recov
 test('supersession cannot discard an ambiguous attempted command or trust a changed physical map',()=>{
  const f=replacementFixture();const io=f.open();retainCapturedInput(io,f.edit,[f.command]);f.fx.fail='ambiguous';deliverFrontendInputs(io);
  assert.equal(supersedeUnattemptedInput(io,'attendance',f.edit.evidence,f.current),0);assert.equal(io.state.drafts.attendance.length,1);f.current.rows[0][0].userEnteredValue.stringValue='another';assert.throws(()=>supersedeUnattemptedInput(io,'attendance',f.edit.evidence,f.current),e=>e.code==='input_slots');
+});
+
+test('an interrupted replacement already owns a durable journal entry and recovers independent of entry key order',()=>{
+ const f=replacementFixture();retainCapturedInput(f.open(),f.edit,[]);
+ const next=copy(f.edit);next.editId='aaa-replacement';next.status='confirmation-required';next.drafts[0].value='A';next.templates[0].drafts[0].value='A';next.templates[0].payload.code='A';
+ f.current.rows[0][1]={userEnteredValue:{stringValue:'A'}};
+ const io=f.open(),replacement=planInputReplacement(io,'attendance',f.edit.evidence,f.current);
+ assert.equal(replacement.sequence,1);assert.equal(replacement.entries.length,1);
+ f.fx.fail='state';assert.throws(()=>retainCapturedInput(io,next,[],replacement.entries));
+ assert.equal(f.fx.storedJournal.entries['edit-one'].superseded,true);assert(f.fx.storedJournal.entries['aaa-replacement']);
+ f.fx.storedJournal.entries=Object.fromEntries(Object.entries(f.fx.storedJournal.entries).sort(([a],[b])=>a.localeCompare(b)));
+ f.fx.fail='';deliverFrontendInputs(f.open());assert.deepEqual(f.fx.storedState.drafts.attendance,next.drafts);assert.equal(f.fx.sendCount,0);
 });

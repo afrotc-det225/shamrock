@@ -29,8 +29,17 @@ function fixture(){
    if(u.host==='worker.example.invalid'){
     assert.equal(options.headers['x-shamrock-signature'],createHmac('sha256',secret).update(`POST\n${u.pathname}\n${options.headers['x-shamrock-timestamp']}\n${sha(options.payload)}`).digest('hex'));
     if(u.pathname==='/v1/admin/effects/availability')return response({acceptingCommands:false,frontendPending:false,frontendLeased:false,formsPending:false,formsLeased:false});
-    if(u.pathname==='/v1/admin/snapshot/page'){fx.snapshotReads=(fx.snapshotReads??0)+1;const shared={contractVersion:FRONTEND_PAGE_VERSION,section:body.section,revision:{operations:1,administration:1}};return response(body.section==='manifest'?{...shared,environment:'staging',generation:1,sections:FRONTEND_SECTIONS.map(section=>({section,count:0})),diagnostics:[]}:body.section==='verify'?{...shared,verified:true}:{...shared,offset:0,rows:[],nextOffset:null});}
-    assert.equal(u.pathname,'/v1/admin/commands');const entry=Object.values(fx.journal.entries).find(e=>e.commands.some(c=>c.command.commandId===body.commandId));assert(entry?.commands[0].attempted);assert.equal(fx.state.drafts.attendance.length,1);fx.commands.push(copy(body));return response({commandId:body.commandId,status:'committed',operation:'attendance.correct',result:{personId:'person',eventId:'event',version:4,code:body.payload.code}});
+    if(u.pathname==='/v1/admin/snapshot/page'){
+      (fx.snapshotSections??=[]).push(body.section);fx.snapshotReads=(fx.snapshotReads??0)+1;
+      if(fx.snapshotFault&&body.section===fx.snapshotFault.section)return response(fx.snapshotFault.body,fx.snapshotFault.status);
+      if(fx.changeDuringRead&&body.section==='events')fx.changeDuringRead();
+      const events=fx.events??[{eventId:'event',termId:'term',columnLabel:'event:event',label:'LLAB',version:1,status:'active'}];
+      const shared={contractVersion:FRONTEND_PAGE_VERSION,section:body.section,revision:{operations:1,administration:1},scope:{termId:'term',currentTermId:'term'}};
+      if(body.section==='manifest')return response({...shared,environment:'staging',generation:1,sections:(body.sections??FRONTEND_SECTIONS).map(section=>({section,count:section==='events'?events.length:section==='terms'?1:0})),diagnostics:[],...(body.sections?{partial:true}:{})});
+      if(body.section==='verify')return response({...shared,verified:true});
+      return response({...shared,offset:0,rows:body.section==='events'?events:body.section==='terms'?[{termId:'term',isCurrent:1}]:[],nextOffset:null});
+    }
+    assert.equal(u.pathname,'/v1/admin/commands');const entry=Object.values(fx.journal.entries).find(e=>e.commands.some(c=>c.command.commandId===body.commandId));assert(entry?.commands[0].attempted);assert(fx.state.drafts.attendance.some(d=>d.key===body.payload.personId&&d.header==='event:'+body.payload.eventId));fx.commands.push(copy(body));return response({commandId:body.commandId,status:'committed',operation:'attendance.correct',result:{personId:body.payload.personId,eventId:body.payload.eventId,version:body.payload.expectedBaseVersion+3,code:body.payload.code}});
    }
    assert.equal(options.headers.Authorization,'Bearer fixture-oauth');
    if(u.host==='sheets.googleapis.com'){
@@ -43,7 +52,9 @@ function fixture(){
       assert.equal(props[INPUT_PROPERTIES.setup],undefined);assert(props.SHAMROCK_V3_INPUT_REORDER);fx.rowBatches??=[];fx.rowBatches.push(copy(body));
       for(const {moveDimension:m} of body.requests){const t=Object.values(fx.tables).find(t=>t.sheetId===m.source.sheetId);t.rows.splice(m.destinationIndex-2,0,t.rows.splice(m.source.startIndex-2,1)[0]);}return response({});
     }
-    fx.notes.push(body);assert(body.requests.every(r=>r.repeatCell.fields==='note'));return response({});
+    fx.notes.push(body);for(const {repeatCell} of body.requests){assert.equal(repeatCell.fields,'note');const {range}=repeatCell;
+      const t=Object.values(fx.tables).find(t=>t.sheetId===range.sheetId);for(let r=range.startRowIndex;r<range.endRowIndex;r++)for(let c=range.startColumnIndex;c<range.endColumnIndex;c++)t.rows[r-2][c].note=repeatCell.cell.note;
+    }return response({});
    }
    if(u.host==='forms.googleapis.com')return response(u.pathname.includes('/responses/')?fx.confirmationResponse:copy(form));
    if(u.pathname.endsWith('/permissions'))return response({permissions:fx.publishedPermissions??[{id:'editor',type:'user',role:'reader',view:'published',emailAddress:email}]});
@@ -67,7 +78,7 @@ function fixture(){
 }
 test('native setup binds verified slots under fences while preserving all cells and resumes explicitly',()=>{
  const f=fixture(),before=copy(f.fx.tables);f.fx.frontendPaused=true;assert.equal(f.runtime.setup().status,'ready-paused');assert.equal(f.fx.fences,1);assert.equal(f.fx.restores,1);assert.deepEqual(f.fx.tables,before);assert(f.fx.state.baselines.attendance.slots);assert.equal(f.fx.triggers.length,3);f.runtime.setup();assert.equal(f.fx.triggers.length,3);f.fx.frontendPaused=false;assert.equal(f.runtime.resume().status,'enabled');
- f.fx.tables.attendance.rows[0][1]=cell('P');assert.equal(f.runtime.onEdit(f.edit()).status,'committed');assert.equal(f.fx.commands.length,1);assert.equal(f.fx.commands[0].actor.principalId,'editor');assert.equal(f.fx.state.drafts.attendance.length,0);assert.equal(f.fx.notes.at(-1).requests[0].repeatCell.cell.note,'');
+ f.fx.tables.attendance.rows[0][1]=cell('P');assert.equal(f.runtime.onEdit(f.edit()).status,'committed');assert.equal(f.fx.commands.length,1);assert.equal(f.fx.commands[0].actor.principalId,'editor');assert.equal(f.fx.state.drafts.attendance.length,0);assert.equal(f.fx.notes.length,0);
 });
 test('unknown native editor receives a frozen prefilled Form and only verified matching confirmation dispatches',()=>{
  const f=fixture();f.runtime.setup();f.runtime.resume();f.fx.tables.attendance.rows[0][1]=cell('P');const held=f.runtime.onEdit(f.edit(null));assert.equal(held.status,'confirmation-required');assert.equal(f.fx.commands.length,0);assert.equal(f.fx.prefilled[0][0].id,101);assert.equal(f.fx.prefilled[0][1].id,102);const entry=f.fx.journal.entries[held.editId];
@@ -149,4 +160,71 @@ test('native reorder control verifies private recovery IO, complete cell metadat
  assert.deepEqual(f.fx.state.supplemental,before.supplemental);assert.deepEqual(f.fx.tables.attendance,nativeRows.attendance);assert.equal(f.fx.commands.length,0);
  const receipt=JSON.parse(f.props[INPUT_PROPERTIES.setup]);assert.notEqual(receipt.ids.main,oldSetup.ids.main);assert.notEqual(receipt.ids.excusals,oldSetup.ids.excusals);assert.equal(receipt.ids.confirmation,oldSetup.ids.confirmation);assert.equal(f.fx.triggers.length,3);
  assert.equal(f.fx.recoveryFiles['separate-recovery'].phase,'complete');assert.equal(f.props.SHAMROCK_V3_INPUT_REORDER,undefined);assert.equal(f.props[INPUT_PROPERTIES.pause],'true');assert.equal(f.props.SHAMROCK_V3_FRONTEND_PAUSED,'true');assert.equal(f.config.enabled,false);assert.equal(f.fx.frontendConfig.enabled,false);
+});
+
+test('native Attendance paste clips a full-column selection and freezes exactly the changed cadet/event pairs, including a clear',()=>{
+ const f=fixture(),t=f.fx.tables.attendance,base=f.fx.state.baselines.attendance;
+ const headers=['last_name','event:llab','event:mando','person_id'];
+ t.headers=headers;t.labels=['Last Name','TW-1 LLAB','TW-1 Mando','ID'];t.gridColumnCount=4;t.range.endColumnIndex=4;t.range.endRowIndex=4;t.hiddenColumns=[3];
+ f.fx.events=['llab','mando'].map((id,i)=>({eventId:id,termId:'term',columnLabel:t.labels[i+1],label:id,version:2+i,status:'active'}));
+ base.rows=['first','second'].map((key,i)=>{
+   const values={last_name:key,'event:llab':i?'P':null,'event:mando':i?null:'N/A',person_id:key};
+   const versions={'event:llab':3,'event:mando':4},eventVersions={'event:llab':2,'event:mando':3};
+   return {key,values,versions,eventVersions,commandBindings:Object.fromEntries(f.fx.events.map(e=>['event:'+e.eventId,{operation:'attendance.correct',entityId:key,field:e.eventId,expectedVersion:versions['event:'+e.eventId]}]))};
+ });
+ t.rows=base.rows.map(r=>headers.map(h=>cell(r.values[h])));
+ t.rows[0][0].note='Fixed name note';t.rows[0][2].note='Existing N/A note';t.rows[1][1].note='Training staff note';
+ f.runtime.setup();f.runtime.resume();
+ t.rows[0][1].userEnteredValue={stringValue:'P'};delete t.rows[1][1].userEnteredValue;t.rows[1][2].userEnteredValue={stringValue:'N/A'};
+ const e=f.edit();delete e.value;
+ Object.assign(e.range,{getRow:()=>1,getColumn:()=>1,getNumRows:()=>1000,getNumColumns:()=>6});
+ const result=f.runtime.onEdit(e),entry=f.fx.journal.entries[result.editId];
+ assert.equal(result.status,'confirmation-required');assert.equal(f.fx.commands.length,0);assert.deepEqual(f.fx.snapshotSections,['manifest','events','verify']);
+ assert.deepEqual(entry.edit.templates.map(t=>[t.payload.personId,t.payload.eventId,t.payload.code]),[['first','llab','P'],['second','llab',null],['second','mando','N/A']]);
+ assert.equal(t.rows[0][0].note,'Fixed name note');assert.equal(t.rows[0][2].note,'Existing N/A note');assert.match(t.rows[1][1].note,/^Training staff note\nSHAMROCK:/);
+ assert.equal(f.fx.notes.length,1);assert.deepEqual(f.fx.notes[0].requests.map(r=>[r.repeatCell.range.startRowIndex,r.repeatCell.range.startColumnIndex]),[[2,1],[3,1],[3,2]]);
+ // Native redelivery of the same range reuses its journal and existing notes.
+ assert.equal(f.runtime.onEdit(e).editId,result.editId);assert.equal(Object.keys(f.fx.journal.entries).length,1);assert.equal(f.fx.notes.length,1);
+ const answers={'ref-q':entry.edit.editId,'summary-q':entry.edit.summary,'action-q':'Confirm these changes'};
+ f.fx.confirmationResponse={formId:'confirmation',responseId:'multi-response',lastSubmittedTime:'2026-11-06T12:00:00Z',respondentEmail:email,answers:Object.fromEntries(Object.entries(answers).map(([questionId,value])=>[questionId,{questionId,textAnswers:{answers:[{value}]}}]))};
+ assert.equal(f.runtime.replayConfirmation('multi-response').status,'committed');
+ assert.deepEqual(f.fx.commands.map(c=>[c.payload.personId,c.payload.eventId,c.payload.code]),[['first','llab','P'],['second','llab',null],['second','mando','N/A']]);
+ assert.equal(t.rows[1][1].note,'Training staff note');assert.equal(t.rows[0][2].note,'Existing N/A note');assert.equal(f.fx.state.drafts.attendance.length,0);
+ assert.equal(f.runtime.replayConfirmation('multi-response').status,'committed');assert.equal(f.fx.commands.length,3);
+
+});
+
+test('an invalid replacement leaves the prior confirmation, frozen hold and operator notes intact',()=>{
+ const f=fixture();f.runtime.setup();f.runtime.resume();const t=f.fx.tables.attendance.rows[0][1];t.userEnteredValue={stringValue:'P'};t.note='Operator note';
+ const first=f.runtime.onEdit(f.edit(null)),held=copy(f.fx.journal.entries[first.editId]),drafts=copy(f.fx.state.drafts.attendance),note=t.note;
+ t.userEnteredValue={stringValue:'unsupported'};
+ const replacement=f.edit(null);replacement.value='unsupported';replacement.oldValue='P';
+ assert.throws(()=>f.runtime.onEdit(replacement));assert.deepEqual(f.fx.journal.entries[first.editId],held);assert.deepEqual(f.fx.state.drafts.attendance,drafts);
+ assert.equal(t.note,note);assert.equal(f.fx.commands.length,0);assert.equal(Object.keys(f.fx.journal.held).length,1);
+});
+
+test('failed catalog reads preserve the observed bulk values and never approve a partial or unauthorized catalog',()=>{
+ for(const [fault,code] of [
+   [{section:'events',status:429,body:{error:{code:'quota'}}},'input_snapshot_retry'],
+   [{section:'verify',status:409,body:{error:{code:'SNAPSHOT_CHANGED'}}},'input_snapshot_retry'],
+   [{section:'verify',status:403,body:{error:{code:'NOT_AUTHORIZED'}}},'input_snapshot_access'],
+   [{section:'manifest',status:200,body:{partial:true}},'input_snapshot']
+ ]){
+   const f=fixture();f.runtime.setup();f.runtime.resume();f.fx.snapshotFault=fault;
+   f.fx.tables.attendance.rows[0][1].userEnteredValue={stringValue:'N/A'};
+   const e=f.edit(null);delete e.value;e.range.getRow=()=>2;e.range.getNumRows=()=>2;
+   assert.throws(()=>f.runtime.onEdit(e),{code});
+   assert.throws(()=>f.runtime.onEdit(e),{code});const held=Object.values(f.fx.journal.held);
+   assert.equal(held.length,1);assert.equal(held[0].issue,code);
+   assert.deepEqual(held[0].event.attendanceCells,[{key:'person',header:'event:event',label:'event:event',before:null,entered:'N/A',pairVersion:1,eventVersion:1}]);
+   assert.equal(f.fx.commands.length,0);assert.equal(f.fx.notes.length,0);
+ }
+});
+
+test('an overlapping human edit during the catalog read keeps the original paste evidence for review',()=>{
+ const f=fixture();f.runtime.setup();f.runtime.resume();const cell=f.fx.tables.attendance.rows[0][1];
+ cell.userEnteredValue={stringValue:'P'};f.fx.changeDuringRead=()=>{cell.userEnteredValue={stringValue:'A'};};
+ assert.throws(()=>f.runtime.onEdit(f.edit()),{code:'input_changed'});
+ const held=Object.values(f.fx.journal.held)[0];assert.equal(held.event.attendanceCells[0].entered,'P');
+ assert.equal(cell.userEnteredValue.stringValue,'A');assert.equal(f.fx.commands.length,0);assert.equal(f.fx.notes.length,0);
 });

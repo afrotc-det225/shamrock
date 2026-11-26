@@ -12,6 +12,9 @@ export interface NativeEditEvidence {
   value?:string;oldValue?:string;actorEmail?:string;triggerUid:string;
 }
 export interface InputPrincipal {email:string;principalId:string}
+export type FrontendInputContext=Pick<FrontendSnapshot,'environment'|'generation'|'people'|'leadership'|'flights'> & {
+  events:Pick<FrontendSnapshot['events'][number],'eventId'|'label'|'columnLabel'|'version'|'status'>[];
+};
 export type InputCommand = AdminCommand|AttendanceCorrectionCommand|ExcusalDecideCommand;
 export interface FrozenInputTemplate {operation:InputCommand['operation'];payload:InputCommand['payload'];path:'/v1/admin/commands'|'/v1/commands';drafts:FrontendDraft[]}
 export interface CapturedFrontendEdit {
@@ -54,7 +57,7 @@ function parsed(template:FrozenInputTemplate,actor:{principalId:string;evidence:
     source:{kind:'sheet',resourceKey:edit.resourceKey,submissionId:`input.${edit.editId}.${index}`,revision:1},operation:template.operation,payload:clone(template.payload)};
   return command.operation==='attendance.correct'?parseAttendanceCorrection(command):command.operation==='excusal.decide'?parseCommand(command) as ExcusalDecideCommand:parseAdminCommand(command);
 }
-function templates(drafts:FrontendDraft[],snapshot:FrontendSnapshot):FrozenInputTemplate[]{
+function templates(drafts:FrontendDraft[],snapshot:FrontendInputContext):FrozenInputTemplate[]{
   const grouped=new Map<string,FrontendDraft[]>();
   for(const draft of drafts){if(!draft.command)fail('input_binding','The published command binding is missing.');const key=inputCanonical([draft.command.operation,draft.command.entityId,draft.command.operation==='attendance.correct'?draft.command.field:'']);const group=grouped.get(key)??[];group.push(draft);grouped.set(key,group);}
   return [...grouped.values()].map(cells=>{
@@ -91,28 +94,89 @@ function templates(drafts:FrontendDraft[],snapshot:FrontendSnapshot):FrozenInput
 export function assertImmutableInputSlots(baseline:FrontendPublicationBaseline,current:FrontendTableRead,surface:InputSurface):void{
   if(!baseline.slots||!equal(baseline.slots.headers,current.headers)||current.range.startRowIndex!==1||current.range.startColumnIndex!==0)fail('input_slots','Immutable native input slots have not been established.');
   const keyHeader=surface==='leadership'?'contact_id':['blue','gold'].includes(surface)?'request_id':'person_id',keyColumn=current.headers.indexOf(keyHeader);
-  if(keyColumn<0||baseline.slots.keys.length!==current.rows.length||!equal(baseline.slots.keys,current.rows.map(r=>nativeInputValue(r[keyColumn]))))fail('input_slots','Physical rows or identities changed; reconcile structural edits first.');
+  const keys=baseline.slots.keys.filter(key=>key!==null);
+  if(keyColumn<0||new Set(current.headers).size!==current.headers.length||new Set(keys).size!==keys.length||new Set(baseline.rows.map(r=>r.key)).size!==baseline.rows.length||
+    baseline.slots.keys.length!==current.rows.length||!equal(baseline.slots.keys,current.rows.map(r=>nativeInputValue(r[keyColumn]))))fail('input_slots','Physical rows or identities changed; reconcile structural edits first.');
+}
+
+/** Coordinates below are zero-based within the Table body. Preserve the original
+ * trigger dimensions for identity and single-cell evidence after clipping. */
+export function nativeInputBounds(e:NativeEditEvidence,current:FrontendTableRead,surface:InputSurface,baseline:FrontendPublicationBaseline){
+  if(![e.row,e.column,e.rows,e.columns].every(n=>natural(n,1)))fail('input_range','Invalid native edit dimensions.');
+  const row=Math.max(0,e.row-3),endRow=Math.min(current.rows.length,e.row-3+e.rows);
+  const column=e.column-1,endColumn=Math.min(current.headers.length,column+e.columns);
+  if(surface!=='attendance'&&(e.row<3||e.row-3+e.rows>current.rows.length||column+e.columns>current.headers.length))fail('input_range','Input is outside the published native Table body.');
+  const retired=new Set(baseline.retiredEventColumns?.map(column=>column.header));
+  const headerCount=surface==='attendance'?current.headers.slice(column,endColumn).filter(h=>h.startsWith('event:')&&!retired.has(h)).length:e.columns;
+  if(Math.max(0,endRow-row)*headerCount>250)fail('input_capacity','Split the edit into groups of at most 250 input cells.');
+  return {row,endRow,column,endColumn};
+}
+
+/** Private evidence for a paste, whose native trigger carries no per-cell values. */
+export function attendanceReadEvidence(event:NativeEditEvidence,current:FrontendTableRead,baseline:FrontendPublicationBaseline){
+  assertImmutableInputSlots(baseline,current,'attendance');
+  const bounds=nativeInputBounds(event,current,'attendance',baseline),rows=new Map(baseline.rows.map(row=>[row.key,row]));
+  const cells=[];
+  for(let r=bounds.row;r<bounds.endRow;r++)for(let c=bounds.column;c<bounds.endColumn;c++){
+    const header=current.headers[c];if(!header.startsWith('event:'))continue;
+    const key=baseline.slots!.keys[r],row=key===null?undefined:rows.get(key);
+    if(baseline.retiredEventColumns?.some(col=>col.header===header)){
+      if(!equal(nativeComparable(row?.values[header]??null),nativeInputValue(current.rows[r][c])))fail('input_readonly','A retained inactive Attendance event was changed.');
+      continue;
+    }
+    cells.push({key,header,label:current.labels[c],before:row?.values[header]??null,
+      entered:nativeInputValue(current.rows[r][c]),pairVersion:row?.versions[header]??null,eventVersion:row?.eventVersions?.[header]??null});
+  }
+  return cells;
 }
 /** Physical slot immutability + reviewed provider behavior are prerequisites. Reading a current hidden ID alone is never sufficient. */
 export function captureFrontendEdit(input:{event:NativeEditEvidence;binding:InputSurfaceBinding;baseline:FrontendPublicationBaseline;drafts:FrontendDraft[];
-  current:FrontendTableRead;snapshot:FrontendSnapshot;principals:InputPrincipal[];config:AdapterConfig;signer:Signer;providerCoordinatesVerified:boolean;automationEmail:string;captureSequence?:number}):CapturedFrontendEdit{
+  current:FrontendTableRead;snapshot:FrontendInputContext;principals:InputPrincipal[];config:AdapterConfig;signer:Signer;providerCoordinatesVerified:boolean;automationEmail:string;captureSequence?:number}):CapturedFrontendEdit{
   const {event:e,binding:b,baseline,current,signer}=input;
   if(input.config.environment!=='staging'||baseline.generation!==input.config.generation||input.snapshot.generation!==baseline.generation||input.snapshot.environment!=='staging'
-    ||e.spreadsheetId!==b.spreadsheetId||e.sheetId!==b.sheetId||current.sheetId!==b.sheetId||current.tableId!==b.tableId
-    ||![e.row,e.column,e.rows,e.columns].every(n=>natural(n,1))||e.rows*e.columns>250)fail('input_binding','A bounded, exact staging edit binding is required.');
+    ||e.spreadsheetId!==b.spreadsheetId||e.sheetId!==b.sheetId||current.sheetId!==b.sheetId||current.tableId!==b.tableId)fail('input_binding','A bounded, exact staging edit binding is required.');
   assertImmutableInputSlots(baseline,current,b.surface);
   if(!natural(input.captureSequence??0))fail('input_identity','Invalid capture sequence.');
-  if(e.row<3||e.row+e.rows-3>current.rows.length||e.column+e.columns-1>current.headers.length)fail('input_range','Input is outside the published native Table body.');
+  const bounds=nativeInputBounds(e,current,b.surface,baseline);
+  const rows=new Map(baseline.rows.map(row=>[row.key,row]));
+  const checkedEvents=new Map<string,number>(),retired=new Set(baseline.retiredEventColumns?.map(c=>c.header));
+  if(b.surface==='attendance'&&bounds.row<bounds.endRow){
+    const labelKey=(label:string)=>label.trim().replace(/\s+/g,' ').toLowerCase();
+    const seenLabels=new Set<string>(),duplicates=new Set<string>();
+    current.headers.forEach((h,i)=>{if(!h.startsWith('event:')||retired.has(h)&&current.hiddenColumns.includes(i))return;const label=labelKey(current.labels[i]??'');if(seenLabels.has(label))duplicates.add(label);seenLabels.add(label);});
+    for(let c=bounds.column;c<bounds.endColumn;c++){
+      const header=current.headers[c];if(!header.startsWith('event:'))continue;
+      if(retired.has(header)){
+        if(!current.hiddenColumns.includes(c))fail('input_slots','A retained inactive Attendance event became visible.');
+        continue;
+      }
+      const matches=input.snapshot.events.filter(event=>event.eventId===header.slice(6)),event=matches[0],label=current.labels[c];
+      if(matches.length!==1||event.status!=='active'||!label||label!==(event.columnLabel||event.label)||duplicates.has(labelKey(label)))
+        fail('input_binding','The visible Attendance event is stale or ambiguous; review the current event before submitting.');
+      checkedEvents.set(header,event.version);
+    }
+    const names=['last_name','first_name'].map(h=>({h,c:current.headers.indexOf(h)})).filter(({c})=>c>=0);
+    if(checkedEvents.size)for(let r=bounds.row;r<bounds.endRow;r++){
+      const key=baseline.slots!.keys[r],row=key===null?undefined:rows.get(key);
+      if(row&&names.some(({h,c})=>!equal(nativeComparable(row.values[h]??null),nativeInputValue(current.rows[r][c]))))fail('input_slots','Attendance names moved relative to their protected row identities.');
+    }
+  }
   const drafts:FrontendDraft[]=[],lines:string[]=[];
-  for(let r=e.row-3;r<e.row-3+e.rows;r++)for(let c=e.column-1;c<e.column-1+e.columns;c++){
-    const key=baseline.slots!.keys[r],header=current.headers[c],row=baseline.rows.find(x=>x.key===key),value=nativeInputValue(current.rows[r][c]);
+  for(let r=bounds.row;r<bounds.endRow;r++)for(let c=bounds.column;c<bounds.endColumn;c++){
+    const key=baseline.slots!.keys[r],header=current.headers[c],row=key===null?undefined:rows.get(key),value=nativeInputValue(current.rows[r][c]);
+    if(b.surface==='attendance'&&e.rows===1&&e.columns===1&&header.startsWith('event:')&&(e.value!==undefined||e.oldValue!==undefined)&&e.value!==eventScalar(value))
+      fail('input_changed','The Attendance cell no longer contains the value from this edit.');
+    if(b.surface==='attendance'&&key===null&&value===null)continue;
+    if(b.surface==='attendance'&&row?.retired&&equal(nativeComparable(row.values[header]??null),value))continue;
     if(!row||row.retired)fail('input_slots','This physical row is not an active published identity.');
     const before=nativeComparable(row.values[header]??null);
     if(equal(before,value))continue;
-    if(row.readonlyHeaders?.includes(header)||!row.commandBindings?.[header]||!natural(row.versions[header]))fail('input_readonly','A protected identity or derived field was changed.');
+    if(b.surface==='attendance'&&retired.has(header)||row.readonlyHeaders?.includes(header)||!row.commandBindings?.[header]||!natural(row.versions[header]))fail('input_readonly','A protected identity or derived field was changed.');
     const binding=row.commandBindings[header];
     const expectedOperation=b.surface==='directory'?'directory.upsert':b.surface==='leadership'?'leadership.upsert':b.surface==='attendance'?'attendance.correct':'excusal.decide';
     if(binding.entityId!==row.key||binding.operation!==expectedOperation||(b.surface==='attendance'&&header!==`event:${binding.field}`)||(['blue','gold'].includes(b.surface)&&(header!=='decision'||binding.field!=='decision')))fail('input_binding','The row key and protected command target disagree.');
+    if(b.surface==='attendance'&&(checkedEvents.get(header)!==row.eventVersions?.[header]||row.versions[header]!==binding.expectedVersion))
+      fail('input_version','The Attendance event or its published version changed.');
     const prior=input.drafts.filter(d=>d.key===key&&d.header===header);
     if(prior.length>1||prior.length===1&&!equal(prior[0].value,value))fail('input_pending','Resolve the previous frozen input before replacing this cell.');
     const draft:FrontendDraft=prior[0]?clone(prior[0]):{key:row.key,header,value,baseVersion:row.versions[header],command:clone(row.commandBindings[header]),...(header.startsWith('event:')?{expectedEventVersion:row.eventVersions?.[header]}:{})};

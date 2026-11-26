@@ -36,6 +36,8 @@ export interface ReportingEvent {
   termId: string;
   label: string;
   type: typeof TYPES[number];
+  /** Earlier frozen report inputs predate catalog status. */
+  status?: 'active' | 'cancelled' | 'inactive' | 'archived';
   trainingWeek: number | null;
   displayOrder: number;
   /** Exact event roster snapshot. Null means unavailable, not everyone eligible. */
@@ -295,7 +297,7 @@ export function buildFrontendReporting(input: FrontendReportingInput) {
   }
   const eligibility = new Map<string, Set<string> | null>();
   for (const e of events.values()) {
-    text(e.label, 'events.label'); if (!terms.has(e.termId) || !TYPES.includes(e.type)) fail('events.classification');
+    text(e.label, 'events.label'); if (!terms.has(e.termId) || !TYPES.includes(e.type) || (e.status !== undefined && !['active', 'cancelled', 'inactive', 'archived'].includes(e.status))) fail('events.classification');
     integer(e.displayOrder, 'events.displayOrder'); if (e.trainingWeek !== null) integer(e.trainingWeek, 'events.trainingWeek', 1);
     if (e.eligiblePersonIds === null) eligibility.set(e.eventId, null);
     else {
@@ -343,7 +345,8 @@ export function buildFrontendReporting(input: FrontendReportingInput) {
   const diagnostics: ReportingDiagnostic[] = [];
   let cellsPlanned = 0;
   const plan = [...terms.values()].sort((a, b) => a.sortOrder - b.sortOrder).map(term => {
-    const termEvents = input.events.filter(e => e.termId === term.termId && e.type !== 'third-hour').sort((a, b) => (a.trainingWeek ?? Number.MAX_SAFE_INTEGER) - (b.trainingWeek ?? Number.MAX_SAFE_INTEGER) || TYPES.indexOf(a.type) - TYPES.indexOf(b.type) || a.displayOrder - b.displayOrder || compareText(a.eventId, b.eventId));
+    const termEvents = input.events.filter(e => e.termId === term.termId && e.type !== 'third-hour'
+      && (term.termId !== input.currentTermId || e.status === undefined || e.status === 'active')).sort((a, b) => (a.trainingWeek ?? Number.MAX_SAFE_INTEGER) - (b.trainingWeek ?? Number.MAX_SAFE_INTEGER) || TYPES.indexOf(a.type) - TYPES.indexOf(b.type) || a.displayOrder - b.displayOrder || compareText(a.eventId, b.eventId));
     const isCurrent = term.termId === input.currentTermId;
     const roster = (term.roster ?? (isCurrent ? input.people.filter(p => !INACTIVE.has(p.flightPathStatus.trim().toLowerCase())) : [])).filter(inScope).slice().sort(compareCadetsForDisplay);
     const rosterSource = term.roster ? 'snapshot' as const : isCurrent ? 'current' as const : 'unavailable' as const;

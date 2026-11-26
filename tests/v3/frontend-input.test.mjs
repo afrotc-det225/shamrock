@@ -7,7 +7,7 @@ const scalar=v=>v===null?{}:typeof v==='number'?{userEnteredValue:{numberValue:v
 function fixture(){
  const headers=['last_name','event:event-one','person_id'],values={last_name:'Example','event:event-one':null,person_id:'person-one'};
  const row={key:'person-one',values,versions:{'event:event-one':4},eventVersions:{'event:event-one':9},commandBindings:{'event:event-one':{operation:'attendance.correct',entityId:'person-one',field:'event-one',expectedVersion:4}}};
- return {event:{spreadsheetId:'main',sheetId:1,row:3,column:2,rows:1,columns:1,value:'P',actorEmail:principal.email,triggerUid:'trigger'},binding:{surface:'attendance',spreadsheetId:'main',sheetId:1,tableId:'table',resourceKey:'main-attendance'},baseline:{generation:1,revision:{operations:4,administration:1},rows:[row],slots:{headers,keys:['person-one']}},drafts:[],current:{sheetId:1,tableId:'table',gridRowCount:20,gridColumnCount:3,headers,labels:['Last Name','LLAB','Person ID'],rows:[[scalar('Example'),scalar('P'),scalar('person-one')]],range:{sheetId:1,startRowIndex:1,endRowIndex:3,startColumnIndex:0,endColumnIndex:3},hiddenColumns:[2],machineRowHidden:true},snapshot:{environment:'staging',generation:1,people:[],leadership:[],flights:[]},principals:[principal],config:{environment:'staging',generation:1,baseUrl:'https://fixture.invalid',keyId:'fixture'},signer,providerCoordinatesVerified:true,automationEmail:'automation@example.invalid'};
+ return {event:{spreadsheetId:'main',sheetId:1,row:3,column:2,rows:1,columns:1,value:'P',actorEmail:principal.email,triggerUid:'trigger'},binding:{surface:'attendance',spreadsheetId:'main',sheetId:1,tableId:'table',resourceKey:'main-attendance'},baseline:{generation:1,revision:{operations:4,administration:1},rows:[row],slots:{headers,keys:['person-one']}},drafts:[],current:{sheetId:1,tableId:'table',gridRowCount:20,gridColumnCount:3,headers,labels:['Last Name','LLAB','Person ID'],rows:[[scalar('Example'),scalar('P'),scalar('person-one')]],range:{sheetId:1,startRowIndex:1,endRowIndex:3,startColumnIndex:0,endColumnIndex:3},hiddenColumns:[2],machineRowHidden:true},snapshot:{environment:'staging',generation:1,people:[],leadership:[],flights:[],events:[{eventId:"event-one",label:"LLAB",version:9,status:"active"}]},principals:[principal],config:{environment:'staging',generation:1,baseUrl:'https://fixture.invalid',keyId:'fixture'},signer,providerCoordinatesVerified:true,automationEmail:'automation@example.invalid'};
 }
 const capture=f=>captureFrontendEdit(f),commands=edit=>commandsForCapturedEdit({edit,principals:[principal]});
 test('single verified dropdown freezes protected target and original pair/catalog versions',()=>{
@@ -69,4 +69,33 @@ test('native empty cells match published empty strings without changing baseline
 test('Blue and Gold decisions bind request/version and cannot clear a committed status implicitly',()=>{
  const f=fixture();f.binding.surface='blue';f.binding.resourceKey='blue-decisions';f.current.headers=['last_name','decision','request_id'];f.current.labels=['Last Name','Decision','Request'];f.baseline.slots={headers:f.current.headers,keys:['request-one']};f.baseline.rows=[{key:'request-one',values:{last_name:'Example',decision:null,request_id:'request-one'},versions:{decision:2},commandBindings:{decision:{operation:'excusal.decide',entityId:'request-one',field:'decision',expectedVersion:2}}}];f.current.rows=[[scalar('Example'),scalar('Denied'),scalar('request-one')]];f.event.value='Denied';const e=capture(f),c=commands(e)[0];assert.equal(c.operation,'excusal.decide');assert.equal(c.payload.requestId,'request-one');assert.equal(c.payload.expectedVersion,2);
  f.baseline.rows[0].values.decision='Denied';f.current.rows[0][1]={};delete f.event.value;f.event.oldValue='Denied';assert.throws(()=>capture(f));
+});
+
+test('visible Attendance header, active catalog version, stable names and unique physical key all precede capture',()=>{
+ for(const mutate of [
+   f=>f.current.labels[1]='Old LLAB', f=>f.snapshot.events[0].status='cancelled',
+   f=>f.event.value='A', f=>{delete f.event.value;f.event.oldValue='A';},
+   f=>f.snapshot.events[0].version++, f=>f.snapshot.events=[],
+   f=>f.snapshot.events.push(copy(f.snapshot.events[0])), f=>f.current.rows[0][0]=scalar('Moved name'),
+   f=>{f.current.headers.splice(2,0,'event:other');f.current.labels.splice(2,0,' llab ');f.current.rows[0].splice(2,0,{});},
+   f=>f.baseline.rows.push(copy(f.baseline.rows[0])),
+   f=>f.baseline.rows[0].commandBindings['event:event-one'].expectedVersion++
+ ]){const f=fixture();mutate(f);assert.throws(()=>capture(f));}
+});
+
+test('Attendance edit bounds count the event-body intersection and retain the paste confirmation requirement',()=>{
+ const f=fixture();f.event={...f.event,row:1,column:1,rows:2000,columns:10};
+ assert.equal(capture(f).status,'confirmation-required');
+ f.current.rows=Array.from({length:251},(_,i)=>[scalar('Example'),scalar('P'),scalar('person-'+i)]);
+ f.baseline.slots.keys=f.current.rows.map(r=>r[2].userEnteredValue.stringValue);
+ assert.throws(()=>capture(f),{code:'input_capacity'});
+});
+
+test('mixed attendance rectangles clip an intact hidden retired event, reject changes to it, and tolerate reuse of its former display label',()=>{
+ const f=fixture();f.current.headers.splice(1,0,'event:retired');f.current.labels.splice(1,0,'LLAB');f.current.rows[0].splice(1,0,scalar('E'));
+ f.current.hiddenColumns=[1,3];f.baseline.slots.headers=[...f.current.headers];f.baseline.retiredEventColumns=[{header:'event:retired',wasHidden:false}];
+ f.baseline.rows[0].values['event:retired']='E';f.event={...f.event,row:2,rows:3,column:1,columns:4};delete f.event.value;
+ const e=capture(f);assert.equal(e.status,'confirmation-required');assert.deepEqual(e.drafts.map(d=>d.header),['event:event-one']);
+ f.current.rows[0][1]={};assert.throws(()=>capture(f),{code:'input_readonly'});
+ f.current.rows[0][1]=scalar('E');f.current.hiddenColumns=[3];assert.throws(()=>capture(f));
 });

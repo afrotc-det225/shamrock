@@ -153,7 +153,7 @@ export function panelSnapshotToReportingInput(snapshot: PanelSnapshot, asOfDate:
     return {
         policyVersion: REPORTING_POLICY_VERSION, asOfDate, currentTermId: snapshot.scope.currentTermId, people, flights, squadrons: snapshot.squadrons,
         terms: snapshot.terms.map(t => ({ termId: t.termId, label: t.label, sortOrder: t.sortOrder })),
-        events: snapshot.events.map(e => ({ eventId: e.eventId, termId: e.termId, label: e.columnLabel || e.label, type: e.eventType, trainingWeek: e.trainingWeek, displayOrder: e.displayOrder, eligiblePersonIds: e.eligiblePersonIds })),
+        events: snapshot.events.map(e => ({ eventId: e.eventId, termId: e.termId, label: e.columnLabel || e.label, type: e.eventType, status: e.status, trainingWeek: e.trainingWeek, displayOrder: e.displayOrder, eligiblePersonIds: e.eligiblePersonIds })),
         observations: snapshot.observations, corrections: snapshot.corrections, legacyBaselines: snapshot.legacyBaselines,
         // Retained request-only people belong in the queue, not a fabricated attendance roster.
         requests: snapshot.requests.filter(r => ids.has(r.personId)).map(r => ({ requestId: r.requestId, personId: r.personId, eventId: r.eventId, order: r.order,

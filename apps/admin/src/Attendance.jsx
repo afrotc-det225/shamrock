@@ -11,9 +11,10 @@ import {
   AttendanceRate,
 } from "./components";
 import { name } from "./api";
+import { currentExcusalRequests } from "./attendance-events.mjs";
 export default function Attendance({ snapshot: s, reporting, propose, busy, readOnly = false }) {
   const [tab, setTab] = useState("attendance"),
-    [event, setEvent] = useState(s.events[0]?.eventId || ""),
+    [selectedEvent, setEvent] = useState(""),
     [flight, setFlight] = useState(""),
     [edit, setEdit] = useState(null),
     [reason, setReason] = useState(""),
@@ -22,7 +23,11 @@ export default function Attendance({ snapshot: s, reporting, propose, busy, read
   const canCorrect = (p) =>
     !scoped ||
     s.access.capabilities.attendanceCorrectionFlightIds.includes(p.flightId);
-  const requests = s.requests.filter((r) => !flight || r.flightId === flight);
+  const reported = new Set(reporting?.matrices.flatMap(m => m.eventColumns.map(e => e.eventId)));
+  const events = s.events.filter(e => reported.has(e.eventId));
+  const event = events.some(e => e.eventId === selectedEvent) ? selectedEvent : events[0]?.eventId || "";
+  const queue = currentExcusalRequests(s);
+  const requests = queue.filter(r => !flight || r.flightId === flight);
   const matrix = reporting?.matrices?.find(
     (m) => m.termId === s.events.find((e) => e.eventId === event)?.termId,
   );
@@ -51,7 +56,7 @@ export default function Attendance({ snapshot: s, reporting, propose, busy, read
             onClick={() => setTab("excusals")}
           >
             Excusals (
-            {s.requests.filter((r) => r.status === "Submitted").length} pending)
+            {queue.filter((r) => r.status === "Submitted").length} pending)
           </button>
         </div>
         <div className="toolbar">
@@ -60,7 +65,7 @@ export default function Attendance({ snapshot: s, reporting, propose, busy, read
               label="Event"
               value={event}
               onChange={setEvent}
-              options={s.events.map((e) => ({
+              options={events.map((e) => ({
                 value: e.eventId,
                 label: e.label,
               }))}
@@ -155,7 +160,7 @@ export default function Attendance({ snapshot: s, reporting, propose, busy, read
           ))}
         </Table>
       )}
-      {edit && (
+      {edit && (edit.request ? queue.some(r => r.requestId === edit.request.requestId) : reported.has(edit.event.eventId)) && (
         <Editor
           title={edit.request ? "Review excusal" : "Correct attendance"}
           busy={busy}

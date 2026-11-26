@@ -328,6 +328,29 @@ export function assertNativeAttendanceLayoutRequest(request: Record<string, any>
     || (style.numberFormat && !equal(style.numberFormat, { type: 'TEXT' }) && !equal(style.numberFormat, { type: 'PERCENT', pattern: '0.0%' }))) fail('frontend_request', 'Attendance formatting differs from the compact native layout.');
 }
 
+/** Unhiding requires both the old protected binding and the exact retained reactivation plan. */
+export function assertNativeFrontendVisibilityRequest(body: Record<string, any>, sheetIds: ReadonlySet<number>, attendance?: {
+  binding: { sheetId: number; tableId: string }; before?: FrontendPublicationBaseline; plan?: FrontendPublicationPlan;
+  read(): FrontendTableRead;
+}): void {
+  const range = body.range, hide = body.properties?.hiddenByUser;
+  if (body.fields !== 'hiddenByUser' || typeof hide !== 'boolean' || !sheetIds.has(range?.sheetId)
+    || !['ROWS', 'COLUMNS'].includes(range.dimension) || !natural(range.startIndex) || !natural(range.endIndex)
+    || range.endIndex <= range.startIndex || range.endIndex > 160) fail('frontend_request', 'A retained frontend visibility update is invalid.');
+  if (hide) return;
+  const index = range.startIndex, header = attendance?.before?.slots?.headers[index], plan = attendance?.plan;
+  if (!attendance || !plan || !header?.startsWith('event:') || range.sheetId !== attendance.binding.sheetId
+    || range.dimension !== 'COLUMNS' || range.endIndex !== index + 1
+    || !attendance.before?.retiredEventColumns?.some(c => c.header === header && c.wasHidden === false)
+    || plan.nextBaseline.slots?.headers[index] !== header || plan.nextBaseline.retiredEventColumns?.some(c => c.header === header)
+    || plan.expectedAfter.sheetId !== range.sheetId || plan.expectedAfter.tableId !== attendance.binding.tableId
+    || plan.expectedAfter.headers[index] !== header || plan.expectedAfter.hiddenColumns.includes(index)
+    || !plan.requests.some(r => equal(r.updateDimensionProperties, body))) fail('frontend_request', 'Only a verified reactivated Attendance event may be made visible.');
+  const current = attendance.read();
+  if (current.sheetId !== range.sheetId || current.tableId !== attendance.binding.tableId
+    || current.headers[index] !== header || !current.hiddenColumns.includes(index)) fail('frontend_request', 'The hidden Attendance slot changed before reactivation.');
+}
+
 /** One effect per run. A failed write never releases the edit fence or discards a claim. */
 export function consumeFrontendRefresh(runtime: FrontendRefreshPorts): { status: 'disabled' | 'idle' | 'published' | 'published-with-drafts'; changedCells?: number; retainedDrafts?: number } {
   if (!runtime.enabled()) return { status: 'disabled' };
@@ -570,7 +593,7 @@ export interface NativeFrontendInputSession {
   config: NativeFrontendConfig; automationEmail: string; adapter: AdapterConfig;
   signer: Signer; transport: Transport; nowSeconds(): number;
   state: FrontendPublicationState;
-  read(surface: 'directory'|'leadership'|'attendance'|'blue'|'gold'): FrontendTableRead;
+  read(surface: 'directory'|'leadership'|'attendance'|'blue'|'gold',fresh?:boolean,includeNotes?:boolean): FrontendTableRead;
   save(state: FrontendPublicationState): void;
   fence(): void; restore(): void;
   /** Verified field mapping reused under the held native lock for permission fencing. */
@@ -715,6 +738,7 @@ export function createNativeFrontendRuntime(services: NativeFrontendServices,
       return metadata;
     }
     let publishedBaselines: FrontendPublicationState['baselines'] | undefined;
+    let pendingAttendancePlan: FrontendPublicationPlan | undefined;
     let publishedSupplemental: FrontendSupplementalState | undefined;
     let pendingCatalog: CatalogLegendPlan | undefined, catalogCache: CatalogLegendRead | undefined;
     let metadataCache: Record<string, any> | undefined, cellsCache: Record<string, any> | undefined;
@@ -724,22 +748,23 @@ export function createNativeFrontendRuntime(services: NativeFrontendServices,
     const readExcusalMetadata = () => excusalMetadataCache ??= api(`${sheetsUrl(supplemental!.excusals.spreadsheetId)}?fields=${encodeURIComponent('spreadsheetId,sheets(properties,tables,protectedRanges)')}`);
     const column = (index: number) => { let result = ''; for (let n = index + 1; n > 0; n = Math.floor((n - 1) / 26)) result = String.fromCharCode(65 + (n - 1) % 26) + result; return result; };
     const quoted = (title: string) => `'${title.replace(/'/g, "''")}'`;
-    function readTable(kind: Kind): FrontendTableRead {
+    function readTable(kind: Kind, freshInput = false, includeNotes = false): FrontendTableRead {
       const metadata = readMetadata(), binding = config.main.sheets[kind];
       const sheet = metadata.sheets?.find((s: any) => s.properties?.sheetId === binding.sheetId);
       const table = sheet?.tables?.find((t: any) => t.tableId === binding.tableId);
       if (!sheet || sheet.tables.length !== 1 || !table || table.range.startRowIndex !== 1 || (table.range.startColumnIndex ?? 0) !== 0
         || !natural(table.range.endRowIndex) || table.range.endRowIndex > 502 || !natural(table.range.endColumnIndex) || table.range.endColumnIndex > 160) fail('frontend_table', 'A configured native frontend Table is missing or exceeds its bound.');
-      if (!cellsCache) {
-        const ranges = KINDS.map(k => {
+      let data = cellsCache;
+      if (!data || freshInput) {
+        const ranges = (freshInput ? [kind] : KINDS).map(k => {
           const bound = config.main.sheets[k], s = metadata.sheets?.find((entry: any) => entry.properties?.sheetId === bound.sheetId);
           const t = s?.tables?.find((entry: any) => entry.tableId === bound.tableId);
           if (!t || !natural(t.range.endRowIndex) || t.range.endRowIndex > 502 || !natural(t.range.endColumnIndex) || t.range.endColumnIndex > 160) fail('frontend_table', 'A configured frontend Table exceeds its bound.');
           return `${quoted(s.properties.title)}!A1:${column(t.range.endColumnIndex - 1)}${t.range.endRowIndex}`;
         });
-        cellsCache = api(`${sheetsUrl(config.main.spreadsheetId)}?${ranges.map(a1 => `ranges=${encodeURIComponent(a1)}`).join('&')}&includeGridData=true&fields=${encodeURIComponent('sheets(properties(sheetId),data(startRow,startColumn,rowData(values(userEnteredValue,chipRuns)),rowMetadata(hiddenByUser),columnMetadata(hiddenByUser)))')}`);
+        data = api(`${sheetsUrl(config.main.spreadsheetId)}?${ranges.map(a1 => `ranges=${encodeURIComponent(a1)}`).join('&')}&includeGridData=true&fields=${encodeURIComponent(`sheets(properties(sheetId),data(startRow,startColumn,rowData(values(userEnteredValue,chipRuns${includeNotes ? ',note' : ''})),rowMetadata(hiddenByUser),columnMetadata(hiddenByUser)))`)}`);
+        if (!freshInput) cellsCache = data;
       }
-      const data = cellsCache;
       const source = data.sheets?.find((s: any) => s.properties?.sheetId === binding.sheetId)?.data?.[0];
       if (!source || (source.startRow ?? 0) !== 0 || (source.startColumn ?? 0) !== 0) fail('frontend_table', 'Frontend cell read-back has invalid bounds.');
       const width = table.range.endColumnIndex;
@@ -749,21 +774,23 @@ export function createNativeFrontendRuntime(services: NativeFrontendServices,
         gridColumnCount: sheet.properties.gridProperties.columnCount, headers, labels, filterViews: sheet.filterViews ?? [], rows: Array.from({ length: table.range.endRowIndex - 2 }, (_, r) => row(r + 2)),
         range: { ...table.range, startColumnIndex: 0 }, hiddenColumns: Array.from({ length: width }, (_, c) => c).filter(c => source.columnMetadata?.[c]?.hiddenByUser === true), machineRowHidden: source.rowMetadata?.[0]?.hiddenByUser === true };
     }
-    function readExcusal(queue: SquadronQueue): FrontendTableRead {
+    function readExcusal(queue: SquadronQueue, freshInput = false, includeNotes = false): FrontendTableRead {
       const book = supplemental!.excusals, metadata = readExcusalMetadata(), binding = book.sheets[queue];
       const sheet = metadata.sheets?.find((s: any) => s.properties?.sheetId === binding.sheetId);
       const table = sheet?.tables?.find((t: any) => t.tableId === binding.tableId);
       if (!sheet || sheet.tables.length !== 1 || !table || table.range.startRowIndex !== 1 || (table.range.startColumnIndex ?? 0) !== 0
         || !natural(table.range.endRowIndex) || table.range.endRowIndex > 502 || !natural(table.range.endColumnIndex) || table.range.endColumnIndex > 160) fail('frontend_table', 'A squadron queue Table is missing or exceeds its bound.');
-      if (!excusalCellsCache) {
-        const ranges = QUEUES.map(q => {
+      let data = excusalCellsCache;
+      if (!data || freshInput) {
+        const ranges = (freshInput ? [queue] : QUEUES).map(q => {
           const b = book.sheets[q], s = metadata.sheets?.find((entry: any) => entry.properties?.sheetId === b.sheetId), t = s?.tables?.find((entry: any) => entry.tableId === b.tableId);
           if (!t || !natural(t.range.endRowIndex) || t.range.endRowIndex > 502 || !natural(t.range.endColumnIndex) || t.range.endColumnIndex > 160) fail('frontend_table', 'A squadron queue read exceeds its bound.');
           return `${quoted(s.properties.title)}!A1:${column(t.range.endColumnIndex - 1)}${t.range.endRowIndex}`;
         });
-        excusalCellsCache = api(`${sheetsUrl(book.spreadsheetId)}?${ranges.map(a1 => `ranges=${encodeURIComponent(a1)}`).join('&')}&includeGridData=true&fields=${encodeURIComponent('sheets(properties(sheetId),data(startRow,startColumn,rowData(values(userEnteredValue,chipRuns)),rowMetadata(hiddenByUser),columnMetadata(hiddenByUser)))')}`);
+        data = api(`${sheetsUrl(book.spreadsheetId)}?${ranges.map(a1 => `ranges=${encodeURIComponent(a1)}`).join('&')}&includeGridData=true&fields=${encodeURIComponent(`sheets(properties(sheetId),data(startRow,startColumn,rowData(values(userEnteredValue,chipRuns${includeNotes ? ',note' : ''})),rowMetadata(hiddenByUser),columnMetadata(hiddenByUser)))`)}`);
+        if (!freshInput) excusalCellsCache = data;
       }
-      const source = excusalCellsCache.sheets?.find((s: any) => s.properties?.sheetId === binding.sheetId)?.data?.[0];
+      const source = data.sheets?.find((s: any) => s.properties?.sheetId === binding.sheetId)?.data?.[0];
       if (!source || (source.startRow ?? 0) !== 0 || (source.startColumn ?? 0) !== 0) fail('frontend_table', 'Squadron queue read-back bounds are invalid.');
       const width = table.range.endColumnIndex, row = (r: number) => Array.from({ length: width }, (_, c) => source.rowData?.[r]?.values?.[c] ?? {});
       return { sheetId: binding.sheetId, tableId: binding.tableId, gridRowCount: sheet.properties.gridProperties.rowCount, gridColumnCount: sheet.properties.gridProperties.columnCount,
@@ -807,7 +834,7 @@ export function createNativeFrontendRuntime(services: NativeFrontendServices,
       });
     }
     function readNativeCatalog(): CatalogLegendRead {
-      return catalogCache ??= readCatalogLegend({ seeds: config.seeds, metadata: readMetadata(), tables: KINDS.map(readTable),
+      return catalogCache ??= readCatalogLegend({ seeds: config.seeds, metadata: readMetadata(), tables: KINDS.map(kind=>readTable(kind)),
         businessSheetIds: [...KINDS.map(k => config.main.sheets[k].sheetId), ...(supplemental ? [supplemental.dashboard.sheetId, supplemental.dashboard.dataSheetId] : [])],
         readCells(bindings) {
           const ranges = bindings.map(({ title, range: r }) => `${quoted(title)}!${column(r.startColumnIndex)}${r.startRowIndex + 1}:${column(r.endColumnIndex - 1)}${r.endRowIndex}`);
@@ -838,7 +865,8 @@ export function createNativeFrontendRuntime(services: NativeFrontendServices,
         const t = tables[kind]; return { kind, sheetId: s.properties.sheetId, headers: t.headers, dataEndRow: t.range.endRowIndex,
           gridRowCount: grid.rowCount, gridColumnCount: grid.columnCount,
           ...(!closed ? { readonlyCells: frontendRowLocks(kind, t, publishedBaselines?.[kind] ?? fail('frontend_state', 'Load the published field policy before restoring edits.')) } : {}),
-          ...(kind === 'attendance' ? { eventColumns: t.headers.filter(h => h.startsWith('event:')).map(h => ({ header: h, eventId: h.slice(6) })) } : {}) };
+          ...(kind === 'attendance' ? { eventColumns: t.headers.filter(h => h.startsWith('event:')
+            && !publishedBaselines?.attendance.retiredEventColumns?.some(c => c.header === h)).map(h => ({ header: h, eventId: h.slice(6) })) } : {}) };
       }) };
     }
     function excusalProtectionInput(closed: boolean): FrontendProtectionInput {
@@ -933,9 +961,8 @@ export function createNativeFrontendRuntime(services: NativeFrontendServices,
         } else if (!excusals && (operation === 'repeatCell' || (operation === 'updateDimensionProperties' && body.fields === 'pixelSize'))) {
           assertNativeAttendanceLayoutRequest(request, config.main.sheets.attendance.sheetId);
         } else if (operation === 'updateDimensionProperties') {
-          if (body.fields !== 'hiddenByUser' || body.properties?.hiddenByUser !== true || !sheetIds.has(body.range?.sheetId)
-            || !['ROWS', 'COLUMNS'].includes(body.range.dimension) || !natural(body.range.startIndex) || !natural(body.range.endIndex)
-            || body.range.endIndex <= body.range.startIndex || body.range.endIndex > 160) fail('frontend_request', 'A retained frontend hidden-identity update is invalid.');
+          assertNativeFrontendVisibilityRequest(body, sheetIds, excusals ? undefined : { binding: config.main.sheets.attendance,
+            before: publishedBaselines?.attendance, plan: pendingAttendancePlan, read: () => readTable('attendance') });
         } else if (operation === 'copyPaste') {
           const source = body.source;
           if (!boundedRange(body.destination) || body.pasteType !== 'PASTE_DATA_VALIDATION' || body.pasteOrientation !== 'NORMAL'
@@ -987,8 +1014,10 @@ export function createNativeFrontendRuntime(services: NativeFrontendServices,
       state: {
         load() { const verified = checkpoint.load();
           publishedBaselines = clone(verified.baselines); publishedSupplemental = verified.supplemental ? clone(verified.supplemental) : undefined;
+          pendingAttendancePlan = verified.pending?.plans.attendance;
           pendingCatalog = verified.pending?.catalog ? clone(verified.pending.catalog) : undefined; return verified; },
         save(value) { checkpoint.save(value); publishedBaselines = clone(value.baselines);
+          pendingAttendancePlan = value.pending?.plans.attendance;
           publishedSupplemental = value.supplemental ? clone(value.supplemental) : undefined;
           pendingCatalog = value.pending?.catalog ? clone(value.pending.catalog) : undefined; },
       },
@@ -1039,7 +1068,11 @@ export function createNativeFrontendRuntime(services: NativeFrontendServices,
         runtime.refreshReads?.(); if(!permissionRepair)assertInputSessionPolicy(runtime,allowPausedInput);
         return inputOperation({config, automationEmail: host.expectedAutomationEmail, adapter: runtime.config, signer, transport: runtime.transport, nowSeconds: now, state,
           ...{protectionInput:(bookId:string)=>{invalidateReads();if(bookId===config.main.spreadsheetId)return protectionInput(false);if(supplemental&&bookId===supplemental.excusals.spreadsheetId)return excusalProtectionInput(false);return fail('frontend_permissions','Unknown permission workbook.');}},
-          read: surface => surface === 'blue' || surface === 'gold' ? runtime.supplemental?.readExcusal(surface) ?? fail('frontend_configuration', 'The squadron queue is not bound.') : runtime.readTable(surface),
+          read: (surface,fresh,includeNotes) => {
+            if(fresh)invalidateReads();
+            if(surface==='blue'||surface==='gold')return supplemental?readExcusal(surface,fresh,includeNotes):fail('frontend_configuration','The squadron queue is not bound.');
+            return readTable(surface,fresh,includeNotes);
+          },
           save: value => { runtime.state.save(value); if (!equal(runtime.state.load(), value)) fail('frontend_state', 'The input checkpoint did not persist.'); },
           fence: () => { runtime.fenceEdits(); runtime.assertFenced(); runtime.refreshReads?.(); },
           restore: () => { if(properties.getProperty(PERMISSION_FENCE_PROPERTY)!==null){runtime.assertFenced();return;}runtime.restoreEditPolicy(); runtime.assertEditPolicy(); runtime.refreshReads?.(); },
