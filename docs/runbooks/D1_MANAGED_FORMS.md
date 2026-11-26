@@ -243,3 +243,5 @@ updated artifact. Changing a responder list does not change the trigger binding
 fingerprint or require clearing a journal. Repair the named access while paused,
 then issue a new reviewed monotonic control if the failed resume was consumed.
 No provider permissions are created, deleted or widened by this runtime guard.
+
+Generated Attendance items, questions and section destinations use the eight-character hexadecimal IDs returned by Google Forms. For an interrupted publication, retain the original edition and compare the actual field contents and destinations before resuming its claim.

@@ -55,7 +55,8 @@ export function expandAttendanceLayout(snapshot: FrontendSnapshot, configured: M
   const stableId = (key: string) => {
     const digest = signer.sha256(`shamrock-layout-v1\n${configured.resourceKey}\n${key}`);
     if (!/^[a-f0-9]{64}$/.test(digest)) fail('A valid layout digest is required.');
-    return digest.slice(0, 7);
+    // Forms v1 returns caller-assigned numeric IDs as eight hexadecimal digits.
+    return digest.slice(0, 7).padStart(8, '0');
   };
   const add = (item: Record<string, any>, index: number) => {
     const ids = [item.itemId, item.questionItem?.question?.questionId].filter(Boolean);

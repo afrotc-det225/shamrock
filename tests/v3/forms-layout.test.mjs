@@ -31,6 +31,7 @@ test('a missing AS-year cohort is added in all applicable existing sections with
 });
 test('a new Flight adds two native sections, freezes Submit continuations, and replans without duplicate creation',()=>{
  const f=fixture();grow(f);const p=planNativeFormPublication(f);assert.equal(p.continuations.length,2);assert.equal(p.requests.filter(r=>r.createItem).length,6);const read=clone(f.current);apply(read,p.requests);assert(verifyFormBeforeContinuations(p,read));assert(!verifyNativeFormPlan(p,read));for(const id of p.continuations)read.pageBreakNavigation[id]={action:'SUBMIT'};assert(verifyNativeFormPlan(p,read));const next=planNativeFormPublication({...f,current:read,previousEdition:p.edition});assert.equal(next.requests.length,0);assert.equal(next.edition.editionId,p.edition.editionId);assert.equal(next.continuations,undefined);
+ for(const {createItem} of p.requests.filter(r=>r.createItem)){const item=createItem.item;for(const id of [item.itemId,item.questionItem?.question?.questionId].filter(Boolean))assert.match(id,/^0[0-9a-f]{7}$/);}
  const ids=read.items.flatMap(i=>[i.itemId,i.questionItem?.question?.questionId].filter(Boolean));assert.equal(new Set(ids).size,ids.length);
 });
 test('old response editions retain the original cohort bindings after a newer cohort is created',()=>{
