@@ -540,7 +540,7 @@ const worker = {
       if (url.pathname === '/v1/admin/effects/availability' && !url.search) return json(await adminEffectAvailability(env, input));
       if (url.pathname === '/v1/admin/snapshot/page' && !url.search) {
         const section = (input as {section?:unknown}|null)?.section;
-        if (section==='terms' || section==='events')
+        if (section==='terms' || section==='events' || section==='manifest' || section==='legacyBaselines')
           return await cachedPanelRead(env,url,body,async () => json(await frontendSnapshotPage(env,input)));
         return json(await frontendSnapshotPage(env,input));
       }

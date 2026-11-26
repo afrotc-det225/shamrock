@@ -115,6 +115,10 @@ export function scopedPanelSource(principal: string, flightIds: readonly string[
 
 export async function readPanelContext(env:Env, principal:string) {
     const first = (await env.DB.batch<Row>(authorityStatements(env, principal))).map(r => r.results);
+    return panelContextFromRows(first,principal);
+}
+
+export async function panelContextFromRows(first:Row[][], principal:string) {
     const authority = authorityFrom(first), access = resolvePanelAccess(authority);
     if (!access) return fail(403, 'NOT_AUTHORIZED');
     const control = first[0][0];

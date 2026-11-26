@@ -180,13 +180,14 @@ export async function loadSnapshot(state, request, progress = (_value) => {}) {
   let count = 0,
     bytes = 0;
   let transfer = state.manifest.viewRevision ?? null;
-  const get = async (section, offset, revision, viewRevision = transfer) => {
+  const get = async (section, offset, revision, viewRevision = transfer, afterBaseline = undefined) => {
     const page = await request("/page", {
       surface: full ? "full" : "scoped",
       section,
       offset,
       revision,
       accessRevision: panel.revision,
+      ...(afterBaseline ? {afterBaseline} : {}),
       ...(state.viewAs ? {viewRevision} : {}),
     });
     const size = new TextEncoder().encode(JSON.stringify(page)).length;
@@ -237,9 +238,14 @@ export async function loadSnapshot(state, request, progress = (_value) => {}) {
       progress({stage: "Loading records", completed: ++completed, total});
       return;
     }
-    let offset = 0;
+    let offset = 0, afterBaseline;
     do {
-      const page = await get(section, offset, manifest.revision);
+      const page = await get(section, offset, manifest.revision, transfer, afterBaseline);
+      if(full && section==="legacyBaselines" && page.nextBaselineKey){
+        const last=page.rows?.at(-1);
+        check(last && last.personId===page.nextBaselineKey.personId && last.eventId===page.nextBaselineKey.eventId);
+        afterBaseline=page.nextBaselineKey;
+      }
       check(page.offset === offset && Array.isArray(page.rows));
       pages.push(page);
       if (page.nextOffset === null) break;

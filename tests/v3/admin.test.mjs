@@ -1020,7 +1020,12 @@ test('current baseline continuations preserve attendance order and bound late-pa
   assert.deepEqual(last.rows.map(r=>[r.personId,r.code]), [['example-513',null]]);
   assert.equal(last.nextOffset, null);
   assert(reads<80, `Last single-record page read ${reads} rows`);
-  for (const [overrides,status] of [[{principalId:'outsider'},403],[{termId:'term-prior'},400],[{afterBaseline:{}},400],[{revision:{administration:999,operations:999}},409]]) {
+  const prior=await f.send({...secondRequest,termId:'term-prior'},path);
+  assert.equal(prior.status,200);
+  assert.deepEqual(prior.body.rows,[]);
+  const explicit=await f.send({...secondRequest,termId:first.body.scope.currentTermId},path);
+  assert.deepEqual(explicit.body.rows,second.body.rows);
+  for (const [overrides,status] of [[{principalId:'outsider'},403],[{afterBaseline:{}},400],[{revision:{administration:999,operations:999}},409]]) {
     assert.equal((await f.send({...secondRequest,...overrides},path)).status,status);
   }
 });

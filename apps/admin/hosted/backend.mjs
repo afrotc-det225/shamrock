@@ -326,6 +326,7 @@ export class HostedBackend {
         throw new PanelError("INVALID_REQUEST", "Reload the selected view.");
       return this.previewPage(input.surface === "full" ? "snapshot" : "panel", {
         section:input.section,offset:input.offset,revision:input.revision,
+        ...(input.surface==="full" && input.afterBaseline ? {afterBaseline:input.afterBaseline} : {}),
       }, input.viewRevision ?? null);
     }
     if (input.surface === "scoped") {
@@ -368,6 +369,7 @@ export class HostedBackend {
       ...this.identity(),
       section: input.section,
       offset: input.offset,
+      ...(input.afterBaseline ? {afterBaseline:input.afterBaseline} : {}),
       revision: input.revision,
       ...(input.sections === undefined ? {} : { sections: input.sections }),
     });

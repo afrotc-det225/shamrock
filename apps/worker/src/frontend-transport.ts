@@ -70,7 +70,7 @@ export async function frontendSnapshotPage(env:Env,input:unknown,forEffect=false
   const selected=Object.hasOwn(req,'sections');
   const hasAfter=Object.hasOwn(req,'afterBaseline');
   const after=req.afterBaseline as {personId:string;eventId:string}|undefined;
-  if(hasAfter && (req.section!=='legacyBaselines'||req.termId!=null||!Number.isSafeInteger(req.offset)||Number(req.offset)<1||
+  if(hasAfter && (req.section!=='legacyBaselines'||!Number.isSafeInteger(req.offset)||Number(req.offset)<1||
     !after||typeof after!=='object'||Object.keys(after).sort().join(',')!=='eventId,personId'||!identifier(after.personId)||!identifier(after.eventId)))fail(400,'INVALID_PAGE_REQUEST');
   const keys=['environment','generation','principalId','section','offset','revision',...(Object.hasOwn(req,'termId')?['termId']:[]),...(selected?['sections']:[]),...(hasAfter?['afterBaseline']:[]),...(forEffect?['workerId','effectId','claimToken']:[])];
   const termId=req.termId??null;if(termId!==null&&!identifier(termId))fail(400,'INVALID_PAGE_REQUEST');
@@ -91,22 +91,25 @@ export async function frontendSnapshotPage(env:Env,input:unknown,forEffect=false
   const scopeIndex=statements.length;statements.push(stmt(env.DB,`SELECT (SELECT COUNT(*) FROM terms WHERE is_current=1) AS currentCount,(SELECT term_id FROM terms WHERE is_current=1) AS currentTermId,(SELECT term_id FROM terms WHERE term_id=COALESCE(?,(SELECT term_id FROM terms WHERE is_current=1))) AS termId`,termId as string|null));
   const resultIndex=statements.length;
   if(section==='manifest'){
-    if(selectedSections.length)statements.push(stmt(env.DB,`${scopeCte} SELECT ${selectedSections.map(s=>`(SELECT COUNT(*) ${semesterQueries[s].from}) AS ${s}`).join(',')}`,termId as string|null));
+    // Counts for people and contacts use the same potentially expensive semester membership.
+    const countScope=scopeCte.replace('scoped_people AS (','scoped_people AS MATERIALIZED (');
+    if(selectedSections.length)statements.push(stmt(env.DB,`${countScope} SELECT ${selectedSections.map(s=>`(SELECT COUNT(*) ${s==='legacyBaselines' ? 'FROM legacy_attendance_baselines WHERE event_id IN(SELECT event_id FROM scoped_events)' : semesterQueries[s].from}) AS ${s}`).join(',')}`,termId as string|null));
     if(!partial){
       statements.push(stmt(env.DB,`${scopeCte} SELECT (SELECT COUNT(*) FROM scoped_people p WHERE NOT EXISTS(SELECT 1 FROM directory_profiles d WHERE d.person_id=p.person_id)) AS peopleMissingProfiles,(SELECT COUNT(*) FROM events e WHERE e.active=1 AND NOT EXISTS(SELECT 1 FROM event_details d WHERE d.event_id=e.event_id)) AS eventsMissingDetails`,termId as string|null));
       statements.push(stmt(env.DB,"SELECT term_id AS termId,label,sort_order AS sortOrder FROM terms WHERE sort_order<(SELECT sort_order FROM terms WHERE is_current=1) ORDER BY sort_order DESC,term_id LIMIT 2"));
     }
   }else if(section==='term-catalog'){statements.push(stmt(env.DB,'SELECT term_id AS termId,label,sort_order AS sortOrder,is_current AS isCurrent FROM terms ORDER BY sort_order DESC,term_id LIMIT 33 OFFSET ?',Number(req.offset)));}
   else if(section==='directory-catalog'||section==='contacts-catalog'){const q=queries[section==='directory-catalog'?'people':'contacts'];statements.push(stmt(env.DB,`SELECT ${q.select} ${q.from} ORDER BY ${q.order} LIMIT 33 OFFSET ?`,Number(req.offset)));}
-  else if(section==='legacyBaselines' && termId===null){
+  else if(section==='legacyBaselines'){
     // Keep the person/event unique index in output order. Unary + prevents SQLite from
     // choosing the event-first index and sorting the whole semester for each page.
     const q=queries.legacyBaselines;
     const seek=after?' AND (b.person_id,b.event_id)>(?,?)':'';
     const args=after?[after.personId,after.eventId,q.limit+1]:[q.limit+1,Number(req.offset)];
     statements.push(stmt(env.DB,`${scopeCte} SELECT ${q.select} ${q.from}
-      WHERE +b.event_id IN(SELECT event_id FROM scoped_events)${seek}
-      ORDER BY ${q.order} LIMIT ?${after?'':' OFFSET ?'}`,null,...args));
+      WHERE EXISTS(SELECT 1 FROM scoped_events e JOIN legacy_attendance_baselines check_row ON check_row.event_id=e.event_id)
+      AND +b.event_id IN(SELECT event_id FROM scoped_events)${seek}
+      ORDER BY ${q.order} LIMIT ?${after?'':' OFFSET ?'}`,termId as string|null,...args));
   }
   else if(section!=='verify'){const q=semesterQueries[section as FrontendSection];statements.push(stmt(env.DB,`${scopeCte} SELECT ${q.select} ${q.from} ORDER BY ${q.order} LIMIT ? OFFSET ?`,termId as string|null,q.limit+1,Number(req.offset)));}
   const results=await env.DB.batch<Record<string,unknown>>(statements);
@@ -142,7 +145,7 @@ export async function frontendSnapshotPage(env:Env,input:unknown,forEffect=false
     const size=new TextEncoder().encode(JSON.stringify(row)).length+1;if(bytes+size>FRONTEND_PAGE_MAX_BYTES){if(!rows.length)fail(409,'SNAPSHOT_ROW_TOO_LARGE');break;}bytes+=size;rows.push(row);
   }
   const last=rows.at(-1);
-  const nextBaselineKey=section==='legacyBaselines'&&termId===null&&sourceRows.length>rows.length&&last&&identifier(last.personId)&&identifier(last.eventId)
+  const nextBaselineKey=section==='legacyBaselines'&&sourceRows.length>rows.length&&last&&identifier(last.personId)&&identifier(last.eventId)
     ? {personId:last.personId,eventId:last.eventId}:undefined;
   return {...(nextBaselineKey?{nextBaselineKey}:{}),contractVersion:FRONTEND_PAGE_VERSION,section:section as FrontendSection,scope,offset:Number(req.offset),nextOffset:sourceRows.length>rows.length?Number(req.offset)+rows.length:null,revision,rows};
 }

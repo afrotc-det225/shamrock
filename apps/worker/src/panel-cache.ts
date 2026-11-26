@@ -39,8 +39,8 @@ export async function cachedPanelRead(env: ReadEnv, url: URL, body: string, load
   // bookmark makes older bytes unreachable even after an out-of-band revocation.
   // Attendance and Semester already have a shared projection and correction path.
   const persist=env.WING_MATRICES && !input.entryAuditId && (
-    url.pathname==='/v1/admin/panel/access' || url.pathname==='/v1/admin/history/list' || url.pathname==='/v1/admin/snapshot/page' ||
-    url.pathname==='/v1/admin/panel/browse' && !['attendance','semester','cadet-details','directory-editor','event-editor'].includes(input.profile));
+    url.pathname==='/v1/admin/panel/access' || url.pathname==='/v1/admin/history/list' || (url.pathname==='/v1/admin/snapshot/page' && input.section!=='legacyBaselines') ||
+    url.pathname==='/v1/admin/panel/browse' && !['attendance','semester','cadet-details','directory-editor','event-editor','leadership','view-as-people'].includes(input.profile));
   const key=persist ? 'signed-read-v2/'+(await cacheAddress(url.origin,'/',parts)).split('/').pop() : null;
   let saved:string|null=null;
   if (key) {
@@ -66,7 +66,7 @@ export async function cachedPanelRead(env: ReadEnv, url: URL, body: string, load
 }
 
 type Tables = Record<string,string|number|null>;
-type WingContext = {profile:'attendance'|'semester'; termId:string; principalId:string; revision:PanelRevision; authority:PanelContext};
+type WingContext = {profile:'attendance'|'semester'|'leadership'|'view-as-people'; termId:string; principalId:string; revision:PanelRevision; authority:PanelContext};
 export type WingTableCache = (context:WingContext, load: () => Promise<Tables>) => Promise<Tables>;
 
 // Only the Wing query invokes this, after resolving the real principal. Preview
@@ -74,6 +74,29 @@ export type WingTableCache = (context:WingContext, load: () => Promise<Tables>) 
 // tables; scope, access and revision always come from the caller's own fence.
 export function wingAttendanceCache(env: ReadEnv, url: URL, bookmark: string, onHit: (source:string) => void): WingTableCache {
   return async (context,load) => {
+    if (context.profile==='leadership' || context.profile==='view-as-people') {
+      // Catalogs are identical for verified full-Wing callers. Share only the
+      // table payload. The enclosing signed read checks the bookmark again.
+      const key=await cacheAddress(url.origin,'/_private/wing-catalog-v1/',[
+        env.ENVIRONMENT,env.GENERATION,env.BRIDGE_KEY_ID,bookmark,context.termId,context.profile]);
+      let edge:Cache|undefined;
+      try {
+        edge=await caches.open('shamrock-wing-catalog-v1');
+        const hit=await edge.match(key);
+        if(hit){const tables=await hit.json<Tables>();onHit('wing-edge');return tables;}
+      } catch { /* KV also covers edge eviction. */ }
+      const storageKey='wing-catalog-v1/'+new URL(key).pathname.split('/').pop();
+      let tables:Tables|null=null;
+      try {tables=await env.WING_MATRICES?.get<Tables>(storageKey,'json') ?? null;} catch { /* Rebuild on outage. */ }
+      if(tables) onHit('wing-stored');
+      else {
+        tables=await load();
+        if((await primaryVersion(env.DB)).bookmark!==bookmark) throw new HttpError(409,'SNAPSHOT_CHANGED','Reload the current records.');
+        try {await env.WING_MATRICES?.put(storageKey,JSON.stringify(tables),{expirationTtl:86400});} catch { /* Edge remains usable. */ }
+      }
+      try {await edge?.put(key,new Response(JSON.stringify(tables),{headers:immutableCacheHeaders}));} catch { /* Cache unavailable. */ }
+      return tables;
+    }
     const attendance=context.profile==='attendance';
     const address = await cacheAddress(url.origin,'/_private/wing-'+context.profile+'/',
       [env.ENVIRONMENT,env.GENERATION,env.BRIDGE_KEY_ID,bookmark]);

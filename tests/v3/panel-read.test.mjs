@@ -472,7 +472,14 @@ test('a cold Wing viewer uses private storage and replays a correction; a Flight
     assert.deepEqual(Object.keys(checks.tables).sort(),['EVENTS_MISSING_DETAILS','EVENTS_MISSING_ROSTER','FLIGHTS_MISSING_SQUADRON','PEOPLE_MISSING_PROFILES']);
     assert(Object.values(checks.tables).every(n=>Number.isInteger(n) && n>=0));
     await assert.rejects(browse('flight','diagnostics'),{status:403});
-    assert.equal(kv.size,2);
+    assert.equal(kv.size,3);
+    const leadership=await browse('owner','leadership');
+    assert.deepEqual((await browse('owner','leadership')).tables,leadership.tables);
+    assert.equal(hits.at(-1),'wing-stored');
+    const wingOnlyReads=gets;
+    await assert.rejects(browse('flight','leadership'),{status:403});
+    assert.equal(gets,wingOnlyReads);
+    assert.equal(kv.size,4);
 });
 
 test('campus enrollment, personal excusal, Flight review and duties use the verified identity',async t=>{

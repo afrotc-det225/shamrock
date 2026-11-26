@@ -1,7 +1,7 @@
 import {DIRECTORY_FIELDS} from "../../../packages/domain/src/admin.js";
 import type {WingTableCache} from './panel-cache.js';
 // Read models for the browser. Commands and native publication retain their own contracts.
-import {readPanelContext, authorityStatements, panelSectionQueries, scopedPanelSource} from './panel-read.js';
+import {panelContextFromRows,readPanelContext, authorityStatements, panelSectionQueries, scopedPanelSource} from './panel-read.js';
 import {scopeCte, semesterQueries, directoryCatalogQuery, leadershipCatalogQuery} from './frontend-transport.js';
 import {baselineRevisionSql} from './corrections.js';
 import {HttpError} from './http-error.js';
@@ -14,6 +14,21 @@ const error = (code:string,status=409) => new HttpError(status,code,'Reload the 
 export async function browsePanel(env:Env, identity:{environment:string;generation:number;principalId:string}, profile:Profile, wingCache?:WingTableCache, recordId?:string) {
   if (!profiles.includes(profile)) throw error('INVALID_PANEL_REQUEST',400);
   if (env.ENVIRONMENT!==identity.environment || Number(env.GENERATION)!==identity.generation) throw error('WRONG_GENERATION');
+  if(profile==='directory-editor'){
+
+    // Evaluate authorization and the primary-key lookup in one D1 transaction.
+    const q=directoryCatalogQuery;
+    const result=await env.DB.batch<Record<string,unknown>>([
+      ...authorityStatements(env,identity.principalId),
+      env.DB.prepare('SELECT '+q.select+' '+q.from+' WHERE d.person_id=?').bind(recordId ?? null),
+    ]);
+    const {access,control,revision}=await panelContextFromRows(result.slice(0,-1).map(r=>r.results),identity.principalId);
+    if(!access.capabilities.fullSnapshot) throw error('NOT_AUTHORIZED',403);
+    if(!recordId) throw error('INVALID_PANEL_REQUEST',400);
+    const fields=['personId','version','flightId',...DIRECTORY_FIELDS];
+    const people=JSON.stringify(result[result.length-1].results.map(row=>fields.map(field=>row[field])));
+    return {profile,scope:{termId:String(control.termId),currentTermId:String(control.termId)},revision,tables:{people} as Record<string,string|number|null>};
+  }
   const authority = await readPanelContext(env,identity.principalId);
   const {first,access,control,revision} = authority;
   const wing = access.capabilities.fullSnapshot;
@@ -44,10 +59,7 @@ export async function browsePanel(env:Env, identity:{environment:string;generati
   const eventRef=reference('events','event_id','eventId');
   const activeEvents="eventId IN (SELECT event_id FROM event_details WHERE term_id=(SELECT term_id FROM terms WHERE is_current=1) AND status='active')";
   const activePeople="flightPathStatus NOT IN ('Inactive','Commissioned','Dropped')";
-  if(profile==='directory-editor'){
-    if (!recordId) throw error('INVALID_PANEL_REQUEST',400);
-    table('people',people,['personId','version','flightId',...DIRECTORY_FIELDS].join(','),'WHERE personId=?2');
-  } else if(profile==='view-as-people'){
+  if(profile==='view-as-people'){
     table('people',people,'personId,lastName,firstName,asYear,role');
   } else if(profile==='event-list'){
     table('terms',q.terms,'termId,label,sortOrder,isCurrent');
@@ -134,6 +146,6 @@ export async function browsePanel(env:Env, identity:{environment:string;generati
     if (Object.values(tables).some(s=>s===null) || Object.values(tables).reduce<number>((n,s)=>n+String(s).length,0)>900000) throw error('BROWSE_TOO_LARGE');
     return tables;
   };
-  const tables = wing && (profile === 'attendance' || profile === 'semester') && wingCache ? await wingCache({profile,termId:String(control.termId),principalId:identity.principalId,revision,authority},load) : await load();
+  const tables = wing && (profile === 'attendance' || profile === 'semester' || profile === 'leadership' || profile === 'view-as-people') && wingCache ? await wingCache({profile,termId:String(control.termId),principalId:identity.principalId,revision,authority},load) : await load();
   return {profile,scope:{termId:control.termId,currentTermId:control.termId},revision,tables};
 }
