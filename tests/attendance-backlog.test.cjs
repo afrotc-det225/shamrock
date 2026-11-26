@@ -16,7 +16,8 @@ function fixture(responses = [rawRow()], records = []) {
   const sheets = new Map();
   function sheet(book, name, cells) {
     let capacity = cells.length;
-    const s = { cells, getName: () => name, getSheetId: () => name === 'Responses' ? 1 : 2, getParent: () => ({ getId: () => book }), getLastRow: () => cells.length, getLastColumn: () => cells[0].length, getMaxRows: () => capacity,
+    const sheetId = sheets.size + 1;
+    const s = { cells, getName: () => name, getSheetId: () => sheetId, getParent: () => ({ getId: () => book }), getLastRow: () => cells.length, getLastColumn: () => cells[0].length, getMaxRows: () => capacity,
       insertRowsAfter(row, count) { assert(state.held); assert.equal(row, capacity); capacity += count; },
       clearConditionalFormatRules() {}, setConditionalFormatRules() {},
       getRange(row, col, height = 1, width = 1) { return {
@@ -42,7 +43,16 @@ function fixture(responses = [rawRow()], records = []) {
       appendRows(s, rows) { assert(state.held); const start = Math.max(3, s.getLastRow() + 1); const end = start + rows.length - 1; if (end > s.getMaxRows()) s.insertRowsAfter(s.getMaxRows(), end - s.getMaxRows()); s.getRange(start, 1, rows.length, s.getLastColumn()).setValues(rows.map(r => s.cells[0].map(h => r[h] ?? ''))); } },
     Utilities: { DigestAlgorithm: { SHA_256: 'sha256' }, Charset: { UTF_8: 'utf8' }, computeDigest: (_, value) => Array.from(require('node:crypto').createHash('sha256').update(value).digest()) },
     ProgressService: { report() {} }, Log: { info() {}, warn() {} },
-    Sheets: { Spreadsheets: { Values: { batchUpdate({ data }, id) { assert(state.held); if (state.fail === id) throw Error('projection failed'); for (const { range, values } of data) { const [, name, letters, row] = /^'([^']+)'!([A-Z]+)(\d+):/.exec(range); const col = [...letters].reduce((n, c) => n * 26 + c.charCodeAt(0) - 64, 0); const s = sheets.get(`${id}/${name}`); values.forEach((r, i) => r.forEach((v, j) => s.cells[Number(row) - 1 + i][col - 1 + j] = v)); } state.projections++; } } } },
+    Sheets: { Spreadsheets: { batchUpdate({ requests }, id) {
+      assert(state.held); if (state.fail === id) throw Error('projection failed');
+      for (const { updateCells } of requests) {
+        assert.equal(updateCells.fields, 'userEnteredValue');
+        const { sheetId, rowIndex, columnIndex } = updateCells.start;
+        const s = [...sheets.values()].find(sheet => sheet.getParent().getId() === id && sheet.getSheetId() === sheetId);
+        updateCells.rows.forEach(({ values }, i) => values.forEach((cell, j) => { s.cells[rowIndex + i][columnIndex + j] = cell.userEnteredValue?.stringValue ?? ''; }));
+      }
+      state.projections++;
+    } } },
   }); compiled.forEach(code => vm.runInContext(code, context));
   return { state, response, log, backend, frontend, events, run: () => context.SetupService.processAttendanceFormBacklog() };
 }

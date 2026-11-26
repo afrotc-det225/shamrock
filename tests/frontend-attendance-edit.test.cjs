@@ -25,8 +25,9 @@ function fixture(options = {}) {
   const sheets = new Map();
   function sheet(name, headers, rows, id = 'backend') {
     const cells = [headers.slice(),headers.slice(),...rows.map(row=>row.slice())];
+    const sheetId = sheets.size;
     let maxRows=1000;
-    const result = {cells,getMaxRows:()=>maxRows,insertRowsAfter(after,count){assert.equal(after,maxRows);calls.insertions.push({name,count});maxRows+=count;},getName:()=>name,getParent:()=>({getId:()=>id}),getLastRow:()=>cells.length,
+    const result = {cells,getSheetId:()=>sheetId,getMaxRows:()=>maxRows,insertRowsAfter(after,count){assert.equal(after,maxRows);calls.insertions.push({name,count});maxRows+=count;},getName:()=>name,getParent:()=>({getId:()=>id}),getLastRow:()=>cells.length,
       getLastColumn:()=>Math.max(...cells.map(row=>row.length)),
       getRange(row,col,height=1,width=1) {
         return {getSheet:()=>result,getRow:()=>row,getColumn:()=>col,getLastRow:()=>row+height-1,getLastColumn:()=>col+width-1,
@@ -64,17 +65,18 @@ function fixture(options = {}) {
     SpreadsheetApp:{flush:()=>{calls.flush++;},getActiveSpreadsheet:()=>null},
     SheetUtils:{getSheet:(id,name)=>sheets.get(`${id}/${name}`),readTable:s=>{calls.tableReads.push(s.getName());return readTable(s);},ensureSchemaColumns:s=>s.cells[0].slice(),
       appendRows(s,rows){s.getRange(Math.max(3,s.getLastRow()+1),1,rows.length,s.getLastColumn()).setValues(rows.map(row=>s.cells[0].map(h=>row[h]??'')));}},
-    Sheets:{Spreadsheets:{Values:{batchUpdate(request,id){
+    Sheets:{Spreadsheets:{batchUpdate(request,id){
       calls.batches.push(clone(request));state.onMirror?.();
       if(state.failMirror)throw Error('Mirror interrupted.');
-      assert.equal(id,'backend');assert.equal(request.valueInputOption,'RAW');
-      request.data.forEach(({range,values})=>{
-        const match=/^'Attendance Matrix Backend'!([A-Z]+)(\d+):([A-Z]+)(\d+)$/.exec(range);assert(match,range);
-        const column=[...match[1]].reduce((n,c)=>n*26+c.charCodeAt(0)-64,0);
-        values.forEach((row,i)=>{back.cells[Number(match[2])-1+i][column-1]=row[0];});
+      assert.equal(id,'backend');
+      request.requests.forEach(({updateCells})=>{
+        assert.equal(updateCells.fields,'userEnteredValue');
+        const {sheetId,rowIndex,columnIndex}=updateCells.start;
+        assert.equal(sheetId,back.getSheetId());
+        updateCells.rows.forEach(({values},i)=>{back.cells[rowIndex+i][columnIndex]=values[0].userEnteredValue?.stringValue??'';});
       });
       if(state.afterMirror)throw Error('Mirror response lost.');
-    }}}},
+    }}},
   });
   for (const [file,code] of compiled)vm.runInContext(code,context,{filename:file});
   audit=sheet('Audit Backend',Array.from(context.Schemas.BACKEND_TABS.find(s=>s.name==='Audit Backend').machineHeaders),[]);
@@ -95,7 +97,7 @@ test('real trigger persists every row in a bulk edit, one append and one sparse 
   assert(f.records().every(r=>r.event==='Event A'&&r.attendance_type==='P'&&r.name==='Admin'));
   assert.equal(f.calls.writes.filter(w=>w.name==='Attendance Backend').length,1);
   assert.equal(f.calls.writes.filter(w=>w.name==='Audit Backend').length,1);
-  assert.equal(f.calls.batches.length,1);assert.equal(f.calls.batches[0].data.length,1);
+  assert.equal(f.calls.batches.length,1);assert.equal(f.calls.batches[0].requests.length,1);
   assert(f.back.cells.slice(2).every(row=>row[7]==='P'&&row[8]==='U'));
   assert.deepEqual(f.audits().map(row=>row.target_range),['Attendance!H3','Attendance!H4','Attendance!H5']);
   assert(f.audits().every(row=>row.result==='ok'&&JSON.parse(row.metadata_json).oldValueKnown===false));
@@ -109,7 +111,7 @@ test('multiple event columns and mixed codes including explicit bulk clears surv
   f.edit(3,8,2,2);
   assert.deepEqual(f.records().map(row=>[row.event,row.cadets,row.attendance_type]),[
     ['Event A','North, One','P'],['Event B','North, One',''],['Event A','South, Two','E'],['Event B','South, Two','T']]);
-  assert.equal(f.calls.batches.length,1);assert.equal(f.calls.batches[0].data.length,2);
+  assert.equal(f.calls.batches.length,1);assert.equal(f.calls.batches[0].requests.length,2);
   const replay=f.context.AttendanceService.buildMatrixRows(roster.map(([last_name,first_name])=>({last_name,first_name})),[{name:'Event A'},{name:'Event B'}],f.records());
   assert.equal(replay[0]['Event B'],'');assert.equal(replay[1]['Event B'],'T');
   assert.deepEqual(f.back.cells.slice(2).map(row=>row.slice(7)),[['A','U'],['E','T'],['P','']]);
@@ -213,7 +215,7 @@ test('large rectangular edit performs one event read, one matrix read, one log a
   assert.equal(f.records().length,200);assert.deepEqual(f.calls.tableReads,['Events Backend','Attendance Matrix Backend']);
   assert.equal(f.calls.writes.filter(w=>w.name==='Attendance Backend').length,1);
   assert.equal(f.calls.writes.filter(w=>w.name==='Audit Backend').length,1);
-  assert.equal(f.calls.batches.length,1);assert.equal(f.calls.batches[0].data.length,2);
+  assert.equal(f.calls.batches.length,1);assert.equal(f.calls.batches[0].requests.length,2);
 });
 
 

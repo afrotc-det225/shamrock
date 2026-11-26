@@ -19,8 +19,9 @@ function fixture({ requests = [request()], logs = [log()], frontend = 'R', backe
   const sheets = new Map();
   function makeSheet(id, name, headers, records) {
     const cells = [headers.slice(), headers.slice(), ...records.map(record => headers.map(header => record[header] ?? ''))];
+    const sheetId = sheets.size;
     const sheet = {
-      cells, getName: () => name, getParent: () => ({ getId: () => id }), getLastRow: () => cells.length, getLastColumn: () => headers.length,
+      cells, getSheetId: () => sheetId, getName: () => name, getParent: () => ({ getId: () => id }), getLastRow: () => cells.length, getLastColumn: () => headers.length,
       getRange(row, col, height = 1, width = 1) { return {
         getValues: () => cells.slice(row - 1, row - 1 + height).map(values => values.slice(col - 1, col - 1 + width)),
         sort() { assert.equal(locked, true); calls.sorted = (calls.sorted || 0) + 1; },
@@ -72,17 +73,17 @@ function fixture({ requests = [request()], logs = [log()], frontend = 'R', backe
         if (fail.appendAfter) throw Error('append response interrupted');
       },
     },
-    Sheets: { Spreadsheets: { Values: { batchUpdate(body, id) {
+    Sheets: { Spreadsheets: { batchUpdate(body, id) {
       assert.equal(locked, true);
       calls.writes.push(id);
       if (fail.projection === id) throw Error('projection interrupted');
-      body.data.forEach(update => {
-        const [, name, letters, first] = update.range.match(/^'([^']+)'!([A-Z]+)(\d+):[A-Z]+\d+$/);
-        const col = [...letters].reduce((n, char) => n * 26 + char.charCodeAt(0) - 64, 0) - 1;
-        const sheet = sheets.get(`${id}:${name}`);
-        update.values.forEach((row, index) => { sheet.cells[Number(first) - 1 + index][col] = row[0]; });
+      body.requests.forEach(({ updateCells }) => {
+        assert.equal(updateCells.fields, 'userEnteredValue');
+        const { sheetId, rowIndex, columnIndex } = updateCells.start;
+        const sheet = [...sheets.values()].find(sheet => sheet.getParent().getId() === id && sheet.getSheetId() === sheetId);
+        updateCells.rows.forEach(({ values }, index) => { sheet.cells[rowIndex + index][columnIndex] = values[0].userEnteredValue?.stringValue ?? ''; });
       });
-    } } } },
+    } } },
   });
   for (const file of ['services/attendance.ts', 'services/excusals.ts']) {
     let source = fs.readFileSync(path.join(__dirname, '..', 'src', file), 'utf8');

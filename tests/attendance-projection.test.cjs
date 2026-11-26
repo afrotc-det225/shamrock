@@ -19,8 +19,10 @@ function fixture() {
   const sheets = new Map();
   function makeSheet(id, name, headers, rows) {
     const cells = [headers.slice(), headers.slice(), ...rows.map(row => row.slice())];
+    const sheetId = sheets.size;
+    const cellData = cells.map(row => row.map(value => ({ userEnteredValue: { stringValue: String(value) } })));
     let capacity = cells.length;
-    const sheet = { cells, getName: () => name, getParent: () => ({ getId: () => id }),
+    const sheet = { cells, cellData, getSheetId: () => sheetId, getName: () => name, getParent: () => ({ getId: () => id }),
       getLastRow: () => cells.length, getLastColumn: () => headers.length, getMaxRows: () => capacity,
       insertRowsAfter(after, count) { assert.equal(after, capacity); capacity += count; },
       getRange(row, col, height = 1, width = 1) {
@@ -75,25 +77,42 @@ function fixture() {
     SetupService: { applyAttendanceBackendFormattingPublic() {} },
     FormService: { isAttendanceCadetQuestionTitle: title => title.startsWith('Cadets (') },
     Log: { info() {}, warn() {}, error() {} },
-    Sheets: { Spreadsheets: { Values: { batchUpdate(request, id) {
+    Sheets: { Spreadsheets: { batchUpdate(request, id) {
       assert(state.held, 'projection must be locked');
       state.beforeWrite?.(id, request);
       if (state.fail === id) throw Error(`${id} projection failed`);
-      for (const { range, values } of request.data) {
-        const [, name, letters, row] = /^'([^']+)'!([A-Z]+)(\d+):/.exec(range);
-        const sheet = sheets.get(`${id}/${name}`);
-        const col = [...letters].reduce((n, c) => n * 26 + c.charCodeAt(0) - 64, 0);
-        values.forEach((values, i) => values.forEach((value, j) => { sheet.cells[Number(row) + i - 1][col + j - 1] = value; }));
+      for (const { updateCells } of request.requests) {
+        assert.equal(updateCells.fields, 'userEnteredValue', 'projection may update only values');
+        const { sheetId, rowIndex, columnIndex } = updateCells.start;
+        const sheet = [...sheets.values()].find(sheet => sheet.getParent().getId() === id && sheet.getSheetId() === sheetId);
+        assert(sheet, 'projection must address a real sheet ID');
+        updateCells.rows.forEach(({ values }, i) => values.forEach((value, j) => {
+          assert(Object.keys(value).every(key => key === 'userEnteredValue'));
+          const target = sheet.cellData[rowIndex + i][columnIndex + j];
+          if (value.userEnteredValue) target.userEnteredValue = clone(value.userEnteredValue);
+          else delete target.userEnteredValue;
+          sheet.cells[rowIndex + i][columnIndex + j] = value.userEnteredValue?.stringValue ?? '';
+        }));
       }
       state.writes.push({ id, batch: clone(request) });
       if (state.fail === `${id}-response`) throw Error(`${id} response lost`);
-    } } } },
+    } } },
   });
   source.forEach(code => vm.runInContext(code, context));
   return { state, backend, frontend, directory, events, log, context, service: context.AttendanceService };
 }
 
 const entry = (cadets = 'North, One; West, Three', code = 'E', event = 'Event A') => ({ event, cadets, attendance_type: code });
+const presentation = sheet => clone(sheet.cellData.map(row => row.map(({ userEnteredValue, ...metadata }) => metadata)));
+function setMixedPresentation(sheet) {
+  const formats = [{ type: 'TEXT' }, { type: 'NUMBER', pattern: '0.00' }, { type: 'DATE', pattern: 'yyyy-mm-dd' }, { type: 'PERCENT', pattern: '0.0%' }, null];
+  sheet.cellData.forEach((row, r) => row.forEach((cell, c) => {
+    const numberFormat = formats[(r + c) % formats.length];
+    cell.userEnteredFormat = { ...(numberFormat ? { numberFormat: clone(numberFormat) } : {}), textFormat: { bold: true }, horizontalAlignment: 'CENTER' };
+    cell.dataValidation = { condition: { type: 'ONE_OF_LIST', values: [{ userEnteredValue: 'N/A' }] }, strict: false };
+    cell.note = 'Existing cell note';
+  }));
+}
 
 test('incremental projection writes only matched cells across independent row and event orders', () => {
   const f = fixture();
@@ -102,9 +121,46 @@ test('incremental projection writes only matched cells across independent row an
   assert.deepEqual(f.backend.cells.slice(2).map(row => row[7]), ['E', 'R', 'E']);
   assert.deepEqual(f.frontend.cells.slice(2).map(row => row[8]), ['E', 'P', 'E']);
   assert.equal(f.state.writes.length, 2);
-  assert(f.state.writes.every(write => write.batch.data.length === 2));
+  assert(f.state.writes.every(write => write.batch.requests.length === 2));
   assert.deepEqual(f.state.reads, ['Attendance Matrix Backend', 'Attendance']);
   assert.deepEqual(f.state.locks, ['acquire', 'release']);
+});
+
+test('bulk fill preserves mixed per-cell formats, validation and notes with value-only updates', () => {
+  const f = fixture();
+  [f.backend, f.frontend].forEach(setMixedPresentation);
+  const before = [presentation(f.backend), presentation(f.frontend)];
+  assert.equal(f.service.fillEventColumn({ eventSelector: { all: true }, code: 'N/A' }), 6);
+  assert.deepEqual([presentation(f.backend), presentation(f.frontend)], before);
+  assert(f.frontend.cells.slice(2).every(row => row[7] === 'N/A' && row[8] === 'N/A'));
+  const batches = f.state.writes.filter(write => write.batch);
+  assert.equal(batches.length, 2, 'one provider batch per workbook');
+  for (const { batch } of batches) {
+    assert.deepEqual(Object.keys(batch), ['requests']);
+    assert.equal(batch.requests.length, 2, 'adjacent cadets coalesce into one run per event');
+    for (const request of batch.requests) {
+      assert.deepEqual(Object.keys(request), ['updateCells']);
+      assert.equal(request.updateCells.fields, 'userEnteredValue');
+      assert.equal(request.updateCells.rows.length, 3);
+      assert.deepEqual(request.updateCells.rows, Array.from({ length: 3 }, () => ({ values: [{ userEnteredValue: { stringValue: 'N/A' } }] })));
+    }
+  }
+});
+
+test('projection uses literal string values and groups different sheets in one workbook batch', () => {
+  const f = fixture();
+  f.frontend.getParent = () => ({ getId: () => 'backend' });
+  const entries = [entry('North, One', '=1+1'), entry('South, Two', '00123'), entry('West, Three', '01/02/2026')];
+  f.service.withWriteLock(() => f.service.applyPreparedAttendanceProjections(f.service.prepareAttendanceProjections(entries)));
+  assert.deepEqual(f.backend.cells.slice(2).map(row => row[7]), ['=1+1', '00123', '01/02/2026']);
+  assert.deepEqual(f.frontend.cells.slice(2).map(row => row[8]), ['01/02/2026', '00123', '=1+1']);
+  assert.equal(f.state.writes.length, 1);
+  const updates = f.state.writes[0].batch.requests.map(request => request.updateCells);
+  assert.deepEqual(updates.map(update => update.start), [
+    { sheetId: f.backend.getSheetId(), rowIndex: 2, columnIndex: 7 },
+    { sheetId: f.frontend.getSheetId(), rowIndex: 2, columnIndex: 8 },
+  ]);
+  assert(updates.every(update => update.rows.every(row => Object.keys(row.values[0].userEnteredValue).join() === 'stringValue')));
 });
 
 test('partial identity matches, duplicate identities and duplicate event headers fail before either matrix is written', () => {
@@ -122,6 +178,8 @@ test('partial identity matches, duplicate identities and duplicate event headers
 
 test('explicit clears remain clear and a retry after interrupted frontend projection heals without duplicate log writes', () => {
   const f = fixture(); f.state.fail = 'frontend';
+  [f.backend, f.frontend].forEach(setMixedPresentation);
+  const before = [presentation(f.backend), presentation(f.frontend)];
   assert.throws(() => f.service.applyAttendanceLogEntry(entry('North, One', '')), /frontend projection failed/);
   assert.equal(f.backend.cells[2][7], '');
   assert.equal(f.frontend.cells[4][8], 'R');
@@ -130,6 +188,10 @@ test('explicit clears remain clear and a retry after interrupted frontend projec
   assert.equal(f.frontend.cells[4][8], '');
   assert.equal(f.log.cells.length, 2);
   assert.equal(f.state.writes.filter(write => write.id === 'backend').length, 1, 'retry does not rewrite already-correct backend');
+  assert.equal('userEnteredValue' in f.backend.cellData[2][7], false, 'clear removes the stored value');
+  assert.equal('userEnteredValue' in f.frontend.cellData[4][8], false);
+  assert.deepEqual([presentation(f.backend), presentation(f.frontend)], before);
+  assert(f.state.writes.every(write => JSON.stringify(write.batch.requests[0].updateCells.rows) === '[{"values":[{}]}]'));
 });
 
 test('lost projection response is safe to retry and already-correct cells consume no additional writes', () => {
@@ -200,6 +262,8 @@ test('bulk fill append failure or lost append response never mirrors or falsely 
 
 test('interrupted bulk projection retains full durable log for targeted retry', () => {
   const f = fixture(); f.state.fail = 'frontend';
+  [f.backend, f.frontend].forEach(setMixedPresentation);
+  const before = [presentation(f.backend), presentation(f.frontend)];
   assert.throws(() => f.service.fillEventColumn({ eventSelector: { all: true }, code: 'P' }), /frontend/);
   assert.equal(f.log.cells.length, 4);
   assert(f.state.audits.every(audit => audit.result === 'failed'));
@@ -208,6 +272,7 @@ test('interrupted bulk projection retains full durable log for targeted retry', 
   f.service.withWriteLock(() => f.service.applyPreparedAttendanceProjections(f.service.prepareAttendanceProjections(logs)));
   assert(f.frontend.cells.slice(2).every(row => row[7] === 'P' && row[8] === 'P'));
   assert.equal(f.log.cells.length, 4);
+  assert.deepEqual([presentation(f.backend), presentation(f.frontend)], before);
 });
 
 test('bulk fill rejects stale event definitions and unsupported codes before appending', () => {

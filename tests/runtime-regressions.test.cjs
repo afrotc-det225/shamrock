@@ -190,18 +190,21 @@ test('full attendance replay preserves a withdrawal clear and later attendance',
 function incrementalProjectionIO(backend, frontend) {
   backend.getName = () => 'Attendance Matrix Backend';
   frontend.getName = () => 'Attendance';
+  backend.getSheetId = () => 0;
+  frontend.getSheetId = () => 1;
   backend.getParent = () => ({ getId: () => 'backend' });
   frontend.getParent = () => ({ getId: () => 'frontend' });
   return {
     LockService: { getScriptLock: () => ({ hasLock: () => true }) },
-    Sheets: { Spreadsheets: { Values: { batchUpdate({ data }, id) {
+    Sheets: { Spreadsheets: { batchUpdate({ requests }, id) {
       const target = id === 'backend' ? backend : frontend;
-      for (const update of data) {
-        const [, letters, row] = /!([A-Z]+)(\d+):/.exec(update.range);
-        const col = [...letters].reduce((n, c) => n * 26 + c.charCodeAt(0) - 64, 0);
-        target.getRange(Number(row), col, update.values.length, 1).setValues(update.values);
+      for (const { updateCells } of requests) {
+        assert.equal(updateCells.fields, 'userEnteredValue');
+        assert.equal(updateCells.start.sheetId, target.getSheetId());
+        const values = updateCells.rows.map(row => row.values.map(cell => cell.userEnteredValue?.stringValue ?? ''));
+        target.getRange(updateCells.start.rowIndex + 1, updateCells.start.columnIndex + 1, values.length, 1).setValues(values);
       }
-    } } } },
+    } } },
   };
 }
 

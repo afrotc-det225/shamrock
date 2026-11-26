@@ -456,7 +456,7 @@ namespace AttendanceService {
 
   export interface AttendanceLogBatch {
     sheet: GoogleAppsScript.Spreadsheet.Sheet;
-    updates: { range: string; values: string[][] }[];
+    updates: { rowIndex: number; columnIndex: number; values: string[][] }[];
     conflicts: number;
     headers: string[];
     rowCount: number;
@@ -513,7 +513,7 @@ namespace AttendanceService {
       let run: number[] = [];
       const add = () => {
         if (!run.length) return;
-        updates.push({ range: `'${sheet.getName().replace(/'/g, "''")}'!${colToLetter(col)}${run[0]}:${colToLetter(col)}${run[run.length - 1]}`,
+        updates.push({ rowIndex: run[0] - 1, columnIndex: col - 1,
           values: run.map(row => [rows.get(row)!]) });
       };
       ordered.forEach(row => {
@@ -545,9 +545,9 @@ namespace AttendanceService {
     return batches;
   }
 
-  /** Sparse, raw-value writes; the caller must persist new log records first. */
+  /** Sparse value-only writes; the caller must persist new log records first. */
   export function applyPreparedAttendanceProjections(batches: AttendanceLogBatch[]): void {
-    const service = (globalThis as any).Sheets?.Spreadsheets?.Values;
+    const service = (globalThis as any).Sheets?.Spreadsheets;
     if (batches.some(batch => batch.updates.length) && !service?.batchUpdate)
       throw new Error('Sheets API is unavailable; attendance log is saved but its projection is pending.');
     const byWorkbook = new Map<string, AttendanceLogBatch[]>();
@@ -571,7 +571,16 @@ namespace AttendanceService {
             || String(current[cell.row - 1][cell.col - 1] ?? '').trim() !== cell.value))
           throw new Error('Attendance was edited or sorted before projection; saved records require a fresh retry.');
       });
-      service.batchUpdate({ valueInputOption: 'RAW', data: group.flatMap(batch => batch.updates) }, id);
+      // A value-only field mask preserves existing per-cell number formats,
+      // including native table cells. Empty CellData clears just the value;
+      // stringValue keeps codes literal without interpreting formulas or dates.
+      service.batchUpdate({ requests: group.flatMap(batch => batch.updates.map(update => ({
+        updateCells: {
+          start: { sheetId: batch.sheet.getSheetId(), rowIndex: update.rowIndex, columnIndex: update.columnIndex },
+          rows: update.values.map(values => ({ values: values.map(value => value === '' ? {} : { userEnteredValue: { stringValue: value } }) })),
+          fields: 'userEnteredValue',
+        },
+      }))) }, id);
     });
   }
 
