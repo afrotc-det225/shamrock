@@ -39,7 +39,7 @@ establish hosted authentication, Google publication, or production readiness.
 
 ## Operator guide
 
-- **Overview:** see current roster/event/request counts and common tasks.
+- **Overview:** Wing readers see roster counts, birthdays and attendance charts when they open the page. Hover, focus or tap a bar or semester point for its exact value. Use the semester chart’s selector to switch between Overall and LLAB.
 - **Events:** find the existing event, select its name or pencil, edit its name,
   Attendance header, Eastern start/end times, location or notes, then select
   **Review change → Apply change**. Attendance and excusals stay linked. Do not

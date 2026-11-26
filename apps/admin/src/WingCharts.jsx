@@ -1,35 +1,106 @@
-import React, { useId, useState, useEffect } from "react";
-import { Table2 } from "lucide-react";
-import { ToolbarPopover } from "./ToolbarPopover";
-import { api } from "./api";
+import React, { useId, useState, useRef, useEffect } from "react";
 import { flightColors, yearColors } from "./roster-colors";
 
 const termInks = ["#253e65", "#b77942", "#598a99", "#886d9a"];
 export const percent = (n) =>
   Number.isFinite(n) ? (100 * n).toFixed(1) + "%" : "—";
-const mean = (values) =>
-  values.length ? values.reduce((sum, n) => sum + n, 0) / values.length : null;
 const termKey = (label) =>
   String(label)
     .toLowerCase()
     .split(/[^a-z0-9]+/)
     .sort()
     .join(" ");
-function archivedTerm(label, rows) {
-  const years = new Map();
-  for (const r of rows) {
-    const key = String(r.asYear).replace(/\s/g, "").toUpperCase();
-    if (!years.has(key)) years.set(key, []);
-    if (Number.isFinite(r.overall)) years.get(key).push(r.overall);
+function useChartTooltip() {
+  const panel = useRef(null);
+  const [tip, setTip] = useState(null);
+  const anchor = useRef(null);
+  function reveal(element, label, name, value) {
+    anchor.current = element;
+    const mark = anchor.current.getBoundingClientRect();
+    const box = panel.current.getBoundingClientRect();
+    setTip({
+      label,
+      name,
+      value,
+      x: mark.left + mark.width / 2 - box.left,
+      y: mark.top - box.top,
+    });
   }
-  return {
-    label,
-    byYear: new Map([...years].map(([k, v]) => [k, mean(v)])),
-    overall: mean(rows.map((r) => r.overall).filter(Number.isFinite)),
-    llab: mean(rows.map((r) => r.llab).filter(Number.isFinite)),
-  };
+  useEffect(() => {
+    if (!tip) return;
+    const dismiss = (event) => {
+      if (
+        event.type === "keydown"
+          ? event.key === "Escape"
+          : !(
+              panel.current?.contains(event.target) &&
+              event.target.closest?.("[data-chart-mark]")
+            )
+      )
+        setTip(null);
+    };
+    document.addEventListener("pointerdown", dismiss, true);
+    document.addEventListener("click", dismiss, true);
+    document.addEventListener("keydown", dismiss);
+    return () => {
+      document.removeEventListener("pointerdown", dismiss, true);
+      document.removeEventListener("click", dismiss, true);
+      document.removeEventListener("keydown", dismiss);
+    };
+  }, [tip]);
+  const dismiss = () => setTip(null);
+  function onScroll(event) {
+    if (!tip) return;
+    const mark = anchor.current;
+    if (document.activeElement === mark && event.currentTarget.contains(mark)) {
+      const rect = mark.getBoundingClientRect();
+      const viewport = event.currentTarget.getBoundingClientRect();
+      if (rect.right > viewport.left && rect.left < viewport.right) {
+        reveal(mark, tip.label, tip.name, tip.value);
+        return;
+      }
+    }
+    dismiss();
+  }
+  function target(label, name, value) {
+    const show = (event) => reveal(event.currentTarget, label, name, value);
+    return {
+      "data-chart-mark": "",
+      tabIndex: 0,
+      "aria-label": [label, name, value].join(", "),
+      onPointerMove: (event) => {
+        if (
+          event.pointerType !== "touch" &&
+          (tip?.label !== label || tip.name !== name || tip.value !== value)
+        )
+          show(event);
+      },
+      onFocus: show,
+      onClick: show,
+      onPointerLeave: (event) => {
+        if (event.pointerType !== "touch") dismiss();
+      },
+      onBlur: dismiss,
+    };
+  }
+  const tooltip = tip && (
+    <div
+      className="chart-tip"
+      role="tooltip"
+      style={{
+        left: `clamp(4.5rem, ${tip.x}px, calc(100% - 4.5rem))`,
+        top: `max(3.25rem, ${tip.y}px)`,
+      }}
+    >
+      <strong>{tip.label}</strong>
+      <span>
+        {tip.name} · {tip.value}
+      </span>
+    </div>
+  );
+  return { panel, tooltip, target, onScroll };
 }
-// All labels and exact values are also available without hovering or distinguishing colors.
+
 function Plot({
   title,
   labels,
@@ -55,41 +126,17 @@ function Plot({
     { length: 5 },
     (_, i) => high - (i * (high - low)) / 4,
   );
+  const { panel, tooltip, target, onScroll } = useChartTooltip();
   return (
-    <section className="insight chart-panel">
+    <section className="insight chart-panel" ref={panel}>
       <header>
         <h3 id={id}>{title}</h3>
-        <div className="heading-tools">
-          {controls}
-          <ToolbarPopover iconOnly icon={Table2} label={title + " chart data"}>
-            <table>
-              <thead>
-                <tr>
-                  <th scope="col">{kind === "line" ? "Semester" : "Group"}</th>
-                  {series.map((s) => (
-                    <th scope="col" key={s.name}>
-                      {s.name}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {labels.map((l, i) => (
-                  <tr key={i}>
-                    <th scope="row">{l}</th>
-                    {series.map((s) => (
-                      <td key={s.name}>{percent(s.values[i])}</td>
-                    ))}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </ToolbarPopover>
-        </div>
+        {controls}
       </header>
-      <div className="chart-scroll">
+      {tooltip}
+      <div className="chart-scroll" onScroll={onScroll}>
         <svg
-          role="img"
+          role="group"
           aria-labelledby={id}
           viewBox={`0 0 ${w} ${h}`}
           style={{ minWidth: labels.length > 7 ? w : 280 }}
@@ -121,9 +168,6 @@ function Plot({
                   cx = x(i) + (j - (series.length - 1) / 2) * bw;
                 return (
                   <g key={i}>
-                    <title>
-                      {labels[i]} · {s.name} · {percent(v)}
-                    </title>
                     {kind === "line" ? (
                       <>
                         {i > 0 && Number.isFinite(s.values[i - 1]) && (
@@ -155,6 +199,17 @@ function Plot({
                         rx="2"
                       />
                     )}
+                    <rect
+                      className="chart-target"
+                      role="img"
+                      {...target(labels[i], s.name, percent(v))}
+                      x={cx - bw / 2}
+                      y={y(v) - 8}
+                      width={bw}
+                      height={
+                        kind === "line" ? 22 : Math.max(20, y(low) - y(v) + 8)
+                      }
+                    />
                     {annotation && (
                       <text
                         x={cx}
@@ -185,46 +240,28 @@ function Plot({
     </section>
   );
 }
-export function WingCharts({ dashboard: d, term, flights, squadrons, hosted }) {
-  const [history, setHistory] = useState(null),
-    [load, setLoad] = useState(false),
-    [error, setError] = useState(""),
-    [metric, setMetric] = useState("overall");
-  useEffect(() => {
-    if (!load || !hosted) return;
-    const controller = new AbortController(),
-      opts = { signal: controller.signal };
-    (async () => {
-      const catalog = await api("/history/list", undefined, opts);
-      const entries = (catalog.semesters || []).filter(
-        (t) => termKey(t.label) !== termKey(term),
-      );
-      const result = await Promise.all(
-        entries.map(async (t) =>
-          archivedTerm(
-            t.label,
-            (await api("/history/report", { version: t.version }, opts)).rows,
-          ),
-        ),
-      );
-      if (!controller.signal.aborted) setHistory(result);
-    })().catch((e) => {
-      if (!controller.signal.aborted) {
-        setError(e.message);
-        setLoad(false);
-      }
-    });
-    return () => controller.abort();
-  }, [load, hosted, term]);
+export function WingCharts({
+  dashboard: d,
+  term,
+  flights,
+  squadrons,
+  history: archives,
+  awaitingHistory,
+}) {
+  const [metric, setMetric] = useState("overall");
+  const rosterTip = useChartTooltip();
+  const history = archives.filter((t) => termKey(t.label) !== termKey(term));
   const years = d.attendanceByYear.filter(
     (r) =>
       r.terms[0]?.percentage != null ||
-      history?.some((t) => t.byYear.get(r.asYear.toUpperCase()) != null),
+      history.some(
+        (t) => t.byYear[r.asYear.replace(/\s/g, "").toUpperCase()] != null,
+      ),
   );
   const currentLabel =
     term?.replace(/^(\d{4})-(Fall|Spring|Summer)$/i, "$1 $2") || "Current";
   const trend = [
-    ...(history || []),
+    ...history,
     {
       label: currentLabel,
       overall: d.averageOverall,
@@ -238,11 +275,13 @@ export function WingCharts({ dashboard: d, term, flights, squadrons, hosted }) {
       values: years.map((r) => r.terms[0]?.percentage),
     },
   ];
-  for (const [i, t] of [...(history || [])].reverse().entries())
+  for (const [i, t] of [...history].reverse().entries())
     byYear.push({
       name: t.label,
       ink: termInks[(i + 1) % termInks.length],
-      values: years.map((r) => t.byYear.get(r.asYear.toUpperCase())),
+      values: years.map(
+        (r) => t.byYear[r.asYear.replace(/\s/g, "").toUpperCase()],
+      ),
     });
   const roster = d.rosterByYear.filter((r) => r.cadets > 0),
     max = Math.max(1, ...roster.map((r) => r.cadets));
@@ -252,47 +291,33 @@ export function WingCharts({ dashboard: d, term, flights, squadrons, hosted }) {
         title="Overall attendance by AS year"
         labels={years.map((r) => r.asYear)}
         series={byYear}
+      />
+      <Plot
+        title="Attendance by semester"
+        labels={trend.map((t) => t.label)}
+        series={[
+          {
+            name: metric === "overall" ? "Overall" : "LLAB",
+            ink: termInks[0],
+            values: trend.map((t) => t[metric]),
+          },
+        ]}
+        kind="line"
+        floor={0.9}
+        annotation
         controls={
-          hosted &&
-          !history && (
-            <button
-              disabled={load}
-              onClick={() => {
-                setError("");
-                setLoad(true);
-              }}
-            >
-              {load ? "Loading semesters…" : "Compare semesters"}
-            </button>
-          )
+          <select
+            aria-label="Attendance measure"
+            value={metric}
+            onChange={(e) => setMetric(e.target.value)}
+          >
+            <option value="overall">Overall</option>
+            <option value="llab">LLAB</option>
+          </select>
         }
       />
-      {error && <p role="alert">{error}</p>}
-      {history && (
-        <Plot
-          title="Attendance by semester"
-          labels={trend.map((t) => t.label)}
-          series={[
-            {
-              name: metric === "overall" ? "Overall" : "LLAB",
-              ink: termInks[0],
-              values: trend.map((t) => t[metric]),
-            },
-          ]}
-          kind="line"
-          floor={0.9}
-          annotation
-          controls={
-            <select
-              aria-label="Attendance measure"
-              value={metric}
-              onChange={(e) => setMetric(e.target.value)}
-            >
-              <option value="overall">Overall</option>
-              <option value="llab">LLAB</option>
-            </select>
-          }
-        />
+      {awaitingHistory && (
+        <p role="status">Historical comparisons are awaiting publication.</p>
       )}
       <Plot
         title="Overall attendance by flight"
@@ -314,11 +339,15 @@ export function WingCharts({ dashboard: d, term, flights, squadrons, hosted }) {
           },
         ]}
       />
-      <section className="insight chart-panel">
+      <section className="insight chart-panel" ref={rosterTip.panel}>
+        {rosterTip.tooltip}
         <h3>Cadets by AS year</h3>
         <ul className="roster-bars">
           {roster.map((r) => (
-            <li key={r.asYear}>
+            <li
+              key={r.asYear}
+              {...rosterTip.target(r.asYear, "Cadets", r.cadets)}
+            >
               <span>{r.asYear}</span>
               <div>
                 <i

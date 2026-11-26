@@ -19,7 +19,7 @@ try {
       viewport: { width: 1488, height: 1056 },
     }),
     errors = [];
-  let testOverview = false;
+  let testOverview = false, fixtureDashboard;
   const overviewRequests = [];
   let stateReads = 0,
     pageReads = 0;
@@ -33,6 +33,7 @@ try {
     stateReads++;
     const response = await route.fetch(),
       data = await response.json();
+    fixtureDashboard = data.reporting?.dashboard ?? fixtureDashboard;
     delete data.reporting;
     delete data.snapshot;
     delete data.error;
@@ -51,6 +52,11 @@ try {
       delete data.captureUnchanged;
     }
     await route.fulfill({ response, status: 200, json: data });
+  });
+  await page.route("**/api/wing-charts", async route => {
+    overviewRequests.push("charts");
+    await route.fulfill({json:{dashboard:fixtureDashboard,history:[],captureKey:"fictional-overview",
+      revision:(await host.panelManifest()).revision}});
   });
   await page.route("**/api/page", async (route) => {
     pageReads++;
@@ -228,7 +234,7 @@ try {
   assert.equal(contrasts.length, 10);
   assert(Math.min(...contrasts) >= 4.5, "Attendance code text must remain legible on its fill.");
   await page.keyboard.press("Escape");
-  assert.equal(await keyTool.getAttribute("aria-expanded"),"false");
+  await page.getByRole("button",{name:"Attendance code key", expanded:false}).waitFor();
   const matrix = page.locator(".attendance-matrix");
   assert.deepEqual(await matrix.locator("thead th[title]").evaluateAll(headers=>
     [...new Set(headers.map(h=>h.getBoundingClientRect().width))]),[68]);
@@ -264,15 +270,17 @@ try {
   await page.reload();
   await page.getByRole("button", {name:"Edit Veterans Day ceremony",exact:true}).waitFor();
   await navigate("Overview");
-  await page.getByRole("button", {name:"Show attendance charts"}).waitFor();
-  assert.deepEqual(overviewRequests, ["overview"]);
-  await page.getByRole("button", {name:"Show attendance charts"}).click();
-  await page.getByRole("heading", {name:"Overall attendance by flight"}).waitFor();
-  assert.deepEqual(overviewRequests, ["overview", "attendance"]);
-  const flightData=page.getByRole("button",{name:"Overall attendance by flight chart data"});
-  await flightData.click();
-  await page.getByRole("region",{name:"Overall attendance by flight chart data"}).getByRole("table").waitFor();
+  const flightChart = page.getByRole("group", {name:"Overall attendance by flight"});
+  const mark = flightChart.locator(".chart-target").first();
+  await mark.hover();
+  await page.getByRole("tooltip").waitFor();
+  assert((await mark.getAttribute("aria-label")).includes((await page.getByRole("tooltip").locator("strong").innerText())));
   await page.keyboard.press("Escape");
+  await page.getByRole("tooltip").waitFor({state:"hidden"});
+  await mark.focus();
+  await page.getByRole("tooltip").waitFor();
+  await page.keyboard.press("Escape");
+  assert.deepEqual(overviewRequests, ["overview", "charts"]);
   testOverview = false;
   for (const title of ["Leadership", "System", "Events"])
     await navigate(title);

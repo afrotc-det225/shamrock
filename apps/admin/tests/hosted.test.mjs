@@ -754,6 +754,7 @@ test('View as keeps the verified actor, wraps reads, and blocks every mutation e
       if(b.action==='exit')return Response.json({error:{code:'REVOKED'}},{status:403});
       return Response.json({contractVersion:'panel-view-as-v1',readOnly:true,action:'enter',entryAuditId:b.auditId,targetPersonId:b.targetPersonId,targetPrincipalId:'flight-reader',status:'ready',access:{mode:'scoped',flightIds:['alpha'],capabilities:{fullSnapshot:false,attendanceCorrectionFlightIds:[],attendanceReportFlightIds:['alpha']}}});
     }
+    if(path==='/v1/admin/panel/view-as/access'&&b.targetPersonId==='selected-cadet')return Response.json({contractVersion:'panel-view-as-access-v1',readOnly:true,environment:'staging',generation:1,entryAuditId:b.entryAuditId,targetPersonId:b.targetPersonId,viewRevision:'a'.repeat(64),access:{capabilities:{fullSnapshot:false}}});
     if(path==='/v1/admin/panel/view-as/page'&&b.targetPersonId==='selected-cadet')return Response.json({contractVersion:'panel-view-as-page-v1',readOnly:true,environment:'staging',generation:1,entryAuditId:b.entryAuditId,targetPersonId:b.targetPersonId,targetPrincipalId:'flight-reader',viewRevision:'a'.repeat(64),kind:b.kind,page:{contractVersion:'panel-pages-v1',section:'manifest',revision:{access:'scoped'},access:{mode:'scoped',flightIds:['alpha'],capabilities:{fullSnapshot:false,attendanceCorrectionFlightIds:[],attendanceReportFlightIds:['alpha']}}}});
     return Response.json({error:{code:'UNWRAPPED_ROUTE',message:'Unexpected route'}},{status:403});
   }};`;
@@ -765,6 +766,9 @@ test('View as keeps the verified actor, wraps reads, and blocks every mutation e
   const entered=await post('/api/view-as',{personId:'selected-cadet'});assert.equal(entered.status,200);
   const state=await f.mf.dispatchFetch(origin+'/api/state',{headers});assert.equal(state.status,200);
   const data=await state.json();assert.equal(data.viewAs.personId,'selected-cadet');assert.equal(data.manifest.access.capabilities.fullSnapshot,false);assert.equal(data.viewAsRevision,'a'.repeat(64));
+  const chartResponse=await f.mf.dispatchFetch(origin+'/api/wing-charts',{headers});
+  assert.equal(chartResponse.status,403);
+  assert.equal((await chartResponse.json()).error.code,'FORBIDDEN');
   const binding=await f.run('SELECT principal_id FROM identity_bindings WHERE google_sub=?','actual-sub');assert.equal(binding.results[0].principal_id,'actual-admin');
   for(const path of ['/api/proposals','/api/proposals/00000000-0000-4000-8000-000000000001/apply','/api/proposals/00000000-0000-4000-8000-000000000001/cancel','/api/chat']){
     const r=await post(path,{operation:'excusal.decide',approved:true,payload:{}});assert.equal(r.status,403);assert.equal((await r.json()).error.code,'VIEW_AS_READ_ONLY');
@@ -876,4 +880,43 @@ test("canonical sign-in is restricted to the reviewed real-data installation", a
   assert.equal((await mf.dispatchFetch(canonical + ".example.invalid/health")).status, 403);
   const wrong = await fixture(t, undefined, false, {...config, STAGING_DATASET:"fictional"});
   assert.equal((await wrong.mf.dispatchFetch(canonical + "/health")).status, 403);
+});
+
+test("Wing charts share a revision across Wing readers and close on revocation or revision drift", async t => {
+  const local = await createLocalBackend();
+  t.after(() => local.dispose());
+  const browse = await local.backend.post("/v1/admin/panel/browse", {...local.backend.identity(), profile:"attendance"});
+  const script = `let loads=0,drift=0; export default {async fetch(req) {
+    const {principalId} = await req.json(), browse=${JSON.stringify(browse)};
+    if (new URL(req.url).pathname.endsWith("/browse")) {
+      if (++loads !== (principalId === "updated" ? 2 : 1)) return Response.json({error:{code:"EXTRA_MATRIX_READ"}},{status:503});
+      if (principalId === "updated") browse.revision.operations++;
+      return Response.json(browse);
+    }
+    const changed = principalId === "updated" || principalId === "drifting" && ++drift > 1;
+    return Response.json({scope:browse.scope, revision:{...browse.revision, operations:browse.revision.operations + Number(changed)},
+      access:{capabilities:{fullSnapshot:principalId !== "flight"}}});
+  }}`;
+  const f = await fixture(t, script);
+  async function visit(actor) {
+    const token = random();
+    await f.run("INSERT INTO identity_bindings VALUES(?,?,1)", actor, actor);
+    await f.run("INSERT INTO sessions VALUES(?,?,?,?)", await sha(token), actor, random(), Date.now()+60000);
+    return f.mf.dispatchFetch(origin+"/api/wing-charts",{headers:{cookie:"__Host-shamrock-v2="+token}});
+  }
+  assert.equal((await f.mf.dispatchFetch(origin+"/api/wing-charts")).status,401);
+  const one = await visit("wing-1");
+  assert.equal(one.status,200);
+  const first = await one.json();
+  assert(first.dashboard.attendanceByFlight.length);
+  assert.equal(first.dashboard.birthdays,undefined);
+  assert.equal(first.dashboard.matrices,undefined);
+  const next=await (await visit("wing-2")).json();
+  assert.deepEqual(next.dashboard,first.dashboard);
+  assert.notEqual(next.captureKey,first.captureKey);
+  assert.equal((await visit("flight")).status,403);
+  assert.equal((await visit("drifting")).status,409);
+  const updated = await visit("updated");
+  assert.equal(updated.status,200);
+  assert.equal((await updated.json()).revision.operations,first.revision.operations+1);
 });

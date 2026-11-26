@@ -125,45 +125,47 @@ export default function OverviewInsights({
 }) {
   const [loaded, setLoaded] = useState(null),
     [error, setError] = useState(""),
-    [retry, setRetry] = useState(0),
-    [requestedCapture, setRequestedCapture] = useState(null);
+    [retry, setRetry] = useState(0);
   const revision = JSON.stringify(manifest?.revision);
   const context = JSON.stringify([captureKey, viewAsRevision, revision]);
   useEffect(() => {
-    if (reporting || !overview || requestedCapture !== context) return;
+    if (!overview && !meta?.hosted) return;
     const controller = new AbortController();
     setLoaded(null);
     setError("");
-    api("/state", undefined, {
-      profile: "attendance",
+    api("/wing-charts", undefined, {
       signal: controller.signal,
     })
       .then((data) => {
         if (
           data.captureKey !== captureKey ||
           data.viewAsRevision !== viewAsRevision ||
-          JSON.stringify(data.manifest?.revision) !== revision
+          JSON.stringify(data.revision) !== revision
         )
           throw Error("The roster or your access changed. Refresh Overview.");
-        setLoaded({ context, dashboard: data.reporting.dashboard });
+        setLoaded({
+          context,
+          dashboard: data.dashboard,
+          history: data.history,
+          awaitingHistory: data.awaitingHistory,
+        });
       })
       .catch((e) => {
         if (!controller.signal.aborted) setError(e.message);
       });
     return () => controller.abort();
   }, [
-    reporting,
+    meta?.hosted,
     !!overview,
     captureKey,
     viewAsRevision,
     revision,
     retry,
-    requestedCapture,
     context,
   ]);
+  const compiled = loaded?.context === context ? loaded : null;
   const d =
-    reporting?.dashboard ||
-    (loaded && loaded.context === context ? loaded.dashboard : null);
+    overview || meta?.hosted ? compiled?.dashboard : reporting?.dashboard;
   const term =
     overview?.term || snapshot?.terms.find((t) => t.isCurrent)?.label;
   const flights = birthdayFlights || snapshot?.flights || [],
@@ -207,16 +209,7 @@ export default function OverviewInsights({
       ) : (
         <section className="insight">
           <h3>Wing attendance</h3>
-          {requestedCapture !== context ? (
-            <button
-              onClick={() => {
-                setError("");
-                setRequestedCapture(context);
-              }}
-            >
-              Show attendance charts
-            </button>
-          ) : error ? (
+          {error ? (
             <p role="alert">
               {error} <button onClick={() => setRetry(retry + 1)}>Retry</button>
             </p>
@@ -238,7 +231,8 @@ export default function OverviewInsights({
           term={term}
           flights={flights}
           squadrons={squadrons}
-          hosted={meta?.hosted}
+          history={compiled?.history || []}
+          awaitingHistory={compiled?.awaitingHistory}
         />
       )}
     </div>

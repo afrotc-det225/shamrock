@@ -1504,3 +1504,15 @@ html:has(dialog:modal) {
   .heading-tools .toolbar-tool span,.tabs .toolbar-tool span {display:none}
   .heading-tools .toolbar-tool,.tabs .toolbar-tool {min-width:36px;min-height:36px}
 }
+.chart-panel {position:relative}
+.chart-target {fill:transparent;cursor:crosshair}
+.chart-target:focus-visible {outline:2px solid #284f78;outline-offset:-1px}
+.chart-scroll .plot-value {pointer-events:none}
+.chart-tip {
+  position:absolute;z-index:2;pointer-events:none;box-sizing:border-box;
+  width:9rem;max-width:100%;
+  transform:translate(-50%, -100%);
+  padding:.4rem .65rem;border-radius:.4rem;background:#182b42;color:white;
+  box-shadow:0 2px 8px #15223633;font-size:.8rem;line-height:1.35;
+}
+.chart-tip strong,.chart-tip span {display:block}

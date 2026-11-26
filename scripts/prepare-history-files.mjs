@@ -5,7 +5,7 @@ import { resolve, join, sep } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { listLegacyHistory, readLegacyHistory } from '../.build/v3/apps/worker/src/legacy-history.js';
 import { retainedDirectoryAliases, linkArchiveRows } from './lib/directory-aliases.mjs';
-import { compactReport } from '../apps/admin/history-table.mjs';
+import { compactReport, historyChartsKey, semesterAverages } from '../apps/admin/history-table.mjs';
 import { catalogKey, fileKey, hash } from '../apps/admin/hosted/semester-history.mjs';
 
 export function semesterLabel(period) {
@@ -61,7 +61,7 @@ export async function prepare(dbPath, out) {
         rows.all(s.snapshotId).map(row => row.labels)]));
       return {...s,importRunId,resource:kind,layout};
     });
-    const semesters = [], files = [], aliasesByRun = new Map();
+    const semesters = [], charts = [], files = [], aliasesByRun = new Map();
     for (const [label, source] of chooseSemesters(sources)) {
       const report = await readLegacyHistory(env,{...request,snapshotId:source.snapshotId});
       if (report.sourceSnapshotSha256 !== source.sourceSnapshotSha256) throw Error('Report source changed');
@@ -71,7 +71,9 @@ export async function prepare(dbPath, out) {
         rows = linkArchiveRows(report,aliasesByRun.get(source.importRunId));
       }
       const summary = {...report.summary, unresolvedRows:rows.filter(r=>r.identityStatus==='unresolved').length};
-      const value = JSON.stringify({semester:label, ...compactReport({...report,rows,summary})});
+      const table = compactReport({...report,rows,summary});
+      charts.push(semesterAverages(label,table.rows));
+      const value = JSON.stringify({semester:label, ...table});
       const version = hash(value);
       semesters.push({label,version});
       files.push({key:fileKey(version),value});
@@ -80,7 +82,8 @@ export async function prepare(dbPath, out) {
     mkdirSync(out,{mode:0o700});
     const save = (name,data) => writeFileSync(join(out,name),JSON.stringify(data),{mode:0o600,flag:'wx'});
     save('files.private.json',files);
-    save('catalog.private.json',[{key:catalogKey(control.generation,snapshots),value:JSON.stringify({semesters})}]);
+    save('catalog.private.json',[{key:catalogKey(control.generation,snapshots),value:JSON.stringify({semesters})},
+      {key:historyChartsKey(control.generation),value:JSON.stringify(charts)}]);
     console.log(JSON.stringify(semesters.map(({label},i) => ({label,rows:JSON.parse(files[i].value).rows.length,
       columns:JSON.parse(files[i].value).headers.length,bytes:Buffer.byteLength(files[i].value)}))));
   } finally { db.close(); }

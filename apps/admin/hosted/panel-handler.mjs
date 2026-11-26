@@ -9,6 +9,7 @@ import { previewFromSession, previewResponse, changePreview } from "./view-as.mj
 import { browseState, browseProfiles } from "./browse.mjs";
 import { eventsState } from "./events-list.mjs";
 import { dailyLimitResponse } from "./provider-errors.mjs";
+import { wingCharts } from "./wing-charts.mjs";
 import { semesterHistory } from "./semester-history.mjs";
 export default {
   async fetch(request, env, controlStoreFactory) {
@@ -86,9 +87,13 @@ export default {
         return secure(json(await changePreview(env, user,
           new HostedBackend(env, user.principal_id), body)));
       if (preview && ![
-        "GET /api/state", "POST /api/page", "GET /api/history/list", "POST /api/history/page", "POST /api/history/report",
+        "GET /api/state", "GET /api/wing-charts", "POST /api/page", "GET /api/history/list", "POST /api/history/page", "POST /api/history/report",
       ].includes(`${request.method} ${url.pathname}`))
         throw new PanelError("VIEW_AS_READ_ONLY", "Exit View as before making changes.", 403);
+      if (url.pathname === "/api/wing-charts" && request.method === "GET") {
+        if (preview && preview.status !== "ready") throw new PanelError("VIEW_AS_CHANGED", "Reload Overview.", 403);
+        return secure(json(await wingCharts(backend)));
+      }
       if (url.pathname === "/api/state" && request.method === "GET") {
         const profile = url.searchParams.get("profile");
         if (profile !== null && !["events", "access", "full", ...browseProfiles].includes(profile))
