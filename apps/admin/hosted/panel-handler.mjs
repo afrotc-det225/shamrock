@@ -113,8 +113,7 @@ export default {
           ? {...authority, section:"manifest", sections:[], partial:true}
           : await backend.panelManifest();
 
-        return secure(
-          json({
+        const state = json({
             manifest,
             ...(browse ? {browse} : {}),
             ...(events ? {eventsList:events.eventsList} : {}),
@@ -133,8 +132,9 @@ export default {
               assistantAvailable: false,
               transitionPolicy: TRANSITION_POLICY,
             },
-          }),
-        );
+          });
+        if (browse) state.headers.set("Server-Timing", `browse;desc="${backend.browseSource}"`);
+        return secure(state);
       }
       if (request.method === "GET" && url.pathname === "/api/receipts") {
         const before = await backend.panelAuthority();

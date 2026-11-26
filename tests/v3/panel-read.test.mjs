@@ -130,6 +130,9 @@ test('Blue/Gold decision visibility uses captured Squadron after Flight reparent
     for (const [principal, expected] of [['blue', [['before-reparent', true]]], ['gold', [['after-reparent', true], ['before-reparent', false]]], ['flight', [['after-reparent', false], ['before-reparent', false]]]]) {
         const rows = (await f.read(principal, 'requests')).rows;
         assert.deepEqual(rows.map(r => [r.requestId, r.canDecide]), expected);
+        const view = await f.send({environment:'local',generation:1,principalId:principal,profile:'excusals'}, '/v1/admin/panel/browse');
+        assert.equal(view.status,200);
+        assert.deepEqual(JSON.parse(view.body.tables.requests).map(r=>[r[0],r[9]===1]),expected);
         for (const row of rows) {
             const check = excusalDecisionPermission(principal, row.requestId, row.flightId);
             const result = await f.db.prepare(`SELECT ${check.sql} AS allowed`).bind(...check.values).first();
@@ -155,6 +158,9 @@ test('explicit owner and manager full reads survive; explicit decision grants ne
     await f.db.prepare("INSERT INTO access_grants VALUES('outsider','excusal.decide','alpha','unit')").run();
     assert.equal((await f.read('outsider', 'requests')).rows[0].canDecide, true);
     assert.deepEqual((await f.read('outsider', 'people')).rows, []);
+    const only = await f.send({environment:'local',generation:1,principalId:'outsider',profile:'excusals'}, '/v1/admin/panel/browse');
+    assert.deepEqual(JSON.parse(only.body.tables.requests).map(r=>[r[0],r[9]]),[['request',1]]);
+    assert.deepEqual(JSON.parse(only.body.tables.people),[]);
 });
 
 test('missing, inactive, source-drifted or stale-bound identities fail closed and role changes invalidate page revisions', async t => {

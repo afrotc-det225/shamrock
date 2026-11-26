@@ -67,20 +67,41 @@ export function panelSectionQueries() {
     return queries;
 }
 
-export function scopedPanelSource(principal: string, flightIds: readonly string[], forCounts: boolean) {
+export function scopedPanelSource(principal: string, flightIds: readonly string[], mode: 'page' | 'counts' | 'browse') {
     const decision = excusalDecisionRowPermission(principal);
     // Manifest counts reuse the same small scope sets in eleven subqueries. Keep
     // them within this transaction instead of recalculating decisions per count.
     // Page queries retain streaming plans so LIMIT can stop reads early.
-    const materialized = forCounts ? 'MATERIALIZED ' : '';
-    const cte = `WITH scoped_flights AS ${materialized}(SELECT value AS flight_id FROM json_each(?)),
+    const browse = mode === 'browse';
+    const materialized = mode === 'page' ? '' : 'MATERIALIZED ';
+    // Compute this actor's decision scopes once per browse query. The row's
+    // captured Squadron still controls commander access after a Flight moves.
+    const decisionScopes = browse ? `decision_actor AS MATERIALIZED (
+        SELECT principal_id FROM principals WHERE principal_id=? AND active=1),
+      decision_flights AS MATERIALIZED (SELECT g.unit_id FROM decision_actor p JOIN access_grants g
+        ON g.principal_id=p.principal_id WHERE g.capability='excusal.decide' AND g.subject_scope='unit'),
+      decision_squadrons AS MATERIALIZED (SELECT json_extract(c.value,'$.squadronId') FROM decision_actor p
+        JOIN principal_accounts a ON a.principal_id=p.principal_id
+        JOIN ${effectivePermissionMembers} m ON m.principal_id=p.principal_id
+        JOIN permission_policy_control pc ON pc.singleton=1 AND pc.enabled=1
+        JOIN json_each(pc.policy_json,'$.google.squadronCommanders') c
+        WHERE json_extract(c.value,'$.email')=a.email),` : '';
+    const canDecide = browse ? '(r.unit_id IN(SELECT * FROM decision_flights) OR coalesce(sc.squadron_id IN(SELECT * FROM decision_squadrons),0))' : decision.sql;
+    const admittedRequests = browse ? `WHERE r.event_id IN(SELECT d.event_id FROM event_details d
+        WHERE d.term_id=(SELECT term_id FROM terms WHERE is_current=1))
+        AND (r.origin='native' OR r.legacy_adoption_id IN(SELECT adoption_id FROM legacy_operational_adoptions WHERE state='complete'))
+        AND (r.unit_id IN(SELECT flight_id FROM scoped_flights) OR r.person_id IN(SELECT person_id FROM scoped_people)
+          OR r.unit_id IN(SELECT * FROM decision_flights) OR r.request_id IN(
+            SELECT request_id FROM excusal_request_scopes WHERE squadron_id IN(SELECT * FROM decision_squadrons)))`
+      : `JOIN event_details d ON d.event_id=r.event_id JOIN terms t ON t.term_id=d.term_id AND t.is_current=1
+        WHERE r.origin='native' OR EXISTS(SELECT 1 FROM legacy_operational_adoptions a WHERE a.adoption_id=r.legacy_adoption_id AND a.state='complete')`;
+    const cte = `WITH scoped_flights AS ${materialized}(SELECT value AS flight_id FROM json_each(?)), ${decisionScopes}
       scoped_people AS ${materialized}(SELECT d.person_id FROM directory_profiles d WHERE d.flight_id IN(SELECT flight_id FROM scoped_flights)
         AND d.flight_path_status NOT IN ('Inactive','Commissioned','Dropped') AND EXISTS(SELECT 1 FROM memberships m WHERE m.person_id=d.person_id AND m.unit_id=d.flight_id AND m.active=1)),
       candidates AS (SELECT r.request_id,r.event_id,r.person_id,r.unit_id,r.origin,r.last_command_id,r.status,r.requested_outcome,r.version,r.reason,
-        r.submitted_at,r.updated_at,r.decided_at,r.decision_reason,sc.squadron_id AS captured_squadron_id,${decision.sql} AS can_decide FROM excusal_records r ${excusalScopeJoin}
-        JOIN event_details d ON d.event_id=r.event_id JOIN terms t ON t.term_id=d.term_id AND t.is_current=1
-        WHERE r.origin='native' OR EXISTS(SELECT 1 FROM legacy_operational_adoptions a WHERE a.adoption_id=r.legacy_adoption_id AND a.state='complete')),
-      visible_requests AS ${materialized}(SELECT * FROM candidates WHERE can_decide=1 OR unit_id IN(SELECT flight_id FROM scoped_flights) OR person_id IN(SELECT person_id FROM scoped_people)),
+        r.submitted_at,r.updated_at,r.decided_at,r.decision_reason,sc.squadron_id AS captured_squadron_id,${canDecide} AS can_decide FROM excusal_records r ${excusalScopeJoin}
+        ${admittedRequests}),
+      visible_requests AS ${materialized}(SELECT * FROM candidates ${browse ? '' : 'WHERE can_decide=1 OR unit_id IN(SELECT flight_id FROM scoped_flights) OR person_id IN(SELECT person_id FROM scoped_people)'}),
       scoped_events AS ${materialized}(SELECT d.event_id FROM event_details d JOIN terms t ON t.term_id=d.term_id AND t.is_current=1
         WHERE EXISTS(SELECT 1 FROM event_units eu WHERE eu.event_id=d.event_id AND eu.unit_id IN(SELECT flight_id FROM scoped_flights))
           OR EXISTS(SELECT 1 FROM visible_requests r WHERE r.event_id=d.event_id)
@@ -126,7 +147,7 @@ export async function panelSnapshotPage(env: Env, input: unknown, authorityOnly 
     if (section === 'verify' && offset !== 0 || section !== 'manifest' && section !== 'verify' && offset > FRONTEND_SECTION_BOUNDS[section]) fail(400, 'INVALID_PANEL_REQUEST');
     const {first,access,control,revision} = await readPanelContext(env,principal);
     if (expected && (expected.operations !== revision.operations || expected.administration !== revision.administration || expected.access !== revision.access)) fail(409, 'SNAPSHOT_CHANGED');
-    const {cte, bind} = scopedPanelSource(principal, access.flightIds, section === "manifest");
+    const {cte, bind} = scopedPanelSource(principal, access.flightIds, section === "manifest" ? "counts" : "page");
     const allQueries = panelSectionQueries(), statements = authorityStatements(env, principal), dataIndex = statements.length;
     if (!authorityOnly && section === 'manifest' && selectedSections.length) statements.push(env.DB.prepare(`${cte} SELECT ${selectedSections.map(s => `(SELECT COUNT(*) ${allQueries[s].countFrom ?? allQueries[s].from}) AS ${s}`).join(',')}`).bind(...bind));
     else if (!authorityOnly && section !== 'verify' && section !== 'manifest') {

@@ -87,3 +87,20 @@ A broad cache cannot fix the first read after a miss. The existing private brows
 Run `npm run check` from the repository root. The baseline regression in `tests/v3/admin.test.mjs` exercises the signed page endpoint across three pages, tests a rejected actor, stale revision and wrong term, and limits the reads for the last single-row page. The native Forms suite checks publication, interrupted work, access fencing, retry behavior and fixture Form choices. The browser and adapter have separate build targets. Run panel unit and browser tests in addition to the root checks.
 
 Release the compatible staging backend first. The previous adapter and offset readers still work with it. Then publish the staging adapter and panel. Verify the served asset version, a cold Overview, and an explicit chart load. During the next approved publication window compare the native Form choices and read the final receipt. Compare account-level hourly usage across comparable workloads. Record local versus hosted numbers separately. Roll back the adapter before reverting the Worker, since the narrower Forms manifest requires the updated server. No database migration or data repair is part of this release.
+
+## Follow-up staging measurement and release
+
+Provider D1 statement metadata on the real-data staging binding gave the following read counts. The comparison ran the Worker read path with the same Wing and Flight identities against hosted D1, including the backend's two permission checks. Every output table matched the independently verified staging snapshot, including its ordering. Measurements exclude browser sign-in, the panel's surrounding authority calls and asset requests. The benchmark used read-only queries and checked zero D1 writes.
+
+| Backend browse | Previous hosted reads | Revised hosted reads |
+|---|---:|---:|
+| Wing Attendance | 37,235 | 15,646 |
+| Flight Attendance | 29,018 | 6,597 |
+| Flight Excusals | 8,640 | 1,686 |
+| Wing Overview | 1,463 | 1,463 |
+
+The matrix maps person and event IDs to their existing compact numeric references once per query input instead of probing both indexes for each fact. It selects roster members by current event version and evaluates import metadata per import. The scoped queue computes the actor's explicit decision Flights and captured decision Squadrons before matching requests. This preserves the difference between permission to see a request and permission to decide it. Read tables share their scope sets in bounded groups within the same database batch. The display data, native publication paths and command authorization are unchanged by these browse changes.
+
+Attendance and Excusals can reuse an authorized result held in a named Worker cache for up to ten minutes. The cache key incorporates the actor binding, effective access, semester, View as entry and revisions. The panel checks current authority before lookup. Fresh authority alone measured 68 hosted reads for the Wing identity and 190 for the scoped identity. A cache miss also runs the backend view and the panel's final authority verification. A different edge location, eviction, a changed permission or a changed revision may cause a miss. The authenticated state response includes a Server-Timing browse description (database, memory or edge), so operators can distinguish a cache hit from a fast database response. Public-facing responses retain Cache-Control: no-store. Existing isolated-memory caching still works if the edge cache is unavailable. No KV writes, D1 cache tables, new paid services or extra credentials are required. [Workers Cache API](https://developers.cloudflare.com/workers/runtime-apis/cache/)
+
+The previous release's hosted current-term baseline transfer measured 18,208 reads **including** the baseline-only manifest count and final verification. The five-section Forms data transfer measured 17,859 including its manifest and final verification through the administrative read route. The latter excludes a live Forms lease and Google publication. These figures use different boundaries from the 9,341 baseline SQL-only measurement above.
