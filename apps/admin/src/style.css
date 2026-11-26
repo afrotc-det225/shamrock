@@ -1427,18 +1427,14 @@ html:has(dialog:modal) {
 .insight,.org-layout section {padding:1rem 1.15rem;border:1px solid var(--border);border-radius:7px;background:#fff}
 .insight h3,.org-layout h3 {margin:0 0 .9rem;font-size:1rem;color:#203f36}
 .insight header {display:flex;justify-content:space-between;align-items:center;gap:.4rem}
-.attendance-summary {grid-column:1/-1;border-top:3px solid var(--green)}
-.attendance-summary dl {display:grid;grid-template-columns:repeat(3,1fr);gap:.5rem;margin:0}
-.attendance-summary dt,.birthdays p {color:#52655f;font-size:.85rem}
-.attendance-summary dd {font-size:clamp(1.2rem,2.3vw,2rem);font-weight:700;margin:.25rem 0}
-.birthdays ul,.org-branches ul {list-style:none;padding:0;margin:0}
-.birthdays li,.org-layout dl div {display:flex;justify-content:space-between;gap:.5rem;font-size:.86rem;padding:.45rem 0;border-bottom:1px solid var(--border)}
+.org-branches ul {list-style:none;padding:0;margin:0}
+.org-layout dl div {display:flex;justify-content:space-between;gap:.5rem;font-size:.86rem;padding:.45rem 0;border-bottom:1px solid var(--border)}
 .org-layout {display:grid;gap:.75rem}.org-layout h3 {margin-bottom:.65rem}
 .org-cards {display:grid;grid-template-columns:repeat(auto-fit,minmax(12rem,1fr));gap:.4rem}
 .org-card {display:flex;flex-direction:column;gap:.23rem;padding:.55rem .75rem;background:#f4f7f6;border-left:3px solid #738d83;font-size:.85rem}
 .org-card span {color:#485c53}.org-branches {margin:0}.org-branches li {border-left:2px solid #bdcbc5;margin:0 0 0 .75rem;padding:.65rem 0 0 .65rem}
 .org-layout dt {font-weight:650}.org-layout dd {margin:0}
-@media(max-width:720px){.insights-grid,.org-branches {grid-template-columns:minmax(0,1fr)}.org-cards{grid-template-columns:1fr}.matrix-scroll{max-width:100%;max-height:65vh}.attendance-summary dt{min-height:2.2em}}
+@media(max-width:720px){.insights-grid,.org-branches {grid-template-columns:minmax(0,1fr)}.org-cards{grid-template-columns:1fr}.matrix-scroll{max-width:100%;max-height:65vh}}
 .coverage {color:var(--muted);font-size:.78rem;margin:.8rem 0 0}
 
 .attendance-matrix {table-layout:fixed;min-width:0}
@@ -1453,27 +1449,38 @@ html:has(dialog:modal) {
 .chart-scroll text {fill:#546274;font:12px system-ui,sans-serif}
 .chart-scroll .plot-value {fill:#1d3048;font-weight:650;font-size:11px}
 .grid-rule {stroke:#dbe1e8;stroke-width:1}
-.chart-legend,.roster-bars,.birthday-week {list-style:none;padding:0}
+.chart-legend,.roster-bars {list-style:none;padding:0}
 .chart-legend {display:flex;flex-wrap:wrap;gap:.8rem;justify-content:center;margin:.35rem 0}
 .chart-legend li {display:flex;align-items:center;gap:.3rem;font-size:.8rem}
 .chart-legend i {width:.65rem;height:.65rem;border-radius:2px}
 .chart-panel header {align-items:baseline;flex-wrap:wrap}
 .chart-panel header select,.chart-panel header button {min-height:1.9rem;font-size:.8rem;width:auto;padding:.28rem .55rem}
-.insights-grid>.attendance-summary {grid-column:auto;border-top:1px solid var(--border)}
 .roster-bars li {display:grid;grid-template-columns:4.5rem 1fr 2rem;align-items:center;gap:.65rem;font-size:.82rem;margin:.55rem 0}
 .roster-bars i {display:block;height:.9rem;border-radius:0 3px 3px 0}
 .roster-bars li>div {border-left:1px solid #b7c2d0;background:#f4f6f8}
-.birthday-month {font-weight:650;color:#23334b}
-.birthday-week {display:grid;grid-template-columns:repeat(7,1fr);gap:2px;margin:.6rem 0}
-.birthday-week li {display:grid;justify-items:center;gap:.2rem;background:#f1f4f7;border:0;padding:.5rem .1rem}
-.birthday-week small {font-size:.7rem;color:#4f5e71}
-.birthday-week b {font-size:1.17rem}
-.birthday-week [aria-current=date] {box-shadow:inset 0 -3px #32587c}
-.birthday-dots {height:5px;display:flex;gap:2px}
-.birthday-dots i {width:5px;height:5px;border-radius:100%}
-.birthdays .birthday-agenda li {display:flex;align-items:center;justify-content:flex-start;border-left:3px solid;padding:.4rem .6rem;margin-top:.35rem}
-.birthday-agenda time {font-size:.76rem;color:#526173}
-.birthday-agenda span {margin-left:auto;padding:.18rem .4rem;font-size:.74rem}
+.attendance-summary,.birthdays {min-width:0;align-self:start}
+.attendance-summary h3,.birthdays h3 {color:#22344f;margin:0}
+.attendance-comparison {width:100%;min-width:0;margin:.65rem 0;font-variant-numeric:tabular-nums}
+.attendance-comparison :is(th,td) {position:static;padding:.48rem .2rem;background:transparent;text-align:right;letter-spacing:0;text-transform:none;border:0}
+.attendance-comparison th:first-child {text-align:left}
+.attendance-comparison thead th {font-weight:500;color:#526173;white-space:normal;border-bottom:1px solid var(--border)}
+.attendance-comparison tbody th {font-size:.88rem;color:#253950}
+.attendance-comparison tbody td:first-of-type {font-size:1.35rem;font-weight:650}
+.attendance-comparison .comparison-change {font-size:.85rem;font-weight:600;color:#526173}
+.comparison-change[data-direction="1"] {color:#216544}
+.comparison-change[data-direction="-1"] {color:#8b4733}
+.attendance-threshold {border-top:1px solid var(--border);margin:.25rem 0;padding:.65rem 0 .2rem;font-size:.88rem}
+.attendance-cohorts,.pending-total {color:#526173;font-size:.8rem}
+.birthdays header {flex-wrap:wrap}
+.birthdays header select {width:auto;max-width:100%;min-height:2rem;font-size:.8rem}
+.birthday-list {margin:.45rem 0 0;padding:0;list-style:none}
+.birthday-list li {display:grid;grid-template-columns:4.25rem 1fr;align-items:center;gap:.75rem;padding:.42rem 0;border-bottom:1px solid var(--border);font-size:.9rem}
+.birthday-list time {color:#344e69;font-size:.82rem;font-weight:650}
+.birthday-list small {display:block;color:#58687b;font-size:.67rem;font-weight:500}
+.birthday-list span {display:block;border-left:3px solid #c7cfd6;padding-left:.55rem;overflow-wrap:anywhere;font-weight:600}
+.birthday-pager {display:flex;align-items:center;justify-content:space-between;margin-top:.4rem}
+.birthday-pager button {display:inline-flex;align-items:center;gap:.2rem;background:transparent;border:0;padding:.35rem;min-height:2rem;font-size:.78rem}
+
 
 @media(max-width:640px) {
   .drawer.cell-editor {inset:auto 0 0;margin:0;width:100%;height:48dvh;max-height:48dvh;border:1px solid var(--border);border-radius:12px 12px 0 0}

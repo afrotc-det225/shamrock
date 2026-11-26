@@ -83,7 +83,7 @@ export default function Semester({
   return (
     <>
       <Heading
-        title="Semester"
+        title="Semester planning"
       />
       <ReceiptStatus receipt={receipt} />
       {plans.length > 0 && (

@@ -1,115 +1,82 @@
 import React, { useEffect, useState } from "react";
 import { api } from "./api";
-import { Select } from "./components";
-import { toEastern } from "./time";
+import BirthdayAgenda from "./BirthdayAgenda";
+import { WingCharts, percent, archivedComparisons } from "./WingCharts";
 
-import { WingCharts, percent } from "./WingCharts";
-import { flightColors, cellStyle } from "./roster-colors";
-const dayMs = 86400000;
-const dayLabel = (date, weekday = false) =>
-  new Intl.DateTimeFormat("en-US", {
-    timeZone: "UTC",
-    month: "short",
-    day: "numeric",
-    ...(weekday ? { weekday: "short" } : {}),
-  }).format(date);
-function Birthdays({ calendar, now, flights, squadrons }) {
-  const [week, setWeek] = useState(0);
-  const today = new Date(toEastern(now).slice(0, 10) + "T00:00Z");
-  const first = new Date(+today + (week * 7 - today.getUTCDay()) * dayMs),
-    end = new Date(+first + 6 * dayMs);
-  const roster = calendar
-    .flatMap(([given, last, md, flightId]) => {
-      if (!/^\d\d-\d\d$/.test(md)) return [];
-      return [...new Set([first.getUTCFullYear(), end.getUTCFullYear()])]
-        .map(
-          (year) => new Date(Date.UTC(year, +md.slice(0, 2) - 1, +md.slice(3))),
-        )
-        .filter((d) => d >= first && d <= end)
-        .map((d) => ({
-          date: d,
-          who: [given, last].join(" "),
-          flight: flights.find((f) => f.flightId === flightId),
-        }));
-    })
-    .sort((a, b) => a.date - b.date || a.who.localeCompare(b.who));
+function AttendanceSummary({ dashboard: d, previous, total }) {
   return (
-    <section className="insight birthdays">
-      <header>
-        <h3>Wing birthdays</h3>
-        <Select
-          label="Week"
-          value={String(week)}
-          onChange={(v) => setWeek(Number(v))}
-          options={[
-            { value: "0", label: "This week" },
-            { value: "1", label: "Next week" },
-            { value: "-1", label: "Last week" },
-          ]}
-        />
-      </header>
-      <div className="birthday-month">
-        {new Intl.DateTimeFormat("en-US", {
-          month: "short",
-          day: "numeric",
-          year: "numeric",
-          timeZone: "UTC",
-        }).formatRange(first, end)}
-      </div>
-      <ol className="birthday-week">
-        {Array.from({ length: 7 }, (_, i) => {
-          const date = new Date(+first + i * dayMs),
-            day = roster.filter((r) => +r.date === +date);
-          return (
-            <li key={i} aria-current={+date === +today ? "date" : undefined}>
-              <small>
-                {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"][i]}
-              </small>
-              <b>{date.getUTCDate()}</b>
-              <div className="birthday-dots">
-                {day.map((r, j) => (
-                  <i
-                    key={j}
-                    style={{
-                      background: flightColors(
-                        r.flight?.label,
-                        squadrons.find(
-                          (s) => s.squadronId === r.flight?.squadronId,
-                        )?.label,
-                      )[2],
-                    }}
-                  />
-                ))}
-              </div>
-            </li>
-          );
-        })}
-      </ol>
-      {roster.length ? (
-        <ul className="birthday-agenda">
-          {roster.map((r, i) => {
-            const colors = flightColors(
-              r.flight?.label,
-              squadrons.find((s) => s.squadronId === r.flight?.squadronId)
-                ?.label,
-            );
+    <section
+      className="insight attendance-summary"
+      aria-labelledby="wing-attendance"
+    >
+      <h3 id="wing-attendance">Wing attendance</h3>
+      <table className="attendance-comparison">
+        <thead>
+          <tr>
+            <th scope="col">Average</th>
+            <th scope="col">This semester</th>
+            {previous && <th scope="col">vs. {previous.label}</th>}
+          </tr>
+        </thead>
+        <tbody>
+          {[
+            ["Overall", d.averageOverall, previous?.overall],
+            ["LLAB", d.averageLlab, previous?.llab],
+          ].map(([label, current, prior]) => {
+            const change =
+              Number.isFinite(prior) && Number.isFinite(current)
+                ? Math.round((current - prior) * 1000) / 10
+                : null;
             return (
-              <li key={i} style={{ borderLeftColor: colors[2] }}>
-                <time>{dayLabel(r.date, true)}</time>
-                <strong>{r.who}</strong>
-                {r.flight && (
-                  <span style={cellStyle(colors)}>{r.flight.label} Flight</span>
+              <tr key={label}>
+                <th scope="row">{label}</th>
+                <td>{percent(current)}</td>
+                {previous && (
+                  <td>
+                    <span
+                      className="comparison-change"
+                      data-direction={Math.sign(change || 0)}
+                      title={
+                        change == null
+                          ? undefined
+                          : change + " percentage points"
+                      }
+                      aria-label={
+                        change == null
+                          ? "No comparison"
+                          : change + " percentage points"
+                      }
+                    >
+                      {change == null
+                        ? "—"
+                        : (change > 0 ? "+" : "") + change.toFixed(1) + " pp"}
+                    </span>
+                  </td>
                 )}
-              </li>
+              </tr>
             );
           })}
-        </ul>
-      ) : (
-        <p>No birthdays this week.</p>
+        </tbody>
+      </table>
+      <p className="attendance-threshold">
+        <strong>
+          {d.belowEighty}
+          {Number.isInteger(total) ? " of " + total : ""}
+        </strong>{" "}
+        cadets below 80% overall
+      </p>
+      {d.noCountedAttendanceCadets > 0 && (
+        <p className="coverage">
+          {d.noCountedAttendanceCadets} with no counted attendance
+        </p>
       )}
+      <small className="attendance-cohorts">
+        {d.gmcCadets} GMC · {d.pocCadets} POC
+      </small>
     </section>
   );
 }
+
 export default function OverviewInsights({
   overview,
   snapshot,
@@ -182,30 +149,11 @@ export default function OverviewInsights({
   return (
     <div className="insights-grid">
       {d ? (
-        <>
-          <section className="insight attendance-summary">
-            <h3>Wing attendance</h3>
-            <dl>
-              {[
-                ["Overall", percent(d.averageOverall)],
-                ["LLAB", percent(d.averageLlab)],
-                ["Below 80% overall", d.belowEighty],
-              ].map(([k, v]) => (
-                <div key={k}>
-                  <dt>{k}</dt>
-                  <dd>{v}</dd>
-                </div>
-              ))}
-            </dl>
-            <p className="coverage">
-              {d.gmcCadets} GMC · {d.pocCadets} POC
-              {d.noCountedAttendanceCadets > 0 &&
-                " · " +
-                  d.noCountedAttendanceCadets +
-                  " with no counted attendance"}
-            </p>
-          </section>
-        </>
+        <AttendanceSummary
+          dashboard={d}
+          total={overview?.activeCadets ?? d.totalCadets}
+          previous={archivedComparisons(compiled?.history ?? [], term).at(-1)}
+        />
       ) : (
         <section className="insight">
           <h3>Wing attendance</h3>
@@ -218,9 +166,9 @@ export default function OverviewInsights({
           )}
         </section>
       )}
-      <Birthdays
-        flights={flights}
+      <BirthdayAgenda
         squadrons={squadrons}
+        flights={flights}
         calendar={calendar}
         now={reportingTime || Date.now()}
       />

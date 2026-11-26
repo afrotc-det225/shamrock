@@ -372,7 +372,7 @@ in a single rehearsal minute. These local improvements do not establish a passed
 daily free-tier budget. Complete captures remain significant, and normal usage
 still needs a measured daily workload before production cutover.
 
-Scoped navigation exposes Attendance & excusals only. Flight Commanders can see
+Scoped navigation exposes separate Attendance and Excusals pages. Each requests its own authorized data. Flight Commanders can see
 their authorized Flights without receiving private Directory/contact fields.
 Blue/Gold decision authority comes from each server-authorized request's
 `canDecide`; attendance correction controls follow the separate Flight capability.

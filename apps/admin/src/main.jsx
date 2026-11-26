@@ -6,6 +6,7 @@ import {
   ChevronsUp,
   CalendarDays,
   ClipboardList,
+  FileCheck2,
   Layers,
   Settings,
   Sparkles,
@@ -16,6 +17,7 @@ import { Drawer, EditorError, EditorSuspended } from "./components";
 import Events from "./Events";
 import People from "./People";
 import Attendance from "./Attendance";
+import Excusals from "./Excusals";
 import History from "./History";
 import Semester from "./Semester";
 import { Overview, System, Assistant } from "./Secondary";
@@ -32,15 +34,18 @@ const pages = [
   ["Cadets", Users],
   ["Leadership", ChevronsUp],
   ["Events", CalendarDays],
-  ["Attendance & excusals", ClipboardList],
+  ["Attendance", ClipboardList],
+  ["Excusals", FileCheck2],
   ["History", HistoryIcon],
-  ["Semester", Layers],
+  ["Semester planning", Layers],
   ["System", Settings],
 ];
-const profileFor = (page,tab) => ({"Cadets":"cadets","Leadership":"leadership","Attendance & excusals":tab,
-  "Semester":"semester","Overview":"overview","Events":"events","History":"access","Assistant":"access","System":"access"}[page] || "full");
+const profileFor = page => ({
+  Cadets:"cadets", Leadership:"leadership", Attendance:"attendance", Excusals:"excusals",
+  "Semester planning":"semester", Overview:"overview", Events:"events",
+  History:"access", Assistant:"access", System:"access",
+}[page] || "full");
 function App() {
-  const [attendanceTab,setAttendanceTab] = useState("attendance");
   const [page, setPage] = useState("Events"),
     [data, setData] = useState(null),
     [error, setError] = useState(""),
@@ -96,7 +101,7 @@ function App() {
     bootstrap.current = null;
     setSessionInfo(null); setData(null); setReadOutage(null); setSignIn(true);
   };
-  live.current = { busy, proposal, data, preview, page, attendanceTab, sessionInfo, readOutage };
+  live.current = { busy, proposal, data, preview, page, sessionInfo, readOutage };
   const reload = async (force = false, profile) => {
     if (!force && pendingRead.current) return pendingRead.current;
     const intent = ++readIntent.current;
@@ -112,7 +117,7 @@ function App() {
     const controller = new AbortController();
     pendingAbort.current = controller;
     setReadProgress({stage: "Checking access"});
-    profile ||= profileFor(live.current.page,live.current.attendanceTab);
+    profile ||= profileFor(live.current.page);
     const task = api("/state", undefined, {profile, signal: controller.signal, onProgress: value => {
       if (!controller.signal.aborted && pendingAbort.current === controller) setReadProgress(value);
     }}).then((value) => {
@@ -125,7 +130,7 @@ function App() {
         (value.snapshot?.access || value.manifest?.access) &&
         !(value.snapshot?.access || value.manifest.access).capabilities.fullSnapshot
       )
-        { setPage("Attendance & excusals"); if(value.browse) setAttendanceTab(value.browse.profile); }
+        setPage(profile === "excusals" ? "Excusals" : "Attendance");
       lastRead.current = Date.now();
       setSync("");
       return value;
@@ -260,8 +265,10 @@ function App() {
     setPage(value);
     setError("");
     setNotice("");
-    if (!data?.snapshot && (!["History", "Assistant"].includes(value) || !data))
-      void run(() => reload(true, profileFor(value,attendanceTab)));
+    // Navigation can supersede the post-save refresh while the old snapshot is still visible.
+    const needsRefresh = !data?.snapshot || pendingRead.current || pendingActions.current > 0;
+    if (needsRefresh && (!["History", "Assistant"].includes(value) || !data))
+      void run(() => reload(true, profileFor(value)));
   };
   const cancelRead = () => {
     readIntent.current++;
@@ -296,15 +303,9 @@ function App() {
   const blockedPreview = preview && preview.status !== "ready";
   const access = data?.snapshot?.access || data?.manifest?.access;
   const scoped = access && !access.capabilities.fullSnapshot;
-  const browseReady = data?.browse && (data.browse.profile === profileFor(page,attendanceTab) ||
-    page === "Attendance & excusals" && ["attendance","excusals"].includes(data.browse.profile));
-  const changeAttendanceTab = value => {
-    if (attendanceTab === value && (!data.browse || data.browse.profile === value)) return;
-    setAttendanceTab(value);
-    if (!data.snapshot) void run(() => reload(true,value));
-  };
+  const browseReady = data?.browse?.profile === profileFor(page);
   const visiblePages = blockedPreview ? [] : scoped
-    ? pages.filter(([title]) => title === "Attendance & excusals")
+    ? pages.filter(([title]) => ["Attendance", "Excusals"].includes(title))
     : pages.filter(([title]) => title !== "History" || data?.meta.hosted);
   const common = { ...data, propose, busy, readOnly: !!preview, notify: setNotice, refresh: reload, withFullData };
   if (signIn) {
@@ -469,9 +470,10 @@ function App() {
                 {!scoped && page === "Leadership" && (
                   <People key="leadership" leadership {...common} />
                 )}{" "}
-                {page === "Attendance & excusals" && <Attendance {...common} tab={data.browse?.profile || attendanceTab} onTab={changeAttendanceTab} />}{" "}
+                {page === "Attendance" && <Attendance {...common} />}
+                {page === "Excusals" && <Excusals {...common} />}{" "}
                 {!scoped && page === "History" && <History key={JSON.stringify([data.captureKey, data.manifest?.revision?.access, preview?.entryAuditId])} />}
-                {!preview && !scoped && page === "Semester" && <Semester {...common} snapshot={data.snapshot || data.list} />}{" "}
+                {!preview && !scoped && page === "Semester planning" && <Semester {...common} snapshot={data.snapshot || data.list} />}{" "}
                 {!scoped && page === "Overview" && (
                   <Overview key={JSON.stringify([data.captureKey,data.viewAsRevision])} {...common} navigate={navigate} />
                 )}{" "}
@@ -481,7 +483,7 @@ function App() {
                 {!preview && !scoped && page === "Assistant" && (
                   <Assistant meta={data.meta} />
                 )}
-                {preview && ["Semester", "System", "Assistant"].includes(page) && <p>Exit View as to use this page.</p>}
+                {preview && ["Semester planning", "System", "Assistant"].includes(page) && <p>Exit View as to use this page.</p>}
               </React.Fragment>
             )}
           </main>

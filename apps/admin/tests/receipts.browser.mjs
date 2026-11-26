@@ -54,7 +54,7 @@ try {
   await page.getByRole("button", { name: "Edit Fictional receipt rehearsal", exact: true }).waitFor();
   assert.equal(receiptCalls, afterApply, "leaving receipt screens starts no extra receipt reads");
   const semesterReceipts = page.waitForResponse(response => response.url().endsWith("/api/receipts"));
-  await navigate("Semester");
+  await navigate("Semester planning");
   await semesterReceipts;
   await page.waitForFunction(() => !document.body.textContent.includes("Loading saved changes…"));
   assert(receiptCalls > afterApply, "Semester loads its saved preparation plans on demand");

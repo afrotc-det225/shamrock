@@ -202,10 +202,8 @@ try {
       .firstName,
     "Alexis",
   );
-  await navigate("Attendance & excusals");
-  await page
-    .getByRole("button", { name: "Excusals (1 pending)", exact: true })
-    .click();
+  await navigate("Excusals");
+  await page.getByText("1 pending", {exact:true}).waitFor();
   await page.getByRole("button", { name: "Review", exact: true }).click();
   await page.getByLabel("Decision", { exact: true }).selectOption("Denied");
   await page
@@ -250,7 +248,7 @@ try {
     .fill("Verified fictional presence");
   await apply();
   assert.equal((await service.snapshot()).corrections[0].code, "P");
-  await navigate("Semester");
+  await navigate("Semester planning");
   await page.getByLabel("New semester name").fill("Spring 2027");
   await page.getByLabel("First training-week Sunday").fill("2027-01-10");
   await page.getByLabel("Training weeks", { exact: true }).fill("2");
@@ -316,7 +314,7 @@ try {
   await page.reload();
   try {
     await page
-      .getByRole("heading", { name: "Attendance & excusals", exact: true })
+      .getByRole("heading", { name: "Attendance", exact: true })
       .waitFor({ timeout: 10000 });
   } catch (e) {
     console.error(await page.locator("body").innerText(), errors);
@@ -324,13 +322,13 @@ try {
   }
   assert.equal(
     await page.getByRole("navigation").getByRole("button").count(),
-    1,
+    2,
   );
   assert.equal(
     await page.locator(".mark-cell button").count(),
     0,
   );
-  await page.getByRole("button", { name: /Excusals \(/ }).click();
+  await navigate("Excusals");
   await page.getByLabel("Decision status").selectOption("");
   await page
     .getByText("Fictional scheduling conflict.", { exact: true })

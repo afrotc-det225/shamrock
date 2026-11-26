@@ -39,7 +39,7 @@ establish hosted authentication, Google publication, or production readiness.
 
 ## Operator guide
 
-- **Overview:** Wing readers see roster counts, birthdays and attendance charts when they open the page. Hover, focus or tap a bar or semester point for its exact value. Use the semester chart’s selector to switch between Overall and LLAB.
+- **Overview:** Wing readers see roster counts, birthdays and attendance charts when they open the page. Attendance averages show the percentage-point change from the preceding published semester. The birthday agenda opens at today, groups names by date, and supports flight filtering and previous or next dates. Hover, focus or tap a bar or semester point for its exact value. Use the semester chart’s selector to switch between Overall and LLAB.
 - **Events:** find the existing event, select its name or pencil, edit its name,
   Attendance header, Eastern start/end times, location or notes, then select
   **Review change → Apply change**. Attendance and excusals stay linked. Do not
@@ -51,11 +51,9 @@ establish hosted authentication, Google publication, or production readiness.
 - **Leadership:** update manual contacts and reporting/office details. A linked
   cadet's identity and role are edited under Cadets. Changing a title does not
   grant system access.
-- **Attendance & excusals:** choose an event and Flight, select **Correct**, choose
-  the attendance code and enter a reason. On Excusals, select **Review**, record
-  the decision and reason, then review/save. Overall and LLAB percentages use the
-  shared reporting rules, not AI calculations.
-- **Semester:** name the next semester, choose the first training-week Sunday and
+- **Attendance:** filter the current matrix by flight, event type, or training week. Select an eligible cell to review a correction, enter a reason, and confirm the change.
+- **Excusals:** review the pending queue for your scope. Search by cadet or event, or filter by flight and decision status. Authorized reviewers can open a request and record a decision.
+- **Semester planning:** name the next semester, choose the first training-week Sunday and
   weekly schedule, explicitly review cadet changes, and prepare the plan. Cadets
   retain their status unless explicitly changed. Preparation does not activate
   the semester. **Check progress** shows the archive state; activation is available

@@ -10,6 +10,8 @@ const termKey = (label) =>
     .split(/[^a-z0-9]+/)
     .sort()
     .join(" ");
+export const archivedComparisons = (archives,term) => archives.filter(t => termKey(t.label) !== termKey(term));
+
 function useChartTooltip() {
   const panel = useRef(null);
   const [tip, setTip] = useState(null);
@@ -250,7 +252,7 @@ export function WingCharts({
 }) {
   const [metric, setMetric] = useState("overall");
   const rosterTip = useChartTooltip();
-  const history = archives.filter((t) => termKey(t.label) !== termKey(term));
+  const history = archivedComparisons(archives,term);
   const years = d.attendanceByYear.filter(
     (r) =>
       r.terms[0]?.percentage != null ||
