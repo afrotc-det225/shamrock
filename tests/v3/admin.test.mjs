@@ -990,6 +990,14 @@ test('scheduled and excusal scoped notice revalidation inherits the pending even
  await assert.rejects(readNotificationContext(f.env,'admin',{kind:'excusal',asOf:f.plan.payload.asOf,requestId:'pending-scope-request'}),{code:'EVENT_ROSTERS_PENDING'});assert.equal(await f.count('notification_intents'),0);
 });
 
+test('a rejected full snapshot never schedules semester counts', async t => {
+  const f=await fixture(t);
+  const planned=[];
+  const DB={prepare(sql){planned.push(sql);return f.db.prepare(sql);},batch:statements=>f.db.batch(statements)};
+  await assert.rejects(frontendSnapshotPage({...f.env,DB},read({principalId:'outsider',section:'manifest',offset:0,revision:null})),{code:'NOT_AUTHORIZED'});
+  assert(!planned.some(sql=>sql.includes('AS legacyBaselines')));
+});
+
 test('current baseline continuations preserve attendance order and bound late-page reads', async t => {
   const f = await fixture(t);
   assert.equal((await f.send(command('event.upsert'))).status, 200);
