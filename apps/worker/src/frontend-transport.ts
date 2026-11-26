@@ -90,6 +90,18 @@ export async function frontendSnapshotPage(env:Env,input:unknown,forEffect=false
   if(forEffect)statements.push(stmt(env.DB,`SELECT effect_id AS effectId,kind,claim_operations_revision AS operationsFloor,claim_administration_revision AS administrationFloor FROM admin_effects WHERE effect_id=? AND worker_id=? AND claim_token=? AND ${pin?reviewedPublicationState:"state='leased'"} AND lease_expires_at>?`,String(req.effectId),String(req.workerId),String(req.claimToken),new Date().toISOString()));
   const scopeIndex=statements.length;statements.push(stmt(env.DB,`SELECT (SELECT COUNT(*) FROM terms WHERE is_current=1) AS currentCount,(SELECT term_id FROM terms WHERE is_current=1) AS currentTermId,(SELECT term_id FROM terms WHERE term_id=COALESCE(?,(SELECT term_id FROM terms WHERE is_current=1))) AS termId`,termId as string|null));
   const resultIndex=statements.length;
+  if(section==='manifest' && !partial){
+    // D1 executes every statement in a batch before JS sees the guard result.
+    // Reject an unavailable capture before scheduling its whole-semester counts.
+    // Keep these same statements in the data batch to catch a concurrent change.
+    const checks=await env.DB.batch<Record<string,unknown>>(statements);
+    const flags=checks[0].results[0];
+    if(flags?.allowed!==1)fail(403,'NOT_AUTHORIZED');
+    if(flags.ready!==1)fail(409,'SNAPSHOT_IMPORT_ACTIVE');
+    if(Number(flags.rosterPending))fail(409,'EVENT_ROSTERS_PENDING');
+    if(checks[scopeIndex].results[0]?.currentCount!==1 || !checks[scopeIndex].results[0]?.termId)fail(409,'TERM_SCOPE_UNAVAILABLE');
+    if(forEffect && !checks[2].results[0])fail(409,'LEASE_CONFLICT');
+  }
   if(section==='manifest'){
     // Counts for people and contacts use the same potentially expensive semester membership.
     const countScope=scopeCte.replace('scoped_people AS (','scoped_people AS MATERIALIZED (');

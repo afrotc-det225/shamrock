@@ -34,3 +34,19 @@ test('quota errors preserve only bounded retry delay from the response',async t=
     await assert.rejects(api('/state'),error=>error.code==='SERVICE_LIMIT_REACHED'&&error.retryAfterSeconds===expected);
   }
 });
+
+test('a read-only Wing Events refresh uses its lightweight event list again',async t=>{
+  const original=globalThis.fetch;t.after(()=>{globalThis.fetch=original});
+  const {api}=await import('../../../.build/admin/state-api-test.mjs?preview-events');
+  const state={transport:'paged-v1',captureKey:'preview',viewAs:{status:'ready'},viewAsRevision:'preview-revision',
+    manifest:{access:{capabilities:{fullSnapshot:true}},revision:{administration:1,operations:1,access:'fixture'}},
+    browse:{profile:'event-list',tables:{terms:'[]',events:'[]'}},reportingTime:1};
+  globalThis.fetch=async()=>Response.json(state);
+  await api('/state',undefined,{profile:'events'});
+  globalThis.fetch=async(path,init)=>{
+    assert.equal(path,'/api/state?profile=events');
+    assert(init.headers['x-shamrock-capture']);
+    return Response.json({captureUnchanged:true,captureKey:state.captureKey,viewAs:state.viewAs,viewAsRevision:state.viewAsRevision});
+  };
+  assert.deepEqual((await api('/state',undefined,{profile:'events'})).eventsList,{terms:[],events:[]});
+});

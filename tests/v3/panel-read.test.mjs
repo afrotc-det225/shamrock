@@ -473,13 +473,25 @@ test('a cold Wing viewer uses private storage and replays a correction; a Flight
     assert(Object.values(checks.tables).every(n=>Number.isInteger(n) && n>=0));
     await assert.rejects(browse('flight','diagnostics'),{status:403});
     assert.equal(kv.size,3);
+    await f.db.prepare("INSERT INTO admin_grants VALUES('outsider','frontend.read','wing','*')").run();
+    bookmark='second-wing-authorized';
     const leadership=await browse('owner','leadership');
-    assert.deepEqual((await browse('owner','leadership')).tables,leadership.tables);
+    assert.deepEqual((await browse('outsider','leadership')).tables,leadership.tables);
     assert.equal(hits.at(-1),'wing-stored');
     const wingOnlyReads=gets;
     await assert.rejects(browse('flight','leadership'),{status:403});
     assert.equal(gets,wingOnlyReads);
     assert.equal(kv.size,4);
+    await f.db.prepare("UPDATE directory_profiles SET role='Updated fixture role' WHERE person_id='cadet'").run();
+    bookmark='directory-edited';
+    const changed=await browse('owner','leadership');
+    assert.notDeepEqual(changed.tables.people,leadership.tables.people);
+    assert.deepEqual((await browse('outsider','leadership')).tables,changed.tables);
+    await f.db.prepare("DELETE FROM admin_grants WHERE principal_id='outsider'").run();
+    bookmark='wing-revoked';
+    const beforeDenied=gets;
+    await assert.rejects(browse('outsider','leadership'),{status:403});
+    assert.equal(gets,beforeDenied);
 });
 
 test('campus enrollment, personal excusal, Flight review and duties use the verified identity',async t=>{
