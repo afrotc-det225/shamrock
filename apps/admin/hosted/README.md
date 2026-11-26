@@ -451,3 +451,15 @@ The Cadets table and View as selector use the same seniority, last-name,
 first-name ordering as the spreadsheet Directory. Leadership keeps its separate
 cadre, operational-role and rank ordering. Sorting is local to the displayed
 list and never changes stable record IDs, snapshot paging or authorization.
+
+### Permanent frontend address during real-data staging
+
+The Worker in `wrangler.canonical.jsonc` forwards the original request over a
+private service binding. It has no database, credentials or scheduled jobs.
+The panel accepts the permanent origin only for the named real-data staging
+installation. Browser cookies are host-only. OAuth and CSRF use the browser's
+actual origin, while the installation keeps its existing control store for
+identity, pending proposals and cleanup. Register both exact callback URIs
+during this overlap. Deploy the compatible panel first, then the entry Worker.
+Verify sign-in and a scoped Sheet readback before sharing the address.
+A future production release needs its own authorized installation and bindings.

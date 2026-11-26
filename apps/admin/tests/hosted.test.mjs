@@ -44,7 +44,7 @@ await build({
   ],
 });
 const origin = "https://panel-staging.example.invalid";
-async function fixture(t, backendScript, viewAsEnabled = false) {
+async function fixture(t, backendScript, viewAsEnabled = false, envOverrides = {}) {
   const mf = new Miniflare({
     workers: [
       {
@@ -70,6 +70,7 @@ async function fixture(t, backendScript, viewAsEnabled = false) {
           SOURCE_RESOURCE: "panel-source",
           GENERATION: "1",
           VIEW_AS_ENABLED: viewAsEnabled ? "1" : "0",
+          ...envOverrides,
         },
       },
       {
@@ -857,4 +858,22 @@ test("backend retry deadlines reject unbounded or malformed provider values", as
       BRIDGE_SECRET:'fictional-bridge-secret-with-more-than-thirty-two-chars',BRIDGE_KEY_ID:'test-key',SOURCE_KIND:'test',SOURCE_RESOURCE:'fixture'},'operator');
     await assert.rejects(backend.send('/v1/admin/panel/access',backend.identity()),error=>error.retryAfterSeconds===expected&&error.status===503);
   }
+});
+
+test("canonical sign-in is restricted to the reviewed real-data installation", async t => {
+  const canonical = "https://shamrock.det225.workers.dev";
+  const config = {
+    APP_ORIGIN: "https://shamrock-admin-staging.det225.workers.dev",
+    STAGING_DATASET: "real",
+    BACKEND_SERVICE_NAME: "shamrock-real-parity",
+    BACKEND_ORIGIN: "https://shamrock-real-parity.det225.workers.dev",
+  };
+  const {mf} = await fixture(t, undefined, false, config);
+  const login = await mf.dispatchFetch(canonical + "/auth/login", {redirect:"manual"});
+  assert.equal(login.status, 303);
+  assert.equal(new URL(login.headers.get("location")).searchParams.get("redirect_uri"),
+    canonical + "/auth/callback");
+  assert.equal((await mf.dispatchFetch(canonical + ".example.invalid/health")).status, 403);
+  const wrong = await fixture(t, undefined, false, {...config, STAGING_DATASET:"fictional"});
+  assert.equal((await wrong.mf.dispatchFetch(canonical + "/health")).status, 403);
 });
