@@ -137,7 +137,7 @@ export default {
             reportingTime:Date.now()}));
         const events = profile === "events" && !preview ? await eventsState(backend) : null;
         const browsing = browseProfiles.includes(profile);
-        const authority = events?.authority ?? (browsing || profile === "events" || (profile && !preview) ? (backend.checkedCapture?.current ?? await backend.panelAuthority()) : null);
+        const authority = events?.authority ?? (browsing || profile === "events" || profile === "access" || (profile && !preview) ? (backend.checkedCapture?.current ?? await backend.panelAuthority()) : null);
         if (profile==="attendance" && request.headers.get("x-shamrock-delta")==="corrections-v1" &&
             !preview && authority?.access.capabilities.fullSnapshot && backend.checkedCapture) {
           const previous=backend.checkedCapture.expected.revision;
@@ -150,7 +150,7 @@ export default {
           }
         }
         if (profile==="semester" && !authority?.access.capabilities.fullSnapshot) throw new PanelError("FORBIDDEN","This page is outside your access.",403);
-        const scopedStart = profile === "events" && authority && !authority.access.capabilities.fullSnapshot;
+        const scopedStart = (profile === "events" || profile === "access") && authority && !authority.access.capabilities.fullSnapshot;
         let browse;
         if (browsing || scopedStart || (preview && profile === "events"))
           browse = await browseState(backend,authority,scopedStart ? "attendance" : profile === "events" ? "event-list" : profile);
