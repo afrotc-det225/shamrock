@@ -76,7 +76,7 @@ Only the configured Google subject with current Wing access can ask a question. 
 
 The real-data staging Worker requires secret bindings `ASSISTANT_OWNER_SUB` and `ASSISTANT_KEY`. Match the subject to the verified maintainer login. Rotate the dedicated restricted Responses-write key before its expiry. Review model prices and the credit grant at rotation. Remove the key binding to disable service. Keep paid recharge off for a credit-only installation.
 
-Both hostnames share the existing panel Durable Object. Before dispatch it reserves a slot atomically, including on provider errors. Limits are one request per 30 seconds, eight per rolling day and 200 per rolling 32 days. Preserve that ledger across releases. Changing the control-store generation disables the Assistant pending review. At the published GPT-5.4 mini prices, budgeting two cents per request allows up to $4 per rolling period. The text-only request has a 10,000-byte limit, 700 output tokens and no model tools or automatic retries.
+Both hostnames share the existing panel Durable Object. Before dispatch it reserves a slot atomically, including on provider errors. Limits are one request per 30 seconds, eight per rolling day and 200 budget slots per rolling 32 days. Preserve that ledger across releases. Changing the control-store generation disables the Assistant pending review. At the published GPT-5.4 mini prices, budgeting two cents per request allows up to $4 per rolling period. The procedure request has a 10,000-byte limit, 700 output tokens and no model tools or automatic retries.
 
 ## Optional CRC connection
 
@@ -349,3 +349,11 @@ without introducing new pass/fail thresholds. Editors and feedback use brief
 transitions only when the user has not requested reduced motion.
 
 In the real-data staging panel, **History → Semester** opens the latest saved attendance sheet. Choose an earlier semester to view its roster, saved Overall and LLAB percentages, and event codes. Flight and cadet-name filters apply within the selected semester. The duplicate backend matrix and alternate workbook copies are retained for reconciliation. The [History runbook](../../docs/runbooks/D1_HISTORY_REPORTS.md#semester-reports-in-the-staging-web-panel) covers publication after an import.
+
+### Successor maintenance workflow
+
+In real-data staging, sign in with the designated maintainer account, open Assistant, choose **Propose a code change**, then choose the source area. Describe the symptom and expected behavior with fictional examples. The Worker sends the selected committed source file and this question to the model. Each proposal identifies its exact Git revision and shows a literal replacement. A download contains the proposed file for that revision.
+
+**Test with fictional data** runs the released and proposed functions separately in a browser worker using an isolated JavaScript interpreter. The table shows regression cases and any additional example supplied by the model. A pass applies only to the displayed case. Four pure functions have executable cases: the excusal queue, birthday agenda, cadet comparator and Sunday closeout code. Other areas require repository integration tests. To continue a proposal, check out the cited revision on a topic branch, review the file diff, and run the build and applicable tests before deploying to staging. Google provider behavior requires a separate staging rehearsal.
+
+Operator questions reserve one budget slot. Maintenance questions use low reasoning, a 40,000-byte request ceiling, 2,400 output tokens and three slots. Both modes share 200 slots per rolling 32 days, eight submissions per rolling day and a 30-second cooldown. At the recorded model prices a three-slot reservation budgets six cents. The test button runs locally and spends no API credits. The model credential belongs to the credit sponsor. At handoff the successor can use the same authorized SHAMROCK account. Before retiring the sponsor credential, replace the staging secret with a restricted Responses-write key from the successor's funded project, check current pricing, and verify one panel question.

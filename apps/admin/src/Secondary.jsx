@@ -1,3 +1,5 @@
+import { areas } from "../hosted/maintenance.mjs";
+import { MaintenanceProposal } from "./MaintenanceProposal";
 import React, { useEffect, useState } from "react";
 import OverviewInsights from "./OverviewInsights";
 import { Send } from "lucide-react";
@@ -121,6 +123,7 @@ export function System({ snapshot, meta, history, receiptsDeferred, reportingTim
   );
 }
 export function Assistant({ meta }) {
+  const [mode,setMode] = useState("procedures"), [area,setArea] = useState(Object.keys(areas)[0]);
   const [messages, setMessages] = useState([]),
     [text, setText] = useState(""),
     [busy, setBusy] = useState(false),
@@ -136,8 +139,8 @@ export function Assistant({ meta }) {
     setBusy(true);
     setError("");
     try {
-      const r = await api("/chat", { messages: next });
-      setMessages([...next, { role: "assistant", content: r.content }]);
+      const r = await api("/chat", { messages: next.map(({role,content})=>({role,content})), ...(meta.hosted ? {mode,area} : {}) });
+      setMessages([...next, { role: "assistant", content: r.content, proposal:r.proposal }]);
     } catch (e) {
       setError(e.message);
     } finally {
@@ -149,8 +152,12 @@ export function Assistant({ meta }) {
       <Heading
         title="Assistant"
       />
+      {meta.hosted && <><label>Assistant mode <select disabled={busy} value={mode} onChange={e=>setMode(e.target.value)}>
+        <option value="procedures">Operator procedures</option><option value="maintenance">Propose a code change</option></select></label>
+        {mode==="maintenance" && <label> Source area <select value={area} disabled={busy} onChange={e=>setArea(e.target.value)}>
+          {Object.keys(areas).map(k=><option key={k}>{k}</option>)}</select></label>}</>}
       <div className="notice">
-        {meta.hosted ? "Ask about SHAMROCK procedures. Your question and recent chat are sent to OpenAI. Keep cadet details and secrets out of chat." : <>CRC access and usage limits may change, and this feature may be retired.
+        {meta.hosted && mode==="maintenance" ? "Describe the change and expected behavior. Your question and the selected release source go to OpenAI. Use fictional examples." : meta.hosted ? "Ask about SHAMROCK procedures. Your question and recent chat are sent to OpenAI. Keep cadet details and secrets out of chat." : <>CRC access and usage limits may change, and this feature may be retired.
         Administrator tools work independently. This version can explain
         procedures; it cannot change records, modify code or repair bugs.</>}
       </div>
@@ -163,10 +170,10 @@ export function Assistant({ meta }) {
         {messages.map((m, i) => (
           <article key={i} className={`message ${m.role}`}>
             <strong>{m.role === "user" ? "You" : "SHAMROCK assistant"}</strong>
-            <p>{m.content}</p>
+            <p>{m.content}</p>{m.proposal && <MaintenanceProposal proposal={m.proposal}/>}
           </article>
         ))}
-        {busy && <p>Checking SHAMROCK procedures…</p>}
+        {busy && <p>{mode==="maintenance" ? "Reviewing release source…" : "Checking SHAMROCK procedures…"}</p>}
         {error && (
           <p role="alert" className="error">
             {error}

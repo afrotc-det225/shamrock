@@ -41,6 +41,15 @@ export default {
       if (url.pathname === "/health")
         return secure(json({ status: "ok", environment: "staging",
           ...(env.PANEL_DB?.status ? { controlStore: await env.PANEL_DB.status() } : {}) }));
+      const runner = /^\/api\/assistant-runner\/(assistant-sandbox-[a-zA-Z0-9_-]+\.js)$/.exec(url.pathname);
+      if (runner && request.method === "GET") {
+        const asset = await env.ASSETS.fetch(new URL("/assets/"+runner[1], url));
+        if (!asset.ok || !asset.headers.get("content-type")?.includes("javascript"))
+          return secure(new Response("Unknown runner", {status:404}));
+        const response = secure(asset);
+        response.headers.set("Content-Security-Policy", "default-src 'none'; script-src 'wasm-unsafe-eval'; connect-src 'none'");
+        return response;
+      }
       const auth = await authRoute(request, env);
       if (auth) return secure(auth);
       if (url.pathname.startsWith("/auth/"))

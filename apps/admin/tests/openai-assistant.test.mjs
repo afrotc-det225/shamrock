@@ -43,3 +43,24 @@ test("bounded text-only call ignores client settings and fails closed before dis
   await assert.rejects(answer(env,{messages:[{role:"user",content:"🍀".repeat(1001)}]},"Guide",send));
   assert.equal(sent,1);
 });
+test("maintenance charges three slots against existing reservations and binds the unique edit to release code", async () => {
+  assert.equal(await reserve(ledger(Array(198).fill(now-2*day)),now,3),false);
+  const book=ledger(Array(197).fill(now-2*day));
+  assert.equal(await reserve(book,now,3),true);
+  assert.equal(await reserve(book,now+day,1),false);
+  const area="Excusal queue", source="export function currentExcusalRequests(s){return s.requests;}";
+  const config={...env,maintenanceSource:{commit:"a".repeat(40),files:{[area]:source}},
+    PANEL_DB:{reserveAssistant:async weight=>weight===3}};
+  const messages=[{role:"user",content:"Do not send prior chat"},{role:"user",content:"Handle missing requests"}];
+  const send=async (_,opts)=>{
+    const q=JSON.parse(opts.body);
+    assert.equal(q.reasoning.effort,"low");assert.equal(q.max_output_tokens,2400);
+    assert.equal(JSON.parse(q.input).source,source);assert.ok(!q.input.includes(messages[0].content));
+    return Response.json({output:[{type:"message",content:[{type:"output_text",text:JSON.stringify({
+      summary:"Handle missing requests.",before:"s.requests;",after:"s.requests ?? [];",args:"[{}]",expected:"[]"})}]}]});
+  };
+  const r=await answer(config,{mode:"maintenance",area,messages},"Guide",send);
+  assert.deepEqual(r.proposal.example,{args:[{}],expected:[]});
+  assert.equal(r.proposal.source,source);
+  await assert.rejects(answer(config,{mode:"maintenance",area:"../secrets",messages},"Guide",send));
+});

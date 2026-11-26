@@ -16,7 +16,7 @@ export default {
       if (/^\d+$/.test(count ?? "")) rows+=Number(count); else measured=false;
       return result;
     }};
-    const response=await handler.fetch(request,{...env,operatorGuide,BACKEND:backend},panelControlStore);
+    const response=await handler.fetch(request,{...env,operatorGuide,maintenanceSource:typeof __MAINTENANCE_SOURCE__ === "undefined" ? null : __MAINTENANCE_SOURCE__,BACKEND:backend},panelControlStore);
     if(response.ok) response.headers.set("X-Shamrock-D1-Rows-Read",measured?String(rows):"unknown");
     return response;
   },

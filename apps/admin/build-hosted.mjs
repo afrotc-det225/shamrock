@@ -1,3 +1,4 @@
+import { areas } from "./hosted/maintenance.mjs";
 import { build } from "esbuild";
 import { fileURLToPath } from "node:url";
 import { resolve } from "node:path";
@@ -5,7 +6,11 @@ import { readFile, writeFile, readdir } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 const root = fileURLToPath(new URL("../../", import.meta.url));
+const sourceCommit=execFileSync('git',['rev-parse','HEAD'],{cwd:root,encoding:'utf8'}).trim();
+const filesAtCommit = Object.fromEntries(Object.entries(areas).map(([area,path]) =>
+  [area,execFileSync('git',['show',sourceCommit+':'+path],{cwd:root,encoding:'utf8'})]));
 const built=await build({
+  define: {__MAINTENANCE_SOURCE__: JSON.stringify({commit:sourceCommit,files:filesAtCommit})},
   absWorkingDir: root,
   entryPoints: ["apps/admin/hosted/worker.mjs"],
   outfile: resolve(root, ".build/admin/hosted-worker.mjs"),
@@ -32,9 +37,8 @@ const built=await build({
   ],
 });
 const sha=bytes=>createHash('sha256').update(bytes).digest('hex');
-const sourceCommit=execFileSync('git',['rev-parse','HEAD'],{cwd:root,encoding:'utf8'}).trim();
 const inputs=Object.keys(built.metafile.inputs).filter(p=>!p.includes('node_modules/'));
-const scope=['apps/admin',...inputs];
+const scope=['apps/admin',...inputs,...Object.values(areas)];
 const trackedDirty=execFileSync('git',['diff','--name-only','HEAD','--',...scope],{cwd:root,encoding:'utf8'}).trim();
 const untracked=execFileSync('git',['ls-files','--others','--exclude-standard','--',...scope],{cwd:root,encoding:'utf8'}).trim();
 const dirty=!!(trackedDirty||untracked);

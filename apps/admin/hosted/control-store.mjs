@@ -32,7 +32,7 @@ export function panelControlStore(env) {
   return {
     prepare: sql => statement(sql),
     batch: statements => call("execute", statements.map(({sql, values}) => ({sql, values}))),
-    reserveAssistant: () => call("reserveAssistant"),
+    reserveAssistant: weight => call("reserveAssistant",weight),
     status: () => call("status"),
   };
 }
