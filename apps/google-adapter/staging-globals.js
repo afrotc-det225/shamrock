@@ -1,5 +1,42 @@
 // Apps Script discovers top-level function declarations, not IIFE object methods.
 // Keep these entry points separate from the current production script and menus.
+// Run from the editor so Google can prompt for any missing publication permissions.
+function shamrockV3StagingAuthorizePublication() {
+  ScriptApp.requireScopes(ScriptApp.AuthMode.FULL, [
+    'https://www.googleapis.com/auth/drive',
+    'https://www.googleapis.com/auth/spreadsheets',
+    'https://www.googleapis.com/auth/forms',
+    'https://www.googleapis.com/auth/forms.body',
+    'https://www.googleapis.com/auth/forms.responses.readonly',
+    'https://www.googleapis.com/auth/script.external_request',
+    'https://www.googleapis.com/auth/userinfo.email'
+  ]);
+  var file = PropertiesService.getScriptProperties().getProperty('SHAMROCK_V3_CONFIG_FILE_ID');
+  if (!file) throw new Error('The staging configuration file has not been bound.');
+  var response = UrlFetchApp.fetch('https://www.googleapis.com/drive/v3/files/' +
+    encodeURIComponent(file) + '?fields=trashed,owners(emailAddress)', {
+    headers: { Authorization: 'Bearer ' + ScriptApp.getOAuthToken() },
+    muteHttpExceptions: true, followRedirects: false
+  });
+  var status = response.getResponseCode();
+  if (status !== 200) {
+    var reason = '';
+    try {
+      var error = JSON.parse(response.getContentText()).error;
+      var codes = (error.details || []).concat(error.errors || []).map(function (item) { return item.reason; });
+      reason = ['ACCESS_TOKEN_SCOPE_INSUFFICIENT', 'SERVICE_DISABLED', 'accessNotConfigured',
+        'insufficientPermissions', 'forbidden', 'notFound'].find(function (code) { return codes.includes(code); }) || '';
+    } catch (_) { /* A non-JSON provider error still has an HTTP status. */ }
+    throw new Error('Staging configuration read failed (HTTP ' + status + (reason ? ', ' + reason : '') + ').');
+  }
+  var metadata = JSON.parse(response.getContentText());
+  if (metadata.trashed || !metadata.owners || metadata.owners.length !== 1 ||
+      metadata.owners[0].emailAddress !== Session.getEffectiveUser().getEmail()) {
+    throw new Error('Run this check as the staging configuration owner.');
+  }
+  console.log('Publication permissions and owner access to the staging configuration verified.');
+}
+
 function shamrockV3StagingHost_() {
   return SHAMROCKV3.createNativeStagingHost({
     PropertiesService: PropertiesService,
