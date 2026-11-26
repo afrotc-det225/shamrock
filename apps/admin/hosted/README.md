@@ -1,12 +1,14 @@
-# Administrator panel: hosted staging
+# SHAMROCK web application
 
-This Worker serves the same administrator interface with verified Google sign-in,
-separate SQLite Durable Object session/proposal persistence, and a service binding to an explicitly
-reviewed fictional or private real-data staging backend. It cannot select a production environment. The production
-Apps Script system is unaffected. Do not deploy `local-fixture.ts` or the Node
-owner-local server.
+Use **https://shamrock.det225.workers.dev/** for cadets and staff. Google returns to `/auth/callback`. The same Worker serves the panel, static files and the signed `/v1/` API. Internal panel reads call the records handler in-process. Only the hourly panel cleanup is scheduled. The live Google Sheets installation remains independently operated until cutover.
 
-## Provider setup
+Use `wrangler.canonical.jsonc` as the template for the named Worker. Supply the existing private binding IDs, secrets and key IDs from the installation. Preserve the authentication Durable Object namespace, its original installation origin, and the original receipt-binding origin on upgrades. Those values identify existing sessions and receipts. The persisted command environment and generation must still match D1.
+
+The fictional regression database is reachable only with its independently verified adapter signature. It has separate credentials, storage and mail settings. Browser accounts always use the cadet database. Older Google adapter configurations keep their saved checkpoints and send signed API calls to the canonical address. Verify both signers, all signed-out denials, Google’s exact callback, the health of the existing control store, and closed write gates after deployment.
+
+The instructions below record the earlier separate-Worker installation for maintainers restoring a rehearsal. Use the configuration above for releases to the current site.
+
+## Archived separate-Worker rehearsal setup
 
 Coordinate with the main migration release owner. Use the existing free Workers
 plan, its SQLite Durable Object allowance, free operational D1 capacity, and a workers.dev address; no Cloudflare Access subscription,
@@ -451,11 +453,3 @@ The Cadets table and View as selector use the same seniority, last-name,
 first-name ordering as the spreadsheet Directory. Leadership keeps its separate
 cadre, operational-role and rank ordering. Sorting is local to the displayed
 list and never changes stable record IDs, snapshot paging or authorization.
-
-### SHAMROCK site and release
-
-Use **https://shamrock.det225.workers.dev/** for cadets and staff. Google returns to `/auth/callback`. The same Worker serves the panel, static files and the signed `/v1/` API. Internal panel reads call the records handler in-process. Only the hourly panel cleanup is scheduled. The live Google Sheets installation remains independently operated until cutover.
-
-Use `wrangler.canonical.jsonc` as the template for the named Worker. Supply the existing private binding IDs, secrets and key IDs from the installation. Preserve the authentication Durable Object namespace, its original installation origin, and the original receipt-binding origin on upgrades. Those values identify existing sessions and receipts. The persisted command environment and generation must still match D1.
-
-The fictional regression database is reachable only with its independently verified adapter signature. It has separate credentials, storage and mail settings. Browser accounts always use the cadet database. Older Google adapter configurations keep their saved checkpoints and send signed API calls to the canonical address. Verify both signers, all signed-out denials, Google’s exact callback, the health of the existing control store, and closed write gates after deployment.
