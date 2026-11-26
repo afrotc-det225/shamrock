@@ -57,7 +57,7 @@ test("maintenance charges three slots against existing reservations and binds th
     assert.equal(q.reasoning.effort,"low");assert.equal(q.max_output_tokens,2400);
     assert.equal(JSON.parse(q.input).source,source);assert.ok(!q.input.includes(messages[0].content));
     return Response.json({output:[{type:"message",content:[{type:"output_text",text:JSON.stringify({
-      summary:"Handle missing requests.",before:"s.requests;",after:"s.requests ?? [];",args:"[{}]",expected:"[]"})}]}]});
+      summary:"Handle missing requests.",before:"s.requests;",after:"s.requests ?? [];",args:["{}"],expected:"[]"})}]}]});
   };
   const r=await answer(config,{mode:"maintenance",area,messages},"Guide",send);
   assert.deepEqual(r.proposal.example,{args:[{}],expected:[]});

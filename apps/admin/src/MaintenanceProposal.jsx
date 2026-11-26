@@ -27,6 +27,7 @@ export function MaintenanceProposal({proposal:p}) {
     <button onClick={download}>Download proposed file</button>
     {Object.hasOwn(runnable,p.area) ? <button disabled={status==="Running…"} onClick={run}>Test with fictional data</button>
       : <p>Requires repository integration tests.</p>}
+    {Object.hasOwn(runnable,p.area) && !p.example && <p>The model supplied no runnable example for the requested behavior. Only regression cases are available.</p>}
     {status && <p role="status">{status}</p>}
     {results && <table><thead><tr><th>Check</th><th>Released code</th><th>Proposal</th></tr></thead>
       <tbody>{results.map(r=><tr key={r.name}><td>{r.name}</td><td>{r.baseline}</td><td>{r.candidate}</td></tr>)}</tbody></table>}
