@@ -63,3 +63,16 @@ test('unrelated section navigation drift is never overwritten during interrupted
 test('an added cohort becomes empty without retaining inactive cadets or losing its question identity',()=>{
  const f=fixture();f.snapshot.people.push({...person,personId:'two',asYear:'AS150'});const first=planNativeFormPublication(f);const read=clone(first.expectedAfter);f.snapshot.people[1].active=false;const next=planNativeFormPublication({...f,current:read,previousEdition:first.edition});assert.equal(next.requests.filter(r=>r.createItem).length,0);assert(!Object.values(next.edition.references).some(r=>r.kind==='person'&&r.personId==='two'));assert.deepEqual(next.expectedAfter.items.map(i=>i.itemId),read.items.map(i=>i.itemId));assert.throws(()=>planNativeFormPublication({...f,current:read}),e=>e.code==='forms_layout');
 });
+
+test('recognizes provider-padded IDs only in the exact interrupted additive layout', async () => {
+ const {legacyLayoutReadback}=await import('../../.build/v3/apps/google-adapter/src/forms-refresh.js');
+ const input=fixture();grow(input);
+ const plan=planNativeFormPublication(input), actual=clone(plan.expectedAfter);
+ const created=plan.requests.flatMap(r=>r.createItem ? [r.createItem.item] : []);
+ const ids=created.flatMap(item=>[item.itemId,item.questionItem?.question.questionId].filter(Boolean));
+ const legacy=JSON.parse(ids.reduce((text,id)=>text.replaceAll('"'+id+'"','"'+id.slice(1)+'"'),JSON.stringify(plan)));
+ for(const id of plan.continuations)actual.pageBreakNavigation[id]={action:'CONTINUE'};
+ assert(legacyLayoutReadback(legacy,actual));
+ actual.items[0].title+=' edited';
+ assert(!legacyLayoutReadback(legacy,actual));
+});

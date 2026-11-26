@@ -31,6 +31,33 @@ export interface FormsRefreshPorts {
 }
 function fail(code: string, message: string): never { throw new AdapterError(code, message); }
 const copy = <T>(x: T): T => JSON.parse(JSON.stringify(x));
+/** Recognize only the numeric ID spelling returned for a previously checkpointed createItem.
+ * Every choice, title and unrelated field must match the frozen post-write expectation.
+ */
+export function legacyLayoutReadback(plan: NativeFormPlan, actual: NativeFormRead): boolean {
+  const aliases = new Map<string, string>();
+  for (const request of plan.requests) {
+    const item = (request.createItem as {item?: {itemId: string; questionItem?: {question: {questionId: string}}}} | undefined)?.item;
+    if (!item) continue;
+    for (const id of [item.itemId, item.questionItem?.question.questionId]) {
+      if (id && /^[0-9a-f]{7}$/.test(id)) aliases.set(id, id.padStart(8, '0'));
+    }
+  }
+  if (!aliases.size) return false;
+  const expected = copy(plan.expectedAfter);
+  const padded = (id: string) => aliases.get(id) ?? id;
+  for (const item of expected.items) {
+    item.itemId = padded(item.itemId);
+    const question = item.questionItem?.question;
+    if (question) question.questionId = padded(question.questionId);
+    for (const option of question?.choiceQuestion?.options ?? []) if (option.goToSectionId) option.goToSectionId = padded(option.goToSectionId);
+  }
+  if (expected.pageBreakNavigation) expected.pageBreakNavigation = Object.fromEntries(Object.entries(expected.pageBreakNavigation).map(([id, target]) =>
+    [padded(id), target.targetSectionId ? {...target, targetSectionId:padded(target.targetSectionId)} : target]));
+  const normalized = {...plan, expectedAfter:expected, continuations:plan.continuations?.map(padded)};
+  return verifyNativeFormPlan(normalized, actual) || verifyFormBeforeContinuations(normalized, actual);
+}
+
 export function consumeFormsRefresh(io: FormsRefreshPorts): { status: 'disabled' | 'idle' | 'published'; forms?: number } {
   if (!io.enabled()) return { status: 'disabled' };
   if (!io.lock.tryLock(100)) fail('forms_busy', 'Another Form operation is in progress.');
@@ -70,9 +97,27 @@ export function consumeFormsRefresh(io: FormsRefreshPorts): { status: 'disabled'
       if (pending.plans.length !== 3 || pending.plans.some(p => formsCanonical(p.binding) !== formsCanonical(bound(p.binding.key)))) fail('forms_state', 'Retained publication bindings changed.');
       if (io.closedWindow && (Object.values(pending.previouslyAccepting).some(Boolean) || pending.plans.some(p => formsCanonical(p.edition.revision) !== formsCanonical(io.closedWindow!.revision)))) fail('forms_state', 'The retained Form publication belongs to another revision or intake window.');
       for (const b of bindings) { touched = true; io.forms.setAccepting(b, false); if (io.forms.read(b).acceptingResponses) fail('forms_fence', 'A Form did not close for safe publication.'); }
-      for (const plan of pending.plans) {
+      for (let index = 0; index < pending.plans.length; index++) {
+        let plan = pending.plans[index];
         currentClaim(); const read = io.forms.read(plan.binding);
         if (verifyNativeFormPlan(plan, read)) continue; // An ambiguous successful write is not repeated.
+        if (io.closedWindow && !state.current[plan.binding.key] && legacyLayoutReadback(plan, read)) {
+          const projected = io.effects.project(claim);
+          if (projected.effect.effectId !== claim.effectId || projected.effect.kind !== claim.kind ||
+              projected.snapshot.generation !== io.config.generation || projected.snapshot.environment !== io.config.environment ||
+              formsCanonical(projected.snapshot.revision) !== formsCanonical(io.closedWindow.revision)) fail('forms_snapshot', 'The original publication revision is required.');
+          const original = {...JSON.parse(plan.expectedBefore), revisionId:plan.requiredRevisionId, acceptingResponses:false};
+          const replacement = planNativeFormPublication({snapshot:projected.snapshot, binding:plan.binding, current:original, signer:io.signer});
+          // Existing items are verified above. Only the edition-dependent options need rewriting.
+          replacement.requests = replacement.requests.filter(request => !request.createItem);
+          if (replacement.requests.some(request => (request.updateItem as {updateMask?:string})?.updateMask !== 'questionItem.question.choiceQuestion.options')) fail('forms_state', 'Unexpected layout recovery mutation.');
+          replacement.expectedBefore = formReadFingerprint(read);
+          replacement.requiredRevisionId = read.revisionId;
+          pending.plans[index] = replacement;
+          state.editions = io.retainCatalog ? io.retainCatalog(state,pending.plans.map(p=>p.edition)) : retainFormEdition(state.editions,replacement.edition);
+          save();
+          plan = replacement;
+        }
         if (!verifyFormBeforeContinuations(plan, read)) {
           if (formReadFingerprint(read) !== plan.expectedBefore) fail('forms_changed', 'A Form changed outside the retained publication plan.');
           if (plan.requests.length) io.forms.write(plan.binding, plan.requests, read.revisionId);
