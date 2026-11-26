@@ -166,6 +166,23 @@ try {
   await page
     .getByRole("button", { name: "Edit Alex Morgan", exact: true })
     .click();
+  // A nonmodal dialog has visible overflow by default. Wheel the actual pane
+  // twice to verify its last field is reachable and scrolling stops at the edge.
+  const profileDrawer = page.getByRole("dialog", {name:"Cadet profile"});
+  await profileDrawer.locator("summary").click();
+  const pane = await profileDrawer.boundingBox();
+  const pageOffset = await page.evaluate(() => scrollY);
+  await page.mouse.move(pane.x + 40, pane.y + pane.height / 2);
+  await page.mouse.wheel(0, 3000);
+  await page.waitForFunction(() => {
+    const d = document.querySelector("dialog[open]");
+    return d.scrollTop > 0 && d.scrollTop + d.clientHeight >= d.scrollHeight - 1;
+  });
+  await page.mouse.wheel(0, 1000);
+  const lastField = await profileDrawer.locator("details label").last().boundingBox();
+  const footer = await profileDrawer.locator("footer").boundingBox();
+  assert(lastField.y + lastField.height <= footer.y + 1 && lastField.y >= pane.y);
+  assert.equal(await page.evaluate(() => scrollY), pageOffset);
   await page.getByLabel("First Name", { exact: true }).fill("Alexis");
   await apply();
   assert.equal(
