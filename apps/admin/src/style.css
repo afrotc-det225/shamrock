@@ -1523,3 +1523,13 @@ html:has(dialog:modal) {
   box-shadow:0 2px 8px #15223633;font-size:.8rem;line-height:1.35;
 }
 .chart-tip strong,.chart-tip span {display:block}
+
+.cadet-workspace {max-width:68rem;margin:auto;padding:clamp(1rem,4vw,3rem);min-width:0}
+.cadet-workspace>header,.cadet-workspace>header>div,.cadet-workspace>nav,.squadron-tabs {display:flex;align-items:center;gap:.6rem;flex-wrap:wrap}
+.cadet-workspace>header {justify-content:space-between;margin-bottom:2rem}
+.cadet-workspace>nav,.squadron-tabs {margin:1rem 0}
+.cadet-workspace button[aria-current=page],.squadron-tabs button[aria-pressed=true] {background:#173d54;color:white}
+.cadet-form {max-width:48rem;margin:1rem 0 2rem}
+.cadet-form fieldset {min-width:0;border:0;padding:0;display:grid;gap:.75rem}
+.cadet-fields {display:grid;grid-template-columns:repeat(auto-fit,minmax(min(15rem,100%),1fr));gap:.8rem}
+.cadet-form button {justify-self:start;margin:.5rem .5rem 0 0}

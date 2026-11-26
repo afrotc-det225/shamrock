@@ -39,7 +39,7 @@ function fixture() {
             before: { permission_policy_control: db.prepare('SELECT * FROM permission_policy_control').all(), shamrock_migrations: db.prepare('SELECT * FROM shamrock_migrations ORDER BY version').all(), legacy_attendance_baselines: [old] },
             desired: { legacy_attendance_baselines: [{ ...old, code: 'P', import_run_id: 'new' }] },
             evidence: { run: { import_run_id: 'new', snapshot_sha256: 'f'.repeat(64), reconciliation_sha256: 'a'.repeat(64), expected_occurrences: 2, expected_profiles: 1, expected_events: 1, expected_baselines: 1 }, groups: rows.map(r => ({ table: 'legacy_source_occurrences', columns: Object.keys(r), rows: [Object.values(r)] })) },
-            context: { environment: 'staging', generation: 1, schemaVersion: 16, backupSha256: backupHash(sourceSql), sourceCommit: commit, administrationRevision: 0, importedAt: at },
+            context: { environment: 'staging', generation: 1, schemaVersion: 17, backupSha256: backupHash(sourceSql), sourceCommit: commit, administrationRevision: 0, importedAt: at },
             review: { reviewReference: 'fictional-reviewed-refresh', preserveCanonicalKeys: true, preserveOriginalEvidence: true, suppressNotifications: true, sourceSnapshots: [{ snapshotSha256: 'f'.repeat(64), consistent: true }] },
         });
         return { sourceSql, refresh };

@@ -28,7 +28,7 @@ export async function cachedPanelRead(env: ReadEnv, url: URL, body: string, load
     [env.ENVIRONMENT,env.GENERATION,env.BRIDGE_KEY_ID,url.pathname,body,version]);
   let edge: Cache;
   try {
-    edge = await caches.open('shamrock-signed-panel-v1');
+    edge = await caches.open('shamrock-signed-panel-v2');
     const hit = await edge.match(address);
     if (hit) return new Response(hit.body,{headers:{'X-Shamrock-D1-Rows-Read':String(rowsRead),'Content-Type':'application/json; charset=utf-8',
       'Cache-Control':'no-store','Server-Timing':'panel;desc="edge"'}});
@@ -40,7 +40,7 @@ export async function cachedPanelRead(env: ReadEnv, url: URL, body: string, load
   const persist=env.WING_MATRICES && !input.entryAuditId && (
     url.pathname==='/v1/admin/panel/access' || url.pathname==='/v1/admin/history/list' || url.pathname==='/v1/admin/snapshot/page' ||
     url.pathname==='/v1/admin/panel/browse' && !['attendance','semester','cadet-details'].includes(input.profile));
-  const key=persist ? 'signed-read-v1/'+(await cacheAddress(url.origin,'/',[
+  const key=persist ? 'signed-read-v2/'+(await cacheAddress(url.origin,'/',[
     env.ENVIRONMENT,env.GENERATION,env.BRIDGE_KEY_ID,url.pathname,body,version])).split('/').pop() : null;
   let saved:string|null=null;
   if (key) {

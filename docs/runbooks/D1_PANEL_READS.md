@@ -246,3 +246,10 @@ Google-account behavior. Before release, integrate and test the panel server's
 alternate-route denial, real named-account Flight/Blue/Gold access and revocation,
 and representative hosted request cost. Keep production unchanged until the
 complete staging acceptance is approved.
+
+
+### Cadet workspace and Squadron review
+
+Apply migration 0017 to the isolated operational D1 after verifying a restorable backup and closed input controls. It adds Flight duty and attendance-flag records. The existing panel session store keeps the Google subject binding. Google-managed school registration and Directory self-service share the native enrollment and command handlers. No additional identity provider or recurring background task is required.
+
+For a permission check, enter View as with an active Wing permission manager, select the Blue commander, and compare the pending and completed request IDs against the captured Squadron in D1. Repeat for Gold, confirm the sets are disjoint, open a request’s details, and verify the preview rejects writes. Repeat after exit to confirm that the previous preview is closed. Use a fictional account and event for registration, excusal decisions and Flight duty tests when write gates are open.

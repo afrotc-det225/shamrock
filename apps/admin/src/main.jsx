@@ -17,6 +17,7 @@ import { Drawer, EditorError, EditorSuspended } from "./components";
 import Events from "./Events";
 import People from "./People";
 import Attendance from "./Attendance";
+import CadetWorkspace from "./CadetWorkspace";
 import Excusals from "./Excusals";
 import History from "./History";
 import Semester from "./Semester";
@@ -105,7 +106,9 @@ function App() {
   const reload = async (force = false, profile) => {
     if (!force && pendingRead.current) return pendingRead.current;
     const intent = ++readIntent.current;
-    await initialize();
+    const currentSession = await initialize();
+    if (new URLSearchParams(location.search).get("workspace")==="cadet" ||
+        !currentSession.viewAs && (currentSession.schoolLogin || currentSession.cadetWorkspace && new URLSearchParams(location.search).get("workspace")!=="leadership")) return;
     if (intent !== readIntent.current)
       throw Object.assign(new Error("A newer view is loading."), {code:"SUPERSEDED"});
     if (pendingRead.current) {
@@ -135,6 +138,7 @@ function App() {
       setSync("");
       return value;
     }).catch(error => {
+      if(error.code==="CADET_WORKSPACE"){location.replace("/?workspace=cadet");return;}
       controller.abort();
       if (controller.superseded) throw Object.assign(new Error("A newer view is loading."), {code:"SUPERSEDED"});
       if (error.name === "AbortError") throw new Error("Loading stopped.");
@@ -295,6 +299,7 @@ function App() {
       if (current?.viewAs) { setPreview(current.viewAs); setData(null); }
       throw error;
     }
+    if(result.directoryWorkspace){location.assign("/?workspace=cadet");return;}
     setPreview(result.viewAs); if (!person) setPreviewName("");
     setProposal(null); setData(null); setNotice("");
     await reload(true);
@@ -346,6 +351,9 @@ function App() {
   }
 
   let outageScreen = null;
+  if(sessionInfo && (new URLSearchParams(location.search).get("workspace")==="cadet" ||
+    !preview && (sessionInfo.schoolLogin || sessionInfo.cadetWorkspace && new URLSearchParams(location.search).get("workspace")!=="leadership")))
+    return <CadetWorkspace session={sessionInfo}/>;
   if (sessionInfo && readOutage) {
     const retryTime = new Intl.DateTimeFormat(undefined, {
       hour:"numeric", minute:"2-digit", timeZoneName:"short",
@@ -393,6 +401,7 @@ function App() {
             ))}
           </nav>
           <div className="sidebar-bottom">
+            {sessionInfo?.cadetWorkspace && !preview && <a href="/?workspace=cadet">My cadet workspace</a>}
             {!preview && !scoped && data?.meta.viewAsEnabled &&
               <ViewAsSelector people={data.snapshot?.people || []} onOpen={done => withFullData(done)} onSelect={viewAs} busy={busy} />}
             {!preview && !scoped && (

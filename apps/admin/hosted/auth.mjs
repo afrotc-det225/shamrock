@@ -1,4 +1,6 @@
 import { createRemoteJWKSet, jwtVerify } from "jose";
+import { HostedBackend } from "./backend.mjs";
+import { schoolForEmail, sealSchoolEmail, readSchoolEmail } from "./school-account.mjs";
 import { PanelError } from "../errors.mjs";
 import { boundedJson, originCheck, json } from "./http.mjs";
 import { previewFromSession, previewResponse } from "./view-as.mjs";
@@ -59,7 +61,11 @@ export async function verifyGoogleIdentity(token, clientId, nonce, jwks = keys) 
   // Missing email does not invalidate an already-bound Google subject.
   const emailHash = email.length <= 254 && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)
     ? await sha(email.toLowerCase()) : null;
-  return { subject: payload.sub, emailHash };
+  const domain = email.toLowerCase().split("@")[1];
+  const schoolEmail = emailHash && typeof payload.hd === "string" && payload.hd.toLowerCase() === domain && schoolForEmail(email)
+    ? email.toLowerCase() : null;
+  const ownedEmail = emailHash && (domain === "gmail.com" || (typeof payload.hd === "string" && payload.hd.toLowerCase() === domain)) ? email.toLowerCase() : null;
+  return { subject: payload.sub, emailHash, schoolEmail, ownedEmail, claimedSchoolEmail: emailHash && schoolForEmail(email) ? email.toLowerCase() : null };
 }
 export async function verifyGoogleToken(token, clientId, nonce, jwks = keys) {
   return (await verifyGoogleIdentity(token, clientId, nonce, jwks)).subject;
@@ -105,6 +111,9 @@ export async function session(request, env) {
       "Your session ended. Sign in again.",
       401,
     );
+  row.schoolEmail = await readSchoolEmail(cookie(request,"__Host-shamrock-school"),env,row.token_hash);
+  if (row.principal_id.startsWith("school.") && (!row.schoolEmail || row.principal_id !== "school." + await sha(row.schoolEmail)))
+    throw new PanelError("SIGN_IN_REQUIRED","Sign in again with your school account.",401);
   return row;
 }
 export async function csrfCheck(request, env, bodySession) {
@@ -258,11 +267,32 @@ export async function authRoute(
         401,
       );
     }
-    const binding = await resolveLoginBinding(env, identity, Date.now());
-    if (!binding)
+    let binding = await resolveLoginBinding(env, identity, Date.now());
+    // A custodian can bind an independently confirmed Google subject for a partner school.
+    // Only that existing principal may open the matching Directory record.
+    if (!identity.schoolEmail && identity.claimedSchoolEmail && binding && !binding.principal_id.startsWith("school.")) {
+      const reviewed = await env.PANEL_DB.prepare("SELECT principal_id FROM identity_bindings WHERE google_sub=? AND active=1 AND NOT EXISTS(SELECT 1 FROM login_invitations WHERE consumed_subject=?)")
+        .bind(identity.subject, identity.subject).first();
+      if (reviewed?.principal_id === binding.principal_id) identity.schoolEmail = identity.claimedSchoolEmail;
+    }
+    if (!identity.schoolEmail && identity.ownedEmail && (!binding || binding.principal_id.startsWith("school."))) {
+      const principalId="google."+identity.emailHash;
+      const backend=new HostedBackend(env,principalId);
+      const known=await backend.post("/v1/cadet/known",{...backend.identity(),email:identity.ownedEmail});
+      if(known.known===true) identity.schoolEmail=identity.ownedEmail;
+    }
+    if (!binding && identity.schoolEmail) {
+      const schoolId = "school." + identity.emailHash;
+      binding = await env.PANEL_DB.prepare(`INSERT INTO identity_bindings(google_sub,principal_id,active)
+        SELECT ?,?,1 WHERE NOT EXISTS(SELECT 1 FROM identity_bindings WHERE google_sub=? OR principal_id IN (?,?))
+        AND NOT EXISTS(SELECT 1 FROM login_invitations WHERE email_sha256=?)
+        AND (SELECT COUNT(*) FROM identity_bindings)<2000 ON CONFLICT DO NOTHING RETURNING principal_id`)
+        .bind(identity.subject,schoolId,identity.subject,schoolId,"google."+identity.emailHash,identity.emailHash).first();
+    }
+    if (!binding || (binding.principal_id.startsWith("school.") && (!identity.schoolEmail || binding.principal_id !== "school."+identity.emailHash)))
       throw new PanelError(
         "ACCESS_NOT_GRANTED",
-        "This Google account does not have SHAMROCK access. Contact your administrator.",
+        identity.claimedSchoolEmail && !identity.schoolEmail ? "Ask your SHAMROCK administrator to confirm this Google account for your school address." : "This Google account does not have SHAMROCK access. Contact your administrator.",
         403,
       );
     const token = random(),
@@ -281,13 +311,14 @@ export async function authRoute(
       );
     return redirect("/", [
       setCookie("__Host-shamrock-v2", token, 8 * 3600),
+      setCookie("__Host-shamrock-school", identity.schoolEmail ? await sealSchoolEmail(identity.schoolEmail,env,await sha(token)) : "", identity.schoolEmail ? 8*3600 : 0),
       setCookie("__Host-shamrock-auth-v2", "", 0),
     ]);
   }
   if (url.pathname === "/api/session" && request.method === "POST") {
     originCheck(request, env.APP_ORIGIN);
     const current = await session(request, env);
-    return json({ authenticated: true, hosted: true, csrf: current.csrf, viewAs: previewResponse(previewFromSession(current)) });
+    return json({ authenticated: true, hosted: true, cadetWorkspace:!!current.schoolEmail, schoolLogin:current.principal_id.startsWith("school."), csrf: current.csrf, viewAs: previewResponse(previewFromSession(current)) });
   }
   if (url.pathname === "/auth/logout" && request.method === "POST") {
     const current = await session(request, env);

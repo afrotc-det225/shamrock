@@ -204,7 +204,6 @@ export const displayDate = (value, timeZone = eventZone) =>
     : "Not scheduled";
 
 export async function logout() {
-  const measured=beginApiRead(path,profile);
   const response = await fetch("/auth/logout", {
     method: "POST",
     headers: { "x-shamrock-csrf": csrf || "" },

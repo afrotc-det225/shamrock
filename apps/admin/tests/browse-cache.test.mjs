@@ -18,7 +18,7 @@ test('private edge hits require identical authority across isolates and cache ou
  const entries=new Map();let loads=0,fail=false;
  const original=globalThis.caches;
  globalThis.caches={open:async name=>{
-   assert.equal(name,'shamrock-private-browse-v1');
+   assert.equal(name,'shamrock-private-browse-v2');
    if(fail)throw Error('unavailable');
    return {match:async key=>entries.get(key)?.clone(),put:async(key,v)=>entries.set(key,v)};
  }};

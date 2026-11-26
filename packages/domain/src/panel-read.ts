@@ -15,7 +15,7 @@ export type PanelAuthorization = {
 export interface PanelAccess {
     mode: 'wing' | 'scoped';
     flightIds: string[];
-    capabilities: { fullSnapshot: boolean; attendanceReportFlightIds: string[]; attendanceCorrectionFlightIds: string[]; };
+    capabilities: { canViewAs?: boolean; fullSnapshot: boolean; attendanceReportFlightIds: string[]; attendanceCorrectionFlightIds: string[]; };
 }
 export interface PanelPage {
     contractVersion: typeof PANEL_PAGE_VERSION;
@@ -87,7 +87,7 @@ export function resolvePanelAccess(authority: PanelAuthority): PanelAccess | nul
     return {
         mode: fullSnapshot ? 'wing' : 'scoped', flightIds: ids,
         capabilities: {
-            fullSnapshot,
+            fullSnapshot, ...(fullSnapshot && authority.permissionManager ? {canViewAs:true} : {}),
             attendanceReportFlightIds: ids.filter(id => authority.effectiveAccessGrants.some(g => g.capability === 'attendance.report' && g.subjectScope === 'unit' && g.flightId === id)),
             attendanceCorrectionFlightIds: ids.filter(id => authority.effectiveAdminGrants.some(g => g.capability === 'attendance.correct' && (g.kind === 'wing' && g.scope === '*' || g.kind === 'flight' && g.scope === id))),
         },

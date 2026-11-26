@@ -17,7 +17,7 @@ export async function browsePanel(env:Env, identity:{environment:string;generati
   const {first,access,control,revision} = authority;
   const wing = access.capabilities.fullSnapshot;
   if (!wing && profile !== 'attendance' && profile !== 'excusals') throw error('NOT_AUTHORIZED',403);
-  const source = wing ? {cte:scopeCte,bind:[null]} : scopedPanelSource(identity.principalId,access.flightIds,'browse');
+  const source = wing ? {cte:scopeCte,bind:[null]} : scopedPanelSource(identity.principalId,access.flightIds,'browse',authority.squadronCommander);
   const q = wing ? semesterQueries : panelSectionQueries();
   const people = wing ? directoryCatalogQuery : q.people;
   const limits:Record<string,number>={people:2000,contacts:2000,birthdays:2000,flights:50,squadrons:20,terms:20,events:200,eligible:100000,baselines:25000,observations:10000,corrections:10000,requests:5000};
@@ -81,7 +81,7 @@ export async function browsePanel(env:Env, identity:{environment:string;generati
     table('events',q.events,eventRef+',eventId,termId,label,columnLabel,eventType,status,trainingWeek,displayOrder,hasRoster,version');
     if(profile==='excusals') {
       table('requests',q.requests,"requestId,personId,eventId,flightId,status,requestedOutcome,reason,version,"+
-        (wing?'NULL,1':'personDisplayName,canDecide'),'WHERE '+activeEvents);
+        (wing?'NULL,1':'personDisplayName,canDecide')+',submittedAt,capturedSquadronLabel,capturedFlightLabel,decisionReason','WHERE '+activeEvents);
     } else {
       table('squadrons',q.squadrons,'squadronId,label');
       const visiblePeople = wing ? '' : ' AND person_id IN(SELECT person_id FROM scoped_people)';

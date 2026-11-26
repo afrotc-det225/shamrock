@@ -244,13 +244,19 @@ stay in component memory; no browser-persistent cache or background receipt
 prefetch is used. `node tests/receipts.browser.mjs` exercises deferred loading,
 failure/retry, System's saved-change retry and Semester's preparation history.
 
+### School sign-in and cadet workflows
+
+Use Google sign-in with the school address in the Directory. Google-managed accounts at the five partner schools can start registration. Registration collects Directory and academic details and creates an active cadet when submissions are open. An existing Directory record retains its assignments when connected. A recognized Gmail or Google Workspace address already used in the Directory can also sign in. For a campus Google cannot verify as its mail host, a custodian must confirm the account holder independently and associate the Google subject with the existing Directory principal. A matching address alone cannot claim that record. The Google consent audience must permit the account.
+
+**My requests** shows the cadet’s excusals and attendance flags. **My Flight** gives commanders and deputies their eligible Flight attendance roster, flags awaiting review and Flight duty assignments. A duty is a roster label and grants no access. Resolving a flag records the review. Attendance corrections use the existing attendance workflow.
+
+Blue and Gold commanders land in **Excusals**, filtered to requests awaiting a decision, oldest first. Choose **All decisions** to inspect past decisions. The request keeps the Squadron captured at submission when the cadet changes Flight. Submissions and decisions share the existing processing and spreadsheet publication paths. While staging submissions are paused, users can read their records and administrators can preview both queues.
+
 ### View as
 
 Administrators can choose **View as**, select a cadet, and inspect that person's
 current panel access. The pinned banner identifies the read-only view and provides
-**Exit view**. Filters remain usable; change controls are disabled. A missing,
-ambiguous, inactive or unverified account link produces an explicit unavailable
-view rather than invented permissions. This preview does not establish that the
+**Exit view**. Filters remain usable; change controls are disabled. An administrator with Wing access and active permission-management authority can also preview an active school Directory record before its first login. The cadet workspace uses the same role, Flight, Squadron and request scope as the signed-in cadet. Conflicting account links or an inactive membership block the preview. This preview does not establish that the
 person's actual Google login works; that needs separate account acceptance.
 
 The actual Google subject and administrator principal never change. The target

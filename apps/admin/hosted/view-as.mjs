@@ -84,5 +84,5 @@ export async function changePreview(env,user,backend,body) {
     ON CONFLICT(token_hash) DO UPDATE SET person_id=excluded.person_id,entry_audit_id=excluded.entry_audit_id,status=excluded.status`)
     .bind(user.token_hash,saved.person_id,saved.entry_audit_id,result.status,user.token_hash,saved.entry_audit_id,user.token_hash,Date.now()).run();
   if(!published.meta.changes)throw new PanelError("VIEW_AS_CANCELLED","This preview was cancelled. Select the person again.",409);
-  return {viewAs:previewResponse(await getPreview(env,user))};
+  return {viewAs:previewResponse(await getPreview(env,user)),directoryWorkspace:result.directoryWorkspace===true};
 }

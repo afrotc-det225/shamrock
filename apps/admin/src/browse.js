@@ -32,7 +32,7 @@ export async function decodeBrowse(data) {
   const terms=columns("terms","termId label sortOrder isCurrent").map(v=>({...v,isCurrent:!!v.isCurrent}));
   const list={people,events,terms,flights,access,scope:data.browse.scope};
   if(profile==="excusals"){
-    list.requests=columns("requests","requestId personId eventId flightId status requestedOutcome reason version personDisplayName canDecide")
+    list.requests=columns("requests","requestId personId eventId flightId status requestedOutcome reason version personDisplayName canDecide submittedAt capturedSquadronLabel capturedFlightLabel decisionReason")
       .map(r=>({...r,canDecide:!!r.canDecide}));
     return {...data,list};
   }

@@ -127,7 +127,7 @@ test('Blue/Gold decision visibility uses captured Squadron after Flight reparent
     const f = await fixture(t); await f.request('cadet', 'before-reparent');
     await f.db.prepare("UPDATE flight_hierarchy SET squadron_id='gold' WHERE unit_id='alpha'").run(); await f.reconcile();
     await f.request('cadet', 'after-reparent');
-    for (const [principal, expected] of [['blue', [['before-reparent', true]]], ['gold', [['after-reparent', true], ['before-reparent', false]]], ['flight', [['after-reparent', false], ['before-reparent', false]]]]) {
+    for (const [principal, expected] of [['blue', [['before-reparent', true]]], ['gold', [['after-reparent', true]]], ['flight', [['after-reparent', false], ['before-reparent', false]]]]) {
         const rows = (await f.read(principal, 'requests')).rows;
         assert.deepEqual(rows.map(r => [r.requestId, r.canDecide]), expected);
         const view = await f.send({environment:'local',generation:1,principalId:principal,profile:'excusals'}, '/v1/admin/panel/browse');
@@ -461,4 +461,61 @@ test('a cold Wing viewer uses private storage and replays a correction; a Flight
     assert(Object.values(checks.tables).every(n=>Number.isInteger(n) && n>=0));
     await assert.rejects(browse('flight','diagnostics'),{status:403});
     assert.equal(kv.size,2);
+});
+
+test('campus enrollment, personal excusal, Flight review and duties use the verified identity',async t=>{
+    const f=await fixture(t);
+    await f.db.prepare("INSERT INTO adapter_sources VALUES('test','admin-staging-web',1)").run();
+    await f.db.prepare("UPDATE permission_policy_control SET config_json=?").bind(JSON.stringify({operationalSquadronIds:["blue","gold"]})).run();
+    const email='fictional-portal@nd.edu',principalId='google.'+createHash('sha256').update(email).digest('hex');
+    const identity={environment:'local',generation:1,principalId,email};
+    const route=(action,who=identity)=>f.send({...who,...(action?{action}:{})},'/v1/cadet/workspace');
+    const action=(kind,fields)=>({kind,fields,id:crypto.randomUUID()});
+    assert((await route()).body.registration);
+    const register=action('register',{firstName:'Fictional',lastName:'Applicant',asYear:'AS100',flightId:'alpha',university:'Notre Dame',
+      classYear:'2030',phone:'555-0100',dateOfBirth:'2006-01-01',homeTown:'Fictional',homeState:'IN',cipCode:'11.0101',afsc:'Undecided'});
+    assert.equal((await route({...register,fields:{...register.fields,role:'Blue Squadron Commander'}})).status,400);
+    const saved=await route(register);assert.equal(saved.status,200,JSON.stringify(saved));
+    assert.equal((await route(register)).body.commandId,saved.body.commandId);
+    const self=(await route()).body;assert(self.linked);assert.equal(self.squadron,null);assert.equal(self.queue.length,0);
+    await f.db.batch([
+      f.db.prepare("INSERT INTO events VALUES('portal-event','Fictional workshop',1)"),
+      f.db.prepare("INSERT INTO event_details SELECT 'portal-event',1,'current','other',1,2,'Workshop','ALL','active',NULL,NULL,'','','2026-01-01','owner','2026-01-01'"),
+      f.db.prepare("INSERT INTO event_units VALUES('portal-event','alpha')")
+    ]);
+    const request=action('excusal',{eventId:'portal-event',version:1,outcome:'E',reason:'Fictional request.'});
+    const receipt=await route(request);assert.equal(receipt.status,200,JSON.stringify(receipt));
+    assert.equal((await route(request)).body.commandId,receipt.body.commandId);
+    assert.equal((await route()).body.requests.length,1);
+    assert.equal((await route(action('decide',{requestId:'request.'+request.id,version:1,decision:'Approved',reason:'test'}))).status,403);
+    const flag=action('flag',{eventId:'portal-event',detail:'Check recorded attendance.'});
+    assert.equal((await route(flag)).status,200);assert.equal((await route(flag)).status,200);
+    assert.equal((await route()).body.actions.length,1);
+    assert.equal((await route(action('duty',{personId:self.profile.personId,detail:'Cadet Wing Commander'}))).status,403);
+    await f.db.batch([
+      f.db.prepare("INSERT INTO events VALUES('portal-second','Another fictional workshop',1)"),
+      f.db.prepare("INSERT INTO event_details SELECT 'portal-second',1,'current','other',1,3,'Workshop','ALL','active',NULL,NULL,'','','2026-01-01','owner','2026-01-01'"),
+      f.db.prepare("INSERT INTO event_units VALUES('portal-second','alpha')")
+    ]);
+    const multiple=action('excusal',{events:[{eventId:'portal-event',version:1},{eventId:'portal-second',version:1}],outcome:'E',reason:'Fictional two-event request.'});
+    const multiResult=await route(multiple);assert.equal(multiResult.status,200,JSON.stringify(multiResult));
+    assert.equal((await route(multiple)).body.commandId,multiResult.body.commandId);
+    assert.equal((await route()).body.requests.length,3);
+    const captain={...identity,principalId:'flight',email:'flight@example.invalid'};
+    const leader=(await route(null,captain)).body;assert(leader.flightCommander && leader.linked);
+    const duty=action('duty',{personId:self.profile.personId,detail:'Guide'});
+    assert.equal((await route(duty,captain)).status,200);
+    assert.equal((await route(action('duty',{personId:'other',detail:'Guide'}),captain)).status,403);
+    assert.equal((await route(action('resolve',{parentId:'portal.'+flag.id,detail:'Reviewed with cadet.'}),captain)).status,200);
+    const after=(await route()).body.actions;
+    assert.equal(after.find(r=>r.kind==='flag').resolution,'Reviewed with cadet.');
+    assert.equal(after.find(r=>r.kind==='duty').detail,'Guide');
+    const report=action('report',{eventId:'portal-event',version:1,rosterVersion:leader.flights.find(f=>f.flightId==='alpha').rosterVersion,present:[self.profile.personId],completeness:'partial'});
+    assert.equal((await route(report)).status,403);
+    assert.equal((await route(report,captain)).status,200);
+    const edit=action('profile',{version:self.profile.version,changes:{afsc:'Undecided after review'}});
+    assert.equal((await route(edit)).status,200);
+    assert.equal((await route()).body.profile.afsc,'Undecided after review');
+    await f.db.prepare('UPDATE principals SET active=0 WHERE principal_id=?').bind(principalId).run();
+    assert.equal((await route()).status,403);
 });

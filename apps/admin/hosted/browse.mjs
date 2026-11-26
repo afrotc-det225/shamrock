@@ -18,7 +18,7 @@ export async function browseState(backend, authority, requested) {
     const digest = createHash("sha256").update(key).digest("hex");
     address = new URL("/_private/browse/"+digest, backend.env.APP_ORIGIN).href;
     try {
-      edge = await caches.open("shamrock-private-browse-v1");
+      edge = await caches.open("shamrock-private-browse-v2");
       const hit = await edge.match(address);
       if (hit) {
         const view = await hit.json();

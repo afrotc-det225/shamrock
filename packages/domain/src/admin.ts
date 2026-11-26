@@ -294,8 +294,9 @@ export function parseAdminCommand(value: unknown): AdminCommand {
   if (c.contractVersion !== 1)
     return invalid('contractVersion', 'Unsupported contract version.');
   const self = c.operation === 'directory.selfUpdate' || c.operation === 'directory.enroll';
-  const sourceKind = choice(s.kind, self ? ['form'] as const : ['sheet', 'test'] as const, 'source.kind');
-  const evidence = choice(a.evidence, self ? ['google-form'] as const : ['google-edit', 'authenticated-confirmation'] as const, 'actor.evidence');
+  const sourceKind = choice(s.kind, self ? ['form','test'] as const : ['sheet', 'test'] as const, 'source.kind');
+  const evidence = choice(a.evidence, self ? ['google-form','authenticated-confirmation'] as const : ['google-edit', 'authenticated-confirmation'] as const, 'actor.evidence');
+  if (self && (sourceKind === 'form' ? evidence !== 'google-form' : evidence !== 'authenticated-confirmation' || s.resourceKey !== 'admin-staging-web')) return invalid('actor.evidence','Self-service requires verified account evidence.');
   if (evidence === 'google-edit' && sourceKind !== 'sheet')
     return invalid('actor.evidence', 'Actor evidence does not match the source.');
   const envelope: Envelope = { commandId: adminIdentifier(c.commandId, 'commandId'), contractVersion: 1, environment: choice(c.environment, ['local', 'staging'] as const, 'environment'), generation: integer(c.generation, 'generation', 1), actor: { principalId: adminIdentifier(a.principalId, 'actor.principalId'), evidence }, source: { kind: sourceKind, resourceKey: adminIdentifier(s.resourceKey, 'source.resourceKey'), submissionId: adminIdentifier(s.submissionId, 'source.submissionId'), revision: integer(s.revision, 'source.revision', 1) } };

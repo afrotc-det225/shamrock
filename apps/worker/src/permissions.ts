@@ -119,7 +119,7 @@ export async function preparePermissionMutation(env: Env, c: AdminCommand, now: 
             throw conflict();
         if (!prior) {
             f.accounts.push({ principalId: c.actor.principalId, email: p.verifiedEmail, personId: targetId, active: true });
-            extra.push(stmt(env.DB, "INSERT INTO principal_accounts VALUES(?,?,'google-form',?)", c.actor.principalId, p.verifiedEmail, c.commandId));
+            extra.push(stmt(env.DB, "INSERT INTO principal_accounts VALUES(?,?,?,?)", c.actor.principalId, p.verifiedEmail, c.actor.evidence, c.commandId));
         }
     }
     else if (c.operation === 'leadership.upsert') {

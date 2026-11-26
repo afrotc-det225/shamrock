@@ -1,3 +1,5 @@
+import { cadetRoute, knownDirectoryEmail } from './cadet-workspace.js';
+import { previewCadetWorkspace } from './panel-view-as.js';
 import {attendanceDelta} from './panel-delta.js';
 import { meterPanelReads } from './panel-read-meter.js';
 import { cachedPanelRead, wingAttendanceCache } from './panel-cache.js';
@@ -487,6 +489,9 @@ const worker = {
         throw new HttpError(400, 'INVALID_REQUEST', 'Use an authenticated JSON operation.');
       }
       const input = parseJson(body);
+      if (url.pathname === '/v1/cadet/known' && !url.search) return json(await knownDirectoryEmail(env,input));
+      if (url.pathname === '/v1/cadet/workspace' && !url.search) return json(await cadetRoute(env,input,(c,guard)=>acceptCommand(env,c,guard)));
+      if (url.pathname === '/v1/cadet/preview' && !url.search) return json(await previewCadetWorkspace(env,input));
       if (url.pathname === '/v1/admin/permissions/recover' && !url.search) return json(await recoverPermissionRefresh(env, input));
       if (url.pathname === '/v1/admin/permissions/fence' && !url.search) return json(await attestPermissionFence(env, input));
       if (url.pathname === '/v1/admin/permissions/commands' && !url.search) return json(await permissionCommand(env, input));

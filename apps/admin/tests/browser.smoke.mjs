@@ -330,6 +330,7 @@ try {
   );
   await navigate("Excusals");
   await page.getByLabel("Decision status").selectOption("");
+  await page.getByRole("button",{name:"Details",exact:true}).click();
   await page
     .getByText("Fictional scheduling conflict.", { exact: true })
     .waitFor();

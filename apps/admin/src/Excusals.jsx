@@ -1,5 +1,6 @@
 import React, { useState } from "react";
 import {
+  Drawer,
   Heading,
   Select,
   Field,
@@ -23,6 +24,7 @@ export default function Excusals({
   const [query, setQuery] = useState(""),
     [status, setStatus] = useState("Submitted"),
     [flight, setFlight] = useState(""),
+    [squadron, setSquadron] = useState(""),
     [edit, setEdit] = useState(null),
     [decision, setDecision] = useState("Approved"),
     [reason, setReason] = useState("");
@@ -31,7 +33,11 @@ export default function Excusals({
   const people = new Map(s.people.map((p) => [p.personId, name(p)]));
   const who = (r) =>
     r.personDisplayName || people.get(r.personId) || "Unknown cadet";
-  const visible = queue.filter(
+  const squadrons = [...new Set(queue.map(r => r.capturedSquadronLabel).filter(Boolean))].sort();
+  const flights = new Map(s.flights.map(f => [f.flightId, f.label]));
+  const flightName = r => r.capturedFlightLabel || flights.get(r.flightId) || "—";
+  const bySquadron = queue.filter(r => !squadron || squadron === r.capturedSquadronLabel);
+  const visible = bySquadron.filter(
     (r) =>
       (!flight || r.flightId === flight) &&
       (!status || r.status === status) &&
@@ -39,6 +45,10 @@ export default function Excusals({
         .toLowerCase()
         .includes(query.trim().toLowerCase()),
   );
+  visible.sort((a,b) => Number(b.status === "Submitted") - Number(a.status === "Submitted") ||
+    (a.status === "Submitted" ? 1 : -1) * ((a.submittedAt || "").localeCompare(b.submittedAt || "")) ||
+    who(a).localeCompare(who(b)));
+  const selected = edit && queue.find(r => r.requestId === edit.requestId);
   const scoped = s.access && !s.access.capabilities.fullSnapshot;
   return (
     <>
@@ -48,6 +58,10 @@ export default function Excusals({
             {queue.filter((r) => r.status === "Submitted").length} pending
           </span>
         </Heading>
+        {squadrons.length > 1 && <div className="squadron-tabs" aria-label="Squadron queues">
+          {["", ...squadrons].map(label => <button key={label} aria-pressed={squadron === label}
+            onClick={() => { setSquadron(label); setFlight(""); }}>{label || "Wing"} · {queue.filter(r => (!label || r.capturedSquadronLabel === label) && r.status === "Submitted").length}</button>)}
+        </div>}
         <div className="toolbar">
           <SearchBox
             placeholder="Find cadet or event"
@@ -60,7 +74,8 @@ export default function Excusals({
             onChange={setStatus}
             options={[
               { value: "", label: "All decisions" },
-              ...new Set(["Submitted", ...queue.map((r) => r.status)]),
+              {value:"Submitted",label:"Needs a decision"},
+              ...new Set(queue.filter(r=>r.status !== "Submitted").map(r=>r.status)),
             ]}
           />
           <Select
@@ -69,46 +84,44 @@ export default function Excusals({
             onChange={setFlight}
             options={[
               { value: "", label: "All Flights" },
-              ...s.flights.map((f) => ({ value: f.flightId, label: f.label })),
+              ...Array.from(new Map(bySquadron.map(r => [r.flightId, flightName(r)])), ([value,label]) => ({value,label})).sort((a,b)=>a.label.localeCompare(b.label)),
             ]}
           />
         </div>
       </section>
-      <Table headers={["Cadet / event", "Request", "Reason", "Status", ""]}>
+      <Table headers={["Cadet / Flight", "Event", "Requested", "Status", ""]}>
         {visible.map((r) => (
           <tr key={r.requestId}>
             <td>
               {who(r)}
-              <small>{events.get(r.eventId)}</small>
+              <small>{flightName(r)}</small>
             </td>
+            <td>{events.get(r.eventId)}</td>
             <td>{r.requestedOutcome}</td>
-            <td>{r.reason}</td>
             <td>
               <Status>{r.status}</Status>
             </td>
             <td>
-              {(!scoped || r.canDecide === true) && (
                 <button
-                  disabled={readOnly || busy}
+                  disabled={busy}
                   onClick={() => {
                     setReason("");
                     setDecision("Approved");
-                    setEdit(r);
+                    setEdit({requestId:r.requestId,version:r.version});
                   }}
                 >
-                  Review
+                  {readOnly || (scoped && !r.canDecide) ? "Details" : "Review"}
                 </button>
-              )}
             </td>
           </tr>
         ))}
       </Table>
       {!visible.length && <Empty>No requests match these filters.</Empty>}
-      {edit &&
-        queue.some(
-          (r) =>
-            r.requestId === edit.requestId && (!scoped || r.canDecide === true),
-        ) && (
+      {selected && (readOnly || (scoped && !selected.canDecide)) &&
+        <Drawer title="Request details" onClose={() => setEdit(null)}>
+          <div className="fields"><RequestDetails request={selected} cadet={who(selected)} event={events.get(selected.eventId)} /></div>
+        </Drawer>}
+      {selected && !readOnly && (!scoped || selected.canDecide === true) && (
           <Editor
             title="Review excusal"
             busy={busy}
@@ -126,10 +139,7 @@ export default function Excusals({
               )
             }
           >
-            <p>
-              {who(edit)} · {events.get(edit.eventId)}
-            </p>
-            <blockquote>{edit.reason}</blockquote>
+            <RequestDetails request={selected} cadet={who(selected)} event={events.get(selected.eventId)} />
             <Select
               label="Decision"
               value={decision}
@@ -147,4 +157,12 @@ export default function Excusals({
         )}
     </>
   );
+}
+
+function RequestDetails({request, cadet, event}) {
+  return <><strong>{cadet}</strong><div>{event} · {request.requestedOutcome}</div>
+    <Status>{request.status}</Status>
+    {request.submittedAt && <small>Submitted {new Date(request.submittedAt).toLocaleDateString()}</small>}
+    <blockquote>{request.reason}</blockquote>
+    {request.decisionReason && <p>Decision reason · {request.decisionReason}</p>}</>;
 }

@@ -67,7 +67,7 @@ export function panelSectionQueries() {
     return queries;
 }
 
-export function scopedPanelSource(principal: string, flightIds: readonly string[], mode: 'page' | 'counts' | 'browse') {
+export function scopedPanelSource(principal: string, flightIds: readonly string[], mode: 'page' | 'counts' | 'browse', squadronCommander = false) {
     const decision = excusalDecisionRowPermission(principal);
     // Manifest counts reuse the same small scope sets in eleven subqueries. Keep
     // them within this transaction instead of recalculating decisions per count.
@@ -101,7 +101,7 @@ export function scopedPanelSource(principal: string, flightIds: readonly string[
       candidates AS (SELECT r.request_id,r.event_id,r.person_id,r.unit_id,r.origin,r.last_command_id,r.status,r.requested_outcome,r.version,r.reason,
         r.submitted_at,r.updated_at,r.decided_at,r.decision_reason,sc.squadron_id AS captured_squadron_id,${canDecide} AS can_decide FROM excusal_records r ${excusalScopeJoin}
         ${admittedRequests}),
-      visible_requests AS ${materialized}(SELECT * FROM candidates ${browse ? '' : 'WHERE can_decide=1 OR unit_id IN(SELECT flight_id FROM scoped_flights) OR person_id IN(SELECT person_id FROM scoped_people)'}),
+      visible_requests AS ${materialized}(SELECT * FROM candidates ${squadronCommander ? 'WHERE can_decide=1' : browse ? '' : 'WHERE can_decide=1 OR unit_id IN(SELECT flight_id FROM scoped_flights) OR person_id IN(SELECT person_id FROM scoped_people)'}),
       scoped_events AS ${materialized}(SELECT d.event_id FROM event_details d JOIN terms t ON t.term_id=d.term_id AND t.is_current=1
         WHERE EXISTS(SELECT 1 FROM event_units eu WHERE eu.event_id=d.event_id AND eu.unit_id IN(SELECT flight_id FROM scoped_flights))
           OR EXISTS(SELECT 1 FROM visible_requests r WHERE r.event_id=d.event_id)
@@ -124,7 +124,7 @@ export async function readPanelContext(env:Env, principal:string) {
     const hashInput = JSON.stringify({ principalId: principal, authority, permissionVersion: control.permissionVersion, permissionHash: control.permissionHash, termId: control.termId });
     const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(hashInput));
     const revision: PanelRevision = { operations: Number(control.operations), administration: Number(control.administration), access: [...new Uint8Array(digest)].map(v => v.toString(16).padStart(2, '0')).join('') };
-    return {first,access,control,revision};
+    return {first,access,control,revision,squadronCommander:authority.commanderSquadronIds.length > 0};
 }
 
 /** Signed adapter route; principalId must come from the panel server's verified session, never browser JSON. */
@@ -145,12 +145,12 @@ export async function panelSnapshotPage(env: Env, input: unknown, authorityOnly:
         || Object.keys(expected).sort().join(',') !== 'access,administration,operations' || typeof expected.access !== 'string' || !/^[a-f0-9]{64}$/.test(expected.access)
         || ![expected.operations, expected.administration].every(v => Number.isSafeInteger(v) && v >= 0)) fail(400, 'INVALID_PANEL_REQUEST');
     if (section === 'verify' && offset !== 0 || section !== 'manifest' && section !== 'verify' && offset > FRONTEND_SECTION_BOUNDS[section]) fail(400, 'INVALID_PANEL_REQUEST');
-    const {first,access,control,revision} = await readPanelContext(env,principal);
+    const {first,access,control,revision,squadronCommander} = await readPanelContext(env,principal);
     if (expected && (expected.operations !== revision.operations || expected.administration !== revision.administration || expected.access !== revision.access)) fail(409, 'SNAPSHOT_CHANGED');
     const response: PanelPage = { contractVersion: PANEL_PAGE_VERSION, environment: env.ENVIRONMENT as PanelPage['environment'], generation: Number(env.GENERATION), section, revision, scope: { termId: String(control.termId), currentTermId: String(control.termId) }, access };
     // All authority inputs came from one transactional D1 batch. There are no business rows to fence.
     if (authorityOnly === "bookmark") return {...response, section:'verify', verified:true};
-    const {cte, bind} = scopedPanelSource(principal, access.flightIds, section === "manifest" ? "counts" : "page");
+    const {cte, bind} = scopedPanelSource(principal, access.flightIds, section === "manifest" ? "counts" : "page", squadronCommander);
     const allQueries = panelSectionQueries(), statements = authorityStatements(env, principal), dataIndex = statements.length;
     if (!authorityOnly && section === 'manifest' && selectedSections.length) statements.push(env.DB.prepare(`${cte} SELECT ${selectedSections.map(s => `(SELECT COUNT(*) ${allQueries[s].countFrom ?? allQueries[s].from}) AS ${s}`).join(',')}`).bind(...bind));
     else if (section !== 'verify' && section !== 'manifest') {

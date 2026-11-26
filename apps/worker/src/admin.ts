@@ -32,6 +32,13 @@ function commandAuth(env: AdminEnv, c: AdminCommand, capability: string, scopes:
     ? { sql: 'EXISTS(SELECT 1 FROM principals WHERE principal_id=? AND person_id=? AND active=1)', values: [c.actor.principalId, c.payload.personId] }
     : c.operation === 'directory.enroll' ? { sql: '(NOT EXISTS(SELECT 1 FROM principals WHERE principal_id=?) OR EXISTS(SELECT 1 FROM principals WHERE principal_id=? AND person_id=? AND active=1))', values: [c.actor.principalId, c.actor.principalId, targetId] }
     : permission(c.actor.principalId, capability, scopes);
+  if (c.operation === 'directory.selfUpdate' && c.source.resourceKey === 'admin-staging-web') {
+    p.sql += ` AND EXISTS(SELECT 1 FROM principals p JOIN principal_accounts a USING(principal_id)
+      JOIN directory_profiles d ON d.person_id=p.person_id AND lower(d.email)=a.email
+      JOIN memberships m ON m.person_id=p.person_id AND m.unit_id=d.flight_id AND m.active=1
+      WHERE p.principal_id=? AND d.flight_path_status NOT IN ('Inactive','Dropped','Commissioned'))`;
+    p.values.push(c.actor.principalId);
+  }
   return { sql: `${control()} AND ${p.sql} AND EXISTS(SELECT 1 FROM adapter_sources WHERE source_kind=? AND resource_key=? AND active=1)`, values: [env.ENVIRONMENT, Number(env.GENERATION), ...p.values, c.source.kind, c.source.resourceKey] };
 }
 interface Receipt {

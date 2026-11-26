@@ -25,6 +25,7 @@ async function fixture(t) {
     db.prepare("INSERT INTO flight_hierarchy VALUES('alpha','blue'),('bravo','gold')"),
     db.prepare("INSERT INTO terms VALUES('current','Fictional current',1,1)"),
     db.prepare("INSERT INTO principals VALUES('owner',NULL,1),('outsider',NULL,1)"),
+    db.prepare("INSERT OR IGNORE INTO permission_managers VALUES('owner',1)"),
     db.prepare("INSERT INTO admin_grants VALUES('owner','frontend.read','wing','*')"),
     db.prepare("INSERT INTO command_registry VALUES('binding','admin')"),
   ]);
@@ -199,4 +200,25 @@ test('historical previews preserve the original source/hash pages and stop when 
   let batches=0;
   const racing={prepare:sql=>f.db.prepare(sql),async batch(s){if(++batches===2)assert.equal((await f.send({...base,action:'exit',auditId:'exit',entryAuditId:'entry'})).status,200);return f.db.batch(s);}};
   const closed=await f.page(preview('administrator','history','entry',rows,head.body.viewRevision),racing);assert.equal(closed.status,409,JSON.stringify(closed));assert.equal(closed.body.error.code,'VIEW_AS_CHANGED');assert.equal(JSON.stringify(closed.body).includes('Archive Cadet'),false);
+});
+
+test('an active Directory assignment supports a read-only admin preview before first login',async t=>{
+  const f=await fixture(t),email='fictional-unbound@nd.edu';
+  await f.db.batch([
+    f.db.prepare("INSERT INTO directory_profiles SELECT 'unmapped',1,'alpha',last_name,first_name,as_year,rank,'Blue Squadron Commander',university,?,phone,dorm,cip_broad_area,cip_code,afsc,home_town,home_state,class_year,date_of_birth,flight_path_status,photo_link,updated_at FROM directory_profiles WHERE person_id='lead'").bind(email),
+    f.db.prepare("INSERT INTO memberships VALUES('unmapped','alpha',1)"),
+    f.db.prepare("UPDATE permission_policy_control SET config_json=?").bind(JSON.stringify({operationalSquadronIds:['blue','gold']})),
+    f.db.prepare("INSERT INTO admin_grants VALUES('outsider','frontend.read','wing','*')"),
+  ]);
+  assert.equal((await f.send({...enter('unmapped'),principalId:'outsider'})).status,403);
+  const entry=await f.send(enter('unmapped'));assert.equal(entry.body.directoryWorkspace,true);
+  const target={...base,targetPersonId:'unmapped',entryAuditId:'entry'};
+  const preview=await f.send(target,'/v1/cadet/preview');
+  assert.equal(preview.status,200);assert.equal(preview.body.readOnly,true);
+  const principalId='google.'+createHash('sha256').update(email).digest('hex');
+  const actual=await f.send({...base,email,principalId},'/v1/cadet/workspace');
+  const {readOnly,...same}=preview.body;assert.deepEqual(same,actual.body);
+  assert.equal((await f.send({...target,action:{kind:'decide'}},'/v1/cadet/preview')).status,400);
+  await f.db.prepare("UPDATE memberships SET active=0 WHERE person_id='unmapped'").run();
+  assert.equal((await f.send(target,'/v1/cadet/preview')).status,403);
 });

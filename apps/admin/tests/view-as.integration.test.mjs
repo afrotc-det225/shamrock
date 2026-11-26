@@ -12,6 +12,7 @@ async function fixture(t,full){
  const local=await createLocalBackend();t.after(()=>local.dispose());
  const source=await local.backend.snapshot(),person=source.people[0],principal='preview-target';
  await local.db.batch([
+  local.db.prepare("INSERT OR IGNORE INTO permission_managers VALUES(?,1)").bind(local.backend.identity().principalId),
   local.db.prepare("INSERT INTO command_registry VALUES('preview-binding','admin')"),
   local.db.prepare('INSERT INTO principals VALUES(?,?,1)').bind(principal,person.personId),
   local.db.prepare("INSERT INTO principal_accounts VALUES(?,?,'authenticated-confirmation','preview-binding')").bind(principal,person.email),

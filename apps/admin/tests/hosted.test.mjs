@@ -770,7 +770,7 @@ test('View as keeps the verified actor, wraps reads, and blocks every mutation e
   assert.equal(chartResponse.status,403);
   assert.equal((await chartResponse.json()).error.code,'FORBIDDEN');
   const binding=await f.run('SELECT principal_id FROM identity_bindings WHERE google_sub=?','actual-sub');assert.equal(binding.results[0].principal_id,'actual-admin');
-  for(const path of ['/api/proposals','/api/proposals/00000000-0000-4000-8000-000000000001/apply','/api/proposals/00000000-0000-4000-8000-000000000001/cancel','/api/chat']){
+  for(const path of ['/api/cadet','/api/proposals','/api/proposals/00000000-0000-4000-8000-000000000001/apply','/api/proposals/00000000-0000-4000-8000-000000000001/cancel','/api/chat']){
     const r=await post(path,{operation:'excusal.decide',approved:true,payload:{}});assert.equal(r.status,403);assert.equal((await r.json()).error.code,'VIEW_AS_READ_ONLY');
   }
   assert.equal((await f.mf.dispatchFetch(origin+'/api/transition?id=saved',{headers})).status,403);
@@ -919,4 +919,26 @@ test("Wing charts share a revision across Wing readers and close on revocation o
   const updated = await visit("updated");
   assert.equal(updated.status,200);
   assert.equal((await updated.json()).revision.operations,first.revision.operations+1);
+});
+
+test('campus sign-in binds a verified school subject once, outside operational D1',async t=>{
+  const f=await fixture(t),login=await invitationLogin(f);
+  const addr='fictional-cadet@nd.edu',sub='fictional-managed-subject';
+  await assert.rejects(login(sub,addr),e=>e.code==='ACCESS_NOT_GRANTED');
+  const reviewedAddress='reviewed-fictional@valpo.edu', reviewedSubject='custodian-confirmed-subject';
+  await f.run('INSERT INTO identity_bindings VALUES(?,?,1)',reviewedSubject,'reviewed-test-principal');
+  const reviewedLogin=await login(reviewedSubject,reviewedAddress);
+  const reviewedCookie=reviewedLogin.headers.getSetCookie().map(c=>c.split(';')[0]).join('; ');
+  const reviewedUser=await session(new Request(origin+'/api/cadet',{headers:{cookie:reviewedCookie}}),{PANEL_DB:f.db,APP_ORIGIN:origin,GOOGLE_CLIENT_SECRET:'test-secret'});
+  assert.equal(reviewedUser.schoolEmail,reviewedAddress);assert.equal(reviewedUser.principal_id,'reviewed-test-principal');
+  const first=await login(sub,addr,{hd:'nd.edu'});assert.equal(first.status,303);
+  const cookies=first.headers.getSetCookie().map(c=>c.split(';')[0]).join('; ');
+  const env={PANEL_DB:f.db,APP_ORIGIN:origin,GOOGLE_CLIENT_SECRET:'test-secret'};
+  const user=await session(new Request(origin+'/api/cadet',{headers:{cookie:cookies}}),env);
+  assert.equal(user.schoolEmail,addr);assert.equal(user.principal_id,'school.'+await sha(addr));
+  await assert.rejects(login('fictional-second-subject',addr,{hd:'nd.edu'}),e=>e.code==='ACCESS_NOT_GRANTED');
+  await assert.rejects(login(sub,'different@nd.edu',{hd:'nd.edu'}),e=>e.code==='ACCESS_NOT_GRANTED');
+  await assert.rejects(session(new Request(origin+'/api/cadet',{headers:{cookie:cookies.replace(/__Host-shamrock-school=[^;]*/,'__Host-shamrock-school=invalid')}}),env));
+  await f.run('UPDATE identity_bindings SET active=0 WHERE google_sub=?',sub);
+  await assert.rejects(session(new Request(origin+'/api/cadet',{headers:{cookie:cookies}}),env));
 });

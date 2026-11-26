@@ -1,5 +1,5 @@
 import { available, answer, model } from "./openai-assistant.mjs";
-import { authRoute, session, csrfCheck } from "./auth.mjs";
+import { authRoute, session, csrfCheck, sha } from "./auth.mjs";
 import { HostedBackend } from "./backend.mjs";
 import { ProposalStore } from "./store.mjs";
 import { AdminService } from "../service-core.mjs";
@@ -93,6 +93,17 @@ export default {
           );
         body = await boundedJson(request);
       }
+      if (url.pathname === "/api/cadet" && ["GET","POST"].includes(request.method)) {
+        if (preview) {
+          if (request.method !== "GET" || preview.status !== "ready") throw new PanelError("VIEW_AS_READ_ONLY","Exit View as before making changes.",403);
+          return secure(json(await backend.send("/v1/cadet/preview",{...backend.identity(),targetPersonId:preview.person_id,entryAuditId:preview.entry_audit_id})));
+        }
+        if (!user.schoolEmail) throw new PanelError("FORBIDDEN","Sign in with your school account.",403);
+        const input={...backend.identity(),principalId:user.principal_id.startsWith("school.") ? "google."+await sha(user.schoolEmail) : user.principal_id,email:user.schoolEmail};
+        if (request.method==="POST" && (!body || !body.kind)) throw new PanelError("INVALID_REQUEST","Choose a workspace action.");
+        return secure(json(await backend.post("/v1/cadet/workspace",{...input,...(request.method==="POST"?{action:body}:{})})));
+      }
+      if (user.principal_id.startsWith("school.")) throw new PanelError("CADET_WORKSPACE","Open your cadet workspace.",403);
       if (request.method === "POST" && url.pathname === "/api/view-as")
         return secure(json(await changePreview(env, user,
           new HostedBackend(env, user.principal_id), body)));
@@ -156,7 +167,7 @@ export default {
               environment: "staging",
               fictional: backend.dataset === "fictional",
               hosted: true,
-              viewAsEnabled: env.VIEW_AS_ENABLED === "1",
+              viewAsEnabled: env.VIEW_AS_ENABLED === "1" && manifest?.access?.capabilities?.canViewAs === true,
               assistantAvailable: available(env, user, preview) && manifest.access.capabilities.fullSnapshot,
               model,
               transitionPolicy: TRANSITION_POLICY,

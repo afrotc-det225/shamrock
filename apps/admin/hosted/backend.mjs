@@ -2,6 +2,7 @@ import { createHash, createHmac } from "node:crypto";
 import { PanelError } from "../errors.mjs";
 import { boundedJson } from "./http.mjs";
 const paths = new Set([
+  "/v1/cadet/known","/v1/cadet/workspace","/v1/cadet/preview",
   "/v1/admin/panel/view-as/authorize",
   "/v1/admin/panel/view-as/page",
   "/v1/admin/panel/view-as/access",
@@ -164,7 +165,7 @@ export class HostedBackend {
         503,
       );
     }
-    const result = await boundedJson(response, path === "/v1/admin/panel/browse" ? 2000000 : 150000);
+    const result = await boundedJson(response, ["/v1/admin/panel/browse", "/v1/cadet/workspace", "/v1/cadet/preview"].includes(path) ? 2000000 : 150000);
     if (!response.ok) {
       const error = new PanelError(
         result.error?.code || "BACKEND_ERROR",
