@@ -53,10 +53,10 @@ export async function browsePanel(env:Env, identity:{environment:string;generati
     }
   } else if(profile==='diagnostics') {
     const counts:Record<string,string>={
-      PEOPLE_MISSING_PROFILES:"SELECT count(*) FROM people p WHERE NOT EXISTS(SELECT 1 FROM directory_profiles d WHERE d.person_id=p.person_id) AND p.person_id IN(SELECT person_id FROM scoped_people)",
+      PEOPLE_MISSING_PROFILES:"SELECT count(*) FROM people p WHERE NOT EXISTS(SELECT 1 FROM directory_profiles d WHERE d.person_id=p.person_id) AND EXISTS(SELECT 1 FROM scoped_people sp WHERE sp.person_id=p.person_id)",
       EVENTS_MISSING_DETAILS:"SELECT count(*) FROM events e WHERE e.active=1 AND NOT EXISTS(SELECT 1 FROM event_details d WHERE d.event_id=e.event_id)",
-      FLIGHTS_MISSING_SQUADRON:"SELECT count(*) FROM ("+q.flights.select+" "+q.flights.from+") WHERE squadronId IS NULL",
-      EVENTS_MISSING_ROSTER:"SELECT count(*) FROM ("+q.events.select+" "+q.events.from+") WHERE hasRoster=0",
+      FLIGHTS_MISSING_SQUADRON:"SELECT count(*) FROM (SELECT "+q.flights.select+" "+q.flights.from+") WHERE squadronId IS NULL",
+      EVENTS_MISSING_ROSTER:"SELECT count(*) FROM (SELECT "+q.events.select+" "+q.events.from+") WHERE hasRoster=0",
     };
     for(const [code,sql] of Object.entries(counts)) selects.push("SELECT '"+code+"' AS name, ("+sql+") AS payload");
   } else if(profile==='semester') {

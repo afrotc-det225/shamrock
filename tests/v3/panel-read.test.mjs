@@ -456,5 +456,9 @@ test('a cold Wing viewer uses private storage and replays a correction; a Flight
     await assert.rejects(browse('flight','semester'),{status:403});
     const semester=await browse('owner','semester');assert.deepEqual(Object.keys(semester.tables).sort(),['events','flights','people','terms']);
     assert.deepEqual((await browse('owner','semester')).tables,semester.tables);assert.equal(hits.at(-1),'wing-stored');
+    const checks=await browse('owner','diagnostics');
+    assert.deepEqual(Object.keys(checks.tables).sort(),['EVENTS_MISSING_DETAILS','EVENTS_MISSING_ROSTER','FLIGHTS_MISSING_SQUADRON','PEOPLE_MISSING_PROFILES']);
+    assert(Object.values(checks.tables).every(n=>Number.isInteger(n) && n>=0));
+    await assert.rejects(browse('flight','diagnostics'),{status:403});
     assert.equal(kv.size,2);
 });
