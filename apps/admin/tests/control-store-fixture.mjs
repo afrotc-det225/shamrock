@@ -12,6 +12,7 @@ export default {
     try {
       const input = await request.json();
       const db = panelControlStore(env);
+      if (input.reserve) return Response.json(await db.reserveAssistant());
       if (input.status) return Response.json(await db.status());
       if (input.callback) {
         return await authRoute(new Request(input.callback.url, {

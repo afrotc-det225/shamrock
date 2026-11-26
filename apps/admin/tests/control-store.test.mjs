@@ -19,7 +19,7 @@ await build({
   entryPoints: ["apps/admin/tests/control-store-fixture.mjs"],
   outfile: resolve(root, ".build/admin/control-store-test.mjs"),
   bundle: true, platform: "node", format: "esm", target: "es2022",
-  external: ["node:*", "cloudflare:*"], loader: {".sql":"text"},
+  external: ["node:*", "cloudflare:*"], loader: {".sql":"text",".md":"text"},
   plugins: [{name:"source-domain", setup(b) {
     b.onResolve({filter:/\.build\/(admin|v3)\//}, a => ({
       path: a.path.endsWith("/admin/domain.mjs") ? resolve(root,"apps/admin/domain-entry.ts") :
@@ -276,4 +276,11 @@ test("bootstrap rejects unreviewed destinations, sessions and active or ambiguou
     assert.equal((await f.request({status:true})).status,503);
     await f.dispose();
   }
+});
+
+test("two simultaneous staging sessions share one durable assistant reservation", async t => {
+  const f = await fixture(t);
+  const results = await Promise.all([f.request({reserve:true}), f.request({reserve:true})]);
+  assert.deepEqual((await Promise.all(results.map(r => r.json()))).sort(), [false,true]);
+  assert.equal((await (await f.request({status:true})).json()).ready,true);
 });
