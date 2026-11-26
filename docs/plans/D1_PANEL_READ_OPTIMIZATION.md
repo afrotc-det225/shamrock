@@ -102,3 +102,5 @@ The web palette keeps routine presence quiet and gives pending requests and abse
 Overview defers its matrix request until the operator selects **Show attendance charts**. Counts and birthdays remain available immediately. When reporting is already loaded the charts appear directly. The [November staging read-cost audit](D1_READ_COST_AUDIT.md) documents measured costs for cold views, baseline transfers and Forms publication.
 
 Desktop editors overlay the workspace and allow another row or cell to be selected. On phones, the attendance cell editor opens as a bottom sheet so the matrix remains interactive. Other mobile editors and the final change review are modal. Attendance event columns have a fixed width and two-line headings. The semester comparison reads the saved percentages once and supplies both the AS-year comparison and the trend chart.
+
+The attendance code key sits beside the Attendance and Excusals tabs. More fields is in the Cadets header and retains its selection when closed. Chart data and System diagnostics open from their respective headings. These controls open over the current view without moving the table or chart.

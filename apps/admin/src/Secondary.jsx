@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 import OverviewInsights from "./OverviewInsights";
-import { Send } from "lucide-react";
+import { ToolbarPopover } from "./ToolbarPopover";
+import { Activity, Send } from "lucide-react";
 import { Heading, Table, Status, Empty } from "./components";
 import { api } from "./api";
 import { currentExcusalRequests } from "./attendance-events.mjs";
@@ -80,9 +81,22 @@ export function System({ snapshot, history, receiptsDeferred, reportingTime, cap
   const receipt = useReceipts({ history, receiptsDeferred, reportingTime, captureKey });
   return (
     <>
-      <Heading
-        title="System"
-      />
+      <Heading title="System">
+        <ToolbarPopover icon={Activity} label="Diagnostics">
+          {snapshot.diagnostics.length ? (
+            <Table headers={["Finding", "Count"]}>
+              {snapshot.diagnostics.map((d) => (
+                <tr key={d.code}>
+                  <td>{d.code}</td>
+                  <td>{d.count}</td>
+                </tr>
+              ))}
+            </Table>
+          ) : (
+            <p>No catalog issues were reported.</p>
+          )}
+        </ToolbarPopover>
+      </Heading>
       <div className="notice">
         Spreadsheet and Form sync may finish after a change is saved.
       </div>
@@ -91,21 +105,6 @@ export function System({ snapshot, history, receiptsDeferred, reportingTime, cap
         <ReceiptStatus receipt={receipt} />
         {receipt.rows !== null && <History rows={receipt.rows} retry={retry} busy={busy} />}
       </section>
-      <details>
-        <summary>Diagnostics</summary>
-        {snapshot.diagnostics.length ? (
-          <Table headers={["Finding", "Count"]}>
-            {snapshot.diagnostics.map((d) => (
-              <tr key={d.code}>
-                <td>{d.code}</td>
-                <td>{d.count}</td>
-              </tr>
-            ))}
-          </Table>
-        ) : (
-          <p>No catalog issues were reported.</p>
-        )}
-      </details>
     </>
   );
 }

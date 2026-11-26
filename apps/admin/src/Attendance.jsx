@@ -67,6 +67,7 @@ export default function Attendance({ snapshot, list, tab="attendance", onTab, re
             Excusals (
             {queue.filter((r) => r.status === "Submitted").length} pending)
           </button>
+          {tab==="attendance" && <AttendanceKey/>}
         </div>
         <div className="toolbar">
           <SearchBox placeholder={tab==="attendance"?"Find a cadet":"Find cadet or event"} value={query} onChange={setQuery}/>
@@ -87,7 +88,7 @@ export default function Attendance({ snapshot, list, tab="attendance", onTab, re
         </div>
       </section>
       {tab === "attendance" ? (
-        <><AttendanceKey/><AttendanceMatrix rows={rows} events={columns} canCorrect={canCorrect} onEdit={correction} readOnly={readOnly || busy}/>
+        <><AttendanceMatrix rows={rows} events={columns} canCorrect={canCorrect} onEdit={correction} readOnly={readOnly || busy}/>
         {(!rows.length || !columns.length) && <Empty>No attendance matches these filters.</Empty>}</>
       ) : (
         <Table headers={["Cadet / event", "Request", "Reason", "Status", ""]}>

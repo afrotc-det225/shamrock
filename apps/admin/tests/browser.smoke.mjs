@@ -158,7 +158,13 @@ try {
   assert.deepEqual(afterSchedule.observations, beforeSchedule.observations);
   await navigate("Cadets");
   await page.getByLabel("Sort by", {exact:true}).selectOption("flight");
-  await page.getByText("More fields", {exact:true}).click();
+  const fieldTool = page.getByRole("button", {name:"More fields", exact:true});
+  const tableTop = () => page.locator("main table").first().evaluate(el=>el.getBoundingClientRect().top);
+  const rosterTop = await tableTop();
+  await fieldTool.focus();
+  await page.keyboard.press("Enter");
+  await page.getByRole("region",{name:"More fields",exact:true}).waitFor();
+  assert.equal(await tableTop(),rosterTop);
   await page.getByLabel("Show field", {exact:true}).selectOption("afsc");
   await page.getByLabel("Filter by AFSC", {exact:true}).fill("no-such-field-value");
   assert.equal(await page.getByRole("button", {name:"Edit Alex Morgan", exact:true}).count(), 0);
@@ -202,7 +208,11 @@ try {
   await apply();
   assert.equal((await service.snapshot()).requests[0].status, "Denied");
   await page.getByRole("button", { name: "Attendance", exact: true }).click();
-  await page.getByText("Attendance code key", {exact:true}).click();
+  const keyTool=page.getByRole("button",{name:"Attendance code key"});
+  const matrixTop=await tableTop();
+  await keyTool.click();
+  await page.getByRole("region",{name:"Attendance code key"}).waitFor();
+  assert.equal(await tableTop(),matrixTop);
   const contrasts = await page.locator(".code-key dt").evaluateAll(nodes => {
     function luminance(color) {
       const [r,g,b] = color.match(/[\d.]+/g).slice(0,3).map(v => Number(v)/255)
@@ -217,6 +227,8 @@ try {
   });
   assert.equal(contrasts.length, 10);
   assert(Math.min(...contrasts) >= 4.5, "Attendance code text must remain legible on its fill.");
+  await page.keyboard.press("Escape");
+  assert.equal(await keyTool.getAttribute("aria-expanded"),"false");
   const matrix = page.locator(".attendance-matrix");
   assert.deepEqual(await matrix.locator("thead th[title]").evaluateAll(headers=>
     [...new Set(headers.map(h=>h.getBoundingClientRect().width))]),[68]);
@@ -226,7 +238,7 @@ try {
   await page.getByRole("dialog",{name:"Correct attendance"}).waitFor();
   assert.equal(await page.locator("dialog:modal").count(),0);
   assert.deepEqual(await layout(),beforeDrawer);
-  await page.getByLabel("Attendance code").selectOption("P");
+  await page.getByLabel("Attendance code", {exact:true}).selectOption("P");
   await page
     .getByLabel("Reason for this change")
     .fill("Verified fictional presence");
@@ -257,6 +269,10 @@ try {
   await page.getByRole("button", {name:"Show attendance charts"}).click();
   await page.getByRole("heading", {name:"Overall attendance by flight"}).waitFor();
   assert.deepEqual(overviewRequests, ["overview", "attendance"]);
+  const flightData=page.getByRole("button",{name:"Overall attendance by flight chart data"});
+  await flightData.click();
+  await page.getByRole("region",{name:"Overall attendance by flight chart data"}).getByRole("table").waitFor();
+  await page.keyboard.press("Escape");
   testOverview = false;
   for (const title of ["Leadership", "System", "Events"])
     await navigate(title);

@@ -1,5 +1,5 @@
 import React, { useState,useEffect } from "react";
-import { Plus, Pencil } from "lucide-react";
+import { Plus, Pencil, Columns3 } from "lucide-react";
 import {
   Heading,
   Field,
@@ -11,6 +11,7 @@ import {
   Empty,
 
 } from "./components";
+import { ToolbarPopover } from "./ToolbarPopover";
 import { cellStyle, flightColors, yearColors } from "./roster-colors";
 import { LeadershipChart, textOrder, alphabetic } from "./RosterViews";
 import { api,name, label, years, statuses, profileFields } from "./api";
@@ -153,16 +154,30 @@ export default function People({
     <>
       <section className="page-controls">
         <Heading title={leadership ? "Leadership" : "Cadets"}>
-          <button className="primary" disabled={readOnly} onClick={() => open()}>
-            <Plus size={17} />
-            {leadership ? "Add contact" : "Add cadet"}
-          </button>
+          <div className="heading-tools">
+            {!leadership && (
+              <ToolbarPopover label={field ? "More fields · "+label(field) : "More fields"} shortLabel="More fields" icon={Columns3} active={!!field}>
+                <div className="field-options">
+                  <Select label="Show field" value={field} onChange={selectField} options={[
+                    {value:"",label:"Choose a field"},
+                    ...profileFields.filter(k=>!["firstName","lastName","asYear","flightPathStatus"].includes(k)).map(k=>({value:k,label:label(k)})),
+                  ]}/>
+                  {field && <Field label={"Filter by "+label(field)} value={match} onChange={e=>setMatch(e.target.value)}/>}
+                </div>
+              </ToolbarPopover>
+            )}
+            <button className="primary" disabled={readOnly} onClick={() => open()}>
+              <Plus size={17} />
+              {leadership ? "Add contact" : "Add cadet"}
+            </button>
+          </div>
         </Heading>
         <div className="toolbar">
           <SearchBox
             placeholder={leadership ? "Find a leader" : "Find a cadet"}
             value={query}
             onChange={setQuery}
+            resultCount={query || flight || year || match || !["current","all"].includes(status) ? rows.length : undefined}
           />
           {leadership ? <Select label="View" value={view} onChange={setView} options={["List","Organization"]}/> : <>
             <Select label="Flight" value={flight} onChange={setFlight} options={[{value:"",label:"All flights"},...s.flights.map(f=>({value:f.flightId,label:f.label})).sort((a,b)=>textOrder(a.label,b.label))]}/>
@@ -171,12 +186,9 @@ export default function People({
             <Select label="Sort by" value={sort} onChange={setSort} options={[{value:"seniority",label:"AS year, then name"},{value:"flight",label:"Flight, then AS year"},{value:"name",label:"Last name"}]}/>
           </>}
         </div>
-        {!leadership && <details className="field-picker"><summary>More fields{field ? " · "+label(field) : ""}</summary>
-          <div className="toolbar"><Select label="Show field" value={field} onChange={selectField} options={[{value:"",label:"Choose a field"},...profileFields.filter(k=>!["firstName","lastName","asYear","flightPathStatus"].includes(k)).map(k=>({value:k,label:label(k)}))]}/>
-          {field && <Field label={"Filter by "+label(field)} value={match} onChange={e=>setMatch(e.target.value)}/>}</div></details>}
+
       </section>
       {extra && extended?.binding!==binding && <p role="status">{fieldError || "Loading directory fields…"} {fieldError && <button onClick={()=>setRetry(retry+1)}>Retry</button>}</p>}
-      {(query || flight || year || match || !["current","all"].includes(status)) && <p className="result-count">{rows.length} {leadership?"contacts":"cadets"}</p>}
       {leadership && view==="Organization" ? <LeadershipChart records={rows} roster={s}/> : <Table
         headers={
           leadership

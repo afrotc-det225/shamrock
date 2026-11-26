@@ -1,4 +1,6 @@
 import React, { useRef } from "react";
+import { List } from "lucide-react";
+import { ToolbarPopover } from "./ToolbarPopover";
 import { cellStyle, flightColors, rateStyle } from "./roster-colors";
 
 const meanings = {
@@ -15,9 +17,12 @@ const meanings = {
 };
 export function AttendanceKey() {
   return (
-    <details className="code-key">
-      <summary>Attendance code key</summary>
-      <dl>
+    <ToolbarPopover
+      label="Attendance code key"
+      shortLabel="Code key"
+      icon={List}
+    >
+      <dl className="code-key">
         {Object.entries(meanings).map(([code, meaning]) => (
           <div key={code}>
             <dt data-mark={code}>{code}</dt>
@@ -25,7 +30,7 @@ export function AttendanceKey() {
           </div>
         ))}
       </dl>
-    </details>
+    </ToolbarPopover>
   );
 }
 

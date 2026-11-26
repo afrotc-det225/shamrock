@@ -1,4 +1,6 @@
 import React, { useId, useState, useEffect } from "react";
+import { Table2 } from "lucide-react";
+import { ToolbarPopover } from "./ToolbarPopover";
 import { api } from "./api";
 import { flightColors, yearColors } from "./roster-colors";
 
@@ -57,7 +59,33 @@ function Plot({
     <section className="insight chart-panel">
       <header>
         <h3 id={id}>{title}</h3>
-        {controls}
+        <div className="heading-tools">
+          {controls}
+          <ToolbarPopover iconOnly icon={Table2} label={title + " chart data"}>
+            <table>
+              <thead>
+                <tr>
+                  <th scope="col">{kind === "line" ? "Semester" : "Group"}</th>
+                  {series.map((s) => (
+                    <th scope="col" key={s.name}>
+                      {s.name}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {labels.map((l, i) => (
+                  <tr key={i}>
+                    <th scope="row">{l}</th>
+                    {series.map((s) => (
+                      <td key={s.name}>{percent(s.values[i])}</td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </ToolbarPopover>
+        </div>
       </header>
       <div className="chart-scroll">
         <svg
@@ -154,31 +182,6 @@ function Plot({
           ))}
         </ul>
       )}
-      <details className="chart-values">
-        <summary>Chart data</summary>
-        <table>
-          <thead>
-            <tr>
-              <th scope="col">{kind === "line" ? "Semester" : "Group"}</th>
-              {series.map((s) => (
-                <th scope="col" key={s.name}>
-                  {s.name}
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {labels.map((l, i) => (
-              <tr key={i}>
-                <th scope="row">{l}</th>
-                {series.map((s) => (
-                  <td key={s.name}>{percent(s.values[i])}</td>
-                ))}
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </details>
     </section>
   );
 }
@@ -218,7 +221,8 @@ export function WingCharts({ dashboard: d, term, flights, squadrons, hosted }) {
       r.terms[0]?.percentage != null ||
       history?.some((t) => t.byYear.get(r.asYear.toUpperCase()) != null),
   );
-  const currentLabel = term?.replace(/^(\d{4})-(Fall|Spring|Summer)$/i, "$1 $2") || "Current";
+  const currentLabel =
+    term?.replace(/^(\d{4})-(Fall|Spring|Summer)$/i, "$1 $2") || "Current";
   const trend = [
     ...(history || []),
     {

@@ -1395,9 +1395,7 @@ html:has(dialog:modal) {
   display:inline-block; padding:.23rem .55rem; border-radius:4px;
   background:#edf0f3; color:#344657; font-size:.8rem; font-weight:650; white-space:nowrap;
 }
-.field-picker,.result-count,.attendance-matrix caption {font-size:.85rem;color:var(--muted)}
-.field-picker {margin:.65rem 0}.field-picker summary {cursor:pointer;color:var(--green);font-weight:650}.field-picker .toolbar {margin-top:.65rem}
-.result-count {margin:.75rem 0}
+.search-count {white-space:nowrap;font-variant-numeric:tabular-nums}
 .matrix-scroll {overflow:auto;max-height:70vh;border:1px solid var(--border);border-radius:6px;isolation:isolate}
 .attendance-matrix {border-spacing:0;border-collapse:separate;width:max-content;min-width:100%;font-variant-numeric:tabular-nums}
 .attendance-matrix thead th {position:sticky;top:0;z-index:2;padding:.5rem .45rem;background:#244f40;color:white;white-space:normal;max-width:6.5rem;text-transform:none;letter-spacing:normal}
@@ -1421,10 +1419,8 @@ html:has(dialog:modal) {
 [data-mark="MED"] {--mark-bg:#e9e0f2;color:#56386a}
 [data-mark="excluded"],[data-mark="N/A"] {--mark-bg:#edf0f3;color:#505f6b}
 .attendance-matrix .mark-cell[data-mark],.history-code[data-mark] {background-color:var(--mark-bg, #fafbfc)}
-.code-key {margin:.4rem 0 .75rem;font-size:.84rem}
-.code-key summary {width:fit-content;cursor:pointer;color:var(--green);font-weight:650}
-.code-key dl {display:flex;flex-wrap:wrap;gap:.45rem 1rem}
-.code-key dl div {display:flex;align-items:center;gap:.4rem}
+.code-key {display:grid;gap:.45rem;margin:0;font-size:.85rem}
+.code-key div {display:flex;align-items:center;gap:.4rem}
 .code-key dt {background:var(--mark-bg);border-radius:3px;padding:.2rem .4rem;min-width:2.2em;text-align:center;font-weight:700}
 .code-key dd {margin:0}
 .insights-grid,.org-branches {display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:1rem;margin:1rem 0}
@@ -1461,9 +1457,6 @@ html:has(dialog:modal) {
 .chart-legend {display:flex;flex-wrap:wrap;gap:.8rem;justify-content:center;margin:.35rem 0}
 .chart-legend li {display:flex;align-items:center;gap:.3rem;font-size:.8rem}
 .chart-legend i {width:.65rem;height:.65rem;border-radius:2px}
-.chart-values {font-size:.76rem;margin-top:.6rem;color:#4a596b}
-.chart-values summary {cursor:pointer;width:fit-content}
-.chart-values table {width:100%}
 .chart-panel header {align-items:baseline;flex-wrap:wrap}
 .chart-panel header select,.chart-panel header button {min-height:1.9rem;font-size:.8rem;width:auto;padding:.28rem .55rem}
 .insights-grid>.attendance-summary {grid-column:auto;border-top:1px solid var(--border)}
@@ -1488,4 +1481,26 @@ html:has(dialog:modal) {
   .cell-editor>header h2 {font-size:1.2rem}
   .cell-editor .fields {padding:.5rem 0;margin:0 1rem}
   .cell-editor footer {padding:.5rem 1rem}
+}
+
+.heading-tools {display:flex;align-items:center;gap:.5rem}
+.toolbar-tool,.tabs .toolbar-tool,.chart-panel header .toolbar-tool {
+  display:inline-flex;align-items:center;justify-content:center;gap:.35rem;width:auto;
+  min-height:32px;padding:.3rem .55rem;color:#3d526b;border:1px solid transparent;border-radius:4px;background:transparent;
+}
+.tabs .toolbar-tool {margin-left:auto;align-self:center}
+.toolbar-tool:hover,.toolbar-tool[aria-expanded=true],.toolbar-tool[data-active=true] {background:#edf2f6;color:#183e59}
+.toolbar-tool[data-active=true]::after {content:"";width:6px;height:6px;border-radius:50%;background:currentColor}
+.toolbar-popover {
+  --popup-width:min(23rem,calc(100vw - 16px));
+  position:fixed;inset:auto;left:clamp(8px,calc(var(--trigger-right) - var(--popup-width)),calc(100% - var(--popup-width) - 8px));
+  margin:0;width:var(--popup-width);padding:1rem;overflow:auto;overscroll-behavior:contain;
+  color:var(--navy);background:white;border:1px solid var(--border);border-radius:6px;box-shadow:0 5px 20px #182b4526;
+}
+.toolbar-popover .field-options {display:grid;gap:.65rem}
+.toolbar-popover table {min-width:0;width:100%;font-size:.82rem}
+.toolbar-popover th,.toolbar-popover td {position:static;padding:.45rem}
+@media(max-width:640px) {
+  .heading-tools .toolbar-tool span,.tabs .toolbar-tool span {display:none}
+  .heading-tools .toolbar-tool,.tabs .toolbar-tool {min-width:36px;min-height:36px}
 }

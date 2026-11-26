@@ -32,7 +32,7 @@ export function Select({ label, value, onChange, options, ...rest }) {
     </Field>
   );
 }
-export function SearchBox({ value, onChange, placeholder }) {
+export function SearchBox({ value, onChange, placeholder, resultCount }) {
   return (
     <label className="search">
       <Search size={17} />
@@ -42,6 +42,7 @@ export function SearchBox({ value, onChange, placeholder }) {
         value={value}
         onChange={(e) => onChange(e.target.value)}
       />
+      {resultCount != null && <small className="search-count" role="status">{resultCount} {resultCount===1 ? "match" : "matches"}</small>}
     </label>
   );
 }
