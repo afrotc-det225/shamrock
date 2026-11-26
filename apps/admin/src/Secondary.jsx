@@ -85,7 +85,12 @@ function ReadUsage() {
       {[["Last 60 seconds",usage.minute],["Since opening",usage.tab]].map(([period,c])=>
         <tr key={period}><td>{period}</td><td>{c.requests}</td><td>{c.receipts}</td>
         <td>{c.unknown ? `${c.rows} measured · ${c.unknown} unmeasured` : c.rows}</td></tr>)}
-    </Table></section>;
+    </Table>
+    <details><summary>Usage by request since opening</summary>
+      <Table headers={["Request","Calls","D1 rows read","Unmeasured"]}>
+        {usage.groups.map(([name,c])=><tr key={name}><td>{name}</td><td>{c.requests}</td><td>{c.rows}</td><td>{c.unknown}</td></tr>)}
+      </Table>
+    </details></section>;
 }
 export function System({ snapshot, meta, history, receiptsDeferred, reportingTime, captureKey, retry, busy }) {
   const receipt = useReceipts({ history, receiptsDeferred, reportingTime, captureKey });

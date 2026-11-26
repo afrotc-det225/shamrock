@@ -16,7 +16,7 @@ export async function api(path, body, options = {}) {
   const matchingProfile = previous?.browse ? previous.browse.profile === profile : !wantsBrowse;
   const conditional = previous?.transport === "paged-v1" && matchingProfile &&
     (profile !== "events" || previous.eventsList || previous.snapshot);
-  const measured=beginApiRead(path);
+  const measured=beginApiRead(path,profile);
   const response = await fetch(`/api${path}${path === "/state" ? `?profile=${encodeURIComponent(profile)}` : ""}`, {
     method: body === undefined ? "GET" : "POST",
     headers: {
@@ -204,7 +204,7 @@ export const displayDate = (value, timeZone = eventZone) =>
     : "Not scheduled";
 
 export async function logout() {
-  const measured=beginApiRead(path);
+  const measured=beginApiRead(path,profile);
   const response = await fetch("/auth/logout", {
     method: "POST",
     headers: { "x-shamrock-csrf": csrf || "" },

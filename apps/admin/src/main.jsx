@@ -267,7 +267,7 @@ function App() {
     setNotice("");
     // Navigation can supersede the post-save refresh while the old snapshot is still visible.
     const needsRefresh = !data?.snapshot || pendingRead.current || pendingActions.current > 0;
-    if (needsRefresh && (!["History", "Assistant"].includes(value) || !data))
+    if (needsRefresh && (!["History", "Assistant", "System"].includes(value) || !data))
       void run(() => reload(true, profileFor(value)));
   };
   const cancelRead = () => {
