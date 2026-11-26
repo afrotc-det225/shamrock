@@ -144,3 +144,40 @@ documents this flag as writable from false to true; it is not a per-image or
 per-domain permission and cannot subsequently be reset through that property.
 Keep all image formulas fixed to reviewed public assets.
 See [SpreadsheetProperties](https://developers.google.com/workspace/sheets/api/reference/rest/v4/spreadsheets#SpreadsheetProperties).
+
+## Publish a reviewed import while access is paused
+
+The real-data staging adapter can publish one reviewed Sheets effect and one
+managed Forms effect while D1 commands, Google intake and role changes remain
+paused. Use this after the staged import and its read-only comparison pass.
+Record both outstanding effect IDs and their exact operations and administration
+revision. The Worker must recognize their import receipt and the paused staging
+configuration. A normal refresh cannot substitute for either effect.
+
+1. Read back ownership and sharing on Main, Excusals, the three managed Forms
+   and the confirmation Form. Both workbooks must already have the owner-only
+   protection policy on every tab. All four Forms must be closed. Leave the
+   pending permission receipt in place and reconcile input drafts or pending
+   journal entries before arming publication.
+2. Use the owner-private root configuration's existing frontend binding. Leave
+   its ordinary publisher disabled. Add a `closedPublication` object with
+   `version: 1`, distinct `frontendEffectId` and `formsEffectId`, the reviewed
+   `revision` object and an ISO UTC `expiresAt` within one hour. Keep the Forms,
+   input and permission configurations disabled. Use the native-only staging
+   adapter whose automation account owns these resources.
+3. The first timer invocation verifies workbook access and closed protections,
+   publishes through the normal checkpoint and reads back the native changes
+   before acknowledging the named Sheets effect. On a later invocation the
+   Worker confirms that exact effect is complete, and the adapter advances the
+   named Forms effect. The timer skips role processing, intake, notices and
+   other jobs during this window. The publisher never opens the editable cells.
+4. If an invocation stops, retain its checkpoint and local claim. Check the
+   effect receipt, checkpoint revision and native readbacks before retrying.
+   An expired unacknowledged lease requires explicit reconciliation. Refresh an
+   expired window only after rechecking the same effects and revision.
+5. After both receipts verify, compare the native attendance matrix, percentages,
+   excusal queues, choices and retained presentation against the reviewed source.
+   Verify both workbooks still have owner-only sharing and closed protections,
+   all four Forms are closed, and the permission receipt is still pending.
+   Remove the temporary window object from the root configuration and verify the
+   ordinary pause settings. Leave the central staging command gate closed.

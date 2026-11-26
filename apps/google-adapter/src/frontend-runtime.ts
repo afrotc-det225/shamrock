@@ -1,5 +1,6 @@
 import { createPermissionContext } from './permissions-context.js';
 import { INPUT_REORDER_PROPERTY } from './frontend-reorder-native.js';
+import { assertClosedPublicationBook, assertClosedPublicationWindow, type ClosedPublicationWindow } from './closed-publication-window.js';
 import { assertPermissionFenceClear, permissionPolicyAccess, PERMISSION_FENCE_PROPERTY } from './permissions-refresh.js';
 import { createNativePermissionApi, desiredPermissionMemberships } from './permissions-native.js';
 import type {ScheduledHints} from './scheduled-runtime.js';
@@ -86,6 +87,7 @@ export interface FrontendRefreshPorts {
   workerId: string; principalId: string;
   signer: Signer; transport: Transport; lock: ScriptLockPort;
   recovery?: { recoveryId: string; checkpointSha256: string; previousExpiry: string };
+  closedWindow?: ClosedPublicationWindow;
   enabled(): boolean;
   nowSeconds(): number;
   /** Verify owner, workbook isolation and private state storage before even claiming. */
@@ -154,7 +156,7 @@ function validState(value: FrontendPublicationState, generation: number): Fronte
 
 /** Reuses the adapter's exact HMAC canonical format, with a narrow administrative path allowlist. */
 export function buildSignedFrontendRequest(action: 'claim' | 'project' | 'ack', input: {
-  principalId: string; workerId: string; claim?: FrontendRefreshClaim;
+  principalId: string; workerId: string; claim?: FrontendRefreshClaim; closedWindow?: ClosedPublicationWindow;
 }, config: AdapterConfig, signer: Signer, nowSeconds: number): SignedRequest {
   if (!['claim', 'project', 'ack'].includes(action) || config.environment !== 'staging' || !natural(config.generation) || config.generation < 1
     || !/^https:\/\/[A-Za-z0-9.-]+$/.test(config.baseUrl) || !id(config.keyId) || !id(input.principalId) || !id(input.workerId)
@@ -162,7 +164,8 @@ export function buildSignedFrontendRequest(action: 'claim' | 'project' | 'ack', 
   const claim = action === 'claim' ? undefined : parseClaim(input.claim);
   const path = `/v1/admin/effects/${action}`;
   const body = JSON.stringify({ environment: 'staging', generation: config.generation, principalId: input.principalId, workerId: input.workerId,
-    ...(claim ? { effectId: claim.effectId, claimToken: claim.claimToken } : { kind: 'frontend.refresh' }) });
+    ...(claim ? { effectId: claim.effectId, claimToken: claim.claimToken } : { kind: 'frontend.refresh',
+      ...(input.closedWindow ? { expectedEffectId: input.closedWindow.frontendEffectId, expectedRevision: input.closedWindow.revision } : {}) }) });
   const hash = signer.sha256(body), timestamp = String(nowSeconds);
   if (!/^[a-f0-9]{64}$/.test(hash)) fail('invalid_signer', 'Frontend signing returned an invalid digest.');
   const signature = signer.hmacSha256(`POST\n${path}\n${timestamp}\n${hash}`);
@@ -360,6 +363,23 @@ export function consumeFrontendRefresh(runtime: FrontendRefreshPorts): { status:
     if (!runtime.enabled()) return { status: 'disabled' };
     runtime.assertIsolation();
     let state = validState(runtime.state.load(), runtime.config.generation);
+    const window = runtime.closedWindow;
+    const fencePublication = () => { if (!window) runtime.fenceEdits(); runtime.assertFenced(); };
+    const finishPolicy = () => {
+      if (window) runtime.assertFenced();
+      else { runtime.restoreEditPolicy(); runtime.assertEditPolicy(); }
+    };
+    const assertClosedPlans = () => {
+      if (!window) return;
+      assertClosedPublicationWindow(window, runtime.nowSeconds());
+      const retained = [...Object.values(state.drafts), ...Object.values(state.supplemental?.drafts ?? {})];
+      if (retained.some(drafts => drafts.length)) fail('frontend_state', 'Closed publication requires empty native input drafts.');
+      if (state.pending && (state.pending.claim.effectId !== window.frontendEffectId || !state.pending.supplemental
+        || [...Object.values(state.pending.plans), ...Object.values(state.pending.supplemental.excusals)].some(p =>
+          !equal(p.nextBaseline.revision, window.revision) || !p.complete || p.retainedDrafts.length || p.diagnostics.length)))
+        fail('frontend_state', 'Closed publication requires clean plans at the exact reviewed revision.');
+    };
+    assertClosedPlans();
     if (Boolean(runtime.supplemental) !== Boolean(state.supplemental)) fail('frontend_state', 'The configured visible surfaces and private baseline must agree before claiming.');
     const boundedRequests = (requests: Record<string, unknown>[]) => {
       if (requests.length > MAX_BATCH_REQUESTS || bytes(JSON.stringify({ requests })) > MAX_GOOGLE_BYTES) fail('frontend_capacity', 'Publication exceeds one atomic workbook batch. Retain its fence for review.');
@@ -367,7 +387,11 @@ export function consumeFrontendRefresh(runtime: FrontendRefreshPorts): { status:
     };
     const send = (action: 'claim' | 'project' | 'ack', claim?: FrontendRefreshClaim): Record<string, any> => {
       if (!runtime.enabled()) fail('frontend_paused', 'Frontend publication was paused; retained work needs review.');
-      const response = runtime.transport.send(buildSignedFrontendRequest(action, { workerId: runtime.workerId, principalId: runtime.principalId, claim }, runtime.config, runtime.signer, runtime.nowSeconds()));
+      if (window) {
+        assertClosedPublicationWindow(window, runtime.nowSeconds());
+        if (claim && claim.effectId !== window.frontendEffectId) fail('frontend_claim', 'The retained claim is outside the closed publication window.');
+      }
+      const response = runtime.transport.send(buildSignedFrontendRequest(action, { workerId: runtime.workerId, principalId: runtime.principalId, claim, closedWindow: window }, runtime.config, runtime.signer, runtime.nowSeconds()));
       if (response.status !== 200) fail('frontend_delivery', `The frontend ${action} request did not complete (HTTP ${response.status}). Retained work needs review.`);
       if (typeof response.body !== 'string' || bytes(response.body) > MAX_STATE_BYTES) fail('frontend_contract', 'The frontend response exceeds its reviewed bound.');
       try { return record(JSON.parse(response.body)); } catch { return fail('frontend_contract', 'The frontend response is invalid.'); }
@@ -378,16 +402,19 @@ export function consumeFrontendRefresh(runtime: FrontendRefreshPorts): { status:
       const response = send('claim');
       if (Object.keys(response).join(',') !== 'effect') fail('frontend_claim', 'The frontend claim response is invalid.');
       if (response.effect === null) return { status: 'idle' };
-      claim = parseClaim(response.effect); runtime.claimStore.save(claim);
+      claim = parseClaim(response.effect);
+      if (window && claim.effectId !== window.frontendEffectId) fail('frontend_claim', 'The closed publication claim differs from the requested effect.');
+      runtime.claimStore.save(claim);
       if (!equal(runtime.claimStore.load(), claim)) fail('frontend_claim', 'The frontend lease did not persist.');
     } else claim = parseClaim(claim);
+    if (window && claim.effectId !== window.frontendEffectId) fail('frontend_claim', 'A different publication claim is still retained.');
     if (Date.parse(claim.leaseExpiresAt) <= (runtime.nowSeconds() + LEASE_RESERVE_SECONDS) * 1000
       || state.pending && !equal(state.pending.claim, claim)) {
       const recovery = runtime.recovery;
       if (!recovery || !id(recovery.recoveryId) || recovery.previousExpiry !== (state.pending?.claim.leaseExpiresAt ?? claim.leaseExpiresAt)
         || runtime.signer.sha256(canonical(state)) !== recovery.checkpointSha256) fail('frontend_lease_expired', 'Review the retained checkpoint and submit an explicit lease recovery request.');
       if (state.pending && (state.pending.claim.effectId !== claim.effectId || state.pending.claim.claimToken !== claim.claimToken)) fail('frontend_claim', 'Recovery cannot replace another publication claim.');
-      fenced = true; runtime.fenceEdits(); runtime.assertFenced(); runtime.refreshReads?.();
+      fenced = true; fencePublication(); runtime.refreshReads?.();
       let providerState: 'before' | 'after' | 'partial' | 'completed' = state.completedClaim ? 'completed' : 'before';
       if (state.completedClaim && (state.completedClaim.effectId !== claim.effectId || state.completedClaim.claimToken !== claim.claimToken)) fail('frontend_claim', 'Completed publication belongs to another claim.');
       if (state.pending) {
@@ -439,15 +466,16 @@ export function consumeFrontendRefresh(runtime: FrontendRefreshPorts): { status:
     const checkLease = () => { if (Date.parse(lease.leaseExpiresAt) <= (runtime.nowSeconds() + LEASE_RESERVE_SECONDS) * 1000) fail('frontend_lease_expired', 'The frontend lease needs reconciliation before further writes.'); };
     checkLease();
     const projected = send('project', claim);
+    if (window && !equal(projected.snapshot?.revision, window.revision)) fail('frontend_contract', 'The projection revision differs from the reviewed maintenance snapshot.');
     if (!projected.effect || projected.effect.effectId !== claim.effectId || projected.effect.kind !== 'frontend.refresh'
       || projected.snapshot?.contractVersion !== 1 || projected.snapshot.environment !== 'staging'
       || projected.snapshot.generation !== runtime.config.generation) fail('frontend_contract', 'The snapshot does not match the leased staging effect.');
     if (state.completedClaim?.effectId === claim.effectId && state.completedClaim.claimToken === claim.claimToken) {
       // A prior run completed publication and restored the field policy. New human
       // drafts may now exist: do not replay the previous publication over them.
-      runtime.restoreEditPolicy(); runtime.assertEditPolicy();
+      finishPolicy();
     } else {
-      fenced = true; runtime.fenceEdits(); runtime.assertFenced(); checkLease();
+      fenced = true; fencePublication(); checkLease();
       if (state.pending) {
         if (!equal(state.pending.claim, claim)) fail('frontend_claim', 'A pending publication belongs to another lease.');
       } else {
@@ -478,6 +506,7 @@ export function consumeFrontendRefresh(runtime: FrontendRefreshPorts): { status:
         }
         boundedRequests([...(state.pending.catalog?.requests ?? []), ...KINDS.flatMap(kind => plans[kind].requests), ...(state.pending.supplemental?.dashboard.requests ?? [])]);
         if (state.pending.supplemental) boundedRequests(QUEUES.flatMap(queue => state.pending!.supplemental!.excusals[queue].requests));
+        assertClosedPlans();
         runtime.state.save(validState(state, runtime.config.generation));
         if (!equal(runtime.state.load(), state)) fail('frontend_state', 'The pending publication did not persist.');
       }
@@ -549,7 +578,7 @@ export function consumeFrontendRefresh(runtime: FrontendRefreshPorts): { status:
       state.completedClaim = { effectId: claim.effectId, claimToken: claim.claimToken }; delete state.pending;
       runtime.state.save(validState(state, runtime.config.generation));
       if (!equal(runtime.state.load(), state)) fail('frontend_state', 'The completed frontend checkpoint did not persist.');
-      runtime.restoreEditPolicy(); runtime.assertEditPolicy(); fenced = false;
+      finishPolicy(); fenced = false;
     }
     checkLease();
     const ack = send('ack', claim);
@@ -573,6 +602,7 @@ export interface NativeFrontendConfig {
   workerId: string; principalId: string; stateFileId: string;
   resumeRequest?: { requestId: string; sequence: number; stateSha256: string };
   leaseRecovery?: { recoveryId: string; checkpointSha256: string; previousExpiry: string };
+  closedPublication?: ClosedPublicationWindow;
   main: { spreadsheetId: string; expectedTitle: string; sheets: Record<Kind, { sheetId: number; tableId: string }> };
   allowedFileEditors: string[];
   access: FrontendProtectionAccess;
@@ -699,16 +729,50 @@ export function createNativeFrontendRuntime(services: NativeFrontendServices,
     }
     return { frontend: clone(f), host };
   }
-  function refresh(inputOperation?: (session: NativeFrontendInputSession) => unknown, allowPausedInput = false, permissionRepair = false) {
+  function verifyClosedWindow(window: ClosedPublicationWindow, loaded: NonNullable<ReturnType<typeof configuration>>) {
+    assertClosedPublicationWindow(window, now());
+    const { frontend: config, host } = loaded, owner = host.expectedAutomationEmail;
+    if (host.mode !== 'native-only' || config.enabled || !config.supplemental?.enabled || config.allowedFileEditors.length
+      || config.supplemental.excusals.allowedFileEditors.length || account() !== owner || properties.getProperty(PERMISSION_FENCE_PROPERTY) !== 'pending'
+      || properties.getProperty(HOST_PROPERTIES.enabled) === 'true' || properties.getProperty(INPUT_REORDER_PROPERTY) !== null
+      || properties.getProperty('SHAMROCK_V3_INPUT_PAUSED') !== 'true' || properties.getProperty('SHAMROCK_V3_FORM_INTAKE_PAUSED') !== 'true'
+      || properties.getProperty(FRONTEND_PROPERTIES.config) !== null) fail('closed_publication', 'The private staging input and access fences must already be closed.');
+    const privateJson = (id: string) => {
+      const file = inspectFile(fileId(id), owner);
+      if (file.mimeType !== 'application/json' || Number(file.size) > MAX_STATE_BYTES) fail('closed_publication', 'A bound private JSON checkpoint is required.');
+      return api(`${driveUrl(id)}?alt=media`);
+    };
+    const root = privateJson(fileId(properties.getProperty(CONFIG_FILE_ID_PROPERTY)));
+    if (!equal(JSON.parse(root[FRONTEND_PROPERTIES.config]), config) || !equal(config.closedPublication, window)
+      || !equal(JSON.parse(root[HOST_PROPERTIES.config]), JSON.parse(properties.getProperty(HOST_PROPERTIES.config)!)))
+      fail('closed_publication', 'The owner-private maintenance binding changed.');
+    const readBinding = (key: string) => {
+      if (properties.getProperty(key) !== null) fail('closed_publication', 'The owner-private root must supply every maintenance binding.');
+      return privateJson(fileId(JSON.parse(root[key]).configFileId));
+    };
+    const input = readBinding('SHAMROCK_V3_INPUT_CONFIG'), forms = readBinding('SHAMROCK_V3_FORMS_CONFIG'), permissions = readBinding('SHAMROCK_V3_PERMISSION_CONFIG');
+    if ([input, forms, permissions].some(c => c.enabled !== false || c.environment !== 'staging' || c.generation !== config.generation)
+      || forms.intakeEnabled !== false) fail('closed_publication', 'Ordinary staging publishers, intake and permission changes must be disabled.');
+    for (const id of [input.journalFileId, forms.intakeFileId]) {
+      const journal = privateJson(fileId(id));
+      if (journal.environment !== 'staging' || journal.generation !== config.generation
+        || !journal.entries || Object.keys(journal.entries).length || Object.keys(journal.held ?? {}).length)
+        fail('closed_publication', 'Reconcile the spreadsheet and Form intake journals before closed publication.');
+    }
+    assertClosedPublicationBook({ spreadsheetId: config.main.spreadsheetId, expectedTitle: config.main.expectedTitle, access: config.access, owner, read: api });
+    const book = config.supplemental.excusals;
+    assertClosedPublicationBook({ spreadsheetId: book.spreadsheetId, expectedTitle: book.expectedTitle, access: book.access, owner, read: api });
+  }
+  function refresh(inputOperation?: (session: NativeFrontendInputSession) => unknown, allowPausedInput = false, permissionRepair = false, window?: ClosedPublicationWindow) {
     const loaded = configuration();
     if (!inputOperation && properties.getProperty(INPUT_REORDER_PROPERTY) !== null) return { status: 'maintenance-paused' as const };
     // Only explicit input setup/control may inspect a disabled publisher. Ordinary
     // refresh and edit delivery retain both independent publication gates.
-    if (!loaded || !loaded.frontend.enabled && !(inputOperation && allowPausedInput)) return { status: 'disabled' as const };
+    if (!loaded || !loaded.frontend.enabled && !(inputOperation && allowPausedInput) && !window) return { status: 'disabled' as const };
     const { frontend: config, host } = loaded;
     const supplemental = config.supplemental?.enabled ? config.supplemental : undefined;
     const signer = createGoogleSigner(services.Utilities, properties.getProperty(HOST_PROPERTIES.secret) ?? '');
-    if (config.resumeRequest) {
+    if (config.resumeRequest && !window) {
       consumeFrontendResume({ request: config.resumeRequest, properties, lock: services.LockService.getScriptLock(), readStateSha256() {
         const info = inspectFile(config.stateFileId, host.expectedAutomationEmail);
         if (info.mimeType !== 'application/json' || Number(info.size) > MAX_STATE_BYTES) fail('frontend_state', 'A private bounded checkpoint is required for resume.');
@@ -717,15 +781,15 @@ export function createNativeFrontendRuntime(services: NativeFrontendServices,
         return signer.sha256(canonical(state));
       } });
     }
-    if (properties.getProperty(FRONTEND_PROPERTIES.pause) === 'true' && !allowPausedInput) return { status: 'disabled' as const };
-    if (!inputOperation && services.scheduled) {
+    if (properties.getProperty(FRONTEND_PROPERTIES.pause) === 'true' && !allowPausedInput && !window) return { status: 'disabled' as const };
+    if (!inputOperation && !window && services.scheduled) {
       const available=services.scheduled.availability(config.principalId);
       if (!available.acceptingCommands) return {status:'disabled' as const};
       if (!services.scheduled.reconcile && !properties.getProperty(FRONTEND_PROPERTIES.claim) && !available.frontendPending && !available.frontendLeased) return {status:'idle' as const};
     }
     const permissionContext=createPermissionContext(services), permissionConfiguration=permissionContext.load();
-    if(!permissionRepair)assertPermissionFenceClear(properties);
-    const appliedPermissions=permissionRepair?undefined:permissionContext.applied();
+    if(!permissionRepair && !window)assertPermissionFenceClear(properties);
+    const appliedPermissions=permissionRepair || window?undefined:permissionContext.applied();
     if(appliedPermissions){config.access=permissionPolicyAccess(config.access,appliedPermissions);if(supplemental)supplemental.excusals.access=permissionPolicyAccess(supplemental.excusals.access,appliedPermissions);}
     const nativePermissionApi=createNativePermissionApi(services,()=>fail('frontend_permissions','A permission repair session is required.'));
     function inspectFrontendBook(bookId:string,editors:string[],kind:'main'|'excusals'){
@@ -994,8 +1058,11 @@ export function createNativeFrontendRuntime(services: NativeFrontendServices,
       config: { baseUrl: host.workerOrigin, keyId: host.keyId, environment: 'staging', generation: host.generation }, workerId: config.workerId, principalId: config.principalId,
       recovery: config.leaseRecovery,
       signer, transport: createPagedFrontendTransport(createGoogleTransport(services.UrlFetchApp), {environment:'staging',generation:config.generation,baseUrl:host.workerOrigin,keyId:host.keyId},signer,now,supplemental?.dashboard.reviewedRetainedHistory), lock: services.LockService.getScriptLock(), nowSeconds: now,
-      enabled: () => config.enabled && properties.getProperty(FRONTEND_PROPERTIES.pause) !== 'true',
+      ...(window ? {closedWindow:window} : {}),
+      enabled: () => window ? !config.enabled && properties.getProperty(PERMISSION_FENCE_PROPERTY) === 'pending'
+        : config.enabled && properties.getProperty(FRONTEND_PROPERTIES.pause) !== 'true',
       assertIsolation() {
+        if (window) verifyClosedWindow(window, loaded);
         if (account() !== host.expectedAutomationEmail) fail('frontend_identity', 'Frontend execution identity changed.');
         const book = inspectFrontendBook(config.main.spreadsheetId, config.allowedFileEditors, 'main');
         if (book.mimeType !== 'application/vnd.google-apps.spreadsheet' || book.name !== config.main.expectedTitle) fail('frontend_isolation', 'The frontend binding is not the reviewed native staging spreadsheet.');
@@ -1024,10 +1091,11 @@ export function createNativeFrontendRuntime(services: NativeFrontendServices,
       buildModel: modelBuilder ?? (snapshot => {
         if (!services.Utilities.formatDate) fail('frontend_configuration', 'A detachment-local calendar date provider is required.');
         return buildCoherentFrontendModel(snapshot, services.Utilities.formatDate(new Date(now() * 1000), 'America/Indiana/Indianapolis', 'yyyy-MM-dd'));
-      }), fenceEdits: () => setPolicy(true), assertFenced: () => assertPolicy(true), readTable, refreshReads: invalidateReads,
+      }), fenceEdits: () => { if (!window) setPolicy(true); }, assertFenced: () => window ? verifyClosedWindow(window, loaded) : assertPolicy(true), readTable, refreshReads: invalidateReads,
       readSeeds() { assertPolicy(true); return readNativeSeeds(config.main.spreadsheetId, readMetadata(), config.seeds); },
       verifyValidation: plan => verifyNativeValidation(plan, config.main.spreadsheetId, readMetadata(), KINDS.map(kind => config.main.sheets[kind].sheetId)),
-      writeAtomic: requests => writeContent(requests), restoreEditPolicy: () => setPolicy(false), assertEditPolicy: () => assertPolicy(false),
+      writeAtomic: requests => writeContent(requests), restoreEditPolicy: () => { if (!window) setPolicy(false); },
+      assertEditPolicy: () => window ? verifyClosedWindow(window, loaded) : assertPolicy(false),
       pause: pauseFrontend,
     };
     if (config.seeds.some(s => ['directory:flight', 'directory:squadron'].includes(s.key))) runtime.catalog = {
@@ -1081,7 +1149,11 @@ export function createNativeFrontendRuntime(services: NativeFrontendServices,
     }
     return consumeFrontendRefresh(runtime);
   }
-  return { refresh: () => refresh(), permissionSession:(operation:(session:NativeFrontendInputSession)=>unknown)=>refresh(operation,true,true), inputSession: (operation: (session: NativeFrontendInputSession) => unknown, options: {allowPaused?: boolean} = {}) => refresh(operation, options.allowPaused === true),
+  return { refresh: () => refresh(),
+    closedPublicationWindow: () => configuration()?.frontend.closedPublication,
+    assertClosedMaintenance(window: ClosedPublicationWindow) { const loaded = configuration(); if (!loaded) fail('closed_publication', 'Staging maintenance is unbound.'); verifyClosedWindow(window, loaded); },
+    publishClosedMaintenance: (window: ClosedPublicationWindow) => refresh(undefined,false,false,window),
+    permissionSession:(operation:(session:NativeFrontendInputSession)=>unknown)=>refresh(operation,true,true), inputSession: (operation: (session: NativeFrontendInputSession) => unknown, options: {allowPaused?: boolean} = {}) => refresh(operation, options.allowPaused === true),
     pause() { pauseFrontend(); return { status: 'paused' as const }; },
     resume() {
       const configured = configuration(); if (!configured || !configured.frontend.enabled) fail('frontend_configuration', 'Enable only a reviewed staging frontend configuration.');

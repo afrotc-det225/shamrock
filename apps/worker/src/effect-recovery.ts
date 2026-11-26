@@ -1,3 +1,4 @@
+import { retainedPublicationPin, reviewedPublicationGuard } from './reviewed-publication.js';
 import { effectiveAdminGrants } from './permission-grants.js';
 /** Deliberate recovery by the same adapter, after exclusive provider reconciliation.
  * A recovery renews a retained lease. It never steals/requeues/acknowledges work. */
@@ -29,10 +30,13 @@ export async function recoverAdminEffect(env: Env, input: unknown): Promise<unkn
   const sql = (query: string, ...values: (string|number)[]) => env.DB.prepare(query).bind(...values);
   // Recovery is permitted while the command gate is paused, but never across
   // generations or a revoked principal/grant. The same grant already owns effects.
-  const guard = `EXISTS(SELECT 1 FROM system_control WHERE singleton=1 AND environment=? AND generation=?)
+  const pin=await retainedPublicationPin(r.claimToken,r.principalId);
+  if(pin && env.ENVIRONMENT!=='staging')throw new HttpError(403,'NOT_AUTHORIZED','Reviewed refreshes require staging.');
+  const maintenance=pin?reviewedPublicationGuard(r.effectId,r.principalId,r.generation,pin):undefined;
+  const guard = maintenance?.sql??`EXISTS(SELECT 1 FROM system_control WHERE singleton=1 AND environment=? AND generation=?)
     AND EXISTS(SELECT 1 FROM principals p JOIN ${effectiveAdminGrants} g ON g.principal_id=p.principal_id
       WHERE p.principal_id=? AND p.active=1 AND g.capability='frontend.read' AND g.scope_kind='wing' AND g.scope_key='*')`;
-  const authority = [r.environment,r.generation,r.principalId];
+  const authority = maintenance?.values??[r.environment,r.generation,r.principalId];
   const prior = await env.DB.batch<Record<string, unknown>>([
     sql(`SELECT (${guard}) AS allowed`, ...authority),
     sql('SELECT request_sha256,receipt_json FROM admin_effect_recoveries WHERE recovery_id=?',r.recoveryId),

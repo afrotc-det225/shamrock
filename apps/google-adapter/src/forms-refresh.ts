@@ -1,6 +1,6 @@
 /** Resumable all-Form publication. A private checkpoint precedes every native mutation. */
 import { AdapterError, type AdapterConfig, type Signer } from './index.js';
-import type { FrontendSnapshot } from '../../../packages/domain/src/admin.js';
+import type { FrontendSnapshot, SnapshotRevision } from '../../../packages/domain/src/admin.js';
 import { formReadFingerprint, formsCanonical, planNativeFormPublication, retainFormEdition, verifyNativeFormPlan, verifyFormBeforeContinuations,
   type FormEdition, type ManagedFormBinding, type NativeFormPlan, type NativeFormRead } from './forms-publication.js';
 
@@ -12,7 +12,7 @@ export interface FormsState {
   canAccept?: Record<string, boolean>;
   claim?: FormsClaim;
   pending?: { plans: NativeFormPlan[]; previouslyAccepting: Record<string, boolean> };
-  completed?: { claim: FormsClaim; reopen: Record<string, boolean> };
+  completed?: { claim: FormsClaim; reopen: Record<string, boolean>; closedRevision?: SnapshotRevision };
 }
 export interface FormsRefreshPorts {
   config: AdapterConfig; enabled(): boolean; intakeEnabled(): boolean; now(): number;
@@ -27,6 +27,7 @@ export interface FormsRefreshPorts {
     write(binding: ManagedFormBinding, requests: Record<string, unknown>[], requiredRevisionId: string): void;
     setSubmitContinuation?(binding: ManagedFormBinding, sectionId: string): void };
   pause(): void;
+  closedWindow?: { effectId: string; revision: SnapshotRevision };
 }
 function fail(code: string, message: string): never { throw new AdapterError(code, message); }
 const copy = <T>(x: T): T => JSON.parse(JSON.stringify(x));
@@ -43,8 +44,13 @@ export function consumeFormsRefresh(io: FormsRefreshPorts): { status: 'disabled'
     if (state.version !== 1 || state.environment !== io.config.environment || state.generation !== io.config.generation || !state.editions || !state.current) fail('forms_state', 'The private Form state belongs to another generation.');
     touched = Boolean(state.pending || state.completed);
     const save = () => { if (formsCanonical(state).length > 5_000_000) fail('forms_capacity', 'Private Form history needs reviewed archival.'); io.state.save(copy(state)); };
-    if (!state.claim) { const claim = io.effects.claim(); if (!claim) return { status: 'idle' }; state.claim = claim; save(); }
+    if (!state.claim && (state.pending || state.completed)) fail('forms_state', 'A retained Form checkpoint is missing its original claim.');
+    const matchesWindow = (claim: FormsClaim) => {
+      if (io.closedWindow && claim.effectId !== io.closedWindow.effectId) fail('forms_claim', 'The private window binds a different Form publication.');
+    };
+    if (!state.claim) { const claim = io.effects.claim(); if (!claim) return { status: 'idle' }; matchesWindow(claim); state.claim = claim; save(); }
     const claim = state.claim;
+    matchesWindow(claim);
     const currentClaim = () => { if (claim.kind !== 'forms.refresh' || !claim.effectId || !claim.claimToken || !Number.isFinite(Date.parse(claim.leaseExpiresAt)) || Date.parse(claim.leaseExpiresAt) <= io.now()) fail('forms_lease', 'The retained Form lease requires operator reconciliation.'); };
     currentClaim();
     const bound = (key: string) => bindings.find(b => b.key === key) ?? fail('forms_binding', 'A retained Form binding is unavailable.');
@@ -52,6 +58,7 @@ export function consumeFormsRefresh(io: FormsRefreshPorts): { status: 'disabled'
       if (!state.pending) {
         const projected = io.effects.project(claim);
         if (projected.effect.effectId !== claim.effectId || projected.effect.kind !== 'forms.refresh' || projected.snapshot.environment !== io.config.environment || projected.snapshot.generation !== io.config.generation) fail('forms_snapshot', 'Form publication requires one coherent matching snapshot.');
+        if (io.closedWindow && formsCanonical(projected.snapshot.revision) !== formsCanonical(io.closedWindow.revision)) fail('forms_snapshot', 'The reviewed Form revision has changed.');
         const reads = bindings.map(b => io.forms.read(b));
         const plans = bindings.map((binding, i) => planNativeFormPublication({ snapshot: projected.snapshot, binding, current: reads[i], signer: io.signer, previousEdition: state.editions[state.current[binding.key]] }));
         // Catalog history is frozen alongside the plans before a respondent can see a new token.
@@ -61,6 +68,7 @@ export function consumeFormsRefresh(io: FormsRefreshPorts): { status: 'disabled'
       }
       const pending = state.pending;
       if (pending.plans.length !== 3 || pending.plans.some(p => formsCanonical(p.binding) !== formsCanonical(bound(p.binding.key)))) fail('forms_state', 'Retained publication bindings changed.');
+      if (io.closedWindow && (Object.values(pending.previouslyAccepting).some(Boolean) || pending.plans.some(p => formsCanonical(p.edition.revision) !== formsCanonical(io.closedWindow!.revision)))) fail('forms_state', 'The retained Form publication belongs to another revision or intake window.');
       for (const b of bindings) { touched = true; io.forms.setAccepting(b, false); if (io.forms.read(b).acceptingResponses) fail('forms_fence', 'A Form did not close for safe publication.'); }
       for (const plan of pending.plans) {
         currentClaim(); const read = io.forms.read(plan.binding);
@@ -86,14 +94,15 @@ export function consumeFormsRefresh(io: FormsRefreshPorts): { status: 'disabled'
       state.published ??= {};
       state.canAccept ??= {};
       for (const plan of pending.plans) { state.current[plan.binding.key] = plan.edition.editionId; state.published[plan.binding.key] = formReadFingerprint(plan.expectedAfter); state.canAccept[plan.binding.key] = plan.canAccept; }
-      state.completed = { claim: copy(claim), reopen: Object.fromEntries(pending.plans.map(p => [p.binding.key, pending.previouslyAccepting[p.binding.key] && p.canAccept])) };
+      state.completed = { claim: copy(claim), reopen: Object.fromEntries(pending.plans.map(p => [p.binding.key, pending.previouslyAccepting[p.binding.key] && p.canAccept])), ...(io.closedWindow ? {closedRevision: copy(io.closedWindow.revision)} : {}) };
       delete state.pending; save();
     }
     if (formsCanonical(state.completed.claim) !== formsCanonical(claim)) fail('forms_claim', 'The completed Form checkpoint does not match its lease.');
+    if (io.closedWindow && formsCanonical(state.completed.closedRevision) !== formsCanonical(io.closedWindow.revision)) fail('forms_state', 'The completed Form checkpoint belongs to another maintenance revision.');
     currentClaim();
     for (const b of bindings) {
       if (state.published?.[b.key] !== formReadFingerprint(io.forms.read(b))) fail('forms_changed', 'A completed Form changed before reopening or acknowledgement.');
-      const reopen = io.intakeEnabled() && state.completed.reopen[b.key] === true;
+      const reopen = !io.closedWindow && io.intakeEnabled() && state.completed.reopen[b.key] === true;
       io.forms.setAccepting(b, reopen);
       if (io.forms.read(b).acceptingResponses !== reopen) fail('forms_fence', 'The verified intake state could not be restored.');
     }

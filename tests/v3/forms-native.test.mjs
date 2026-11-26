@@ -184,3 +184,58 @@ test('a native response outside the reviewed audience is retained for review wit
  f.fx.responses['form-directory']={responseId:'outside',lastSubmittedTime:'2026-11-06T12:00:00Z',respondentEmail:'outside@example.invalid',answers:Object.fromEntries(Object.entries({'q-0':value('q-0'),'q-1':value('q-1'),first:'Outside',last:'Example'}).map(([questionId,value])=>[questionId,{questionId,textAnswers:{answers:[{value}]}}]))};
  assert.equal(f.runtime.replay('directory','outside').status,'pending-review');assert.equal(f.fx.commands.length,0);assert.equal(Object.values(f.fx.files['intake-file'].value.entries)[0].issue,'form_responder_access');
 });
+
+function closedFixture(){
+ const f=fixture(),window={version:1,frontendEffectId:'frontend-effect',formsEffectId:'effect',revision:clone(f.snapshot.revision),expiresAt:'2026-11-06T12:45:00.000Z'};
+ const host=JSON.parse(f.values[HOST_PROPERTIES.config]);delete host.attendance;delete host.journal;host.mode='native-only';f.values[HOST_PROPERTIES.config]=JSON.stringify(host);
+ f.config.enabled=false;f.config.intakeEnabled=false;
+ f.fx.files['root-config'].value.SHAMROCK_V3_INPUT_CONFIG=JSON.stringify({configFileId:'input-config'});
+ f.fx.files['input-config']={id:'input-config',name:'input-config',mimeType:'application/json',value:{environment:'staging',generation:1,enabled:false,confirmation:{formId:'form-confirmation',expectedTitle:'Confirmation Staging'}}};
+ f.fx.files['form-confirmation']={id:'form-confirmation',name:'Confirmation Staging',mimeType:'application/vnd.google-apps.form'};
+ f.fx.open['form-confirmation']=false;
+ for(const g of Object.values(f.fx.forms))g.publishSettings={publishState:{}};
+ const incoming=f.services.UrlFetchApp.fetch;
+ f.fx.publishedPermissions=Object.fromEntries(['attendance','excusals','directory','confirmation'].map(k=>[k,[{type:'user',role:'owner',emailAddress:owner}]]));
+ const ackRequests=[],claimRequests=[];let guardCalls=0,settingWrites=0;
+ const originalOpen=f.services.FormApp.openById;f.services.FormApp.openById=id=>({...originalOpen(id),setAcceptingResponses(){settingWrites++;assert.fail('Closed publication attempted to change intake');},setPublished(){settingWrites++;assert.fail('Closed publication attempted to change access');}});
+ f.services.UrlFetchApp.fetch=(url,opts)=>{
+   if(url.startsWith('https://forms.googleapis.com/v1/forms/form-confirmation'))return {getResponseCode:()=>200,getContentText:()=>JSON.stringify({formId:'form-confirmation',info:{title:'Confirmation Staging'},settings:{emailCollectionType:'VERIFIED'},publishSettings:{publishState:{}}})};
+   if(url.endsWith('/claim'))claimRequests.push(JSON.parse(opts.payload));if(url.endsWith('/ack'))ackRequests.push(JSON.parse(opts.payload));
+   return incoming(url,opts);
+ };
+ const run=()=>f.runtime.publishClosedMaintenance(window,()=>{guardCalls++;if(f.fx.windowRevoked)throw Error('Window revoked');});
+ return {...f,window,run,ackRequests,claimRequests,counters:()=>({guardCalls,settingWrites})};
+}
+
+test('closed owner maintenance publishes all three catalogs using one named effect while every Form and its confirmation stay closed',()=>{
+ const f=closedFixture();f.config.controlRequest={requestId:'old-control',action:'resume-intake'};
+ assert.equal(f.run().status,'published');assert.equal(f.fx.commands.length,0);assert.equal(f.fx.triggers.length,0);assert.equal(f.counters().settingWrites,0);
+ assert.equal(f.claimRequests.length,1);assert.equal(f.claimRequests[0].expectedEffectId,f.window.formsEffectId);assert.deepEqual(f.claimRequests[0].expectedRevision,f.window.revision);
+ assert.equal(f.ackRequests.length,1);assert.equal(Object.keys(f.fx.files['state-file'].value.current).length,3);assert(f.counters().guardCalls>=5);
+ assert.equal(f.runtime.flush().status,'paused');assert.equal(f.values[FORMS_PROPERTIES.intakePause],'true');
+});
+
+test('closed publication holds a different leased effect, revision, open Form or additional responder before changing native items',()=>{
+ for(const [mutate,code]of [[f=>f.window.formsEffectId='different','forms_claim'],[f=>f.window.revision.operations++,'forms_snapshot'],[f=>f.fx.open['form-confirmation']=true,'forms_fence'],[f=>delete f.fx.forms['form-attendance'].publishSettings,'forms_fence'],[f=>f.fx.publishedPermissions.confirmation.push({type:'user',role:'reader',view:'published',id:'extra',emailAddress:'other@example.invalid'}),'form_responder_access'],[f=>f.fx.publishedPermissions.directory.push({type:'group',role:'reader'}),'forms_isolation']]){
+  const f=closedFixture();mutate(f);assert.throws(f.run,{code});assert.equal(f.ackRequests.length,0);assert.equal(f.fx.log.filter(q=>q.url.endsWith(':batchUpdate')).length,0);assert.equal(f.counters().settingWrites,0);
+ }
+});
+
+test('closed publication rechecks access between provider writes and resumes an interrupted plan without repeating the saved revision',()=>{
+ const f=closedFixture(),send=f.services.UrlFetchApp.fetch;let revoke=true;
+ f.services.UrlFetchApp.fetch=(url,opts)=>{const response=send(url,opts);if(url.endsWith(':batchUpdate')&&revoke){revoke=false;f.fx.windowRevoked=true;}return response;};
+ assert.throws(f.run,/Window revoked/);assert.equal(f.ackRequests.length,0);assert(f.fx.files['state-file'].value.pending);assert.equal(f.fx.log.filter(x=>x.url.endsWith(':batchUpdate')).length,1);
+ f.fx.windowRevoked=false;assert.equal(f.run().status,'published');assert.equal(f.fx.log.filter(x=>x.url.endsWith(':batchUpdate')).length,3);assert.equal(f.ackRequests.length,1);assert.equal(f.counters().settingWrites,0);
+});
+
+test('closed publication retains a verified completed checkpoint when acknowledgement is interrupted and rejects a different revision on resume',()=>{
+ const f=closedFixture(),send=f.services.UrlFetchApp.fetch;let unavailable=true;
+ f.services.UrlFetchApp.fetch=(url,opts)=>url.endsWith('/ack')&&unavailable?{getResponseCode:()=>503,getContentText:()=>'{}'}:send(url,opts);
+ assert.throws(f.run,{code:'forms_effect'});const state=f.fx.files['state-file'].value;assert.deepEqual(state.completed.closedRevision,f.window.revision);assert.equal(f.fx.log.filter(x=>x.url.endsWith(':batchUpdate')).length,3);
+ f.window.revision.operations++;assert.throws(f.run,{code:'forms_state'});f.window.revision.operations--;unavailable=false;assert.equal(f.run().status,'published');assert.equal(f.ackRequests.length,1);assert.equal(f.fx.log.filter(x=>x.url.endsWith(':batchUpdate')).length,3);assert.equal(f.counters().settingWrites,0);
+});
+
+test('closed maintenance does not attach an orphaned private checkpoint to a newly claimed effect',()=>{
+ const f=closedFixture();f.fx.files['state-file'].value.pending={plans:[],previouslyAccepting:{}};
+ assert.throws(f.run,{code:'forms_state'});assert.equal(f.claimRequests.length,0);assert.equal(f.fx.log.filter(x=>x.url.endsWith(':batchUpdate')).length,0);assert.equal(f.counters().settingWrites,0);
+});

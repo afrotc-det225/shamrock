@@ -265,3 +265,30 @@ test('trusted permission managers own privilege fields while ordinary Leadership
  input.access={...input.access,permissionManagers:[],supportEditors:[],directoryEditors:[],leadershipEditors:[],attendanceEditors:[],squadronCommanders:[]};apply(input,planFrontendProtections(input).requests);
  assert.equal(nativeAllows(input,actor(input,'leadership','role',people.wing)),false);
 });
+
+test('closed publication verifies the owner, every protection including hidden sheets, and the completed permission listing', async () => {
+  const {assertClosedPublicationBook,assertClosedPublicationWindow}=await import('../../.build/v3/apps/google-adapter/src/closed-publication-window.js');
+  const owner=people.owner, spreadsheetId='private-staging', expectedTitle='Staging';
+  const cases=['valid','additional','published','truncated','hole','foreign-owner','other-automation','missing-tab-policy'];
+  for(const mode of cases){
+    const fx=fixture();fx.access={ownerEmail:owner,automationEmail:owner,supportEditors:[],permissionManagers:[],directoryEditors:[],leadershipEditors:[],attendanceEditors:[],squadronCommanders:[]};
+    fx.surfaces=fx.surfaces.map(({sheetId,dataEndRow,gridRowCount,gridColumnCount})=>({sheetId,dataEndRow,gridRowCount,gridColumnCount,kind:'readonly',headers:[]}));
+    apply(fx,planFrontendProtections(fx).requests);fx.metadata.spreadsheetId=spreadsheetId;
+    const acl={permissions:[{type:'user',role:'owner',emailAddress:owner}]};
+    const file={id:spreadsheetId,name:expectedTitle,mimeType:'application/vnd.google-apps.spreadsheet',owners:[{emailAddress:owner}]};
+    if(mode==='additional')acl.permissions.push({type:'user',role:'reader',emailAddress:people.outsider});
+    if(mode==='published')acl.permissions.push({type:'anyone',role:'reader',view:'published'});
+    if(mode==='truncated')acl.nextPageToken='more';
+    if(mode==='hole')fx.metadata.sheets.at(-1).protectedRanges[0].unprotectedRanges=[{sheetId:107}];
+    if(mode==='missing-tab-policy')fx.metadata.sheets.at(-1).protectedRanges=[];
+    if(mode==='foreign-owner')file.owners[0].emailAddress=people.outsider;
+    if(mode==='other-automation')fx.access.automationEmail=people.runtime;
+    const check=()=>assertClosedPublicationBook({owner,spreadsheetId,expectedTitle,access:fx.access,
+      read:url=>url.includes('/permissions?')?acl:url.includes('sheets.googleapis')?fx.metadata:file});
+    if(mode==='valid')check();else assert.throws(check);
+  }
+  const at=1800000000,w={version:1,frontendEffectId:'one',formsEffectId:'two',revision:{operations:0,administration:3},expiresAt:new Date((at+3600)*1000).toISOString()};
+  assertClosedPublicationWindow(w,at);
+  for(const variant of [{...w,formsEffectId:w.frontendEffectId},{...w,revision:{operations:0,administration:-1}},{...w,expiresAt:new Date(at*1000).toISOString()},
+    {...w,expiresAt:new Date((at+3601)*1000).toISOString()},{...w,extra:true}])assert.throws(()=>assertClosedPublicationWindow(variant,at));
+});

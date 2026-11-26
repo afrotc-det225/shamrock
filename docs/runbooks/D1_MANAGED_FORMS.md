@@ -4,6 +4,12 @@ Status: implemented for the isolated staging adapter, with local D1 and injected
 
 ## Supported workflow
 
+### Publish choices during owner-only staging maintenance
+
+The scheduled closed publication window can refresh the Attendance, Excusals and Directory choices while ordinary publication, all intake and the confirmation Form are paused. The private window pins one Forms effect, the exact D1 revision and an expiry. The adapter checks both Google sharing views for all four Forms and verifies that each Form is unpublished and closed to responses before changing content or acknowledging the effect. Its writes are limited to the private checkpoint, native choices and reviewed section navigation. The scheduler leaves each Form closed after success and after a retry.
+
+If sharing, the revision or the window changes during a run, inspect the saved Forms checkpoint and effect receipt. Restore the reviewed conditions before resuming that same effect. Successful native writes are compared with the saved plan on retry. Verify the visible event choices and retained choice references before using the ordinary intake controls to open a future rehearsal.
+
 The existing Attendance, Excusals and Directory Forms remain native Google Forms. Their existing item IDs, question IDs, response history, linked response destinations, descriptions and validation are preserved. Ordinary publication updates explicitly bound choice options with Google revision preconditions. It never deletes, moves or replaces existing questions. Optional reviewed Attendance layout provisioning adds missing AS-year checkboxes and Flight sections, using the existing private checkpoint and native continuation readback described below. Without that layout configuration, a Flight lacking an explicitly bound section stops publication.
 
 Attendance event, Flight and cadet choices come from one coherent D1 snapshot. Explicit Flight, AS year and university filters preserve the existing Flight/crosstown question partitions; labels do not infer these partitions. Excusal event choices use the same event catalog. Directory choice lists use explicit private catalogs, matching the current nineteen-question Directory Form and its ten canonical dropdowns. Flight choices include empty Flights so a verified new cadet can enroll. Squadron is derived from the selected Flight in D1; its Form answer cannot grant a conflicting assignment.

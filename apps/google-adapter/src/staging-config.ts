@@ -1,6 +1,7 @@
 /** Import reviewed, nonsecret staging bindings from an automation-owned private JSON file.
  * This module never uploads files, installs triggers, enables processing or reads the bridge secret. */
 import { AdapterError } from './index.js';
+import { assertClosedPublicationWindow } from './closed-publication-window.js';
 import { MAINTENANCE_PROPERTIES, parseNativeMaintenanceConfig } from './maintenance-config.js';
 import { HOST_PROPERTIES, parseStagingHostConfig, type TransportStagingHostConfig } from './staging-host.js';
 import { NATIVE_PROPERTIES, parseNativePresentationConfig, type NativeProjectionConfig } from './native-runtime.js';
@@ -228,7 +229,8 @@ export function importStagingConfiguration(services: StagingConfigurationService
   if (forms) { keys(forms, ['version', 'configFileId']); if (forms.version !== 1) fail('configuration_invalid', 'Unsupported managed Forms configuration.'); id(forms.configFileId, 512); if (forms.configFileId === fileId) fail('configuration_invalid', 'Managed Forms config needs a separate owner-only file.'); }
   const frontend = parsed[FRONTEND_CONFIG_PROPERTY];
   if (frontend) {
-    keys(frontend, ['version', 'environment', 'generation', 'enabled', 'resourceReview', 'workerId', 'principalId', 'stateFileId', 'main', 'allowedFileEditors', 'access', 'seeds'], ['supplemental','resumeRequest','leaseRecovery']);
+    keys(frontend, ['version', 'environment', 'generation', 'enabled', 'resourceReview', 'workerId', 'principalId', 'stateFileId', 'main', 'allowedFileEditors', 'access', 'seeds'], ['supplemental','resumeRequest','leaseRecovery','closedPublication']);
+    if (frontend.closedPublication) assertClosedPublicationWindow(frontend.closedPublication, Math.floor(Date.now() / 1000));
     if(frontend.resumeRequest){const r=object(frontend.resumeRequest);keys(r,['requestId','sequence','stateSha256']);id(r.requestId);integer(r.sequence);if(typeof r.stateSha256!=='string'||!/^[a-f0-9]{64}$/.test(r.stateSha256))fail('configuration_invalid','Frontend resume requires a reviewed state digest.');}
     if(frontend.leaseRecovery){const r=object(frontend.leaseRecovery);keys(r,['recoveryId','checkpointSha256','previousExpiry']);id(r.recoveryId);if(typeof r.checkpointSha256!=='string'||!/^[a-f0-9]{64}$/.test(r.checkpointSha256)||typeof r.previousExpiry!=='string'||!Number.isFinite(Date.parse(r.previousExpiry)))fail('configuration_invalid','Frontend lease recovery requires a reviewed checkpoint and expiry.');}
     if (frontend.version !== 1 || frontend.environment !== 'staging' || frontend.generation !== host.generation || typeof frontend.enabled !== 'boolean'

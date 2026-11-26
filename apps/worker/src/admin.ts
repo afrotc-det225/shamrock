@@ -1,3 +1,4 @@
+import { parsePublicationPin, retainedPublicationPin, reviewedPublicationGuard, reviewedPublicationState, reviewedPublicationToken } from './reviewed-publication.js';
 import { excusalScopeSelect, excusalScopeJoin } from './excusal-scope.js';
 import { frontendAttendanceVersions } from '../../../packages/domain/src/frontend-transport.js';
 import { markManagedFutureRosters } from './event-rosters.js';
@@ -415,21 +416,40 @@ export async function getAdminReceipt(env: AdminEnv, url: URL): Promise<unknown>
   return JSON.parse(row.receipt);
 }
 export async function adminEffect(env: AdminEnv, action: 'claim' | 'project' | 'ack', input: unknown): Promise<unknown> {
-  const req = readInput(input, env, action === 'claim' ? ['workerId', 'kind'] : ['workerId', 'effectId', 'claimToken']);
-  const guard = readerGuard(env, req.principalId, true);
+  const obj = input && typeof input === 'object' ? input as Record<string,unknown> : {};
+  const named = action === 'claim' && Object.hasOwn(obj,'expectedEffectId');
+  const {expectedRevision,...claimInput} = obj;
+  const req = readInput(named ? claimInput : input, env, action === 'claim'
+    ? ['workerId','kind',...(named ? ['expectedEffectId'] : [])] : ['workerId','effectId','claimToken']);
+  const pin = named ? parsePublicationPin(expectedRevision) : action !== 'claim' ? await retainedPublicationPin(String(req.claimToken),req.principalId) : undefined;
+  if (pin && env.ENVIRONMENT !== 'staging') throw new HttpError(403,'NOT_AUTHORIZED','Reviewed refreshes require the isolated staging environment.');
+  const guard = pin ? reviewedPublicationGuard(String(named ? req.expectedEffectId : req.effectId),req.principalId,Number(env.GENERATION),pin) : readerGuard(env,req.principalId,true);
   const now = new Date().toISOString();
   if (action === 'claim') {
     if (!['frontend.refresh', 'forms.refresh'].includes(String(req.kind)))
       throw new HttpError(400, 'INVALID_ADMIN_REQUEST', 'Unsupported refresh effect kind.');
+    const token = pin ? await reviewedPublicationToken(req.principalId,pin) : crypto.randomUUID();
     const effect = await stmt(env.DB, `UPDATE admin_effects SET state='leased',worker_id=?,claim_token=?,lease_expires_at=?,
       claim_operations_revision=CASE WHEN kind='frontend.refresh' THEN (SELECT COALESCE(MAX(audit_id),0) FROM audit_events) ELSE NULL END,
       claim_administration_revision=CASE WHEN kind='frontend.refresh' THEN (SELECT COALESCE(MAX(audit_id),0) FROM admin_audit_events) ELSE NULL END
-   WHERE effect_id=(SELECT j.effect_id FROM admin_effects j WHERE j.state='pending' AND j.kind=? AND ${guard.sql}
+   WHERE effect_id=(SELECT j.effect_id FROM admin_effects j WHERE j.state='pending' AND j.kind=?${named?' AND j.effect_id=?':''} AND ${guard.sql}
     AND NOT EXISTS(SELECT 1 FROM admin_effects l WHERE l.kind=j.kind AND l.state='leased') ORDER BY j.created_at,j.effect_id LIMIT 1)
-   RETURNING effect_id AS effectId,kind,claim_token AS claimToken,lease_expires_at AS leaseExpiresAt`, req.workerId, crypto.randomUUID(), new Date(Date.now() + 600000).toISOString(), req.kind, ...guard.values).first();
+   RETURNING effect_id AS effectId,kind,claim_token AS claimToken,lease_expires_at AS leaseExpiresAt`, req.workerId, token, new Date(Date.now() + 600000).toISOString(), req.kind, ...(named?[req.expectedEffectId]:[]), ...guard.values).first();
+    if (!effect && named) {
+      // Recover a lost claim response, or signal that this particular publication
+      // already finished so the next scheduler tick may advance to the next kind.
+      const receipt = await stmt(env.DB,`SELECT effect_id AS effectId,kind,claim_token AS claimToken,lease_expires_at AS leaseExpiresAt,state
+        FROM admin_effects WHERE effect_id=? AND kind=? AND worker_id=?
+        AND ((state='leased' AND lease_expires_at>?) OR (state='done' AND completed_by_effect_id=effect_id))
+        AND substr(claim_token,1,length(?))=? AND ${guard.sql}`,req.expectedEffectId,req.kind,req.workerId,now,
+        token.slice(0,-36),token.slice(0,-36),...guard.values).first();
+      if (!receipt) throw new HttpError(409,'REVIEWED_PUBLICATION_CONFLICT','The named refresh or its reviewed staging conditions changed.');
+      const {state,...retainedEffect} = receipt;
+      return {effect:state === 'done' ? null : retainedEffect};
+    }
     return { effect };
   }
-  const lease = `effect_id=? AND worker_id=? AND claim_token=? AND state='leased' AND lease_expires_at>? AND ${guard.sql}`;
+  const lease = `effect_id=? AND worker_id=? AND claim_token=? AND ${pin?reviewedPublicationState:"state='leased'"} AND lease_expires_at>? AND ${guard.sql}`;
   const values = [req.effectId, req.workerId, req.claimToken, now, ...guard.values];
   if (action === 'ack') {
     const assertionId = crypto.randomUUID();
@@ -440,15 +460,15 @@ export async function adminEffect(env: AdminEnv, action: 'claim' | 'project' | '
           assertionId, ...values),
         // Only the immutable claim-time floor is covered. A cached publication may
         // predate a later project read, so never replace this with the current MAX.
-        stmt(env.DB, `UPDATE admin_effects AS pending SET state='done',completed_at=?,completed_by_effect_id=?
+        ...(pin ? [] : [stmt(env.DB, `UPDATE admin_effects AS pending SET state='done',completed_at=?,completed_by_effect_id=?
           WHERE pending.state='pending' AND pending.kind='frontend.refresh' AND EXISTS(
             SELECT 1 FROM admin_effects claimed WHERE ${lease} AND claimed.kind='frontend.refresh' AND (
               EXISTS(SELECT 1 FROM command_registry r JOIN audit_events a ON a.command_id=r.command_id
                 WHERE r.command_id=pending.command_id AND r.ledger='operation' AND a.audit_id<=claimed.claim_operations_revision)
               OR EXISTS(SELECT 1 FROM command_registry r JOIN admin_audit_events a ON a.command_id=r.command_id
                 WHERE r.command_id=pending.command_id AND r.ledger='admin' AND a.audit_id<=claimed.claim_administration_revision)))`,
-          now, req.effectId, ...values),
-        stmt(env.DB, `UPDATE admin_effects SET state='done',completed_at=?,completed_by_effect_id=? WHERE ${lease}`, now, req.effectId, ...values),
+          now, req.effectId, ...values)]),
+        stmt(env.DB, `UPDATE admin_effects SET state='done',completed_at=?,completed_by_effect_id=? WHERE state='leased' AND ${lease}`, now, req.effectId, ...values),
         stmt(env.DB, 'DELETE FROM command_assertions WHERE command_id=?', assertionId),
       ]);
     } catch {

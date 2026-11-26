@@ -122,3 +122,12 @@ explicit selected Flights instead of maintaining ID arrays. Imported and manual
 future events can adopt an audited current-membership policy through a reviewed
 preview/apply. See [future event rosters](D1_EVENT_ROSTERS.md) for automatic verified
 enrollment/transfer handling, historical-capture boundaries and native scheduling.
+
+
+## Publishing a reviewed import while staging is paused
+
+For an isolated, owner-only Google publication, a registered Wing reader with an explicit Wing read grant can claim one previously queued `frontend.refresh` or `forms.refresh` effect. Add `expectedEffectId` and `expectedRevision: {operations, administration}` to the ordinary signed claim. Send the returned opaque token, effect ID and worker ID unchanged for projection, page reads, recovery and acknowledgement.
+
+The Worker verifies the completed staging import behind the effect, its permission policy version and hash, both audit revisions, the environment and generation, active read authority, suppressed notifications and the closed command gate. An active permission lease, incomplete import or unfinished event roster refresh holds publication. If the review has become stale, keep the Google checkpoint and review the new state. The ordinary mutation gate stays closed throughout.
+
+The named claim can be retried by its original principal and worker after a lost response. Its acknowledgement completes only the named effect. Within its lease deadline, a retry can verify the original completed effect and receive the same acknowledgement. On a later invocation, claiming the same completed effect under the same reviewer, worker and revision returns an empty result even after expiry. This lets the scheduler advance to the next named effect. An expired lease that still has unfinished work requires explicit reconciliation. Native Drive isolation, closed spreadsheet protections and non-accepting Forms must also be verified by the publishing adapter.

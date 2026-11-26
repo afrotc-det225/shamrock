@@ -9,6 +9,7 @@ import {HOST_PROPERTIES,parseStagingHostConfig} from './staging-host.js';
 import {createNativeStagingHost} from './native-runtime.js';
 import {createNativeFrontendRuntime} from './frontend-runtime.js';
 import {createNativeFormsRuntime} from './forms-native.js';
+import type {ClosedPublicationWindow} from './closed-publication-window.js';
 import {createNativeFrontendInput} from './frontend-input-native.js';
 import {createNativeMaintenanceRuntime} from './native-maintenance.js';
 import {invocationServices} from './invocation-cache.js';
@@ -32,8 +33,28 @@ export function createEffectAvailabilityProbe(services:Pick<Parameters<typeof cr
   };
 }
 type Services=Parameters<typeof createNativeFrontendInput>[0]&Parameters<typeof createNativeStagingHost>[0]&Parameters<typeof createNativeMaintenanceRuntime>[0]&Parameters<typeof createNativeFormsRuntime>[0]&Partial<Pick<NativeOwnerMailServices,'MailApp'>>;
+/** Advance at most one provider publication per trigger invocation. */
+export function runClosedPublicationTick(
+  window: ClosedPublicationWindow, frontend: Pick<ReturnType<typeof createNativeFrontendRuntime>, 'publishClosedMaintenance' | 'assertClosedMaintenance'>,
+  forms: Pick<ReturnType<typeof createNativeFormsRuntime>, 'publishClosedMaintenance'>,
+) {
+  const result = frontend.publishClosedMaintenance(window) as {status:string};
+  if (result.status !== 'idle') return {closedPublication:true, frontend:result, forms:{status:'waiting-frontend'}};
+  const guard = () => frontend.assertClosedMaintenance(window);
+  return {closedPublication:true, frontend:result, forms:forms.publishClosedMaintenance(window, guard)};
+}
 export function runScheduledStaging(input:Services,nowSeconds=()=>Math.floor(Date.now()/1000)){
   const services=invocationServices(input),props=services.PropertiesService.getScriptProperties(),now=nowSeconds();
+  const rawHost = props.getProperty(HOST_PROPERTIES.config);
+  const nativeOnly = rawHost !== null && parseStagingHostConfig(JSON.parse(rawHost)).mode === 'native-only';
+  if (nativeOnly) {
+    const window = createNativeFrontendRuntime(services).closedPublicationWindow();
+    if (window) {
+      if (props.getProperty(PERMISSION_FENCE_PROPERTY) !== 'pending') fail('Closed staging publication lost its existing permission fence.');
+      const uncached = {...input, nowSeconds};
+      return runClosedPublicationTick(window, createNativeFrontendRuntime(uncached), createNativeFormsRuntime(uncached));
+    }
+  }
   const hour=String(Math.floor(now/3600)),quarter=String(Math.floor(now/900));
   const reconcile=props.getProperty(SCHEDULE_PROPERTIES.reconciled)!==hour;
   const scheduled:ScheduledHints={availability:createEffectAvailabilityProbe(services,nowSeconds),reconcile};
@@ -44,8 +65,6 @@ export function runScheduledStaging(input:Services,nowSeconds=()=>Math.floor(Dat
   const permissionResult=permissions.refresh();
   const accessFenced=props.getProperty(PERMISSION_FENCE_PROPERTY)!==null;
   forms.applyControl();if(!accessFenced)nativeInput.applyControl();
-  const rawHost=props.getProperty(HOST_PROPERTIES.config);
-  const nativeOnly=rawHost!==null&&parseStagingHostConfig(JSON.parse(rawHost)).mode==='native-only';
   const intake=nativeOnly?{status:'native-only'}:createNativeStagingHost(shared).flush();
   const formIntake=forms.flush();
   const eventRosters=createNativeMaintenanceRuntime(shared,nowSeconds).refreshEventRosters();

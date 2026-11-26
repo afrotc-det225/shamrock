@@ -15,6 +15,8 @@ import { formReadFingerprint, formsCanonical, type ManagedFormBinding, type Nati
 import { commandsFromManagedForm, directoryDraftFromManagedForm, directoryReviewCommand, verifyDirectoryPhoto,
   type DirectorySubmissionDraft, type FormIntakeBinding, type FormPrincipal, type VerifiedFormSubmission } from './forms-intake.js';
 import type { DirectoryProfile } from '../../../packages/domain/src/admin.js';
+import { assertClosedPublicationWindow, type ClosedPublicationWindow } from './closed-publication-window.js';
+import type { NativeInputConfig } from './frontend-input-native.js';
 
 export const FORMS_PROPERTIES = { config: 'SHAMROCK_V3_FORMS_CONFIG', pause: 'SHAMROCK_V3_FORMS_PAUSED', intakePause: 'SHAMROCK_V3_FORM_INTAKE_PAUSED', setup: 'SHAMROCK_V3_FORMS_SETUP', controlReceipt: 'SHAMROCK_V3_FORMS_CONTROL_RECEIPT', intakeWork:'SHAMROCK_V3_FORM_INTAKE_WORK', publicationWork:'SHAMROCK_V3_FORMS_WORK' } as const;
 export const MANAGED_FORM_HANDLERS = { attendance: 'shamrockV3ManagedAttendanceSubmit', excusals: 'shamrockV3ManagedExcusalSubmit', directory: 'shamrockV3ManagedDirectorySubmit' } as const;
@@ -106,9 +108,9 @@ export function createNativeFormsRuntime(services: NativeFormsServices) {
       let responseBody: any; try { responseBody = JSON.parse(response.body); } catch { fail('forms_transport', 'The D1 response is ambiguous; retain the same command.'); }
       return { status: response.status, body: responseBody };
     }
-    function effect(action: string, claim?: FormsClaim) {
+    function effect(action: string, claim?: FormsClaim, window?: ClosedPublicationWindow) {
       const result = request(`/v1/admin/effects/${action}`, { environment: 'staging', generation: config.generation, principalId: config.principalId, workerId: config.workerId,
-        ...(action === 'claim' ? { kind: 'forms.refresh' } : { effectId: claim!.effectId, claimToken: claim!.claimToken }) });
+        ...(action === 'claim' ? { kind: 'forms.refresh', ...(window ? {expectedEffectId: window.formsEffectId, expectedRevision: window.revision} : {}) } : { effectId: claim!.effectId, claimToken: claim!.claimToken }) });
       if (result.status !== 200) fail('forms_effect', `D1 Form publication failed (HTTP ${result.status}).`); return result.body;
     }
     function storage<T>(id: string) {
@@ -176,7 +178,7 @@ export function createNativeFormsRuntime(services: NativeFormsServices) {
       privateJson(config.stateFileId, owner); privateJson(config.intakeFileId, owner);
       retention?.get('retention-health-v1');
     }
-    return { config, configurationFileId, adapter, owner, signer, enabled, intakeEnabled, request, effect, storage, read, isolation, setSubmitContinuation,retention,catalogArchive };
+    return { config, configurationFileId, adapter, owner, host, signer, enabled, intakeEnabled, request, effect, storage, read, isolation, setSubmitContinuation,retention,catalogArchive };
   }
   function paused(key: string) { props.setProperty(key, 'true'); if (props.getProperty(key) !== 'true') fail('forms_pause', 'The local pause did not persist.'); }
   function lock<T>(operation: () => T): T { const l = services.LockService.getScriptLock(); if (!l.tryLock(25_000)) fail('forms_busy', 'Form intake is busy; replay the retained native response.'); try { return operation(); } finally { l.releaseLock(); } }
@@ -296,6 +298,58 @@ export function createNativeFormsRuntime(services: NativeFormsServices) {
     markWork(FORMS_PROPERTIES.intakeWork,Object.values(state.entries).some(e=>e.commands.some(c=>c.status==='queued'))?'pending':idleMarker(ctx,ctx.config.intakeFileId));
     return { attempted: sent };
   }
+  function closedAccess(ctx: FormsContext, window: ClosedPublicationWindow, guard: () => void) {
+    assertClosedPublicationWindow(window, Math.floor(now() / 1000));
+    guard();
+    const rootId = props.getProperty(CONFIG_FILE_ID_PROPERTY);
+    if (ctx.host.mode !== 'native-only' || !rootId || !ctx.configurationFileId || ctx.config.enabled || ctx.config.intakeEnabled
+      || props.getProperty(FORMS_PROPERTIES.pause) !== 'true' || props.getProperty(FORMS_PROPERTIES.intakePause) !== 'true') fail('forms_fence', 'Closed publication requires paused native Forms and intake.');
+    const root = privateJson(rootId, ctx.owner).value;
+    const ref = (key: string) => { const raw = root[key]; return typeof raw === 'string' ? JSON.parse(raw) : raw; };
+    if (ref(FORMS_PROPERTIES.config)?.configFileId !== ctx.configurationFileId
+      || formsCanonical(privateJson(ctx.configurationFileId, ctx.owner).value) !== formsCanonical(ctx.config)) fail('forms_configuration', 'The private Forms binding changed during publication.');
+    const inputId = ref('SHAMROCK_V3_INPUT_CONFIG')?.configFileId;
+    if (typeof inputId !== 'string' || !inputId) fail('forms_fence', 'The private confirmation Form binding is missing.');
+    const input = privateJson(inputId, ctx.owner).value as NativeInputConfig;
+    if (input.environment !== 'staging' || input.generation !== ctx.config.generation || input.enabled !== false || !input.confirmation?.expectedTitle.includes('Staging')) fail('forms_fence', 'The staging confirmation Form must remain paused.');
+    const bindings = [...ctx.config.forms, input.confirmation];
+    if (new Set(bindings.map(b => b.formId)).size !== 4) fail('forms_binding', 'The four reviewed Forms must be distinct.');
+    for (const b of bindings) {
+      const metadata = file(b.formId, ctx.owner);
+      const g = api(`${forms(b.formId)}?fields=formId,info(title),settings(emailCollectionType),publishSettings`);
+      const state = g.publishSettings?.publishState;
+      // Google omits false protobuf fields from the explicit publishState object.
+      if (metadata.mimeType !== 'application/vnd.google-apps.form' || metadata.name !== b.expectedTitle || g.formId !== b.formId
+        || g.info?.title !== b.expectedTitle || g.settings?.emailCollectionType !== 'VERIFIED' || !state || typeof state !== 'object' || Array.isArray(state)
+        || (state.isPublished !== undefined && state.isPublished !== false) || (state.isAcceptingResponses !== undefined && state.isAcceptingResponses !== false)
+        || services.FormApp.openById(b.formId).isAcceptingResponses()) fail('forms_fence', 'All four Forms must be verified, closed and unpublished.');
+      assertPublishedResponderAccess({formId: b.formId, ownerEmail: ctx.owner, policy: {version: 1, allowedEmails: [ctx.owner]}, read(url) {
+        const page = api(url);
+        if (!Array.isArray(page.permissions) || page.permissions.some((p: any) => !p || (!p.view && (p.deleted || p.type !== 'user' || p.role !== 'owner' || p.emailAddress !== ctx.owner)))) fail('forms_isolation', 'Only the automation owner may access these Forms.');
+        return page;
+      }});
+    }
+  }
+  function publish(ctx: FormsContext, maintenance?: {window: ClosedPublicationWindow; guard: () => void}) {
+    const recheck = () => { if (maintenance) closedAccess(ctx, maintenance.window, maintenance.guard); };
+    const store = ctx.storage<FormsState>(ctx.config.stateFileId);
+    return consumeFormsRefresh({config: ctx.adapter, enabled: maintenance ? () => true : ctx.enabled, intakeEnabled: maintenance ? () => false : ctx.intakeEnabled,
+      now, signer: ctx.signer, bindings: ctx.config.forms, lock: services.LockService.getScriptLock(),
+      ...(maintenance ? {closedWindow: {effectId: maintenance.window.formsEffectId, revision: maintenance.window.revision}} : {}),
+      assertIsolation: maintenance ? recheck : ctx.isolation, state: store,
+      ...(ctx.catalogArchive ? {retainCatalog: ctx.catalogArchive.retain} : {}),
+      effects: {claim: () => ctx.effect('claim', undefined, maintenance?.window).effect, project: claim => ctx.effect('project', claim), ack(claim) {
+        recheck(); if (ctx.effect('ack', claim).acknowledged !== true) fail('forms_effect', 'Form acknowledgement did not verify.');
+      }},
+      forms: {read: ctx.read, setSubmitContinuation(b, sectionId) { recheck(); ctx.setSubmitContinuation(b, sectionId); },
+        setAccepting(b, open) {
+          // setAcceptingResponses can change an unpublished Form's revision. Closed maintenance performs no intake or publication-setting writes.
+          if (maintenance) { if (open || services.FormApp.openById(b.formId).isAcceptingResponses()) fail('forms_fence', 'Intake must remain closed throughout maintenance.'); }
+          else services.FormApp.openById(b.formId).setAcceptingResponses(open);
+        },
+        write(b, requests, requiredRevisionId) { recheck(); api(`${forms(b.formId)}:batchUpdate`, {requests, writeControl: {requiredRevisionId}}); }},
+      pause: () => paused(FORMS_PROPERTIES.pause)});
+  }
   return {
     applyControl() {
       const ctx = context(), request = ctx?.config.controlRequest;
@@ -337,14 +391,16 @@ export function createNativeFormsRuntime(services: NativeFormsServices) {
         if(!services.scheduled.reconcile && props.getProperty(FORMS_PROPERTIES.publicationWork)===idleMarker(ctx,ctx.config.stateFileId) && !available.formsPending && !available.formsLeased)return{status:'idle'};
       }
       markWork(FORMS_PROPERTIES.publicationWork);
-      const result=consumeFormsRefresh({ config: ctx.adapter, enabled: ctx.enabled, intakeEnabled: ctx.intakeEnabled, now, signer: ctx.signer,
-        bindings: ctx.config.forms, lock: services.LockService.getScriptLock(), assertIsolation: ctx.isolation, state: ctx.storage<FormsState>(ctx.config.stateFileId),
-        ...(ctx.catalogArchive?{retainCatalog:ctx.catalogArchive.retain}:{}),
-        effects: { claim: () => ctx.effect('claim').effect, project: claim => ctx.effect('project', claim), ack: claim => { const result = ctx.effect('ack', claim); if (result.acknowledged !== true) fail('forms_effect', 'Form acknowledgement did not verify.'); } },
-        forms: { read: ctx.read, setSubmitContinuation: ctx.setSubmitContinuation, setAccepting: (b, open) => { services.FormApp.openById(b.formId).setAcceptingResponses(open); },
-          write: (b, requests, requiredRevisionId) => { api(`${forms(b.formId)}:batchUpdate`, { requests, writeControl: { requiredRevisionId } }); } },
-        pause: () => paused(FORMS_PROPERTIES.pause) });
+      const result = publish(ctx);
       markWork(FORMS_PROPERTIES.publicationWork,idleMarker(ctx,ctx.config.stateFileId));return result;
+    },
+    publishClosedMaintenance(window: ClosedPublicationWindow, guard: () => void) {
+      assertClosedPublicationWindow(window, Math.floor(now() / 1000));
+      guard();
+      const ctx = context();
+      if (!ctx || ctx.host.mode !== 'native-only' || ctx.config.enabled || ctx.config.intakeEnabled) fail('forms_fence', 'Use the paused native staging configuration.');
+      paused(FORMS_PROPERTIES.pause); paused(FORMS_PROPERTIES.intakePause);
+      return publish(ctx, {window, guard});
     },
     pause() { let failure: unknown; for (const key of [FORMS_PROPERTIES.pause, FORMS_PROPERTIES.intakePause]) { try { paused(key); } catch (e) { failure ??= e; } }
       try { const ctx = context(); if (ctx) for (const b of ctx.config.forms) { services.FormApp.openById(b.formId).setAcceptingResponses(false); if (ctx.read(b).acceptingResponses) fail('forms_pause', 'A managed Form did not close.'); } } catch (e) { failure ??= e; }

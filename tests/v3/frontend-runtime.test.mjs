@@ -281,6 +281,43 @@ test('publication preserves unsent editable cells and saves frozen versions inst
   assert.equal(fx.state.drafts.directory[0].baseVersion, 1); assert.equal(fx.state.baselines.directory.rows[0].values.phone, 'old');
 });
 
+test('named closed publication pins the claim and revision, leaves protections closed through a lost acknowledgement and rejects drafts', () => {
+  for (const mode of ['ack-retry','draft','diverged','wrong-effect','wrong-revision']) {
+    const {fx,runtime,claim} = fullFixture();
+    runtime.closedWindow = {version:1,frontendEffectId:claim.effectId,formsEffectId:'forms-only-effect',revision:copy(fx.model.revision),
+      expiresAt:new Date((fx.now+900)*1000).toISOString()};
+    fx.fenced = true;
+    runtime.restoreEditPolicy = runtime.assertEditPolicy = runtime.fenceEdits = () => assert.fail('closed maintenance must never change the field policy');
+    const normalSend = runtime.transport.send;
+    let acknowledgements = 0;
+    runtime.transport.send = request => {
+      const action=request.url.split('/').at(-1);
+      if (action==='claim') {
+        const body=JSON.parse(request.body);
+        assert.equal(body.expectedEffectId,claim.effectId);
+        assert.deepEqual(body.expectedRevision,runtime.closedWindow.revision);
+        if(mode==='wrong-effect') return {status:200,body:JSON.stringify({effect:{...claim,effectId:'unrelated-effect'}})};
+      }
+      if(action==='ack'){
+        assert.equal(fx.fenced,true);assert.ok(fx.state.completedClaim);acknowledgements++;
+        if(acknowledgements===1)throw Error('ack response interrupted');
+        return {status:200,body:'{"acknowledged":true}'};
+      }
+      return normalSend(request);
+    };
+    if(mode==='draft')fx.state.drafts.attendance=[{key:'retained'}];
+    if(mode==='diverged')fx.current.directory.rows[0][1]=frontendLiteralCell('unsent');
+    if(mode==='wrong-revision')runtime.closedWindow.revision.administration++;
+    if(mode!=='ack-retry'){
+      assert.throws(()=>consumeFrontendRefresh(runtime));assert.equal(fx.writes,0);assert.equal(fx.excusalWrites,0);assert.equal(acknowledgements,0);continue;
+    }
+    assert.throws(()=>consumeFrontendRefresh(runtime),/ack response interrupted/);
+    const writes=fx.writes,queueWrites=fx.excusalWrites;
+    assert.equal(consumeFrontendRefresh(runtime).status,'published');
+    assert.equal(fx.writes,writes);assert.equal(fx.excusalWrites,queueWrites);assert.equal(acknowledgements,2);assert(fx.fenced);
+  }
+});
+
 test('native host is disabled without touching Google or requiring optional frontend configuration', () => {
   let calls = 0;
   const native = createNativeFrontendRuntime({ PropertiesService: { getScriptProperties: () => ({ getProperty: () => null, setProperty() {}, deleteProperty() {} }) },
@@ -561,4 +598,33 @@ test('explicit setup recovers only an exactly closed native fence; ordinary inpu
  const exact={assertEditPolicy(){throw Error('not open');},assertFenced(){closed++;}};
  assertInputSessionPolicy(exact,true);assert.equal(closed,1);assert.throws(()=>assertInputSessionPolicy(exact,false),/not open/);assert.equal(closed,1);
  assert.throws(()=>assertInputSessionPolicy({assertEditPolicy(){throw Error('mixed');},assertFenced(){throw Error('not exactly fenced');}},true),/not exactly fenced/);
+});
+
+test('successive closed scheduler ticks publish Sheets then Forms through the same named pins', async () => {
+  const {runClosedPublicationTick} = await import('../../.build/v3/apps/google-adapter/src/scheduled-runtime.js');
+  const {fx,runtime,claim} = fullFixture();
+  const window = {version:1,frontendEffectId:claim.effectId,formsEffectId:'managed-forms',revision:copy(fx.model.revision),
+    expiresAt:new Date((fx.now+1800)*1000).toISOString()};
+  runtime.closedWindow=window;
+  fx.fenced=true;
+  runtime.fenceEdits=runtime.restoreEditPolicy=runtime.assertEditPolicy=()=>assert.fail('opening the native edit policy');
+  const send=runtime.transport.send, calls=[];
+  let done=false;
+  runtime.transport.send=request=>{
+    const action=request.url.split('/').at(-1);
+    if (action==='claim') {
+      const body=JSON.parse(request.body);
+      assert.equal(body.expectedEffectId,window.frontendEffectId);assert.deepEqual(body.expectedRevision,window.revision);
+      calls.push(action);if(done)return {status:200,body:'{"effect":null}'};
+    }
+    if(action==='ack'){assert.ok(fx.fenced);assert.ok(fx.state.completedClaim);done=true;return {status:200,body:'{"acknowledged":true}'};}
+    return send(request);
+  };
+  const frontend={publishClosedMaintenance:w=>{assert.deepEqual(w,window);return consumeFrontendRefresh(runtime);},
+    assertClosedMaintenance:()=>assert.equal(fx.fenced,true)};
+  const forms={publishClosedMaintenance:(w,guard)=>{guard();assert.equal(w.formsEffectId,window.formsEffectId);calls.push('forms');return {status:'published'};}};
+  assert.equal(runClosedPublicationTick(window,frontend,forms).frontend.status,'published');
+  assert.deepEqual(calls,['claim']); const writes=fx.writes+fx.excusalWrites;
+  assert.equal(runClosedPublicationTick(window,frontend,forms).forms.status,'published');
+  assert.deepEqual(calls,['claim','claim','forms']);assert.equal(fx.writes+fx.excusalWrites,writes);
 });
