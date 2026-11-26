@@ -1,3 +1,5 @@
+import {attendanceDelta} from './panel-delta.js';
+import { cachedPanelRead, wingAttendanceCache } from './panel-cache.js';
 import { acceptCatalogCommand, readOrganizationalCatalog } from './organizational-catalog.js';
 import { captureExcusalScopes, excusalDecisionPermission } from './excusal-scope.js';
 import { beginTransitionPreparation,stepTransitionPreparation,readTransitionArchivePage,abandonTransitionPreparation } from './transition-transport.js';
@@ -529,13 +531,26 @@ export default {
       if (url.pathname === '/v1/admin/history/page' && !url.search) return json(await legacyHistoryPage(env, input));
       if (url.pathname === '/v1/admin/history/read' && !url.search) return json(await readLegacyHistory(env, input));
       if (url.pathname === '/v1/admin/effects/availability' && !url.search) return json(await adminEffectAvailability(env, input));
-      if (url.pathname === '/v1/admin/snapshot/page' && !url.search) return json(await frontendSnapshotPage(env, input));
+      if (url.pathname === '/v1/admin/snapshot/page' && !url.search) {
+        const section = (input as {section?:unknown}|null)?.section;
+        if (section==='terms' || section==='events')
+          return await cachedPanelRead(env,url,body,async () => json(await frontendSnapshotPage(env,input)));
+        return json(await frontendSnapshotPage(env,input));
+      }
       if (url.pathname === '/v1/admin/panel/page' && !url.search) return json(await panelSnapshotPage(env, input));
-      if (url.pathname === '/v1/admin/panel/browse' && !url.search) return json(await panelBrowse(env,input));
-      if (url.pathname === '/v1/admin/panel/access' && !url.search) return json(await panelReadAuthority(env, input));
+      if (url.pathname === '/v1/admin/panel/browse' && !url.search) return await cachedPanelRead(env,url,body,async bookmark => {
+        let shared = '';
+        const tables = bookmark ? wingAttendanceCache(env,url,bookmark,source=>{shared=source;}) : undefined;
+        const response = json(await panelBrowse(env,input,tables));
+        if (shared) response.headers.set('Server-Timing','panel;desc="'+shared+'"');
+        return response;
+      });
+      if (url.pathname === '/v1/admin/panel/attendance-delta' && !url.search)
+        return await cachedPanelRead(env,url,body,async () => json(await attendanceDelta(env,input)));
+      if (url.pathname === '/v1/admin/panel/access' && !url.search) return await cachedPanelRead(env,url,body,async () => json(await panelReadAuthority(env,input)));
       if (url.pathname === '/v1/admin/panel/view-as/authorize' && !url.search) return json(await authorizePanelViewAs(env, input));
       if (url.pathname === '/v1/admin/panel/view-as/page' && !url.search) return json(await panelViewAsPage(env, input));
-      if (url.pathname === '/v1/admin/panel/view-as/access' && !url.search) return json(await panelViewAsAuthority(env, input));
+      if (url.pathname === '/v1/admin/panel/view-as/access' && !url.search) return await cachedPanelRead(env,url,body,async () => json(await panelViewAsAuthority(env,input)));
       if (url.pathname === '/v1/admin/panel/authorize' && !url.search) return json((await preparePanelAuthorization(env, input)).authorization);
       if (url.pathname === '/v1/admin/panel/commands' && !url.search) {
         if (input && typeof input === 'object' && 'operation' in input && input.operation === 'attendance.correct') {

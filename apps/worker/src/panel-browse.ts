@@ -1,3 +1,4 @@
+import type {WingTableCache} from './panel-cache.js';
 // Read models for the browser. Commands and native publication retain their own contracts.
 import {readPanelContext, authorityStatements, panelSectionQueries, scopedPanelSource} from './panel-read.js';
 import {scopeCte, semesterQueries, directoryCatalogQuery, leadershipCatalogQuery} from './frontend-transport.js';
@@ -9,7 +10,7 @@ export const profiles = ['cadets','cadet-details','leadership','attendance','exc
 export type Profile = typeof profiles[number];
 const error = (code:string,status=409) => new HttpError(status,code,'Reload the page to read current records.');
 
-export async function browsePanel(env:Env, identity:{environment:string;generation:number;principalId:string}, profile:Profile) {
+export async function browsePanel(env:Env, identity:{environment:string;generation:number;principalId:string}, profile:Profile, wingCache?:WingTableCache) {
   if (!profiles.includes(profile)) throw error('INVALID_PANEL_REQUEST',400);
   if (env.ENVIRONMENT!==identity.environment || Number(env.GENERATION)!==identity.generation) throw error('WRONG_GENERATION');
   const {first,access,control,revision} = await readPanelContext(env,identity.principalId);
@@ -80,7 +81,8 @@ export async function browsePanel(env:Env, identity:{environment:string;generati
       table('baselines',{
         select:`b.person_id AS personId,b.event_id AS eventId,b.code,json_extract((SELECT json_group_object(i.import_run_id,${baselineRevisionSql}) FROM legacy_import_runs i WHERE i.state='complete'),'$.'||json_quote(b.import_run_id)) AS baselineRevision`,
         from:"FROM legacy_attendance_baselines b WHERE b.import_run_id IN(SELECT import_run_id FROM legacy_import_runs WHERE state='complete') AND b.event_id IN(SELECT event_id FROM scoped_events)"+visiblePeople,
-        order:'b.person_id,b.event_id',
+        // Match the event/person index. Consumers resolve these facts by pair.
+        order:wing ? 'b.event_id,b.person_id' : 'b.person_id,b.event_id',
       },personRef+','+eventRef+',code,baselineRevision');
       for (const section of ['observations','corrections'] as const)
         table(section,q[section],personRef+','+eventRef+',factId,"order",code');
@@ -94,9 +96,13 @@ export async function browsePanel(env:Env, identity:{environment:string;generati
   for(let start=0; start<selects.length; start+=5) {
     payload.push(env.DB.prepare(source.cte+selects.slice(start,start+5).join(' UNION ALL ')).bind(...source.bind));
   }
-  const results=await env.DB.batch<Record<string,unknown>>([...fence,...payload]);
-  if (JSON.stringify(first)!==JSON.stringify(results.slice(0,fence.length).map(r=>r.results))) throw error('SNAPSHOT_CHANGED');
-  const tables=Object.fromEntries(results.slice(fence.length).flatMap(r=>r.results).map(r=>[String(r.name),r.payload as string|number|null]));
-  if (Object.values(tables).some(s=>s===null) || Object.values(tables).reduce<number>((n,s)=>n+String(s).length,0)>900000) throw error('BROWSE_TOO_LARGE');
+  const load = async () => {
+    const results=await env.DB.batch<Record<string,unknown>>([...fence,...payload]);
+    if (JSON.stringify(first)!==JSON.stringify(results.slice(0,fence.length).map(r=>r.results))) throw error('SNAPSHOT_CHANGED');
+    const tables=Object.fromEntries(results.slice(fence.length).flatMap(r=>r.results).map(r=>[String(r.name),r.payload as string|number|null]));
+    if (Object.values(tables).some(s=>s===null) || Object.values(tables).reduce<number>((n,s)=>n+String(s).length,0)>900000) throw error('BROWSE_TOO_LARGE');
+    return tables;
+  };
+  const tables = wing && profile === 'attendance' && wingCache ? await wingCache({termId:String(control.termId),principalId:identity.principalId,revision},load) : await load();
   return {profile,scope:{termId:control.termId,currentTermId:control.termId},revision,tables};
 }

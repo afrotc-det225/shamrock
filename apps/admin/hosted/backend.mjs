@@ -11,6 +11,7 @@ const paths = new Set([
   "/v1/admin/panel/page",
   "/v1/admin/panel/access",
   "/v1/admin/panel/browse",
+  "/v1/admin/panel/attendance-delta",
   "/v1/admin/panel/authorize",
   "/v1/admin/panel/commands",
   "/v1/admin/commands",
@@ -277,6 +278,7 @@ export class HostedBackend {
     // A changed actor/binding must obtain a new capture before any reuse.
     if (expected.captureKey !== this.binding) return false;
     const current=await this.panelAuthority();
+    this.checkedCapture = {expected,current};
     return JSON.stringify(expected.revision)===JSON.stringify(current.revision) &&
       expected.viewAsRevision===(this.viewRevision??null);
   }

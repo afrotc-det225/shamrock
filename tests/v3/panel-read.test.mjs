@@ -386,3 +386,47 @@ test('panel authorization accepts only exact server targets and panel apply excl
     const DB = { prepare: sql => f.db.prepare(sql), batch: async statements => { if (++batches === 2) await f.db.prepare('UPDATE system_control SET generation=2').run(); return f.db.batch(statements); } };
     assert.equal((await f.send(valid, '/v1/admin/panel/authorize', DB)).body.error.code, 'SNAPSHOT_CHANGED', 'generation changes cannot cross a targeted read');
 });
+
+test('Wing correction deltas replay a mark and clear exactly; scoped readers and mixed operations cannot reuse the base',async t=>{
+    const f=await fixture(t),identity={environment:'local',generation:1,principalId:'owner'};
+    const before=await panelReadAuthority(f.env,identity);
+    const input={...identity,termId:before.scope.termId,access:before.revision.access,administration:before.revision.administration,from:before.revision.operations};
+    const endpoint='/v1/admin/panel/attendance-delta';
+    const commit=async(id,payload)=>{const result=await f.send(f.command('flight',id,'attendance.correct',payload),'/v1/admin/panel/commands');assert.equal(result.status,200);return result.body.result.version;};
+    const version=await commit('delta-mark',correctionPayload());
+    await commit('delta-clear',{...correctionPayload(),expectedBaseVersion:version,code:null});
+    const read=await f.send(input,endpoint);
+    assert.equal(read.status,200);assert.equal(read.body.available,true);
+    const full=await f.send({...identity,profile:'attendance'},'/v1/admin/panel/browse');
+    assert.deepEqual(read.body.rows,JSON.parse(full.body.tables.corrections));
+    assert.deepEqual(read.body.rows.map(r=>r[4]),['T',null]);
+    assert.equal((await f.send({...input,principalId:'flight'},endpoint)).status,403);
+    assert.equal((await f.send({...input,termId:'old'},endpoint)).body.available,false);
+    await f.request('cadet','delta-excusal');
+    assert.equal((await f.send(input,endpoint)).body.available,false);
+});
+
+test('new Wing viewers reuse the base after a correction; Flight views bypass shared tables',async t=>{
+    const {wingAttendanceCache}=await import('../../.build/v3/apps/worker/src/panel-cache.js');
+    const {panelBrowse}=await import('../../.build/v3/apps/worker/src/panel-view-as.js');
+    const f=await fixture(t),stored=new Map(), hits=[];
+    const original=Object.getOwnPropertyDescriptor(globalThis,'caches');
+    Object.defineProperty(globalThis,'caches',{configurable:true,value:{open:async()=>({
+        match:async k=>stored.get(k)?.clone(),put:async(k,r)=>stored.set(k,r),
+    })}});
+    t.after(()=>original?Object.defineProperty(globalThis,'caches',original):delete globalThis.caches);
+    let mark='initial';
+    const env={...f.env,BRIDGE_KEY_ID:'fixture',DB:{prepare:s=>f.db.prepare(s),batch:s=>f.db.batch(s),
+        withSession:()=>({prepare:()=>({run:async()=>({meta:{rows_read:0}})}),getBookmark:()=>mark})}};
+    const read=id=>panelBrowse(env,{environment:'local',generation:1,principalId:id,profile:'attendance'},
+        wingAttendanceCache(env,new URL('https://fixture.invalid/browse'),mark,source=>hits.push(source)));
+    await read('owner');await read('owner');assert.deepEqual(hits,['wing-edge']);
+    const result=await f.send(f.command('flight','shared-edit','attendance.correct',correctionPayload()),'/v1/admin/panel/commands');
+    assert.equal(result.status,200);mark='changed';
+    const updated=await read('owner');
+    const authoritative=await f.send({environment:'local',generation:1,principalId:'owner',profile:'attendance'},'/v1/admin/panel/browse');
+    assert.deepEqual(updated.tables,authoritative.body.tables);
+    assert.deepEqual(hits,['wing-edge','wing-delta']);
+    const scoped=await read('flight');assert.notDeepEqual(scoped.tables.people,updated.tables.people);
+    assert.deepEqual(hits,['wing-edge','wing-delta']);
+});

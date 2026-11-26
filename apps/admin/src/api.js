@@ -19,6 +19,7 @@ export async function api(path, body, options = {}) {
     method: body === undefined ? "GET" : "POST",
     headers: {
       ...(body === undefined ? {} : { "content-type": "application/json", "x-shamrock-csrf": csrf || "" }),
+      ...(conditional && previous.browse?.profile==="attendance" && !previous.viewAs ? {"x-shamrock-delta":"corrections-v1"} : {}),
       ...(conditional ? {"x-shamrock-capture": encodeURIComponent(JSON.stringify({
         captureKey:previous.captureKey,revision:previous.manifest.revision,viewAsRevision:previous.viewAsRevision??null,
       }))} : {}),
@@ -42,6 +43,19 @@ export async function api(path, body, options = {}) {
     throw error;
   }
   if (path === "/state") {
+    if (data.attendanceDelta) {
+      const delta=data.attendanceDelta, base=previous?.browse;
+      if (base?.profile!=="attendance" || previous.viewAs || data.captureKey!==previous.captureKey ||
+          delta.from!==base.revision.operations || delta.revision.access!==base.revision.access ||
+          delta.revision.administration!==base.revision.administration || !Array.isArray(delta.rows) ||
+          delta.rows.length!==delta.revision.operations-delta.from || delta.rows.length>64 ||
+          delta.rows.some((r,i)=>!Array.isArray(r) || r.length!==5 || r[3]!==delta.from+i+1))
+        throw Object.assign(new Error("Reload the attendance matrix."),{code:"SNAPSHOT_CHANGED"});
+      const corrections=JSON.parse(base.tables.corrections).concat(delta.rows);
+      const browse={...base,revision:delta.revision,tables:{...base.tables,corrections:JSON.stringify(corrections)}};
+      data={...previous,reportingTime:data.reportingTime,browse,list:undefined,reporting:undefined,
+        manifest:{...previous.manifest,revision:delta.revision}};
+    }
     if (data.captureUnchanged) {
       if (!previous || previous.captureKey !== data.captureKey ||
           (previous.viewAsRevision??null) !== (data.viewAsRevision??null))

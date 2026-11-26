@@ -102,7 +102,18 @@ export default {
             reportingTime:Date.now()}));
         const events = profile === "events" && !preview ? await eventsState(backend) : null;
         const browsing = browseProfiles.includes(profile);
-        const authority = events?.authority ?? (browsing || profile === "events" || (profile && !preview) ? await backend.panelAuthority() : null);
+        const authority = events?.authority ?? (browsing || profile === "events" || (profile && !preview) ? (backend.checkedCapture?.current ?? await backend.panelAuthority()) : null);
+        if (profile==="attendance" && request.headers.get("x-shamrock-delta")==="corrections-v1" &&
+            !preview && authority?.access.capabilities.fullSnapshot && backend.checkedCapture) {
+          const previous=backend.checkedCapture.expected.revision;
+          if (previous?.access===authority.revision.access && previous.administration===authority.revision.administration &&
+              Number.isSafeInteger(previous.operations) && previous.operations<authority.revision.operations &&
+              authority.revision.operations-previous.operations<=64) {
+            const delta=await backend.post("/v1/admin/panel/attendance-delta",{...backend.identity(),
+              termId:authority.scope.termId,access:previous.access,administration:previous.administration,from:previous.operations});
+            if (delta.available) return secure(json({attendanceDelta:delta,captureKey:backend.binding,reportingTime:Date.now()}));
+          }
+        }
         const scopedStart = profile === "events" && authority && !authority.access.capabilities.fullSnapshot;
         let browse;
         if (browsing || scopedStart) {
