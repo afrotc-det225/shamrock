@@ -3,9 +3,9 @@ import { PanelError } from "../errors.mjs";
 export const browseProfiles = ["cadets","cadet-details","leadership","attendance","excusals","overview","semester"];
 const cache = new Map();
 // Each entry is private to the current actor, preview entry, effective scope and data revisions.
-export async function browseState(backend, authority, requested) {
+export async function browseState(backend, authority, requested, recordId) {
   const profile = authority.access.capabilities.fullSnapshot || requested === "excusals" ? requested : "attendance";
-  const binding = a => JSON.stringify([backend.binding,profile,a.scope,a.access,a.revision,backend.viewRevision]);
+  const binding = a => JSON.stringify([backend.binding,profile,recordId,a.scope,a.access,a.revision,backend.viewRevision]);
   const key = binding(authority), cached = cache.get(key);
   if (cached && cached.until > Date.now()) {
     backend.browseSource = 'memory';
@@ -14,7 +14,7 @@ export async function browseState(backend, authority, requested) {
   // A named Cache API namespace is accessible only inside the Worker. These
   // entries never use a public route or the default HTTP response cache.
   let edge, address;
-  if (globalThis.caches && ["attendance","excusals"].includes(profile) && backend.env?.APP_ORIGIN) {
+  if (globalThis.caches && ["attendance","excusals","view-as-people","event-editor"].includes(profile) && backend.env?.APP_ORIGIN) {
     const digest = createHash("sha256").update(key).digest("hex");
     address = new URL("/_private/browse/"+digest, backend.env.APP_ORIGIN).href;
     try {
@@ -28,7 +28,7 @@ export async function browseState(backend, authority, requested) {
     } catch { /* Cache outage or eviction falls back to the authorized data path. */ }
   }
   backend.browseSource = 'database';
-  const view = await backend.send("/v1/admin/panel/browse",{...backend.identity(),profile,
+  const view = await backend.send("/v1/admin/panel/browse",{...backend.identity(),profile,...(recordId ? {recordId} : {}),
     ...(backend.preview ? {entryAuditId:backend.preview.entry_audit_id,targetPersonId:backend.preview.person_id} : {})});
   const after = await backend.panelAuthority();
   if (binding(after) !== key || view.profile !== profile || view.scope.termId !== authority.scope.termId ||

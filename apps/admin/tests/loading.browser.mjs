@@ -21,6 +21,10 @@ try{
  await page.route('**/api/session',async route=>{if(holdSession)await sessionGate;const response=await route.fetch();await route.fulfill({response});});
  await page.route('**/api/state*',async route=>{stateCalls++;
   if(await host.captureUnchanged(route.request().headers()['x-shamrock-capture']))return route.fulfill({json:{captureUnchanged:true,captureKey:host.binding,viewAs:null,viewAsRevision:null,reportingTime:Date.now()}});
+  if(new URL(route.request().url()).searchParams.get('profile')==='leadership'){
+    const browse=await host.post('/v1/admin/panel/browse',{...host.identity(),profile:'leadership'});
+    return route.fulfill({json:{manifest:await host.panelAuthority(),browse,captureKey:host.binding,viewAs:null,viewAsRevision:null,transport:'paged-v1',reportingTime:Date.now(),history:[],meta:{hosted:true}}});
+  }
   return route.fulfill({json:{manifest:await host.panelManifest(),captureKey:host.binding,viewAs:null,viewAsRevision:null,transport:'paged-v1',reportingTime:Date.now(),history:[],meta:{hosted:true}}});});
  await page.route('**/api/history/list',route=>route.fulfill({json:{snapshots:[]}}));
  await page.route('**/api/page',async route=>{
@@ -41,8 +45,12 @@ try{
  assert.equal(await page.locator('.error').count(),0);
  assert(maximum<=2,`maximum page concurrency was ${maximum}`);
  blockSection=null;await page.reload();await page.getByRole('button',{name:'Edit Veterans Day',exact:true}).waitFor();
- hold('people');await page.getByRole('button',{name:'Edit Veterans Day',exact:true}).click();
- await page.getByText('Loading editor records…',{exact:true}).waitFor();
+ await page.route('**/api/events/editor*',async route=>{
+   await gate;
+   await route.fulfill({json:await host.post('/v1/admin/panel/browse',{...host.identity(),profile:'event-editor'})});
+ });
+ hold('event-editor');await page.getByRole('button',{name:'Edit Veterans Day',exact:true}).click();
+ await page.getByText('Loading event details…',{exact:true}).waitFor();
  assert(await page.getByRole('button',{name:'Edit Veterans Day',exact:true}).isDisabled());
  await page.screenshot({path:'/tmp/shamrock-editor-loading-desktop.png'});
  await page.setViewportSize({width:390,height:844});await page.screenshot({path:'/tmp/shamrock-editor-loading-mobile.png'});

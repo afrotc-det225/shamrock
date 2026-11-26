@@ -45,6 +45,11 @@ try {
       reportingTime: Date.now(),
     });
     const profile = new URL(route.request().url()).searchParams.get("profile");
+    if (profile==="leadership") {
+      data.browse=await host.post("/v1/admin/panel/browse",{...host.identity(),profile});
+      data.captureKey="fictional-leadership"; data.meta.viewAsEnabled=true;
+      delete data.captureUnchanged;
+    }
     if (testOverview && ["overview", "attendance"].includes(profile)) {
       overviewRequests.push(profile);
       data.browse = await host.post("/v1/admin/panel/browse", {...host.identity(), profile});
@@ -53,6 +58,7 @@ try {
     }
     await route.fulfill({ response, status: 200, json: data });
   });
+  await page.route("**/api/events/editor*", async route=>route.fulfill({json:await host.post("/v1/admin/panel/browse",{...host.identity(),profile:"event-editor",...(new URL(route.request().url()).searchParams.has("id")?{recordId:new URL(route.request().url()).searchParams.get("id")}:{})})}));
   await page.route("**/api/wing-charts", async route => {
     overviewRequests.push("charts");
     await route.fulfill({json:{dashboard:fixtureDashboard,history:[],captureKey:"fictional-overview",
@@ -117,6 +123,7 @@ try {
   await page
     .getByLabel("Event name", { exact: true })
     .fill("Veterans Day ceremony");
+  assert.equal(pageReads,initialPageReads,"opening an event editor fetches no record pages");
   const readsWhileEditing = stateReads;
   await page.clock.fastForward(61000);
   assert.equal(stateReads, readsWhileEditing, "refresh pauses while editing");
@@ -129,7 +136,7 @@ try {
   await apply();
   await page.getByRole("button",{name:"Edit Veterans Day ceremony",exact:true}).waitFor();
   assert.deepEqual(requestedSections.slice(-4).sort(),["events","manifest","terms","verify"],
-    "changed revision on Events returns to the list profile after a full editor capture");
+    "changed revision on Events returns to the list profile after editing");
   assert.equal(
     (await service.snapshot()).events.find((e) => e.eventId === "veterans")
       .label,
@@ -280,7 +287,21 @@ try {
   await page.keyboard.press("Escape");
   assert.deepEqual(overviewRequests, ["overview", "charts"]);
   testOverview = false;
-  for (const title of ["Leadership", "System", "Events"])
+  await navigate("Leadership");
+  const readsBeforePicker=pageReads;
+  const contact=(await service.snapshot()).leadership[0];
+  await page.getByRole("button",{name:"Edit "+contact.firstName+" "+contact.lastName,exact:true}).click();
+  assert.equal(await page.getByLabel("Office phone",{exact:true}).inputValue(),contact.officePhone || "");
+  await page.getByLabel("Office location",{exact:true}).fill("Fictional office");
+  await apply();
+  const updated=(await service.snapshot()).leadership.find(c=>c.contactId===contact.contactId);
+  assert.equal(updated.officeLocation,"Fictional office"); assert.equal(updated.officePhone,contact.officePhone);
+  assert.equal(updated.cellPhone,contact.cellPhone);
+  await page.getByRole("button",{name:"View as",exact:true}).click();
+  await page.getByRole("dialog").getByRole("button",{name:/Alexis/}).waitFor();
+  await page.getByRole("button",{name:"Close editor"}).click();
+  assert.equal(pageReads,readsBeforePicker,"contact edit and cached View as picker load zero record pages");
+  for (const title of ["System", "Events"])
     await navigate(title);
   await page.setViewportSize({ width: 390, height: 844 });
   assert.equal(

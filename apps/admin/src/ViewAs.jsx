@@ -1,20 +1,32 @@
 import React, { useState, useRef, useEffect } from "react";
 import { Eye } from "lucide-react";
 import { Drawer, SearchBox, Empty } from "./components";
-import { name } from "./api";
+import { name,api } from "./api";
 import { compareCadetsForDisplay } from "../../../packages/domain/src/cadet-display-order";
-export function ViewAsSelector({ people, onSelect, onOpen, busy }) {
+export function ViewAsSelector({ people, onSelect, busy }) {
   const [open, setOpen] = useState(false), [query, setQuery] = useState("");
-  const rows = people.filter(person => name(person).toLowerCase().includes(query.toLowerCase())).sort(compareCadetsForDisplay);
+  const [loaded,setLoaded]=useState(null),[error,setError]=useState(""),[retry,setRetry]=useState(0);
+  useEffect(()=>{
+    if (!open || people) return;
+    const controller=new AbortController();
+    setLoaded(null);setError("");
+    api("/view-as/people",undefined,{signal:controller.signal}).then(view=>{
+      if(!controller.signal.aborted) setLoaded(JSON.parse(view.tables.people).map(([personId,lastName,firstName,asYear,role])=>({personId,lastName,firstName,asYear,role})));
+    }).catch(()=>{if(!controller.signal.aborted)setError("The cadet list could not be loaded.");});
+    return ()=>controller.abort();
+  },[open,people,retry]);
+  const rows = (people || loaded || []).filter(person => name(person).toLowerCase().includes(query.toLowerCase())).sort(compareCadetsForDisplay);
   return <>
-    <button disabled={busy} onClick={() => { setQuery(""); onOpen ? onOpen(() => setOpen(true)) : setOpen(true); }}><Eye size={18} /> View as</button>
+    <button disabled={busy} onClick={() => { setQuery(""); setLoaded(null);setError("");setOpen(true); }}><Eye size={18} /> View as</button>
     {open && <Drawer title="View as" onClose={() => setOpen(false)}>
       <div className="fields">
         <SearchBox placeholder="Find a person to view" value={query} onChange={setQuery} />
         <p className="history-caption">Read-only view of their SHAMROCK access.</p>
         <div className="view-as-people">{rows.map(person => <button key={person.personId} disabled={busy}
           onClick={() => { setOpen(false); onSelect(person); }}>{name(person)}<small>{person.role || person.asYear}</small></button>)}</div>
-        {!rows.length && <Empty>No matching cadets.</Empty>}
+        {error && <p role="alert">{error} <button onClick={()=>setRetry(n=>n+1)}>Retry</button></p>}
+        {!people && !loaded && !error && <p role="status">Loading cadets…</p>}
+        {(people || loaded) && !rows.length && <Empty>No matching cadets.</Empty>}
       </div>
     </Drawer>}
   </>;

@@ -456,6 +456,18 @@ test('a cold Wing viewer uses private storage and replays a correction; a Flight
     await assert.rejects(browse('flight','semester'),{status:403});
     const semester=await browse('owner','semester');assert.deepEqual(Object.keys(semester.tables).sort(),['events','flights','people','terms']);
     assert.deepEqual((await browse('owner','semester')).tables,semester.tables);assert.equal(hits.at(-1),'wing-stored');
+    const picker=await browse('owner','view-as-people');
+    assert.deepEqual(Object.keys(picker.tables),['people']);
+    assert.ok(JSON.parse(picker.tables.people).every(row=>row.length===5));
+    const editor=await browse('owner','event-editor');
+    assert.deepEqual(Object.keys(editor.tables).sort(),['eligible','eventFlights','events','flights','people','terms']);
+    const target=JSON.parse(picker.tables.people)[0][0];
+    const detail=await panelBrowse(env,{environment:'local',generation:1,principalId:'owner',profile:'directory-editor',recordId:target});
+    assert.deepEqual(JSON.parse(detail.tables.people).map(r=>r[0]),[target]);
+    const event=JSON.parse(editor.tables.events)[0][0];
+    const single=await panelBrowse(env,{environment:'local',generation:1,principalId:'owner',profile:'event-editor',recordId:event});
+    for(const table of ['eligible','eventFlights']) assert.deepEqual(JSON.parse(single.tables[table]),JSON.parse(editor.tables[table]).filter(r=>r[0]===event));
+    for(const profile of ['directory-editor','event-editor','view-as-people','event-list']) await assert.rejects(browse('flight',profile),{status:403});
     const checks=await browse('owner','diagnostics');
     assert.deepEqual(Object.keys(checks.tables).sort(),['EVENTS_MISSING_DETAILS','EVENTS_MISSING_ROSTER','FLIGHTS_MISSING_SQUADRON','PEOPLE_MISSING_PROFILES']);
     assert(Object.values(checks.tables).every(n=>Number.isInteger(n) && n>=0));

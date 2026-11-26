@@ -1,3 +1,4 @@
+import {DIRECTORY_FIELDS} from "../../../packages/domain/src/admin.js";
 import type {WingTableCache} from './panel-cache.js';
 // Read models for the browser. Commands and native publication retain their own contracts.
 import {readPanelContext, authorityStatements, panelSectionQueries, scopedPanelSource} from './panel-read.js';
@@ -6,11 +7,11 @@ import {baselineRevisionSql} from './corrections.js';
 import {HttpError} from './http-error.js';
 type Env = {DB:D1Database;ENVIRONMENT:string;GENERATION:string};
 type Query = {select:string;from:string;order:string};
-export const profiles = ['cadets','cadet-details','leadership','attendance','excusals','overview','semester','diagnostics'] as const;
+export const profiles = ['cadets','cadet-details','leadership','attendance','excusals','overview','semester','diagnostics','view-as-people','event-editor','event-list','directory-editor'] as const;
 export type Profile = typeof profiles[number];
 const error = (code:string,status=409) => new HttpError(status,code,'Reload the page to read current records.');
 
-export async function browsePanel(env:Env, identity:{environment:string;generation:number;principalId:string}, profile:Profile, wingCache?:WingTableCache) {
+export async function browsePanel(env:Env, identity:{environment:string;generation:number;principalId:string}, profile:Profile, wingCache?:WingTableCache, recordId?:string) {
   if (!profiles.includes(profile)) throw error('INVALID_PANEL_REQUEST',400);
   if (env.ENVIRONMENT!==identity.environment || Number(env.GENERATION)!==identity.generation) throw error('WRONG_GENERATION');
   const authority = await readPanelContext(env,identity.principalId);
@@ -20,7 +21,7 @@ export async function browsePanel(env:Env, identity:{environment:string;generati
   const source = wing ? {cte:scopeCte,bind:[null]} : scopedPanelSource(identity.principalId,access.flightIds,'browse',authority.squadronCommander);
   const q = wing ? semesterQueries : panelSectionQueries();
   const people = wing ? directoryCatalogQuery : q.people;
-  const limits:Record<string,number>={people:2000,contacts:2000,birthdays:2000,flights:50,squadrons:20,terms:20,events:200,eligible:100000,baselines:25000,observations:10000,corrections:10000,requests:5000};
+  const limits:Record<string,number>={people:2000,contacts:2000,birthdays:2000,flights:50,squadrons:20,terms:20,events:200,eventFlights:10000,eligible:100000,baselines:25000,observations:10000,corrections:10000,requests:5000};
   const selects:string[]=[];
   // Aggregate in SQLite. Large roster/fact sections use small numeric event and person
   // references; JSON parsing and reporting work belongs to the browser.
@@ -43,13 +44,28 @@ export async function browsePanel(env:Env, identity:{environment:string;generati
   const eventRef=reference('events','event_id','eventId');
   const activeEvents="eventId IN (SELECT event_id FROM event_details WHERE term_id=(SELECT term_id FROM terms WHERE is_current=1) AND status='active')";
   const activePeople="flightPathStatus NOT IN ('Inactive','Commissioned','Dropped')";
-  if(profile==='cadets'||profile==='cadet-details'||profile==='leadership') {
+  if(profile==='directory-editor'){
+    if (!recordId) throw error('INVALID_PANEL_REQUEST',400);
+    table('people',people,['personId','version','flightId',...DIRECTORY_FIELDS].join(','),'WHERE personId=?2');
+  } else if(profile==='view-as-people'){
+    table('people',people,'personId,lastName,firstName,asYear,role');
+  } else if(profile==='event-list'){
+    table('terms',q.terms,'termId,label,sortOrder,isCurrent');
+    table('events',q.events,'eventId,termId,eventType,displayOrder,label,status,startAt,endAt,location,notes');
+  } else if(profile==='event-editor'){
+    table('people',people,'personId,lastName,firstName');
+    table('flights',q.flights,'flightId,label');
+    table('terms',q.terms,'termId,label,sortOrder,isCurrent');
+    table('events',q.events,'eventId,version,termId,eventType,trainingWeek,displayOrder,label,columnLabel,expectedGroup,status,startAt,endAt,location,notes,hasRoster');
+    table('eventFlights',semesterQueries.eventFlights,'eventId,flightId',recordId?'WHERE eventId=?2':'');
+    table('eligible',semesterQueries.eventRosters,'eventId,personId',recordId?'WHERE eventId=?2':'');
+  } else if(profile==='cadets'||profile==='cadet-details'||profile==='leadership') {
     table('people',people,'personId,version,flightId,lastName,firstName,rank,asYear,flightPathStatus,email,role'+(profile!=='leadership'?',afsc,university,classYear,cipCode,cipBroadArea':'')+
       (profile==='cadet-details'?',phone,dorm,homeTown,homeState,dateOfBirth,photoLink':''));
     table('flights',q.flights,'flightId,label,squadronId');
     table('squadrons',q.squadrons,'squadronId,label');
     if(profile==='leadership'){
-      table('contacts',leadershipCatalogQuery,'contactId,version,personId,lastName,firstName,rank,role,email,officeLocation,active,reportsTo');
+      table('contacts',leadershipCatalogQuery,'contactId,version,personId,lastName,firstName,rank,role,email,officeLocation,active,reportsTo,officePhone,cellPhone');
     }
   } else if(profile==='diagnostics') {
     const counts:Record<string,string>={
@@ -108,7 +124,8 @@ export async function browsePanel(env:Env, identity:{environment:string;generati
   // visible requests and event scope across tables within the authorization fence.
   const payload:D1PreparedStatement[]=[];
   for(let start=0; start<selects.length; start+=5) {
-    payload.push(env.DB.prepare(source.cte+selects.slice(start,start+5).join(' UNION ALL ')).bind(...source.bind));
+    const sql=source.cte+selects.slice(start,start+5).join(' UNION ALL ');
+    payload.push(env.DB.prepare(sql).bind(...source.bind,...(recordId && sql.includes('?2') ? [recordId] : [])));
   }
   const load = async () => {
     const results=await env.DB.batch<Record<string,unknown>>([...fence,...payload]);

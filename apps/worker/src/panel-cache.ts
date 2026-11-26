@@ -24,8 +24,10 @@ export async function cachedPanelRead(env: ReadEnv, url: URL, body: string, load
   if (env.ENVIRONMENT !== 'staging' || typeof caches === 'undefined' || !env.DB.withSession) return load();
   const {bookmark:version,rowsRead} = await primaryVersion(env.DB);
   if (!version) return load();
-  const address = await cacheAddress(url.origin,'/_private/read/',
-    [env.ENVIRONMENT,env.GENERATION,env.BRIDGE_KEY_ID,url.pathname,body,version]);
+  const input=JSON.parse(body);
+  const parts=[env.ENVIRONMENT,env.GENERATION,env.BRIDGE_KEY_ID,url.pathname,body,version];
+  if (url.pathname==='/v1/admin/panel/browse' && input.profile==='leadership') parts.push('contact-phones-v1');
+  const address = await cacheAddress(url.origin,'/_private/read/',parts);
   let edge: Cache;
   try {
     edge = await caches.open('shamrock-signed-panel-v2');
@@ -36,12 +38,10 @@ export async function cachedPanelRead(env: ReadEnv, url: URL, body: string, load
   // Keep exact signed request results through edge eviction. A newer primary
   // bookmark makes older bytes unreachable even after an out-of-band revocation.
   // Attendance and Semester already have a shared projection and correction path.
-  const input=env.WING_MATRICES ? JSON.parse(body) : {};
   const persist=env.WING_MATRICES && !input.entryAuditId && (
     url.pathname==='/v1/admin/panel/access' || url.pathname==='/v1/admin/history/list' || url.pathname==='/v1/admin/snapshot/page' ||
-    url.pathname==='/v1/admin/panel/browse' && !['attendance','semester','cadet-details'].includes(input.profile));
-  const key=persist ? 'signed-read-v2/'+(await cacheAddress(url.origin,'/',[
-    env.ENVIRONMENT,env.GENERATION,env.BRIDGE_KEY_ID,url.pathname,body,version])).split('/').pop() : null;
+    url.pathname==='/v1/admin/panel/browse' && !['attendance','semester','cadet-details','directory-editor','event-editor'].includes(input.profile));
+  const key=persist ? 'signed-read-v2/'+(await cacheAddress(url.origin,'/',parts)).split('/').pop() : null;
   let saved:string|null=null;
   if (key) {
     try { saved=await env.WING_MATRICES!.get(key); } catch { /* Rebuild from D1. */ }

@@ -3,11 +3,18 @@ import {operationallyActive} from "../../../packages/domain/src/admin";
 import {frontendAttendanceVersions} from "../../../packages/domain/src/frontend-transport";
 import {hydrateReporting} from "./reporting";
 
-// These compact tables are display models, never inputs to a write or a native snapshot.
+// Command payloads retain optimistic version checks.
 export async function decodeBrowse(data) {
   const {tables:t, profile} = data.browse, access=data.manifest.access;
-  const rows=(table,names)=>JSON.parse(t[table]).map(values=>Object.fromEntries(names.map((name,i)=>[name,values[i]])));
+  const rows=(table,names)=>JSON.parse(t[table]).map(values=>{
+    if (profile==="leadership" && table==="contacts" && values.length!==names.length)
+      throw Error("Reload Leadership to get current contact details.");
+    return Object.fromEntries(names.map((name,i)=>[name,values[i]]));
+  });
   const columns=(table,names)=>rows(table,names.split(" "));
+  if(profile==="event-list") return {...data,eventsList:{
+    terms:columns("terms","termId label sortOrder isCurrent"),events:columns("events","eventId termId eventType displayOrder label status startAt endAt location notes"),
+  }};
   if(profile==="overview") return {...data,birthdayFlights:t.flights ? columns("flights","flightId label squadronId") : [], birthdaySquadrons:t.squadrons ? columns("squadrons","squadronId label") : [],birthdayCalendar:JSON.parse(t.birthdays || "[]"),overview:{term:JSON.parse(t.terms)[0]?.[1],
     activeCadets:t.activeCadets,activeEvents:t.activeEvents,pending:t.pending}};
   if(profile==='semester') return {...data,list:{
@@ -21,7 +28,7 @@ export async function decodeBrowse(data) {
     const people=columns("people","personId version flightId lastName firstName rank asYear flightPathStatus email role"+(profile!=="leadership"?" afsc university classYear cipCode cipBroadArea":"")+(profile==="cadet-details"?" phone dorm homeTown homeState dateOfBirth photoLink":""))
       .map(p=>({...p,active:operationallyActive(p)}));
     if(profile!=="leadership") return {...data,list:{flights,people,squadrons:t.squadrons ? columns("squadrons","squadronId label") : []}};
-    const contacts=columns("contacts","contactId version personId lastName firstName rank role email officeLocation active reportsTo")
+    const contacts=columns("contacts","contactId version personId lastName firstName rank role email officeLocation active reportsTo officePhone cellPhone")
       .map(c=>({...c,active:!!c.active}));
     const list=await mergeCatalogs({flights,squadrons:columns("squadrons","squadronId label"),people:[]},people,contacts);
     return {...data,list};
@@ -50,4 +57,15 @@ export async function decodeBrowse(data) {
   list.contractVersion=access.capabilities.fullSnapshot ? 1 : "panel-snapshot-v1";
   const {reporting}=hydrateReporting({snapshot:list,reportingTime:data.reportingTime});
   return {...data,list,reporting};
+}
+
+
+export function eventEditorData({tables}) {
+  const rows=(key,names)=>JSON.parse(tables[key]).map(values=>Object.fromEntries(names.split(" ").map((n,i)=>[n,values[i]])));
+  const events=rows("events","eventId version termId eventType trainingWeek displayOrder label columnLabel expectedGroup status startAt endAt location notes hasRoster");
+  const byId=new Map(events.map(e=>[e.eventId,e]));
+  for(const event of events) event.eligiblePersonIds=event.hasRoster ? [] : null;
+  for(const [event,person] of JSON.parse(tables.eligible)) byId.get(event).eligiblePersonIds.push(person);
+  return {events,people:rows("people","personId lastName firstName"),flights:rows("flights","flightId label"),
+    terms:rows("terms","termId label sortOrder isCurrent"),eventFlights:rows("eventFlights","eventId flightId")};
 }

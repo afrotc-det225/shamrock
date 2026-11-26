@@ -70,6 +70,10 @@ The panel handles identities and version checks. Operators never enter record ID
 API requests, SQL, or version numbers. When a record has changed, reload and review;
 never guess a version, use zero, or increment it manually.
 
+### Editor and preview loading
+
+Leadership editors open from the authorized Leadership list, including contact versions and office and cell phone fields. Cadet editing fetches the selected Directory record when needed. A single event edit loads only that event’s roster assignments. Bulk scheduling loads the current semester’s assignments. View as opens immediately and reuses the displayed Directory roster or fetches a compact name list. Selecting a person checks their current access. System counts the roster and event-editor requests separately from Record pages.
+
 ## Hosted staging Assistant
 
 Only the configured Google subject with current Wing access can ask a question. View as disables chat. The Assistant receives the operator guide and at most five recent messages, on explicit submission. Keep private information out of questions. No records are automatically included. This is procedure help.

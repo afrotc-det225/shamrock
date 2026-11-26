@@ -15,9 +15,10 @@ import { ToolbarPopover } from "./ToolbarPopover";
 import { cellStyle, flightColors, yearColors } from "./roster-colors";
 import { LeadershipChart, textOrder, alphabetic } from "./RosterViews";
 import { api,name, label, years, statuses, profileFields } from "./api";
+import { DIRECTORY_FIELDS } from "../../../packages/domain/src/admin";
 import { compareCadetsForDisplay, compareLeadershipForDisplay } from "../../../packages/domain/src/cadet-display-order";
 export default function People({
-  snapshot, list, withFullData, captureKey, manifest, viewAsRevision,
+  snapshot, list, run, captureKey, manifest, viewAsRevision,
   propose,
   busy,
   leadership = false,
@@ -31,12 +32,15 @@ export default function People({
     profile = (k, v) =>
       setEdit({ ...edit, profile: { ...edit.profile, [k]: v } });
   const open = (row) => {
-    if (snapshot) return openRecord(row);
-    return withFullData(full => {
-      const record = row && (leadership ? full.leadership.find(c=>c.contactId===row.contactId) :
-        full.people.find(p=>p.personId===row.personId));
-      if (row && !record) throw Error("This record changed. Reload the page.");
-      openRecord(record);
+    if (!row || snapshot || leadership) return openRecord(row);
+    const detailed = extended?.binding===binding && extended.people.find(p=>p.personId===row.personId);
+    if (detailed) return openRecord(detailed);
+    return run(async () => {
+      const view=await api("/cadets/editor?id="+encodeURIComponent(row.personId));
+      const [values]=JSON.parse(view.tables.people);
+      if (!values || values[0]!==row.personId || values.length!==DIRECTORY_FIELDS.length+3)
+        throw Error("This record changed. Reload the page.");
+      openRecord(Object.fromEntries(["personId","version","flightId",...DIRECTORY_FIELDS].map((key,i)=>[key,values[i]])));
     });
   };
   const openRecord = (p) => {

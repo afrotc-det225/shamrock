@@ -2,7 +2,7 @@
 const totals=()=>({requests:0,receipts:0,rows:0,unknown:0});
 const lifetime=totals(), buckets=new Map(), groups=new Map();
 export function beginApiRead(path,profile) {
-  const group=path==='/state'?profile:({'/receipts':'Change receipts','/session':'Session','/system/diagnostics':'Catalog checks','/wing-charts':'Wing charts','/page':'Record pages'}[path]??'Other requests');
+  const group=path==='/state'?profile:({'/cadets/editor':'Cadet editor','/view-as/people':'View as roster','/events/editor':'Event editor','/receipts':'Change receipts','/session':'Session','/system/diagnostics':'Catalog checks','/wing-charts':'Wing charts','/page':'Record pages'}[path.split('?')[0]]??'Other requests');
   const countsForGroup=groups.get(group)??totals();groups.set(group,countsForGroup);
   const sec=Math.floor(performance.now()/1000);
   for(const s of buckets.keys()) if(s<=sec-60) buckets.delete(s);

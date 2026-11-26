@@ -67,7 +67,7 @@ export async function api(path, body, options = {}) {
     }
     if (revisionOf(retainedState) !== revisionOf(data)) retainedViews.clear();
     if (data.browse) {
-      const loaded = data.list || data.overview ? data : await decodeBrowse(data);
+      const loaded = data.list || data.overview || data.eventsList ? data : await decodeBrowse(data);
       options.signal?.throwIfAborted();
       retainedState=loaded;
       retainedViews.set(data.browse.profile, loaded);

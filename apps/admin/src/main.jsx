@@ -60,7 +60,6 @@ function App() {
     [sync, setSync] = useState("");
   const [preview, setPreview] = useState(null), [previewName, setPreviewName] = useState("");
   const [readProgress, setReadProgress] = useState({stage: "Checking access"});
-  const [loadingEditor, setLoadingEditor] = useState(false);
   const pendingAbort = useRef(null);
   const pendingActions = useRef(0);
   const readIntent = useRef(0);
@@ -246,10 +245,10 @@ function App() {
       if (--pendingActions.current === 0) setBusy(false);
     }
   };
-  const propose = (operation, payload, close) =>
+  const propose = (operation, payload, close, reviewContext) =>
     run(async () => {
       const p = await api("/proposals", { operation, payload });
-      setProposal(p);
+      setProposal({...p, reviewContext});
       close?.();
     });
   const apply = (id) =>
@@ -280,17 +279,9 @@ function App() {
     setErrorSource("read");
     setError("Loading stopped.");
   };
-  const withFullData = (callback) => run(async () => {
-    const needsRecords = !live.current.data?.snapshot;
-    if (needsRecords) setLoadingEditor(true);
-    try {
-      const value = needsRecords ? await reload(true, "full") : live.current.data;
-      if (!value?.snapshot) throw new Error("The records could not be loaded.");
-      callback(value.snapshot);
-    } finally { if (needsRecords) setLoadingEditor(false); }
-  });
   const viewAs = (person) => run(async () => {
-    if (pendingRead.current) await pendingRead.current.catch(() => {});
+    readIntent.current++;
+    if (pendingAbort.current) {pendingAbort.current.superseded=true; pendingAbort.current.abort();}
     if (person?.firstName) setPreviewName([person.firstName,person.lastName].filter(Boolean).join(" "));
     let result;
     try { result = await api("/view-as", {personId:person?.personId || null}); }
@@ -312,7 +303,7 @@ function App() {
   const visiblePages = blockedPreview ? [] : scoped
     ? pages.filter(([title]) => ["Attendance", "Excusals"].includes(title))
     : pages.filter(([title]) => title !== "History" || data?.meta.hosted);
-  const common = { ...data, propose, busy, readOnly: !!preview, notify: setNotice, refresh: reload, withFullData };
+  const common = { ...data, propose, busy, readOnly: !!preview, notify: setNotice, refresh: reload, run };
   if (signIn) {
     const code = new URLSearchParams(location.search).get("signin");
     const message =
@@ -403,7 +394,7 @@ function App() {
           <div className="sidebar-bottom">
             {sessionInfo?.cadetWorkspace && !preview && <a href="/?workspace=cadet">My cadet workspace</a>}
             {!preview && !scoped && data?.meta.viewAsEnabled &&
-              <ViewAsSelector people={data.snapshot?.people || []} onOpen={done => withFullData(done)} onSelect={viewAs} busy={busy} />}
+              <ViewAsSelector people={data.snapshot?.people ?? (["cadets","leadership","cadet-details","semester"].includes(data.browse?.profile) ? data.list.people : null)} onSelect={viewAs} busy={busy} />}
             {!preview && !scoped && (
               <button
                 className={page === "Assistant" ? "selected" : ""}
@@ -435,10 +426,7 @@ function App() {
                 {sync}
               </small>
             )}
-            {loadingEditor && (data?.eventsList || data?.browse) && <div className="editor-loading">
-              <span role="status">{readProgress.stage === "Verifying records" ? "Verifying editor records…" : "Loading editor records…"}</span>
-              <button onClick={cancelRead}>Cancel</button>
-            </div>}
+
             {error && (
               <div className="error" role="alert">
                 {error}
@@ -506,7 +494,7 @@ function App() {
                 {proposal.summary.changes.map((c, i) => (
                   <React.Fragment key={i}>
                     <dt>{label(c.field)}</dt>
-                    <dd>{displayValue(c.value, data?.snapshot || data?.list, c.field)}</dd>
+                    <dd>{displayValue(c.value, proposal.reviewContext || data?.snapshot || data?.list, c.field)}</dd>
                   </React.Fragment>
                 ))}
               </dl>

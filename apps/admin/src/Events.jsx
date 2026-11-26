@@ -12,14 +12,17 @@ import {
 } from "./components";
 import { eventTypes, displayDate, name } from "./api";
 import { toEastern, fromEastern, zoneLabel } from "./time";
+import { eventEditorData } from "./browse";
+import { api } from "./api";
 import BulkSchedule from "./BulkSchedule";
-export default function Events({ snapshot, eventsList, propose, busy, refresh, readOnly = false, withFullData }) {
-  const s = snapshot || eventsList;
+export default function Events({ snapshot, eventsList, propose, busy, refresh, readOnly = false, run }) {
+  const [details,setDetails] = useState(null), [loading,setLoading] = useState(false);
   const [bulk, setBulk] = useState(false);
   const [query, setQuery] = useState(""),
     [type, setType] = useState(""),
-    [term, setTerm] = useState(s.terms.find((t) => t.isCurrent)?.termId || ""),
+    [term, setTerm] = useState((snapshot || eventsList).terms.find((t) => t.isCurrent)?.termId || ""),
     [edit, setEdit] = useState(null);
+  const s = snapshot || ((bulk || edit) && details) || eventsList;
   const set = (key, value) => setEdit({ ...edit, [key]: value });
   const [timeError, setTimeError] = useState("");
   const setTime = (key, value) => {
@@ -76,11 +79,18 @@ export default function Events({ snapshot, eventsList, propose, busy, refresh, r
             notes: "",
           },
     );
-  const open = (event) => withFullData ? withFullData(source => {
+  const withEditor = (callback, recordId) => snapshot ? callback(snapshot) : run(async () => {
+    setLoading(true);
+    try {
+      const source=eventEditorData(await api("/events/editor"+(recordId ? "?id="+encodeURIComponent(recordId) : "")));
+      setDetails(source); callback(source);
+    } finally {setLoading(false);}
+  });
+  const open = (event) => withEditor(source => {
     const current = event ? source.events.find(value => value.eventId === event.eventId) : null;
     if (event && !current) throw new Error("This event is no longer available. Reload the list.");
     openFrom(source, current);
-  }) : openFrom(s, event);
+  }, event?.eventId || crypto.randomUUID());
   const rows = s.events
     .filter(
       (e) =>
@@ -94,7 +104,7 @@ export default function Events({ snapshot, eventsList, propose, busy, refresh, r
       <section className="page-controls">
         <Heading title="Events">
           <div className="actions">
-            <button disabled={readOnly || !term || busy} onClick={() => withFullData ? withFullData(() => setBulk(true)) : setBulk(true)}>
+            <button disabled={readOnly || !term || busy} onClick={() => withEditor(() => setBulk(true))}>
               Change schedule
             </button>
             <button className="primary" disabled={readOnly || busy} onClick={() => open()}>
@@ -132,6 +142,7 @@ export default function Events({ snapshot, eventsList, propose, busy, refresh, r
           />
         </div>
       </section>
+      {loading && <p role="status">Loading event details…</p>}
       <Table headers={["Event", "Type", "Date & time", "Status", ""]}>
         {rows.map((e) => (
           <tr key={e.eventId}>
@@ -178,7 +189,7 @@ export default function Events({ snapshot, eventsList, propose, busy, refresh, r
           busy={busy}
           onClose={() => setEdit(null)}
           onSubmit={() =>
-            !timeError && propose("event.upsert", edit, () => setEdit(null))
+            !timeError && propose("event.upsert", edit, () => setEdit(null), s)
           }
         >
           <Field

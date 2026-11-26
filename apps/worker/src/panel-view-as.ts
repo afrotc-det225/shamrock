@@ -169,11 +169,14 @@ export async function panelViewAsPage(env: Env, input: unknown): Promise<PanelVi
 /** Shared browse endpoint, including the real actor and target fence on every preview D1 batch. */
 export async function panelBrowse(env:Env,input:unknown,wingCache?:WingTableCache) {
   const req=identity(env,input), preview=Object.hasOwn(req,'entryAuditId');
-  if (Object.keys(req).sort().join(',') !== (preview?'entryAuditId,environment,generation,principalId,profile,targetPersonId':'environment,generation,principalId,profile') ||
+  const targeted = Object.hasOwn(req,'recordId');
+  if (targeted && (preview || !['event-editor','directory-editor'].includes(String(req.profile)) || !id(req.recordId)))
+    return fail(400,'INVALID_PANEL_REQUEST');
+  if (Object.keys(req).sort().join(',') !== (preview?'entryAuditId,environment,generation,principalId,profile,targetPersonId':'environment,generation,principalId,profile'+(targeted?',recordId':'')) ||
       !profiles.includes(req.profile as Profile)) throw new HttpError(400,'INVALID_PANEL_REQUEST','Invalid page.');
   const actor = {environment:env.ENVIRONMENT,generation:Number(env.GENERATION),principalId:req.principalId};
-  if (!preview) return browsePanel(env,actor,req.profile as Profile,wingCache);
-  if (req.profile==='semester' || req.profile==='diagnostics') return fail(403,'NOT_AUTHORIZED');
+  if (!preview) return browsePanel(env,actor,req.profile as Profile,wingCache,req.recordId as string|undefined);
+  if (['semester','diagnostics','event-editor','view-as-people','directory-editor'].includes(String(req.profile))) return fail(403,'NOT_AUTHORIZED');
   if (!id(req.entryAuditId)||!id(req.targetPersonId)) return fail(400,'INVALID_VIEW_AS_REQUEST');
   const {query,binding}=await readBinding(env,req.principalId,req.targetPersonId,req.entryAuditId);
   if(binding.directoryEmail || !binding.targetPrincipalId)return fail(403,'NOT_AUTHORIZED');

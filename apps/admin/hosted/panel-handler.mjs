@@ -111,6 +111,14 @@ export default {
         "GET /api/state", "GET /api/wing-charts", "POST /api/page", "GET /api/history/list", "POST /api/history/page", "POST /api/history/report",
       ].includes(`${request.method} ${url.pathname}`))
         throw new PanelError("VIEW_AS_READ_ONLY", "Exit View as before making changes.", 403);
+      const editorProfile = {"/api/view-as/people":"view-as-people", "/api/events/editor":"event-editor","/api/cadets/editor":"directory-editor"}[url.pathname];
+      if (editorProfile && request.method === "GET") {
+        const authority = await backend.panelAuthority();
+        if (!authority.access.capabilities.fullSnapshot || preview ||
+            (editorProfile === "view-as-people" && env.VIEW_AS_ENABLED !== "1"))
+          throw new PanelError("FORBIDDEN","This page is outside your access.",403);
+        return secure(json(await browseState(backend,authority,editorProfile,url.searchParams.get("id") || undefined)));
+      }
       if (url.pathname === "/api/wing-charts" && request.method === "GET") {
         if (preview && preview.status !== "ready") throw new PanelError("VIEW_AS_CHANGED", "Reload Overview.", 403);
         return secure(json(await wingCharts(backend)));
@@ -144,10 +152,8 @@ export default {
         if (profile==="semester" && !authority?.access.capabilities.fullSnapshot) throw new PanelError("FORBIDDEN","This page is outside your access.",403);
         const scopedStart = profile === "events" && authority && !authority.access.capabilities.fullSnapshot;
         let browse;
-        if (browsing || scopedStart) {
-          try { browse = await browseState(backend,authority,scopedStart ? "attendance" : profile); }
-          catch (error) { if (!["BROWSE_TOO_LARGE","TOO_LARGE"].includes(error.code)) throw error; }
-        }
+        if (browsing || scopedStart || (preview && profile === "events"))
+          browse = await browseState(backend,authority,scopedStart ? "attendance" : profile === "events" ? "event-list" : profile);
         const manifest = browse || authority?.access.capabilities.fullSnapshot
           ? {...authority, section:"manifest", sections:[], partial:true}
           : await backend.panelManifest();
