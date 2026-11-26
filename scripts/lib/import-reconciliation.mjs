@@ -1,4 +1,5 @@
 /** Source-backed reconciliation. Preserved matrix state is not re-labelled as an observed submission. */
+import {directoryAliases,aliasEvidence} from './directory-aliases.mjs';
 import {importDigest} from './import-capture.mjs';
 import {importCellValue,normalizeLegacyDate,proposeImportCrosswalk} from './import-parity.mjs';
 const val=cell=>importCellValue(cell);
@@ -47,6 +48,8 @@ export function reconcileImportEvidence(snapshot,plan) {
   const ledger=new Map(plan.ledger.map(l=>[l.occurrenceId,l]));
   const currentDirectories=plan.records.filter(r=>r.kind==='directory'&&drafts.has(r.occurrenceId));
   const emailAnchors=new Map(),anchorNames=new Map();for(const r of currentDirectories)if(drafts.get(r.occurrenceId).targets.personId){emailAnchors.set(norm(r.profile.email),drafts.get(r.occurrenceId).targets.personId);anchorNames.set(norm(r.profile.email),[norm(r.profile.lastName),norm(r.profile.firstName)]);}
+  const currentByOccurrence = new Map(currentDirectories.map(r=>[r.occurrenceId,drafts.get(r.occurrenceId).targets.personId]));
+  const aliasInputs = [];
   const allDirectories=[];
   for(const resource of snapshot.resources.filter(r=>r.kind==='workbook'))for(const sheet of resource.sheets){
     const headers=(sheet.rows[0]??[]).map(str);if(!['last_name','first_name','as_year','email','cip_code'].every(h=>headers.includes(h)))continue;
@@ -56,12 +59,22 @@ export function reconcileImportEvidence(snapshot,plan) {
       const personId=email&&/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)?emailAnchors.get(email)??stable('historical-person',email):null;
       rows.push({occurrenceId:occurrence(resource,sheet,r),email,identity,personId,anchorKind:emailAnchors.has(email)?'unique-current-email':'historical-email-anchor',cells});
     }
+    for (const row of rows) {
+      const dob = normalizeLegacyDate(row.cells[headers.indexOf('dob')],{dateOnly:true});
+      aliasInputs.push({occurrenceId:row.occurrenceId, sheet:JSON.stringify([resource.key,sheet.metadata.properties.sheetId]),
+        email:row.email, lastName:row.identity[0], firstName:row.identity[1], birthDate:dob.issue ? null : dob.value,
+        phone:val(row.cells[headers.indexOf('phone')]), currentPersonId:currentByOccurrence.get(row.occurrenceId)});
+    }
     allDirectories.push({resource,sheet,headers,rows});
   }
   // An email occurring with different first/last names in the retained archive is a conflict, not a silent merge.
   const byEmail=new Map();for(const dir of allDirectories)for(const row of dir.rows)if(row.personId)group(byEmail,row.email,row);
   const ambiguousEmails=new Set([...byEmail].filter(([,rows])=>new Set(rows.map(r=>JSON.stringify(r.identity.slice(0,2)))).size>1).map(([email])=>email));
-  const identityProven=row=>!!row.personId&&(!ambiguousEmails.has(row.email)||JSON.stringify(anchorNames.get(row.email))===JSON.stringify(row.identity.slice(0,2)));
+  const aliases = directoryAliases(aliasInputs);
+  for (const dir of allDirectories) for (const row of dir.rows) {
+    if (row.personId && aliases.get(row.occurrenceId)===row.personId) row.anchorKind=aliasEvidence;
+  }
+  const identityProven=row=>!!row.personId&&(row.anchorKind===aliasEvidence||!ambiguousEmails.has(row.email)||JSON.stringify(anchorNames.get(row.email))===JSON.stringify(row.identity.slice(0,2)));
   const events=plan.records.filter(r=>r.kind==='event'&&drafts.has(r.occurrenceId));
   const eventAliases=new Map();for(const event of events)for(const alias of new Set([event.event_id,event.display_name,event.attendance_column_label].filter(Boolean)))group(eventAliases,alias,event);
   const matrices=[],matrixRows=[],issues=[],historicalPeople=[];
@@ -80,7 +93,7 @@ export function reconcileImportEvidence(snapshot,plan) {
     const sourceRoster=(companion?.rows??[]).map(r=>({personId:identityProven(r)?r.personId:null,directoryOccurrenceId:r.occurrenceId,
       profile:Object.fromEntries(['last_name','first_name','as_year','flight','squadron','flight_path_status'].filter(h=>companion.headers.includes(h)).map(h=>[h,val(r.cells[companion.headers.indexOf(h)])])),
       dateOfBirth:normalizeLegacyDate(r.cells[companion.headers.indexOf('dob')],{dateOnly:true}),
-      identityEvidence:'retained-companion-directory-email',eventEligibility:'not-reconstructable-from-term-roster'}));
+      identityEvidence:r.anchorKind===aliasEvidence?aliasEvidence:'retained-companion-directory-email',eventEligibility:'not-reconstructable-from-term-roster'}));
     const matrix={resourceKey:resource.key,sheetId:sheet.metadata.properties.sheetId,sourceTitle:title,periodId,periodLabel,termCandidateId:periodLabel?stable('term',periodLabel):null,isCurrent,
       authority:resource.role==='backend'&&isCurrent?'current-backend':'retained-source-copy',companionDirectoryFound:!!companion,sourceRoster,columns,rows:[]};
     for(let r=2;r<sheet.rows.length;r++){
@@ -112,7 +125,7 @@ export function reconcileImportEvidence(snapshot,plan) {
     const counts={flights:{},squadrons:{},asYears:{}};for(const row of rows)for(const [key,index]of[['asYears',2],['flights',3],['squadrons',4]]){const label=row.identityLabels[index];counts[key][label]=(counts[key][label]??0)+1;}
     return {cadets:rows.length,overallMean:mean('overall'),llabMean:mean('llab'),...counts};
   };
-  const result={formatVersion:1,snapshotSha256:snapshot.snapshotSha256,policyVersion:'legacy-source-reconciliation-v1',matrixSnapshots:matrices,nativeProvenance:native,mirrorComparison,
+  const result={formatVersion:1,snapshotSha256:snapshot.snapshotSha256,policyVersion:'legacy-source-reconciliation-v2',matrixSnapshots:matrices,nativeProvenance:native,mirrorComparison,
     currentReports:{backend:reportFor(backend),frontend:reportFor(frontend)},historicalPeople,issues,historicalCodeEvidence:HISTORICAL_CODE_EVIDENCE,
     summary:{matrixSnapshots:matrices.length,matrixRows:matrixRows.length,matrixPeopleResolved:matrixRows.filter(r=>r.personId).length,matrixPeopleUnresolved:matrixRows.filter(r=>!r.personId).length,ambiguousEmailHistories:ambiguousEmails.size,
       currentMatrixColumnsWithCatalogIds:liveMatrices.reduce((n,m)=>n+m.columns.filter(c=>c.eventId).length,0),currentMatrixColumnsWithoutCatalogIds:liveMatrices.reduce((n,m)=>n+m.columns.filter(c=>!c.eventId).length,0),

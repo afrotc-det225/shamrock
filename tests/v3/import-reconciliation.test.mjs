@@ -73,3 +73,46 @@ test('saved formula range exclusions remain explicit while every excluded effect
   const result=reconcileImportEvidence(s,buildImportPlan(s)),entry=result.matrixSnapshots[0].rows[0];
   assert.equal(entry.credit.overall.matches,true);assert.deepEqual(entry.formulaCoverage.excludedEventColumns,[9]);assert.equal(entry.events[2].code,'A');
 });
+
+test('a first-name change needs a unique email, matching surname, birth date and phone throughout the archive',()=>{
+  const phone='(202) 555-0123';
+  function reconcile(overrides={},duplicate=false) {
+    const archived={...person,first_name:'Former',phone:'+1 202-555-0123',...overrides};
+    const directory=sheet('Spring 2026 Directory',11,IMPORT_SCHEMAS.directory,duplicate?[archived,archived]:[archived]);
+    const matrix=sheet('Spring 2026 Attendance',12,[...IMPORT_SCHEMAS.matrix,'TW-01 LLAB'],[{...matrixRow,...archived}]);
+    const source=snapshot([book('archive-external',[directory,matrix])]);
+    for(const resource of source.resources.filter(r=>['backend','main'].includes(r.role))) {
+      resource.sheets[0].rows[2][IMPORT_SCHEMAS.directory.indexOf('phone')]=cell(phone);
+    }
+    const {snapshotSha256,...body}=source;
+    source.snapshotSha256=importDigest(body);
+    const result=reconcileImportEvidence(source,buildImportPlan(source));
+    return {current:result.matrixSnapshots[0].rows[0],archive:result.matrixSnapshots.at(-1)};
+  }
+  const {current,archive}=reconcile();
+  assert.ok(current.personId);
+  assert.equal(archive.rows[0].personId,current.personId);
+  assert.equal(archive.sourceRoster[0].personId,current.personId);
+  assert.equal(archive.rows[0].personEvidence.anchorKind,'current-email-surname-birthdate-phone');
+  assert.equal(archive.rows[0].identityLabels[1],'former');
+  assert.equal(archive.rows[0].events[0].code,'P');
+  for(const fields of [{phone:''},{phone:'202-555-0124'},{dob:''},{dob:'2007-02-01'},{last_name:'Different'}]){
+    assert.equal(reconcile(fields).archive.rows[0].personId,null);
+  }
+  assert.equal(reconcile({},true).archive.rows[0].personId,null);
+});
+
+test('versioned report links only an unoccupied person and a unique full archived Directory tuple', async()=>{
+  const {linkArchiveRows}=await import('../../scripts/lib/directory-aliases.mjs');
+  const historic={personId:null,identityStatus:'unresolved',lastName:'Example',firstName:'Former',
+    asYear:'AS300',flight:'Away',squadron:'Away',overall:0.9,codes:['P',null,'E']};
+  const companion={...historic,directoryOccurrenceId:'directory-old'};
+  const links=new Map([['directory-old','person-current']]);
+  const reconcile=(rows,sourceRoster)=>linkArchiveRows({rows,sourceRoster},links);
+  const [linked]=reconcile([historic],[companion]);
+  assert.deepEqual(linked,{...historic,identityStatus:'resolved',personId:'person-current'});
+  assert.equal(reconcile([historic],[companion,companion])[0],historic);
+  assert.equal(reconcile([historic,historic],[companion])[0],historic);
+  assert.equal(reconcile([historic,{...historic,firstName:'Other',personId:'person-current'}],[companion])[0],historic);
+  assert.equal(reconcile([historic],[{...companion,flight:'Different'}])[0],historic);
+});

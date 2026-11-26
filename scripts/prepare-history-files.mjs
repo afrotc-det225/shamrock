@@ -4,6 +4,7 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { resolve, join, sep } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { listLegacyHistory, readLegacyHistory } from '../.build/v3/apps/worker/src/legacy-history.js';
+import { retainedDirectoryAliases, linkArchiveRows } from './lib/directory-aliases.mjs';
 import { compactReport } from '../apps/admin/history-table.mjs';
 import { catalogKey, fileKey, hash } from '../apps/admin/hosted/semester-history.mjs';
 
@@ -52,19 +53,25 @@ export async function prepare(dbPath, out) {
     if (!reader) throw Error('No authorized Wing reader in staging export');
     const request = {...control,principalId:reader.principal_id};
     const {snapshots} = await listLegacyHistory(env,request);
-    const resource = db.prepare('SELECT source_resource_key AS resource, metadata_json AS metadata FROM legacy_matrix_snapshots WHERE matrix_snapshot_id=?');
+    const resource = db.prepare('SELECT import_run_id AS importRunId, source_resource_key AS resource, metadata_json AS metadata FROM legacy_matrix_snapshots WHERE matrix_snapshot_id=?');
     const rows = db.prepare("SELECT json_extract(payload_json,'$.identityLabels') AS labels FROM legacy_matrix_snapshot_rows WHERE matrix_snapshot_id=? ORDER BY labels");
     const sources = snapshots.map(s => {
-      const {resource:kind,metadata} = resource.get(s.snapshotId);
+      const {importRunId,resource:kind,metadata} = resource.get(s.snapshotId);
       const layout = hash(JSON.stringify([JSON.parse(metadata).columns.map(c => c.header),
         rows.all(s.snapshotId).map(row => row.labels)]));
-      return {...s,resource:kind,layout};
+      return {...s,importRunId,resource:kind,layout};
     });
-    const semesters = [], files = [];
+    const semesters = [], files = [], aliasesByRun = new Map();
     for (const [label, source] of chooseSemesters(sources)) {
       const report = await readLegacyHistory(env,{...request,snapshotId:source.snapshotId});
       if (report.sourceSnapshotSha256 !== source.sourceSnapshotSha256) throw Error('Report source changed');
-      const value = JSON.stringify({semester:label, ...compactReport(report)});
+      let rows = report.rows;
+      if (report.summary.unresolvedRows && report.sourceRoster.length) {
+        if (!aliasesByRun.has(source.importRunId)) aliasesByRun.set(source.importRunId, retainedDirectoryAliases(db,source.importRunId));
+        rows = linkArchiveRows(report,aliasesByRun.get(source.importRunId));
+      }
+      const summary = {...report.summary, unresolvedRows:rows.filter(r=>r.identityStatus==='unresolved').length};
+      const value = JSON.stringify({semester:label, ...compactReport({...report,rows,summary})});
       const version = hash(value);
       semesters.push({label,version});
       files.push({key:fileKey(version),value});
