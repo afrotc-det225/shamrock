@@ -52,7 +52,11 @@ test('operator setup pauses and validates projection outputs before installing t
 test('installed scheduled flush delegates once to the shared invocation scheduler',async()=>{
  const source=await readFile(new URL('../../apps/google-adapter/staging-globals.js',import.meta.url),'utf8');let calls=0;
  const services=Object.fromEntries(['PropertiesService','Utilities','UrlFetchApp','ScriptApp','Session','FormApp','SpreadsheetApp','LockService','MailApp'].map(name=>[name,{}]));
- const context=vm.createContext({...services,SHAMROCKV3:{runScheduledStaging(s){calls++;assert.equal(s.UrlFetchApp,services.UrlFetchApp);assert.equal(s.MailApp,services.MailApp);return{status:'paused',reconciled:true};}}});vm.runInContext(source,context);
+ const options={muteHttpExceptions:true};services.UrlFetchApp.fetch=(url,passed)=>{assert.equal(passed,options);return url;};
+ const context=vm.createContext({...services,SHAMROCKV3:{runScheduledStaging(s){calls++;
+ for(const host of ['shamrock-staging','shamrock-real-parity'])assert.equal(s.UrlFetchApp.fetch('https://'+host+'.det225.workers.dev/v1/jobs?key=1',options),'https://shamrock.det225.workers.dev/v1/jobs?key=1');
+ const google='https://www.googleapis.com/drive/v3/files';assert.equal(s.UrlFetchApp.fetch(google,options),google);
+ const other='https://shamrock-staging.det225.workers.dev.example.invalid/v1/jobs';assert.equal(s.UrlFetchApp.fetch(other,options),other);assert.equal(s.MailApp,services.MailApp);return{status:'paused',reconciled:true};}}});vm.runInContext(source,context);
  assert.deepEqual(context.shamrockV3StagingFlush(),{status:'paused',reconciled:true});assert.equal(calls,1);
 });
 
