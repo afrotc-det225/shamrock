@@ -54,13 +54,23 @@ export async function answer(env, body, guide, send = fetch) {
       headers: {Authorization: "Bearer " + env.ASSISTANT_KEY, "Content-Type": "application/json"},
       body: payload,
     });
-    if (!r.ok) throw new Error();
+    if (!r.ok) {
+      const explanations = {
+        400: "The model rejected the request settings.",
+        401: "The staging credential needs renewal.",
+        403: "The provider denied the staging request.",
+        404: "The configured model is unavailable.",
+        429: "The provider has reached a usage or rate limit.",
+      };
+      throw new PanelError("ASSISTANT_PROVIDER", explanations[r.status] || "The model provider is temporarily unavailable.", 503);
+    }
     const data = await r.json();
     const content = data.output.filter(m => m.type === "message")
       .flatMap(m => m.content).filter(c => c.type === "output_text").map(c => c.text).join("\n");
     if (!content.trim()) throw new Error();
     return {content};
-  } catch {
+  } catch (error) {
+    if (error instanceof PanelError) throw error;
     throw new PanelError("ASSISTANT_UNAVAILABLE", "The Assistant could not answer. Administrator tools are available.", 503);
   }
 }
