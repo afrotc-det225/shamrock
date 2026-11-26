@@ -16,7 +16,8 @@ export function meetingDefault(events, type, fallback) {
 
 export function semesterDefaults(snapshot) {
   const current = snapshot.terms.find(t => t.isCurrent);
-  const match = /\b(Spring|Fall)\s+(\d{4})\b/i.exec(current?.label || '');
+  const currentLabel = (current?.label || '').replace(/^(\d{4})-(Spring|Fall)$/i, '$2 $1');
+  const match = /\b(Spring|Fall)\s+(\d{4})\b/i.exec(currentLabel);
   const label = match ? `${match[1].toLowerCase()==='fall' ? 'Spring' : 'Fall'} ${Number(match[2]) + (match[1].toLowerCase()==='fall' ? 1 : 0)}` : '';
   const events = snapshot.events.filter(e => e.termId === current?.termId);
   const weeks = Math.max(...events.map(e => e.trainingWeek || 0), 0);

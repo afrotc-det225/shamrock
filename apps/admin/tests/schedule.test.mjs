@@ -13,3 +13,9 @@ test('bulk schedule keeps the training week in Eastern time across the DST bound
   assert.deepEqual(rescheduleEvent(event,{weekday:6,hour:7,minute:0,durationMinutes:60}),{startAt:'2026-03-07T12:00:00.000Z',endAt:'2026-03-07T13:00:00.000Z'});
   assert.throws(()=>rescheduleEvent({startAt:'2026-03-12T10:30:00Z'},{weekday:0,hour:2,minute:30,durationMinutes:60}),/daylight-saving/);
 });
+
+test('imported term labels suggest the next semester',()=>{
+  for (const [label,next] of [['2026-Fall','Spring 2027'],['2027-Spring','Fall 2027'],['Summer session','']]) {
+    assert.equal(semesterDefaults({terms:[{termId:'current',label,isCurrent:true}],events:[]}).label,next);
+  }
+});
