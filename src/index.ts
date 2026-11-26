@@ -609,7 +609,7 @@ function repairAttendanceBackendFromResponses() {
   }, () => {
     confirmMenuAction(
       'Repair Attendance Backend',
-      'This compares preserved Attendance Form Responses with Attendance Backend, fills blank cadet lists, and appends any missing event rows. Existing populated rows are left unchanged. Continue?',
+      'This compares preserved Attendance Form Responses with Attendance Backend and appends replacement records for blank cadet lists or missing event rows. Original log rows are preserved. Conflicts with newer attendance require review. Continue?',
     );
     ProgressService.report({
       title: 'Comparing Attendance responses',
@@ -627,7 +627,7 @@ function repairAttendanceBackendFromResponses() {
       totalSteps: 2,
     });
     SpreadsheetApp.getUi().alert(
-      `Attendance repair complete.\nBlank cadet lists restored: ${result.repaired}\nMissing event rows added: ${result.appended}`,
+      `Attendance repair complete.\nReplacement records for blank lists: ${result.repaired}\nMissing event rows added: ${result.appended}`,
     );
   });
 }
@@ -703,9 +703,7 @@ function reinitializeExcusalsManagementSheets() {
 
 /** Non-interactive entry point used by the menu and authorized production repairs. */
 function repairExcusalDecisionAttendanceHistory() {
-  const result = ExcusalsService.reconcileManagementDecisions();
-  SetupService.rebuildAttendanceMatrix();
-  return result;
+  return ExcusalsService.reconcileManagementDecisions();
 }
 
 function reconcileExcusalsManagementDecisions() {
@@ -717,7 +715,7 @@ function reconcileExcusalsManagementDecisions() {
   }, () => {
     confirmMenuAction(
       'Reconcile Excusals management decisions',
-      'This applies commander decisions missing from Excusals Backend, repairs missing Attendance Backend effects for every decided excusal, and rebuilds both attendance matrices. It does not resend decision emails. Continue?',
+      'This applies commander decisions missing from Excusals Backend, repairs missing attendance effects, and updates affected attendance cells. Other attendance edits are preserved. It does not resend decision emails. Continue?',
     );
     ProgressService.report({
       title: 'Preparing decision reconciliation',
@@ -742,7 +740,11 @@ function reconcileExcusalsManagementDecisions() {
       + `\nAttendance log effects repaired: ${result.attendanceRepaired}`
       + `\nNewer attendance records preserved: ${result.attendancePreserved}`
       + `\nExcusal effect fields repaired: ${result.metadataRepaired}`
-      + `\nMissing backend matches: ${result.missing}\nBoth attendance matrices were rebuilt. Decision emails were not resent.`,
+      + `\nAttendance cells updated: ${result.attendanceProjected}`
+      + `\nOther frontend values preserved for review: ${result.attendanceConflicts}`
+      + `\nHistorical targets outside the current matrix: ${result.attendanceSkipped}`
+      + `\nManagement decisions requiring review: ${result.reviewRequired}`
+      + `\nMissing backend matches: ${result.missing}\nAffected attendance cells were checked without rebuilding either matrix. Decision emails were not resent.`,
     );
   });
 }

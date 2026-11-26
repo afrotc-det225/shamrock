@@ -186,13 +186,21 @@ namespace AttendanceService {
     includeAbroad?: boolean;
   };
 
-  export function fillEventColumn(opts: {
+  interface AttendanceFillOptions {
     eventSelector: EventSelector;
     code: string;
     cadetSelector?: CadetSelector;
     actorEmail?: string;
     actorRole?: string;
-  }): number {
+  }
+
+  export function fillEventColumn(opts: AttendanceFillOptions): number {
+    return withWriteLock(() => fillEventColumnLocked(opts));
+  }
+
+  function fillEventColumnLocked(opts: AttendanceFillOptions): number {
+    const code = String(opts.code ?? '').trim();
+    if (code && !Arrays.ATTENDANCE_CODES.includes(code)) throw new Error('Unsupported attendance code.');
     const backendId = Config.getBackendId();
     const frontendId = Config.getFrontendId();
     const sheet = SheetUtils.getSheet(backendId, 'Attendance Matrix Backend');
@@ -293,97 +301,66 @@ namespace AttendanceService {
       return false;
     };
 
-    const timestamp = new Date();
-    const actor = opts.actorEmail || Session.getActiveUser().getEmail() || 'unknown';
-    let totalFilled = 0;
-
-    Array.from(eventCols.entries()).forEach(([eventName, eventCol]) => {
-      let filled = 0;
-      const colValues = data.map((row) => {
-        if (match(row)) {
-          filled += 1;
-          return [opts.code];
-        }
-        return [row[eventCol]];
-      });
-      totalFilled += filled;
-
-      sheet.getRange(3, eventCol + 1, colValues.length, 1).setValues(colValues);
-
-      if (frontendId) {
-        const frontendSheet = SheetUtils.getSheet(frontendId, 'Attendance');
-        if (frontendSheet) {
-          try {
-            frontendSheet.getRange(3, eventCol + 1, colValues.length, 1).setValues(colValues);
-          } catch (err) {
-            Log.warn(`Failed to mirror fillEventColumn to frontend: ${err}`);
-          }
-        }
-      }
-
-      // Audit per event
-      try {
-        const cadetNotesParts: string[] = [];
-        if (cadetSet.size) cadetNotesParts.push(`cadets=${cadetSet.size}`);
-        if (flightSet.size) cadetNotesParts.push(`flights=${Array.from(flightSet).join('|')}`);
-        if (universitySet.size) cadetNotesParts.push(`universities=${Array.from(universitySet).join('|')}`);
-        if (asYearSet.size) cadetNotesParts.push(`asYears=${Array.from(asYearSet).join('|')}`);
-        if (cadetSelector.includeAbroad) cadetNotesParts.push('abroad=true');
-        AuditService.log({
-          action: 'bulk_fill_attendance',
-          result: 'ok',
-          actorEmail: actor,
-          role: opts.actorRole || 'frontend_editor',
-          targetSheet: 'Attendance Matrix Backend',
-          targetTable: 'attendance_matrix',
-          targetKey: eventName,
-          targetRange: `${eventName}`,
-          newValue: opts.code,
-          notes: cadetNotesParts.join('; '),
-          source: 'AttendanceService.fillEventColumn',
-          metadata: {
-            filled,
-            selectedAt: timestamp.toISOString(),
-          },
-        });
-      } catch (err) {
-        Log.warn(`Unable to append audit for fillEventColumn: ${err}`);
-      }
-
-      // Attendance log per event and cadet
-      try {
-        const attendanceLogSheet = SheetUtils.getSheet(Config.getBackendId(), 'Attendance Backend');
-        if (attendanceLogSheet) {
-          const cadetNames = data
-            .map((row, i) => {
-              if (!(colValues[i][0] === opts.code && match(row))) return '';
-              const last = idx.last >= 0 ? String(row[idx.last] || '').trim() : '';
-              const first = idx.first >= 0 ? String(row[idx.first] || '').trim() : '';
-              if (!last && !first) return '';
-              return `${last}, ${first}`.trim();
-            })
-            .filter(Boolean);
-
-          if (cadetNames.length) {
-            const entry = {
-              submission_id: `bulk-fill-${eventName}-${timestamp.getTime()}-${Math.random().toString(36).slice(2, 8)}`,
-              submitted_at: timestamp,
-              event: eventName,
-              attendance_type: opts.code,
-              email: actor,
-              name: 'Bulk Fill Attendance',
-              flight: cadetNames.length > 1 ? 'Mixed' : '',
-              cadets: cadetNames.join('; '),
-            };
-            SheetUtils.appendRows(attendanceLogSheet, [entry]);
-          }
-        }
-      } catch (err) {
-        Log.warn(`Unable to append attendance log for fillEventColumn: ${err}`);
-      }
+    const currentEvents = SheetUtils.readTable(Config.getBackendSheet('Events Backend')).rows
+      .filter(row => isActiveScheduledEvent(row) && !/third\s*hour/i.test(`${row['event_id'] || ''} ${row['event_type'] || ''} ${row['display_name'] || ''}`))
+      .map(row => String(row['display_name'] || row['attendance_column_label'] || row['event_id'] || '').trim());
+    eventCols.forEach((_col, event) => {
+      if (currentEvents.filter(name => name === event).length !== 1)
+        throw new Error('Selected attendance events are stale or ambiguous. Refresh their definitions before filling attendance.');
     });
-
-    return totalFilled;
+    const selected = data.filter(match);
+    if (!selected.length) return 0;
+    const cadetNames = selected.map(row => {
+      const last = idx.last >= 0 ? String(row[idx.last] || '').trim() : '';
+      const first = idx.first >= 0 ? String(row[idx.first] || '').trim() : '';
+      if (!last || !first || /[;,=]/.test(last + first) || /\(AS[^)]*\)/i.test(last + first))
+        throw new Error('Selected attendance contains an invalid cadet identity. No fill was saved.');
+      return `${last}, ${first}`;
+    });
+    const timestamp = new Date();
+    const actor = opts.actorEmail || AuditService.actorEmail();
+    const runId = Utilities.getUuid();
+    const logs = Array.from(eventCols.keys()).map((event, index) => ({
+      submission_id: `bulk-fill-${runId}-${index}`, submitted_at: timestamp, event,
+      attendance_type: code, email: actor, name: 'Bulk Fill Attendance',
+      flight: cadetNames.length > 1 ? 'Mixed' : '', cadets: cadetNames.join('; '),
+    }));
+    // Resolve both independent row orders before the durable append. Never copy
+    // backend positions into the human-sortable frontend.
+    const projections = prepareAttendanceProjections(logs);
+    const logSheet = SheetUtils.getSheet(backendId, 'Attendance Backend');
+    if (!logSheet) throw new Error('Attendance Backend is missing; no fill was saved.');
+    const logHeaders = logSheet.getRange(1, 1, 1, logSheet.getLastColumn()).getValues()[0].map(h => String(h || '').trim());
+    const required = Schemas.BACKEND_TABS.find(tab => tab.name === 'Attendance Backend')?.machineHeaders || [];
+    if (!required.length || required.some(header => logHeaders.filter(h => h === header).length !== 1))
+      throw new Error('Attendance Backend headers are incomplete; no fill was saved.');
+    const nextRow = Math.max(3, logSheet.getLastRow() + 1);
+    const requiredRows = nextRow + logs.length - 1;
+    if (requiredRows > logSheet.getMaxRows()) logSheet.insertRowsAfter(logSheet.getMaxRows(), requiredRows - logSheet.getMaxRows());
+    let persisted = false;
+    const audits: AuditService.AuditEntry[] = logs.map(log => ({
+      backendId, action: 'bulk_fill_attendance', result: 'ok', actorEmail: actor,
+      role: opts.actorRole || 'frontend_editor', targetSheet: 'Attendance Matrix Backend',
+      targetTable: 'attendance_matrix', targetKey: log.event, targetRange: log.event,
+      newValue: code, source: 'AttendanceService.fillEventColumn', requestId: log.submission_id, runId,
+      metadata: { filled: selected.length, selectedAt: timestamp.toISOString() },
+    }));
+    try {
+      logSheet.getRange(nextRow, 1, logs.length, logHeaders.length).setValues(logs.map(log => logHeaders.map(header => (log as any)[header] ?? '')));
+      SpreadsheetApp.flush();
+      persisted = true;
+      applyPreparedAttendanceProjections(projections);
+      if (!AuditService.logBatch(audits)) throw new Error('Attendance fill was saved, but its audit batch was not confirmed.');
+    } catch (err) {
+      audits.forEach(audit => {
+        audit.result = 'failed';
+        audit.notes = persisted ? 'Attendance log saved; verify both projections before retrying.' : 'Attendance append was not confirmed; inspect the operation log before retrying.';
+        audit.error = err;
+      });
+      AuditService.logBatch(audits);
+      throw err;
+    }
+    return selected.length * logs.length;
   }
 
   function normalizeName(part: string): string {
@@ -480,38 +457,58 @@ namespace AttendanceService {
   export interface AttendanceLogBatch {
     sheet: GoogleAppsScript.Spreadsheet.Sheet;
     updates: { range: string; values: string[][] }[];
+    conflicts: number;
+    headers: string[];
+    rowCount: number;
+    preconditions: { row: number; col: number; identity: string; value: string }[];
   }
 
-  /** Resolve all targets once, by identity and canonical event header, before persistence. */
-  export function prepareAttendanceLogBatch(entries: Record<string, any>[]): AttendanceLogBatch {
-    const sheet = SheetUtils.getSheet(Config.getBackendId(), 'Attendance Matrix Backend');
-    if (!sheet || sheet.getLastRow() < 3) throw new Error('Attendance backend matrix is missing; no manual edit was logged.');
+  function projectionKey(event: string, cadet: CadetKey): string {
+    return JSON.stringify([event, buildKey(cadet.last, cadet.first)]);
+  }
+
+  function prepareProjection(entries: Record<string, any>[], sheet: GoogleAppsScript.Spreadsheet.Sheet, pendingOnly = false, pendingPairs = new Set<string>()): AttendanceLogBatch {
+    if (sheet.getLastRow() < 3) throw new Error('Attendance matrix is empty. Rebuild Attendance before applying records.');
     const table = SheetUtils.readTable(sheet);
     const headers = table.headers;
     if (headers.filter(h => h === ATT_HEADER_LAST).length !== 1 || headers.filter(h => h === ATT_HEADER_FIRST).length !== 1)
-      throw new Error('Attendance backend identity headers are ambiguous.');
+      throw new Error('Attendance matrix identity headers are ambiguous.');
     const identities = new Map<string, number[]>();
     table.rows.forEach((row, index) => {
       const identity = cadetKey(row), matches = identities.get(identity) || [];
       matches.push(index + 3); identities.set(identity, matches);
     });
+    // Resolve the final value of each supplied pair before applying pending-only
+    // policy, so earlier entries in a batch cannot mask a later correction.
     const cells = new Map<number, Map<number, string>>();
     entries.forEach(entry => {
       const event = String(entry['event'] || '').trim();
       const matches = headers.map((header, index) => header === event ? index + 1 : 0).filter(Boolean);
       const cadets = parseCadetEntries(String(entry['cadets'] || ''));
-      if (matches.length !== 1 || matches[0] <= ATTENDANCE_MACHINE_HEADERS.length || !cadets.length) throw new Error('Attendance backend event column is missing or ambiguous.');
+      if (matches.length !== 1 || ATTENDANCE_MACHINE_HEADERS.includes(event) || !cadets.length)
+        throw new Error('Attendance event column is missing or ambiguous. Rebuild Attendance before applying records.');
       const col = matches[0], rows = cells.get(col) || new Map<number, string>();
       cadets.forEach(cadet => {
         const targets = identities.get(buildKey(cadet.last, cadet.first));
-        if (!targets || targets.length !== 1) throw new Error('Attendance backend cadet identity is missing or ambiguous.');
+        if (!targets || targets.length !== 1) throw new Error('Attendance cadet identity is missing or ambiguous. No partial projection was applied.');
         rows.set(targets[0], String(entry['attendance_type'] ?? '').trim());
       });
       cells.set(col, rows);
     });
-    // Coalesce adjacent rows only. Unrelated values/formulas/pending edits are never rewritten.
+    let conflicts = 0;
     const updates: AttendanceLogBatch['updates'] = [];
+    const preconditions: AttendanceLogBatch['preconditions'] = [];
     cells.forEach((rows, col) => {
+      rows.forEach((code, row) => {
+        const record = table.rows[row - 3];
+        const current = String(record[headers[col - 1]] ?? '').trim();
+        const key = projectionKey(headers[col - 1], { last: record[ATT_HEADER_LAST], first: record[ATT_HEADER_FIRST] });
+        if (current === code) rows.delete(row);
+        else if ((pendingOnly || pendingPairs.has(key)) && current !== 'R' && current !== 'D') { rows.delete(row); conflicts++; }
+        else preconditions.push({ row, col, identity: cadetKey(record), value: current });
+      });
+      // Coalesce only adjacent affected cells; unrelated values, formulas and
+      // human edits are never copied back from the captured matrix.
       const ordered = Array.from(rows.keys()).sort((a, b) => a - b);
       let run: number[] = [];
       const add = () => {
@@ -525,91 +522,149 @@ namespace AttendanceService {
       });
       add();
     });
-    return { sheet, updates };
+    return { sheet, updates, conflicts, headers: headers.slice(), rowCount: table.rows.length + 2, preconditions };
   }
 
-  /** Backend-only sparse mirror; caller has already persisted the complete attendance log batch. */
-  export function applyPreparedAttendanceLogBatch(batch: AttendanceLogBatch): void {
-    if (!batch.updates.length) return;
-    const service = (globalThis as any).Sheets?.Spreadsheets?.Values;
-    if (!service?.batchUpdate) throw new Error('Sheets API is unavailable; attendance log is saved but its backend mirror is pending.');
-    service.batchUpdate({ valueInputOption: 'RAW', data: batch.updates }, batch.sheet.getParent().getId());
+  /** Backend-only preparation for manual edits whose frontend values already exist. */
+  export function prepareAttendanceLogBatch(entries: Record<string, any>[]): AttendanceLogBatch {
+    const sheet = SheetUtils.getSheet(Config.getBackendId(), 'Attendance Matrix Backend');
+    if (!sheet) throw new Error('Attendance backend matrix is missing; no manual edit was logged.');
+    return prepareProjection(entries, sheet);
   }
 
-  /**
-   * Apply a single attendance backend log entry to the Attendance Matrix Backend (and mirror to frontend).
-   * This lets us process new submissions incrementally without a full rebuild.
-   */
-  export function applyAttendanceLogEntry(entry: Record<string, any>): boolean {
-    const backendId = Config.getBackendId();
+  /** Resolve every target in both independently sortable matrices before writing either one. */
+  export function prepareAttendanceProjections(entries: Record<string, any>[], options: { frontendPendingOnly?: boolean; frontendPendingOnlyFor?: Record<string, any>[] } = {}): AttendanceLogBatch[] {
+    const backend = SheetUtils.getSheet(Config.getBackendId(), 'Attendance Matrix Backend');
     const frontendId = Config.getFrontendId();
-    if (!backendId) return false;
+    const frontend = frontendId ? SheetUtils.getSheet(frontendId, 'Attendance') : null;
+    if (!backend || (frontendId && !frontend)) throw new Error('Attendance matrix is missing. Rebuild Attendance before applying records.');
+    const batches = [prepareProjection(entries, backend)];
+    const pendingPairs = new Set<string>();
+    (options.frontendPendingOnlyFor || []).forEach(entry => parseCadetEntries(String(entry.cadets || '')).forEach(cadet => pendingPairs.add(projectionKey(String(entry.event || '').trim(), cadet))));
+    if (frontend) batches.push(prepareProjection(entries, frontend, !!options.frontendPendingOnly, pendingPairs));
+    return batches;
+  }
 
-    const matrixSheet = SheetUtils.getSheet(backendId, 'Attendance Matrix Backend');
-    if (!matrixSheet) return false;
-
-    const lastRow = matrixSheet.getLastRow();
-    const lastCol = matrixSheet.getLastColumn();
-    if (lastRow < 3 || lastCol < 1) return false;
-
-    const headers = matrixSheet
-      .getRange(1, 1, 1, lastCol)
-      .getValues()[0]
-      .map((h) => String(h || '').trim());
-
-    const eventName = String(entry['event'] || '').trim();
-    const code = String(entry['attendance_type'] ?? '').trim();
-    if (!eventName) return false;
-
-    const eventColIdx = headers.indexOf(eventName);
-    const lastIdx = headers.indexOf(ATT_HEADER_LAST);
-    const firstIdx = headers.indexOf(ATT_HEADER_FIRST);
-    if (eventColIdx < 0 || lastIdx < 0 || firstIdx < 0) return false;
-
-    const data = matrixSheet.getRange(3, 1, lastRow - 2, lastCol).getValues();
-
-    // Build cadet lookup for quick row resolution
-    const keyToIndex = new Map<string, number>();
-    data.forEach((r, idx) => {
-      const key = cadetKey({
-        last_name: r[lastIdx],
-        first_name: r[firstIdx],
+  /** Sparse, raw-value writes; the caller must persist new log records first. */
+  export function applyPreparedAttendanceProjections(batches: AttendanceLogBatch[]): void {
+    const service = (globalThis as any).Sheets?.Spreadsheets?.Values;
+    if (batches.some(batch => batch.updates.length) && !service?.batchUpdate)
+      throw new Error('Sheets API is unavailable; attendance log is saved but its projection is pending.');
+    const byWorkbook = new Map<string, AttendanceLogBatch[]>();
+    batches.forEach(batch => {
+      if (!batch.updates.length) return;
+      const id = batch.sheet.getParent().getId();
+      byWorkbook.set(id, [...(byWorkbook.get(id) || []), batch]);
+    });
+    byWorkbook.forEach((group, id) => {
+      group.forEach(batch => {
+        // Script locks do not block human sorts or edits. Recheck each target
+        // immediately before the provider batch, without rewriting a stale range.
+        const sheet = batch.sheet;
+        if (sheet.getLastRow() !== batch.rowCount || sheet.getLastColumn() !== batch.headers.length)
+          throw new Error('Attendance layout changed before projection; saved records require a fresh retry.');
+        const current = sheet.getRange(1, 1, batch.rowCount, batch.headers.length).getValues();
+        if (JSON.stringify(current[0].map(h => String(h || '').trim())) !== JSON.stringify(batch.headers))
+          throw new Error('Attendance headers changed before projection; saved records require a fresh retry.');
+        const last = batch.headers.indexOf(ATT_HEADER_LAST), first = batch.headers.indexOf(ATT_HEADER_FIRST);
+        if (batch.preconditions.some(cell => buildKey(current[cell.row - 1][last], current[cell.row - 1][first]) !== cell.identity
+            || String(current[cell.row - 1][cell.col - 1] ?? '').trim() !== cell.value))
+          throw new Error('Attendance was edited or sorted before projection; saved records require a fresh retry.');
       });
-      keyToIndex.set(key, idx);
+      service.batchUpdate({ valueInputOption: 'RAW', data: group.flatMap(batch => batch.updates) }, id);
     });
+  }
 
-    const cadets = parseCadetEntries(String(entry['cadets'] || ''));
-    if (!cadets.length) return false;
+  /** Backend-only sparse mirror for already-persisted manual corrections. */
+  export function applyPreparedAttendanceLogBatch(batch: AttendanceLogBatch): void {
+    applyPreparedAttendanceProjections([batch]);
+  }
 
-    cadets.forEach((c) => {
-      const idx = keyToIndex.get(buildKey(c.last, c.first));
-      if (idx === undefined) return;
-      data[idx][eventColIdx] = code; // allow blank to clear
+  /** Apply one durable entry without overwriting unrelated frontend edits. */
+  export function applyAttendanceLogEntry(entry: Record<string, any>): boolean {
+    return withWriteLock(() => {
+      const batches = prepareAttendanceProjections([entry]);
+      applyPreparedAttendanceProjections(batches);
+      return true;
     });
+  }
 
-    // Write back only the affected event column for efficiency
-    const colValues = data.map((row) => [row[eventColIdx]]);
-    matrixSheet.getRange(3, eventColIdx + 1, colValues.length, 1).setValues(colValues);
-
-    // Resolve the frontend's own headers and cadet rows. Its order can differ
-    // after a sort or an interrupted rebuild; backend positions are not keys.
-    if (frontendId) {
-      const frontendSheet = SheetUtils.getSheet(frontendId, 'Attendance');
-      if (frontendSheet) {
-        const frontend = SheetUtils.readTable(frontendSheet);
-        const frontendEventIndex = frontend.headers.indexOf(eventName);
-        if (frontendEventIndex < 0) {
-          throw new Error('Frontend Attendance is missing the event column. Rebuild Attendance to restore it.');
+  /** Commit a native Form response once and heal retries from the current ordered log. */
+  export function commitAttendanceFormRows(entries: Record<string, any>[]): { appended: number; existing: number; conflicts: number } {
+    return withWriteLock(() => {
+      if (!entries.length) return { appended: 0, existing: 0, conflicts: 0 };
+      const logSheet = SheetUtils.getSheet(Config.getBackendId(), 'Attendance Backend');
+      if (!logSheet) throw new Error('Attendance Backend is missing; the Form response was not committed.');
+      const logTable = SheetUtils.readTable(logSheet);
+      const required = Schemas.BACKEND_TABS.find(tab => tab.name === 'Attendance Backend')?.machineHeaders || [];
+      if (!required.length || required.some(header => logTable.headers.filter(h => h === header).length !== 1))
+        throw new Error('Attendance Backend headers are incomplete; the Form response was not committed.');
+      const records = logTable.rows;
+      const byId = new Map<string, Record<string, any>[]>();
+      const byPayload = new Map<string, Record<string, any>[]>();
+      const latest = new Map<string, Record<string, any>>();
+      const pair = projectionKey;
+      const cadetSet = (row: Record<string, any>) => Array.from(new Set(parseCadetEntries(String(row.cadets || '')).map(cadet => buildKey(cadet.last, cadet.first)))).sort().join(';');
+      const payloadKey = (row: Record<string, any>) => JSON.stringify([
+        String(row.event || '').trim(), String(row.email || '').trim().toLowerCase(),
+        String(row.attendance_type ?? '').trim(), new Date(row.submitted_at).getTime(), cadetSet(row),
+      ]);
+      records.forEach(record => {
+        const id = String(record.submission_id || '');
+        byId.set(id, [...(byId.get(id) || []), record]);
+        if (/^att-/.test(id)) {
+          const payload = payloadKey(record);
+          byPayload.set(payload, [...(byPayload.get(payload) || []), record]);
         }
-        const affected = new Set(cadets.map((cadet) => buildKey(cadet.last, cadet.first)));
-        if (frontend.rows.length) {
-          const values = frontend.rows.map((row) => [affected.has(cadetKey(row)) ? code : (row[eventName] ?? '')]);
-          frontendSheet.getRange(3, frontendEventIndex + 1, values.length, 1).setValues(values);
+        const event = String(record.event || '').trim();
+        parseCadetEntries(String(record.cadets || '')).forEach(cadet => latest.set(pair(event, cadet), record));
+      });
+      const seen = new Set<string>(), appended: Record<string, any>[] = [];
+      const affected = new Map<string, { event: string; cadet: CadetKey }>();
+      const newPairs = new Set<string>();
+      let existing = 0;
+      entries.forEach(entry => {
+        const id = String(entry.submission_id || '');
+        const event = String(entry.event || '').trim();
+        const submittedAt = new Date(entry.submitted_at).getTime();
+        const cadets = parseCadetEntries(String(entry.cadets || ''));
+        if (!/^att-form-[a-f0-9]{64}$/.test(id) || seen.has(id) || !event || !Number.isFinite(submittedAt))
+          throw new Error('Attendance response identity or payload is incomplete; no new rows were committed.');
+        seen.add(id);
+        let matches = byId.get(id) || [];
+        // Preserve existing production submissions written before stable native
+        // response IDs were introduced; never rewrite their original receipt.
+        if (!matches.length) matches = byPayload.get(payloadKey(entry)) || [];
+        if (matches.length > 1 || (matches.length === 1 && payloadKey(matches[0]) !== payloadKey(entry)))
+          throw new Error('Attendance response conflicts with existing log receipts; review before retrying.');
+        if (matches.length) existing++;
+        else {
+          // An old response arriving for the first time needs reviewed recovery
+          // if later decisions already exist. Appending it blindly would make
+          // physical replay undo those decisions.
+          cadets.forEach(cadet => {
+            const prior = latest.get(pair(event, cadet));
+            if (prior && (!Number.isFinite(new Date(prior.submitted_at).getTime()) || new Date(prior.submitted_at).getTime() > submittedAt))
+              throw new Error('A delayed attendance response has newer attendance records. Review the saved Form response before importing it.');
+          });
+          appended.push(entry);
+          cadets.forEach(cadet => { latest.set(pair(event, cadet), entry); newPairs.add(pair(event, cadet)); });
         }
+        cadets.forEach(cadet => affected.set(pair(event, cadet), { event, cadet }));
+      });
+      const effective = Array.from(affected.entries()).map(([key, target]) => ({
+        event: target.event, cadets: `${target.cadet.last}, ${target.cadet.first}`,
+        attendance_type: String(latest.get(key)?.attendance_type ?? '').trim(),
+      }));
+      const existingPairs = effective.filter(entry => !newPairs.has(pair(entry.event, parseCadetEntries(entry.cadets)[0])));
+      const projections = effective.length ? prepareAttendanceProjections(effective, { frontendPendingOnlyFor: existingPairs }) : [];
+      if (appended.length) {
+        SheetUtils.appendRows(logSheet, appended);
+        SpreadsheetApp.flush();
       }
-    }
-
-    return true;
+      applyPreparedAttendanceProjections(projections);
+      return { appended: appended.length, existing, conflicts: projections.reduce((count, batch) => count + batch.conflicts, 0) };
+    });
   }
 
   function writeMatrix(sheet: GoogleAppsScript.Spreadsheet.Sheet, events: EventDef[], rows: any[]) {

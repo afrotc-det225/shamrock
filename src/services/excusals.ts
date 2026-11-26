@@ -86,6 +86,43 @@ namespace ExcusalsService {
     return '';
   }
 
+  /** Resolve claimed names to exactly one Directory record without replacing
+   * the verified respondent email with that record's potentially different email. */
+  export function resolveExcusalCadet(email: string, lastName: string, firstName: string): Record<string, any> {
+    const normalize = (value: any) => String(value || '').trim().toLowerCase();
+    const respondent = normalize(email);
+    if (!respondent) throw new Error('A verified respondent email is required for an excusal request.');
+    const sheet = SheetUtils.getSheet(Config.getBackendId(), 'Directory Backend');
+    if (!sheet) throw new Error('Directory Backend is unavailable. The excusal request was not saved.');
+    const rows = SheetUtils.readTable(sheet).rows;
+    const emailMatches = rows.filter(row => normalize(row['email']) === respondent);
+    if (emailMatches.length > 1) throw new Error('The respondent email matches multiple Directory records. Review the Directory before retrying.');
+    let matches = emailMatches;
+    if (!matches.length) {
+      // Some submissions copied the same "Last, First" selection into both
+      // text fields. Only that exact repeated shape is normalized.
+      if (normalize(lastName) === normalize(firstName)) {
+        const parts = lastName.split(',').map(part => part.trim());
+        if (parts.length === 2 && parts.every(Boolean)) [lastName, firstName] = parts;
+      }
+      matches = rows.filter(row => normalize(row['last_name']) === normalize(lastName) && normalize(row['first_name']) === normalize(firstName));
+    }
+    if (matches.length !== 1) throw new Error('The excusal cadet identity is missing or ambiguous. Review the Directory before retrying.');
+    const cadet = matches[0];
+    if (rows.filter(row => normalize(row['last_name']) === normalize(cadet['last_name']) && normalize(row['first_name']) === normalize(cadet['first_name'])).length !== 1) {
+      throw new Error('The Directory name matches multiple attendance identities. Review the Directory before retrying.');
+    }
+    if (!String(cadet['last_name'] || '').trim() || !String(cadet['first_name'] || '').trim()
+      || !Arrays.OPERATIONAL_SQUADRONS.some(squadron => normalize(squadron) === normalize(cadet['squadron']))
+      || !Arrays.FLIGHTS.some(flight => normalize(flight) === normalize(cadet['flight']))) {
+      throw new Error('The Directory record needs a valid name, flight and operational squadron before an excusal can be routed.');
+    }
+    return { ...cadet,
+      flight: Arrays.FLIGHTS.find(flight => normalize(flight) === normalize(cadet['flight'])),
+      squadron: Arrays.OPERATIONAL_SQUADRONS.find(squadron => normalize(squadron) === normalize(cadet['squadron'])),
+      respondent_email: respondent, identity_match: emailMatches.length ? 'verified_email' : 'directory_name' };
+  }
+
   /**
    * Send notification email to squadron commander when new excusal submitted.
    */
@@ -163,20 +200,49 @@ SHAMROCK Automations`;
 
     if (!lastName || !firstName || !eventName) return;
 
-    const logEntry = {
-      submission_id: `excusal-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-      submitted_at: new Date(),
-      event: eventName,
-      attendance_type: 'R',
-      email: excusalRow['email'] || '',
-      name: 'Excusal Request',
-      flight: excusalRow['flight'] || '',
-      cadets: `${lastName}, ${firstName}`,
-    };
-
     AttendanceService.withWriteLock(() => {
+      // Notifications can delay this continuation long enough for a commander
+      // to decide the request. The submitted object is not authoritative now.
+      const requestId = String(excusalRow['request_id'] || '').trim();
+      if (!/^[A-Za-z0-9_-]{1,120}$/.test(requestId)) throw new Error('Excusal request identity is missing or invalid.');
+      const requestSheet = SheetUtils.getSheet(backendId, 'Excusals Backend');
+      if (!requestSheet) throw new Error('Excusals Backend is unavailable.');
+      const matches = SheetUtils.readTable(requestSheet).rows.filter(row => String(row['request_id'] || '').trim() === requestId);
+      if (matches.length !== 1) throw new Error('Excusal request identity is missing or ambiguous.');
+      const current = matches[0];
+      if (attendanceStateKey(current['event'], current['last_name'], current['first_name']) !== attendanceStateKey(eventName, lastName, firstName)) {
+        throw new Error('Excusal request target changed before attendance could be applied.');
+      }
+      if (isDecisionValue(String(current['decision'] || '').trim())) return;
+      const logEntry = {
+        submission_id: `excusal-request-${requestId}`,
+        submitted_at: new Date(),
+        event: eventName,
+        attendance_type: 'R',
+        email: excusalRow['email'] || '',
+        name: 'Excusal Request',
+        flight: excusalRow['flight'] || '',
+        cadets: `${lastName}, ${firstName}`,
+      };
+      // A retry after an uncertain append must not restore R over newer P/T or
+      // an intentional clear. The original durable effect already exists.
+      const log = readAttendanceLogState();
+      if (log.receiptIds.has(logEntry.submission_id)) {
+        if (log.state.get(attendanceStateKey(eventName, lastName, firstName))?.submissionId === logEntry.submission_id) {
+          const projections = AttendanceService.prepareAttendanceProjections([logEntry], { frontendPendingOnly: true });
+          AttendanceService.applyPreparedAttendanceProjections(projections);
+          if (projections.some(batch => batch.conflicts)) {
+            AuditService.log({ action: 'excusal_pending_projection_review_required', result: 'ok', role: 'automation',
+              targetSheet: 'Attendance', requestId, targetKey: requestId,
+              source: 'ExcusalsService.updateAttendanceOnExcusalSubmission', metadata: { reason: 'Saved request conflicts with a non-pending frontend value.' } });
+            throw new Error('The request is saved, but its live attendance value needs review before retrying. No non-pending frontend value was replaced.');
+          }
+        }
+        return;
+      }
+      const projections = AttendanceService.prepareAttendanceProjections([logEntry]);
       appendAttendanceLogs([logEntry]);
-      AttendanceService.applyAttendanceLogEntry(logEntry);
+      AttendanceService.applyPreparedAttendanceProjections(projections);
     });
   }
 
@@ -543,76 +609,46 @@ SHAMROCK Automations`;
    * Sync excusal to management spreadsheet.
    */
   export function syncExcusalToManagementPanel(excusalRow: Record<string, any>) {
-    const squadron = String(excusalRow['squadron'] || '').trim();
-    if (!squadron) {
-      Log.warn('Cannot sync excusal to management panel: no squadron');
-      return;
-    }
-
-    const managementId = Config.getScriptProperty(Config.PROPERTY_KEYS.EXCUSAL_MANAGEMENT_SPREADSHEET_ID);
-    if (!managementId) {
-      Log.warn('Excusals management spreadsheet not found; skipping sync');
-      return;
-    }
-
-    try {
+    return AttendanceService.withWriteLock(() => {
+      const managementId = Config.getScriptProperty(Config.PROPERTY_KEYS.EXCUSAL_MANAGEMENT_SPREADSHEET_ID);
+      if (!managementId) throw new Error('Excusals Management is not configured. The saved request needs review routing.');
+      const requestId = String(excusalRow['request_id'] || '').trim();
+      const source = SheetUtils.getSheet(Config.getBackendId(), 'Excusals Backend');
+      if (!source || !requestId) throw new Error('The saved excusal request could not be resolved for management routing.');
+      const matches = SheetUtils.readTable(source).rows.filter(row => String(row['request_id'] || '').trim() === requestId);
+      if (matches.length !== 1) throw new Error('The saved excusal request identity is missing or ambiguous.');
+      const current = matches[0];
+      const squadron = String(current['squadron'] || '').trim();
+      if (!Arrays.OPERATIONAL_SQUADRONS.includes(squadron)) throw new Error('The saved request needs an operational squadron before it can be routed.');
       const ss = SpreadsheetApp.openById(managementId);
       const sheet = ss.getSheetByName(squadron);
-      if (!sheet) {
-        Log.warn(`Sheet for squadron ${squadron} not found in management spreadsheet`);
-        return;
+      if (!sheet) throw new Error('The operational squadron review sheet is missing. The request remains saved in the backend.');
+      const existing = ss.getSheets().filter(candidate => Arrays.OPERATIONAL_SQUADRONS.includes(candidate.getName()))
+        .flatMap(candidate => SheetUtils.readTable(candidate).rows.filter(row => String(row['request_id'] || '').trim() === requestId).map(() => candidate.getName()));
+      if (existing.length > 1 || (existing.length === 1 && existing[0] !== squadron)) {
+        throw new Error('The request has ambiguous or inconsistent review routing. Review its existing management row.');
       }
-
-      // Ensure sheet has capacity and append after existing data (starting at row 3)
-      const nextRow = Math.max(3, sheet.getLastRow() + 1);
-      const maxRows = sheet.getMaxRows();
-      if (nextRow > maxRows) {
-        sheet.insertRowsAfter(maxRows, nextRow - maxRows);
+      if (!existing.length) {
+        // Append by machine headers once. Never replace an existing row: its
+        // commander decision may be newer than the backend while a trigger waits.
+        const required = Schemas.EXCUSALS_MANAGEMENT_SCHEMA.machineHeaders || [];
+        const headers = SheetUtils.readTable(sheet).headers;
+        if (required.some(header => headers.filter(value => value === header).length !== 1)) {
+          throw new Error('The review sheet headers need repair before a request can be added.');
+        }
+        SheetUtils.appendRows(sheet, [{ ...current, timestamp: current['submitted_at'] || '' }]);
+        SpreadsheetApp.flush();
+        trimAndSortManagementSheet(sheet);
       }
-
-      // Ensure columns match current schema (handles legacy sheets created before Reason column was added)
-      const maxCols = sheet.getMaxColumns();
-      const requiredCols = Schemas.EXCUSALS_MANAGEMENT_SCHEMA.machineHeaders!.length;
-      if (maxCols < requiredCols) {
-        sheet.insertColumnsAfter(maxCols, requiredCols - maxCols);
-      }
-
-      // Refresh headers to match schema (machine headers row 1, display headers row 2)
-      const machineHeaders = Schemas.EXCUSALS_MANAGEMENT_SCHEMA.machineHeaders!;
-      const displayHeaders = Schemas.EXCUSALS_MANAGEMENT_SCHEMA.displayHeaders!;
-      sheet.getRange(1, 1, 1, machineHeaders.length).setValues([machineHeaders]);
-      sheet.getRange(2, 1, 1, displayHeaders.length).setValues([displayHeaders]);
-
-      const rowData = [
-        excusalRow['submitted_at'] || '',
-        '', // Decision column starts empty
-        excusalRow['event'] || '',
-        excusalRow['reason'] || '',
-        excusalRow['requested_outcome'] || '',
-        excusalRow['email'] || '',
-        excusalRow['last_name'] || '',
-        excusalRow['first_name'] || '',
-        excusalRow['flight'] || '',
-        excusalRow['request_id'] || '',
-      ];
-
-      sheet.getRange(nextRow, 1, 1, rowData.length).setValues([rowData]);
-      const typeColumn = machineHeaders.indexOf('requested_outcome') + 1;
-      if (typeColumn > 0) sheet.getRange(nextRow, typeColumn).setHorizontalAlignment('center');
-
-      // Sort by Timestamp (descending), then extend the native table and validation.
-      // Protections are restored even if the presentation API is temporarily unavailable.
-      trimAndSortManagementSheet(sheet);
+      // Retrying after a presentation failure keeps the saved row/decision and
+      // completes presentation/protections without a second insert.
       try {
         ensureManagementPresentation(ss);
       } finally {
         applyManagementSheetProtections(ss);
       }
-
-      Log.info(`Synced excusal ${excusalRow['request_id']} to ${squadron} management sheet`);
-    } catch (err) {
-      Log.warn(`Failed to sync excusal to management panel: ${err}`);
-    }
+      Log.info(`Synced excusal ${requestId} to ${squadron} management sheet`);
+    });
   }
 
   function mirrorDecisionToManagementPanel(requestId: string, decision: string) {
@@ -892,25 +928,13 @@ SHAMROCK Automations`;
   function trimAndSortManagementSheet(sheet: GoogleAppsScript.Spreadsheet.Sheet) {
     const lastRow = sheet.getLastRow();
     const lastColumn = sheet.getLastColumn();
-
-    // Only sort and trim if there's any rows present
-    if (lastRow >= 2) {
-      const dataRange = sheet.getRange(3, 1, Math.max(1, lastRow - 2), lastColumn);
-      const dataRows = lastRow >= 3
-        ? dataRange.getValues().filter((row) => row.some((cell) => cell !== '' && cell !== null && cell !== undefined))
-        : [];
-
-      // Sort data rows by timestamp descending (col 1)
-      dataRows.sort((a: any[], b: any[]) => {
-        const timeA = new Date(a[0] || '').getTime();
-        const timeB = new Date(b[0] || '').getTime();
-        return timeB - timeA; // Descending (latest first)
-      });
-
-      dataRange.clearContent();
-      if (dataRows.length) sheet.getRange(3, 1, dataRows.length, lastColumn).setValues(dataRows);
-
-    }
+    if (lastRow < 3) return;
+    const headers = sheet.getRange(1, 1, 1, lastColumn).getValues()[0].map(value => String(value || '').trim());
+    const timestamp = headers.indexOf('timestamp');
+    if (timestamp < 0 || headers.lastIndexOf('timestamp') !== timestamp) throw new Error('The review sheet timestamp header is missing or ambiguous.');
+    // Native sorting moves the current complete rows atomically. Clearing and
+    // rewriting a captured array could erase a commander edit made meanwhile.
+    sheet.getRange(3, 1, lastRow - 2, lastColumn).sort({ column: timestamp + 1, ascending: false });
   }
 
   /**
@@ -1066,7 +1090,6 @@ SHAMROCK Automations`;
           source: 'ExcusalsService.handleExcusalsBackendEdit',
           managementSheet: '',
           notifyCadet: true,
-          forceApply: true,
           previousDecision: singleCellEdit ? previousDecision : '',
         });
         if (result !== 'updated') return;
@@ -1142,25 +1165,7 @@ SHAMROCK Automations`;
     }
 
     const headers = backendSheet.getRange(1, 1, 1, backendSheet.getLastColumn()).getValues()[0].map((h) => String(h || '').trim());
-    const schemaHeaders = Schemas.getTabSchema('Excusals Backend')?.machineHeaders || [];
-    const headerName = (name: string) => (schemaHeaders.includes(name) ? name : name); // prefer schema names
-    const idx = {
-      request: headers.indexOf(headerName('request_id')),
-      decision: headers.indexOf(headerName('decision')),
-      status: headers.indexOf(headerName('status')),
-      decidedBy: headers.indexOf(headerName('decided_by')),
-      decidedAt: headers.indexOf(headerName('decided_at')),
-      lastUpdated: headers.indexOf(headerName('last_updated_at')),
-      event: headers.indexOf(headerName('event')),
-      email: headers.indexOf(headerName('email')),
-      last: headers.indexOf(headerName('last_name')),
-      first: headers.indexOf(headerName('first_name')),
-      squadron: headers.indexOf(headerName('squadron')),
-      reason: headers.indexOf(headerName('reason')),
-      requestedOutcome: headers.indexOf(headerName('requested_outcome')),
-      priorAttendanceCode: headers.indexOf(headerName('prior_attendance_code')),
-      attendanceEffect: headers.indexOf(headerName('attendance_effect')),
-    };
+    const idx = excusalsBackendIndexes(headers);
 
     if (idx.request < 0) return;
 
@@ -1199,7 +1204,7 @@ SHAMROCK Automations`;
     }
   }
 
-  type ManagementDecisionResult = 'updated' | 'unchanged' | 'missing';
+  type ManagementDecisionResult = 'updated' | 'unchanged' | 'missing' | 'review';
 
   function excusalsBackendIndexes(headers: string[]): Record<string, number> {
     return {
@@ -1234,10 +1239,13 @@ SHAMROCK Automations`;
     source: string;
     managementSheet: string;
     notifyCadet: boolean;
-    forceApply?: boolean;
+    deferAttendanceEffects?: boolean;
+    repairLogState?: Map<string, EffectiveAttendanceState>;
     previousDecision?: string;
   }): ManagementDecisionResult {
-    const targetRow = opts.data.findIndex((row) => String(row[opts.idx.request] || '').trim() === opts.requestId);
+    const matches = opts.data.map((row, index) => String(row[opts.idx.request] || '').trim() === opts.requestId ? index : -1).filter(index => index >= 0);
+    if (matches.length > 1) throw new Error('Excusal request identity is ambiguous. No decision was applied.');
+    const targetRow = matches.length ? matches[0] : -1;
     if (targetRow < 0) {
       Log.warn(`Request ${opts.requestId} not found in Excusals Backend; cannot mirror decision`);
       return 'missing';
@@ -1247,7 +1255,22 @@ SHAMROCK Automations`;
       ? String(opts.data[targetRow][opts.idx.decision] || '').trim()
       : '';
     const oldDecision = opts.previousDecision !== undefined ? opts.previousDecision : storedDecision;
-    if (!opts.forceApply && storedDecision === opts.decision) return 'unchanged';
+    const recordedStatus = opts.idx.status >= 0 ? String(opts.data[targetRow][opts.idx.status] || '').trim() : '';
+    const recordedAt = opts.idx.decidedAt >= 0 ? opts.data[targetRow][opts.idx.decidedAt] : '';
+    const recorded = storedDecision === opts.decision && (
+      recordedStatus === opts.decision && !!recordedAt && Number.isFinite(new Date(recordedAt).getTime())
+    );
+    if (recorded) {
+      if (opts.deferAttendanceEffects) return 'unchanged';
+      // Metadata may have committed before a failed append/mirror. Repeating
+      // that decision heals effects without inventing a new decision time or
+      // sending a second decision email.
+      const repaired = repairAuthoritativeAttendanceEffects({
+        backendSheet: opts.backendSheet, data: opts.data, idx: opts.idx,
+        requestIds: new Set([opts.requestId]),
+      });
+      return repaired.repaired || repaired.metadataRepaired || repaired.projected ? 'updated' : 'unchanged';
+    }
 
     const rowNumber = targetRow + 3;
     const nowIso = new Date().toISOString();
@@ -1262,6 +1285,16 @@ SHAMROCK Automations`;
     const reason = value(opts.idx.reason);
     const requestedOutcome = value(opts.idx.requestedOutcome, 'E');
     const priorAttendanceCode = value(opts.idx.priorAttendanceCode);
+    const latest = opts.repairLogState?.get(attendanceStateKey(eventName, lastName, firstName));
+    if (opts.deferAttendanceEffects && latest && latest.code !== 'R') {
+      // A management dropdown has no original decision timestamp. Replaying it
+      // as a new decision could erase an intervening attendance report/clear.
+      // Require evidence rather than inventing that ordering during repair.
+      AuditService.log({ action: 'excusal_decision_repair_review_required', result: 'ok', role: 'admin_repair',
+        targetSheet: 'Excusals Backend', targetKey: opts.requestId, requestId: opts.requestId, source: opts.source,
+        metadata: { reason: 'Original decision time is unknown and attendance is no longer pending.' } });
+      return 'review';
+    }
     const attendanceEffect = effectForDecision({
       decision: opts.decision,
       requestedOutcome,
@@ -1276,14 +1309,16 @@ SHAMROCK Automations`;
       opts.backendSheet.getRange(rowNumber, index + 1).setValue(cellValue);
       opts.data[targetRow][index] = cellValue;
     };
-    setValue(opts.idx.status, opts.decision);
     setValue(opts.idx.decision, opts.decision);
     setValue(opts.idx.decidedBy, opts.actorEmail);
     setValue(opts.idx.decidedAt, nowIso);
     setValue(opts.idx.lastUpdated, nowIso);
     setValue(opts.idx.attendanceEffect, attendanceEffect);
+    // Status is the final metadata checkpoint. A partial metadata write must
+    // not be mistaken for a completely recorded decision on retry.
+    setValue(opts.idx.status, opts.decision);
 
-    updateAttendanceOnExcusalDecision({
+    const appended = !opts.deferAttendanceEffects && updateAttendanceOnExcusalDecision({
       lastName,
       firstName,
       eventName,
@@ -1292,9 +1327,10 @@ SHAMROCK Automations`;
       priorAttendanceCode,
       attendanceEffect,
       requestId: opts.requestId,
+      decisionAt: nowIso,
     });
 
-    if (opts.notifyCadet) {
+    if (opts.notifyCadet && appended) {
       sendExcusalDecisionEmail({
         cadetEmail,
         cadetFirstName: firstName,
@@ -1362,27 +1398,53 @@ SHAMROCK Automations`;
     code: string;
     timestamp: number;
     submissionId: string;
+    position: number;
   }
 
-  function readEffectiveAttendanceLogState(): Map<string, EffectiveAttendanceState> {
+  function readAttendanceLogState(): { state: Map<string, EffectiveAttendanceState>; receiptIds: Set<string>; history: Map<string, EffectiveAttendanceState[]> } {
     const state = new Map<string, EffectiveAttendanceState>();
+    const receiptIds = new Set<string>();
+    const history = new Map<string, EffectiveAttendanceState[]>();
     const sheet = SheetUtils.getSheet(Config.getBackendId(), 'Attendance Backend');
-    if (!sheet || sheet.getLastRow() < 3) return state;
+    if (!sheet) throw new Error('Attendance Backend is unavailable. No excusal effect was applied.');
+    if (sheet.getLastRow() < 3) return { state, receiptIds, history };
     const table = SheetUtils.readTable(sheet);
-    table.rows.forEach((row) => {
+    table.rows.forEach((row, position) => {
+      const submissionId = String(row['submission_id'] || '');
+      if (submissionId) receiptIds.add(submissionId);
       const eventName = String(row['event'] || '').trim();
       if (!eventName) return;
       const code = normalizeAttendanceCode(row['attendance_type']);
       const timestamp = new Date(row['submitted_at']).getTime();
       attendanceLogCadets(row['cadets']).forEach((cadet) => {
-        state.set(attendanceStateKey(eventName, cadet.last, cadet.first), {
+        const key = attendanceStateKey(eventName, cadet.last, cadet.first);
+        const entry = {
           code,
           timestamp: Number.isFinite(timestamp) ? timestamp : 0,
-          submissionId: String(row['submission_id'] || ''),
-        });
+          submissionId,
+          position,
+        };
+        state.set(key, entry);
+        const entries = history.get(key) || [];
+        entries.push(entry);
+        history.set(key, entries);
       });
     });
-    return state;
+    return { state, receiptIds, history };
+  }
+
+  function decisionLogEntry(opts: {
+    requestId: string; decision: string; decisionAt: number; code: string;
+    eventName: string; lastName: string; firstName: string; afterPosition?: number;
+  }): Record<string, any> {
+    if (!/^[A-Za-z0-9_-]{1,120}$/.test(opts.requestId) || !Number.isFinite(opts.decisionAt)) {
+      throw new Error('Excusal decision identity or date is invalid. Review the request before retrying.');
+    }
+    return {
+      submission_id: `excusal-decision-${opts.requestId}-${opts.decisionAt}-${opts.decision}-${opts.code || 'clear'}${opts.afterPosition === undefined ? '' : `-after-${opts.afterPosition}`}`,
+      submitted_at: new Date(), event: opts.eventName, attendance_type: opts.code,
+      email: 'excusal-decision', name: 'Excusal Decision', flight: '', cadets: `${opts.lastName}, ${opts.firstName}`,
+    };
   }
 
   function decisionTimestamp(dataRow: any[], idx: Record<string, number>, rowIndex: number): number {
@@ -1398,8 +1460,9 @@ SHAMROCK Automations`;
     backendSheet: GoogleAppsScript.Spreadsheet.Sheet;
     data: any[][];
     idx: Record<string, number>;
-  }): { checked: number; repaired: number; metadataRepaired: number; preserved: number } {
-    const effectiveLogState = readEffectiveAttendanceLogState();
+    requestIds?: Set<string>;
+  }): { checked: number; repaired: number; metadataRepaired: number; preserved: number; projected: number; conflicts: number; skipped: number } {
+    const { state: effectiveLogState, history } = readAttendanceLogState();
     const finalByCadetEvent = new Map<string, {
       rowIndex: number;
       timestamp: number;
@@ -1431,7 +1494,7 @@ SHAMROCK Automations`;
         currentAttendanceCode: effectiveLogState.get(key)?.code || '',
         eventName,
       });
-      if (opts.idx.attendanceEffect >= 0 && value(opts.idx.attendanceEffect) !== expectedEffect) {
+      if ((!opts.requestIds || opts.requestIds.has(value(opts.idx.request))) && opts.idx.attendanceEffect >= 0 && value(opts.idx.attendanceEffect) !== expectedEffect) {
         opts.backendSheet.getRange(rowIndex + 3, opts.idx.attendanceEffect + 1).setValue(expectedEffect);
         row[opts.idx.attendanceEffect] = expectedEffect;
         metadataRepaired++;
@@ -1456,15 +1519,47 @@ SHAMROCK Automations`;
       }
     });
 
-    let repaired = 0;
+    // Historical decisions remain in the request log after events or cadets
+    // leave the current matrix. They must not recreate removed event columns.
+    const matrix = SheetUtils.getSheet(Config.getBackendId(), 'Attendance Matrix Backend');
+    const events = SheetUtils.getSheet(Config.getBackendId(), 'Events Backend');
+    if (!matrix || !events) throw new Error('Attendance matrix or Events Backend is unavailable.');
+    const matrixTable = SheetUtils.readTable(matrix);
+    const currentIdentities = new Set(matrixTable.rows.map(row => attendanceStateKey('', row['last_name'], row['first_name'])));
+    const activeEvents = new Set(SheetUtils.readTable(events).rows.filter(row =>
+      !['cancelled', 'canceled', 'inactive', 'archived', 'n/a'].includes(String(row['status'] || '').trim().toLowerCase()),
+    ).map(row => String(row['display_name'] || row['attendance_column_label'] || row['event_id'] || '').trim()));
+    const corrections: Record<string, any>[] = [];
+    const projections: Record<string, any>[] = [];
+    const audits: Array<() => void> = [];
     let preserved = 0;
+    let checked = 0;
+    let skipped = 0;
     finalByCadetEvent.forEach((candidate, key) => {
+      if (opts.requestIds && !opts.requestIds.has(candidate.requestId)) return;
+      checked++;
+      if (!activeEvents.has(candidate.eventName) || !matrixTable.headers.includes(candidate.eventName)
+        || !currentIdentities.has(attendanceStateKey('', candidate.lastName, candidate.firstName))) {
+        skipped++;
+        return;
+      }
       const effective = effectiveLogState.get(key);
       // Reconciliation repairs a missing decision effect; it must not roll back
       // a later attendance report, manual correction, or newly pending request.
       const sameDecisionLog = effective?.submissionId.startsWith(`excusal-decision-${candidate.requestId}-`);
-      if (effective && effective.timestamp > candidate.timestamp && !sameDecisionLog) {
+      const samePendingLog = effective?.submissionId === `excusal-request-${candidate.requestId}`;
+      const decisionPosition = (history.get(key) || []).reduce((position, entry) =>
+        entry.submissionId.startsWith(`excusal-decision-${candidate.requestId}-`)
+          && (entry.timestamp >= candidate.timestamp || entry.submissionId.startsWith(`excusal-decision-${candidate.requestId}-${candidate.timestamp}-${candidate.decision}-`))
+          ? Math.max(position, entry.position) : position, -1);
+      const laterIndependent = effective && (!effective.timestamp || effective.timestamp > candidate.timestamp
+        || (decisionPosition >= 0 && effective.position > decisionPosition));
+      if (effective && laterIndependent && !sameDecisionLog && !samePendingLog) {
         preserved++;
+        // A newer independent value remains authoritative, including a clear.
+        // Repair only stale pending projections of that value, never replay the
+        // older decision over the newer log entry.
+        projections.push({ event: candidate.eventName, attendance_type: effective.code, cadets: `${candidate.lastName}, ${candidate.firstName}` });
         return;
       }
       const expectedEffect = effectForDecision({
@@ -1474,18 +1569,10 @@ SHAMROCK Automations`;
         currentAttendanceCode: effective?.code || '',
         eventName: candidate.eventName,
       });
-      if ((effective?.code || '') === expectedEffect) return;
-      updateAttendanceOnExcusalDecision({
-        lastName: candidate.lastName,
-        firstName: candidate.firstName,
-        eventName: candidate.eventName,
-        decision: candidate.decision,
-        requestedOutcome: candidate.requestedOutcome,
-        priorAttendanceCode: candidate.priorAttendanceCode,
-        attendanceEffect: expectedEffect,
-        requestId: candidate.requestId,
-      });
-      AuditService.log({
+      projections.push({ event: candidate.eventName, attendance_type: expectedEffect, cadets: `${candidate.lastName}, ${candidate.firstName}` });
+      if (effective && effective.code === expectedEffect) return;
+      corrections.push(decisionLogEntry({ ...candidate, decisionAt: candidate.timestamp, code: expectedEffect, afterPosition: effective?.position ?? -1 }));
+      audits.push(() => AuditService.log({
         action: 'excusal_attendance_repaired',
         result: 'ok',
         role: 'admin_repair',
@@ -1498,12 +1585,22 @@ SHAMROCK Automations`;
         newValue: expectedEffect,
         source: 'ExcusalsService.reconcileManagementDecisions',
         metadata: { event: candidate.eventName, decision: candidate.decision },
-      });
-      effectiveLogState.set(key, { code: expectedEffect, timestamp: Date.now(), submissionId: '' });
-      repaired++;
+      }));
     });
-
-    return { checked: finalByCadetEvent.size, repaired, metadataRepaired, preserved };
+    const batches = projections.length ? AttendanceService.prepareAttendanceProjections(projections, { frontendPendingOnly: true }) : [];
+    const projected = batches.reduce((count, batch) => count + batch.updates.reduce((n, update) => n + update.values.length, 0), 0);
+    const conflicts = batches.reduce((count, batch) => count + batch.conflicts, 0);
+    // Preflight all targets once, persist all missing effects once, then mirror
+    // sparse cells. A failed mirror is repaired from the saved log on retry.
+    appendAttendanceLogs(corrections);
+    AttendanceService.applyPreparedAttendanceProjections(batches);
+    audits.forEach(audit => audit());
+    if (projected || conflicts || skipped) AuditService.log({
+      action: 'excusal_attendance_projections_reconciled', result: 'ok', role: 'admin_repair',
+      targetSheet: 'Attendance', source: 'ExcusalsService.reconcileManagementDecisions',
+      metadata: { projectedCells: projected, preservedFrontendCells: conflicts, skippedHistoricalTargets: skipped },
+    });
+    return { checked, repaired: corrections.length, metadataRepaired, preserved, projected, conflicts, skipped };
   }
 
   /**
@@ -1516,10 +1613,14 @@ SHAMROCK Automations`;
     scanned: number;
     repaired: number;
     missing: number;
+    reviewRequired: number;
     attendanceChecked: number;
     attendanceRepaired: number;
     metadataRepaired: number;
     attendancePreserved: number;
+    attendanceProjected: number;
+    attendanceConflicts: number;
+    attendanceSkipped: number;
   } {
     const lock = LockService.getScriptLock();
     lock.waitLock(120000);
@@ -1557,6 +1658,8 @@ SHAMROCK Automations`;
     let scanned = 0;
     let repaired = 0;
     let missing = 0;
+    let reviewRequired = 0;
+    const repairLogState = readAttendanceLogState().state;
     const sheets = management.getSheets().filter((sheet) => Arrays.OPERATIONAL_SQUADRONS.includes(sheet.getName()));
 
     sheets.forEach((sheet, sheetIndex) => {
@@ -1587,29 +1690,37 @@ SHAMROCK Automations`;
           source: 'ExcusalsService.reconcileManagementDecisions',
           managementSheet: sheet.getName(),
           notifyCadet: false,
+          deferAttendanceEffects: true,
+          repairLogState,
         });
         if (result === 'updated') repaired++;
         if (result === 'missing') missing++;
+        if (result === 'review') reviewRequired++;
       });
     });
 
     const attendance = repairAuthoritativeAttendanceEffects({ backendSheet, data, idx });
-    if (repaired > 0 || attendance.repaired > 0 || attendance.metadataRepaired > 0) {
+    if (repaired > 0 || attendance.repaired > 0 || attendance.metadataRepaired > 0 || attendance.projected > 0) {
       repairAttendancePresentation();
     }
     Log.info(
-      `Reconciled excusal decisions: managementScanned=${scanned}, managementRepaired=${repaired}, missing=${missing} `
+      `Reconciled excusal decisions: managementScanned=${scanned}, managementRepaired=${repaired}, missing=${missing}, reviewRequired=${reviewRequired} `
       + `attendanceChecked=${attendance.checked}, attendanceRepaired=${attendance.repaired} `
-      + `metadataRepaired=${attendance.metadataRepaired}, attendancePreserved=${attendance.preserved}`,
+      + `metadataRepaired=${attendance.metadataRepaired}, attendancePreserved=${attendance.preserved} `
+      + `attendanceProjected=${attendance.projected}, attendanceConflicts=${attendance.conflicts}, attendanceSkipped=${attendance.skipped}`,
     );
     return {
       scanned,
       repaired,
       missing,
+      reviewRequired,
       attendanceChecked: attendance.checked,
       attendanceRepaired: attendance.repaired,
       metadataRepaired: attendance.metadataRepaired,
       attendancePreserved: attendance.preserved,
+      attendanceProjected: attendance.projected,
+      attendanceConflicts: attendance.conflicts,
+      attendanceSkipped: attendance.skipped,
     };
     } finally {
       try { SpreadsheetApp.flush(); } finally { lock.releaseLock(); }
@@ -1653,30 +1764,26 @@ SHAMROCK Automations`;
     requestedOutcome?: string;
     priorAttendanceCode?: string;
     attendanceEffect?: string;
-    requestId?: string;
-  }) {
-    const code = opts.attendanceEffect ?? effectForDecision({
-      decision: opts.decision,
-      requestedOutcome: opts.requestedOutcome || 'E',
-      priorAttendanceCode: opts.priorAttendanceCode || '',
-      currentAttendanceCode: lookupMatrixValue(opts.eventName, opts.lastName, opts.firstName),
-      eventName: opts.eventName,
+    requestId: string;
+    decisionAt: string;
+  }): boolean {
+    return AttendanceService.withWriteLock(() => {
+      const code = opts.attendanceEffect ?? effectForDecision({
+        decision: opts.decision,
+        requestedOutcome: opts.requestedOutcome || 'E',
+        priorAttendanceCode: opts.priorAttendanceCode || '',
+        currentAttendanceCode: lookupMatrixValue(opts.eventName, opts.lastName, opts.firstName),
+        eventName: opts.eventName,
+      });
+
+      const logEntry = decisionLogEntry({ ...opts, decisionAt: new Date(opts.decisionAt).getTime(), code });
+      const log = readAttendanceLogState();
+      if (log.receiptIds.has(logEntry.submission_id)) return false;
+      const projections = AttendanceService.prepareAttendanceProjections([logEntry]);
+      appendAttendanceLogs([logEntry]);
+      AttendanceService.applyPreparedAttendanceProjections(projections);
+      return true;
     });
-
-    const safeRequestId = String(opts.requestId || '').replace(/[^A-Za-z0-9_-]+/g, '').slice(0, 80);
-    const logEntry = {
-      submission_id: `excusal-decision-${safeRequestId ? `${safeRequestId}-` : ''}${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-      submitted_at: new Date(),
-      event: opts.eventName,
-      attendance_type: code,
-      email: 'excusal-decision',
-      name: 'Excusal Decision',
-      flight: '',
-      cadets: `${opts.lastName}, ${opts.firstName}`,
-    };
-
-    appendAttendanceLogs([logEntry]);
-    AttendanceService.applyAttendanceLogEntry(logEntry);
   }
 
   /**
@@ -1761,10 +1868,13 @@ C/${commanderLastName}`;
   function appendAttendanceLogs(logs: Record<string, any>[]) {
     if (!logs.length) return;
     const backendId = Config.getBackendId();
-    if (!backendId) return;
+    if (!backendId) throw new Error('Backend workbook is not configured. No excusal attendance was saved.');
     const sheet = SheetUtils.getSheet(backendId, 'Attendance Backend');
-    if (!sheet) return;
+    if (!sheet) throw new Error('Attendance Backend is unavailable. No excusal attendance was saved.');
     SheetUtils.appendRows(sheet, logs);
+    // Apps Script buffers SpreadsheetApp writes. Confirm the durable log before
+    // any Sheets API projection request, including inside an already-held lock.
+    SpreadsheetApp.flush();
   }
 
   // Helper: lookup current matrix value for a cadet/event (backend matrix)

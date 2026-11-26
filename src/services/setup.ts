@@ -1299,258 +1299,95 @@ namespace SetupService {
    * inserted into Attendance Backend yet (backfill for new multi-category form structure).
    */
   export function processAttendanceFormBacklog(): { appended: number; repaired: number } {
-    try {
-      const respSheet = Config.getBackendSheet(Config.RESOURCE_NAMES.ATTENDANCE_FORM_SHEET);
-      const lastCol = respSheet.getLastColumn();
-      const lastRow = respSheet.getLastRow();
-      if (lastCol === 0 || lastRow < 2) {
-        Log.info('No attendance form responses found; nothing to backfill.');
-        return { appended: 0, repaired: 0 };
-      }
-
-      const headers = respSheet.getRange(1, 1, 1, lastCol).getValues()[0].map((h) => String(h || '').trim());
-
-      // Find column indices
-      const tsIdx = headers.indexOf('Timestamp');
-      const emailIdx = headers.findIndex((h) => h.toLowerCase().includes('email'));
-      const nameIdx = headers.findIndex((h) => h.toLowerCase() === 'name');
-      const eventTypeIdx = headers.findIndex((h) => h.toLowerCase() === 'event type');
-      const flightCrosstownIdx = headers.findIndex((h) => h.toLowerCase().includes('flight') && h.toLowerCase().includes('crosstown'));
-
-      // Find all "Select Event" columns (but exclude any that contain "Cadets" to avoid confusion)
-      const selectEventIndices: number[] = [];
-      headers.forEach((h, idx) => {
-        const lower = h.toLowerCase();
-        if (lower.includes('select event') && !lower.includes('cadet')) {
-          selectEventIndices.push(idx);
-        }
-      });
-
-      // Find all canonical cadet checkbox columns, including legacy duplicated-AS titles.
-      const cadetColumnIndices: Array<{ idx: number; title: string }> = [];
-      headers.forEach((h, idx) => {
-        if (FormService.isAttendanceCadetQuestionTitle(h)) {
-          cadetColumnIndices.push({ idx, title: h });
-        }
-      });
-
-      if (selectEventIndices.length === 0) {
-        throw new Error('Attendance responses missing "Select Event" columns; cannot backfill.');
-      }
-
-      Log.info(`Found ${selectEventIndices.length} "Select Event" columns and ${cadetColumnIndices.length} cadet columns`);
-      Log.info(`Email col: ${emailIdx}, Name col: ${nameIdx}, Flight col: ${flightCrosstownIdx}`);
-
-      // Index Attendance Backend rows so existing blank log entries can be repaired
-      // without appending duplicates.
-      const backendSheet = Config.getBackendSheet('Attendance Backend');
-      const backend = SheetUtils.readTable(backendSheet);
-      const existingByKey = new Map<string, { rowNumber: number; cadets: string }>();
-      backend.rows.forEach((row, idx) => {
-        const e = String(row['email'] || '').toLowerCase().trim();
-        const ev = String(row['event'] || '').trim();
-        const ts = String(row['submitted_at'] || '').trim();
-        if (e && ev && ts) {
-          existingByKey.set(`${e}|${ev}|${ts}`, {
-            rowNumber: idx + 3,
-            cadets: String(row['cadets'] || '').trim(),
-          });
-        }
-      });
-
-      // Helper: normalize cadet list from response value
-      const normalizeCadetList = (val: any): string[] => {
-        if (!val) return [];
-        const s = String(val).trim();
-        if (!s) return [];
-        if (s.includes(';')) {
-          return s.split(';').map((n) => n.trim()).filter(Boolean);
-        }
-
-        // Linked response sheets serialize checkbox choices with commas even though
-        // each choice is itself "Last, First". Reconstruct those name pairs.
-        const parts = s.split(',').map((part) => part.trim()).filter(Boolean);
-        const names: string[] = [];
-        for (let idx = 0; idx + 1 < parts.length; idx += 2) {
-          names.push(`${parts[idx]}, ${parts[idx + 1]}`);
-        }
-        return names;
+    return AttendanceService.withWriteLock(() => {
+      const responseSheet = Config.getBackendSheet(Config.RESOURCE_NAMES.ATTENDANCE_FORM_SHEET);
+      const width = responseSheet.getLastColumn(), height = responseSheet.getLastRow();
+      if (!width || height < 2) return { appended: 0, repaired: 0 };
+      const headers = responseSheet.getRange(1, 1, 1, width).getValues()[0].map(value => String(value || '').trim());
+      const timestampIndex = headers.indexOf('Timestamp');
+      const emailIndex = headers.findIndex(header => /^email/i.test(header));
+      const nameIndex = headers.indexOf('Name');
+      const flightIndex = headers.findIndex(header => /flight.*crosstown/i.test(header));
+      const eventIndexes = headers.map((header, index) => /^Select Event(?:\(s\))?\s*\(/i.test(header) ? index : -1).filter(index => index >= 0);
+      const cadetIndexes = headers.map((header, index) => FormService.isAttendanceCadetQuestionTitle(header) ? index : -1).filter(index => index >= 0);
+      if (timestampIndex < 0 || emailIndex < 0 || !eventIndexes.length)
+        throw new Error('Attendance response headers are incomplete; no records were changed.');
+      const normalizedTime = (value: any): string => {
+        if (value === '' || value === null || value === undefined) return '';
+        const timestamp = new Date(value).getTime();
+        return Number.isFinite(timestamp) ? new Date(timestamp).toISOString() : '';
       };
-
-      // Helper: lookup cadet by email for flight/squadron info
-      const lookupCadetByEmail = (addr: string) => {
-        const backendId = Config.getBackendId();
-        if (!backendId || !addr) return null;
-        const directorySheet = SheetUtils.getSheet(backendId, 'Directory Backend');
-        if (!directorySheet) return null;
-        const data = SheetUtils.readTable(directorySheet);
-        const lower = addr.toLowerCase();
-        return data.rows.find((r) => String(r['email'] || '').toLowerCase() === lower) || null;
+      const key = (row: Record<string, any>) => JSON.stringify([
+        String(row.email || '').trim().toLowerCase(), String(row.event || '').trim(), normalizedTime(row.submitted_at),
+      ]);
+      const cadetList = (value: any): string[] => {
+        const raw = String(value || '').trim();
+        if (!raw) return [];
+        if (raw.includes(';')) return raw.split(';').map(name => name.trim()).filter(Boolean);
+        const parts = raw.split(',').map(part => part.trim());
+        if (parts.length % 2 || parts.some(part => !part))
+          throw new Error('An attendance response has an ambiguous cadet list. Review the native Form response before importing it.');
+        return parts.reduce<string[]>((names, part, index) => index % 2 ? [...names, `${parts[index - 1]}, ${part}`] : names, []);
       };
-
-      const toAppend: Record<string, any>[] = [];
-      const toRepair: Array<{ rowNumber: number; cadets: string }> = [];
-      const logEntries: Array<{ event: string; attendance_type: string; cadets: string }> = [];
-
-      const values = respSheet.getRange(2, 1, lastRow - 1, lastCol).getValues();
-      let rowNum = 2; // Starting row number for logging
-      values.forEach((row) => {
-        const email = emailIdx >= 0 ? String(row[emailIdx] || '').trim() : '';
-        const name = nameIdx >= 0 ? String(row[nameIdx] || '').trim() : '';
-        const flightCrosstown = flightCrosstownIdx >= 0 ? String(row[flightCrosstownIdx] || '').trim() : '';
-        const tsVal = tsIdx >= 0 ? row[tsIdx] : '';
-        const submittedAt = (() => {
-          try { return new Date(tsVal).toISOString(); } catch { return new Date().toISOString(); }
-        })();
-
-        // Collect all selected events from "Select Event" columns
-        const selectedEvents: string[] = [];
-        selectEventIndices.forEach((idx) => {
-          const val = String(row[idx] || '').trim();
-          if (val) {
-            // Events should be single values, not semicolon-separated lists
-            // If we see semicolons, it's likely cadet names incorrectly in an event column
-            if (val.includes(';')) {
-              Log.warn(`Row ${rowNum}: "Select Event" column ${idx} contains suspicious value (looks like cadet list): "${val.substring(0, 50)}"`);
-            } else {
-              // Single event name
-              if (!selectedEvents.includes(val)) {
-                selectedEvents.push(val);
-              }
-            }
-          }
+      const normalizeCadets = (value: any) => Array.from(new Set(cadetList(value)
+        .map(name => name.replace(/\(AS[^)]*\)/gi, '').trim().toLowerCase()))).sort().join(';');
+      const backend = SheetUtils.readTable(Config.getBackendSheet('Attendance Backend'));
+      const events = SheetUtils.readTable(Config.getBackendSheet('Events Backend')).rows;
+      const activeEvents = new Map<string, Record<string, any>>();
+      events.forEach(event => {
+        const label = String(event.display_name || event.attendance_column_label || event.event_id || '').trim();
+        if (!label || /third\s*hour|thirdhour/i.test(`${event.event_type || ''} ${label}`)
+          || /^(cancelled|canceled|inactive|archived|n\/a)$/i.test(String(event.status || '').trim())) return;
+        if (activeEvents.has(label)) throw new Error('Current event labels are ambiguous; no response repair was started.');
+        activeEvents.set(label, event);
+      });
+      const directory = SheetUtils.readTable(Config.getBackendSheet('Directory Backend')).rows;
+      const entries = new Map<string, Record<string, any>>();
+      let skipped = 0;
+      responseSheet.getRange(2, 1, height - 1, width).getValues().forEach(row => {
+        const selected = Array.from(new Set(eventIndexes.map(index => String(row[index] || '').trim()).filter(Boolean)));
+        selected.forEach(event => {
+          if (!activeEvents.has(event)) { skipped++; return; }
+          const email = String(row[emailIndex] || '').trim().toLowerCase();
+          const submittedAt = normalizedTime(row[timestampIndex]);
+          if (!email || !submittedAt) throw new Error('An attendance response is missing its verified email or timestamp. No records were changed.');
+          const type = String(activeEvents.get(event)!['event_type'] || '').toLowerCase();
+          const branch = type.includes('llab') ? '(llab)' : type.includes('mando') ? '(mando)' : type.includes('secondary') ? '(secondary)' : '(all)';
+          const cadets = Array.from(new Set(cadetIndexes.filter(index => headers[index].toLowerCase().includes(branch)).flatMap(index => cadetList(row[index]))));
+          const digest = Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256,
+            JSON.stringify(['response-sheet', responseSheet.getParent().getId(), responseSheet.getSheetId(), email, submittedAt, event]), Utilities.Charset.UTF_8);
+          const submissionId = `att-form-${digest.map(byte => (byte & 255).toString(16).padStart(2, '0')).join('')}`;
+          const existing = entries.get(submissionId);
+          const entry = { submission_id: submissionId, submitted_at: submittedAt, event, attendance_type: 'P', email,
+            name: nameIndex >= 0 ? String(row[nameIndex] || '').trim() : '',
+            flight: branch === '(secondary)' ? 'Secondary' : branch === '(all)' ? 'Other'
+              : (flightIndex >= 0 ? String(row[flightIndex] || '').trim() : '')
+                || directory.find(cadet => String(cadet.email || '').trim().toLowerCase() === email)?.flight || '',
+            cadets: cadets.join('; ') };
+          if (existing && normalizeCadets(existing.cadets) !== normalizeCadets(entry.cadets))
+            throw new Error('Duplicate attendance response identities disagree. Review the raw responses before importing them.');
+          entries.set(submissionId, entry);
         });
-
-        for (let i = selectedEvents.length - 1; i >= 0; i--) {
-          const normalized = selectedEvents[i].toLowerCase();
-          if (!normalized.includes('third hour') && !normalized.includes('thirdhour')) continue;
-          selectedEvents.splice(i, 1);
-        }
-
-        if (selectedEvents.length === 0) {
-          rowNum++;
-          return;
-        }
-
-        // For each selected event, determine event type and collect relevant cadets
-        selectedEvents.forEach((eventName) => {
-          const key = `${email.toLowerCase()}|${eventName}|${submittedAt}`;
-
-          // Determine event type from event name pattern
-          let eventType = '';
-          if (eventName.includes('LLAB') || eventName.includes('TW-')) {
-            if (eventName.includes('Secondary')) {
-              eventType = 'Secondary';
-            } else if (eventName.includes('LLAB')) {
-              eventType = 'LLAB';
-            } else {
-              eventType = 'Mando';
-            }
-          } else {
-            eventType = 'Other';
-          }
-
-          // Collect relevant cadet selections for this event type
-          const relevantCadets: string[] = [];
-          cadetColumnIndices.forEach(({ idx, title }) => {
-            const titleLower = title.toLowerCase();
-            const matches =
-              (eventType === 'Mando' && titleLower.includes('(mando)')) ||
-              (eventType === 'LLAB' && titleLower.includes('(llab)')) ||
-              (eventType === 'Secondary' && titleLower.includes('(secondary)')) ||
-              (eventType === 'Other' && titleLower.includes('(all)'));
-
-            if (matches) {
-              const cadets = normalizeCadetList(row[idx]);
-              cadets.forEach((c) => {
-                if (!relevantCadets.includes(c)) {
-                  relevantCadets.push(c);
-                }
-              });
-            }
-          });
-
-          const cadetField = relevantCadets.join('; ');
-          const existing = existingByKey.get(key);
-          if (existing) {
-            if (!existing.cadets && cadetField) {
-              toRepair.push({ rowNumber: existing.rowNumber, cadets: cadetField });
-              logEntries.push({ event: eventName, attendance_type: 'P', cadets: cadetField });
-              existing.cadets = cadetField;
-            }
-            return;
-          }
-
-          const cadet = lookupCadetByEmail(email);
-          const submissionId = `att-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
-
-          // Determine flight field based on event type
-          let flightValue = '';
-          if (eventType === 'Mando' || eventType === 'LLAB') {
-            // For Mando/LLAB, use the selected flight (Alpha-Foxtrot, Trine, Valparaiso)
-            flightValue = flightCrosstown || cadet?.flight || '';
-          } else if (eventType === 'Secondary') {
-            flightValue = 'Secondary';
-          } else if (eventType === 'Other') {
-            flightValue = 'Other';
-          }
-
-          const backendRow = {
-            submission_id: submissionId,
-            submitted_at: submittedAt,
-            event: eventName,
-            attendance_type: 'P',
-            email,
-            name,
-            flight: flightValue,
-            cadets: cadetField,
-          };
-
-          toAppend.push(backendRow);
-          existingByKey.set(key, { rowNumber: -1, cadets: cadetField });
-          logEntries.push({
-            event: eventName,
-            attendance_type: 'P',
-            cadets: cadetField,
-          });
-
-          // Log first few entries for debugging
-          if (toAppend.length <= 3) {
-            Log.info(`Row ${rowNum} Event: "${eventName}", Cadets: "${cadetField.substring(0, 50)}", Email: ${email}, Name: ${name}`);
-          }
-        });
-        
-        rowNum++;
       });
-
-      if (!toAppend.length && !toRepair.length) {
-        Log.info('No unprocessed attendance responses found.');
-        return { appended: 0, repaired: 0 };
-      }
-
-      if (toAppend.length) SheetUtils.appendRows(backendSheet, toAppend);
-
-      const cadetsCol = backend.headers.indexOf('cadets') + 1;
-      if (toRepair.length && cadetsCol <= 0) {
-        throw new Error('Attendance Backend is missing the cadets column; cannot repair blank entries.');
-      }
-      toRepair.forEach((repair) => {
-        backendSheet.getRange(repair.rowNumber, cadetsCol).setValue(repair.cadets);
+      const pending = Array.from(entries.values());
+      pending.forEach(entry => {
+        const matching = backend.rows.filter(row => key(row) === key(entry));
+        if (matching.some(row => String(row.attendance_type ?? '').trim() !== 'P'
+          || (String(row.cadets || '').trim() && normalizeCadets(row.cadets) !== normalizeCadets(entry.cadets))))
+          throw new Error('A preserved attendance response disagrees with its existing log payload. Review it before importing records.');
       });
-      
-      // Apply each log entry to update the attendance matrix
-      logEntries.forEach((entry) => {
-        AttendanceService.applyAttendanceLogEntry(entry);
-      });
-
-      applyAttendanceBackendFormatting();
-
-      Log.info(`Processed attendance form backlog: appended ${toAppend.length} event rows, repaired ${toRepair.length} blank cadet lists, updated matrix.`);
-      return { appended: toAppend.length, repaired: toRepair.length };
-    } catch (err) {
-      Log.warn(`Failed to process attendance form backlog: ${err}`);
-      throw err;
-    }
+      // Blank historical receipts stay immutable. A separately appended record
+      // may recover their selected cadets only when no newer record would be lost.
+      const replacements = pending.filter(entry => entry.cadets && backend.rows.some(row => key(row) === key(entry) && !String(row.cadets || '').trim())
+        && !backend.rows.some(row => key(row) === key(entry) && normalizeCadets(row.cadets) === normalizeCadets(entry.cadets))).length;
+      ProgressService.report({ title: 'Saving recoverable attendance',
+        detail: 'Checking saved records and preserving newer decisions before updating affected attendance cells.', percent: 65 });
+      const result = AttendanceService.commitAttendanceFormRows(pending);
+      if (result.conflicts) throw new Error('Saved attendance records were checked, but some frontend edits need review before their projection can be repaired.');
+      if (result.appended) applyAttendanceBackendFormatting();
+      Log.info(`Attendance response repair: appended=${result.appended}, existing=${result.existing}, skippedHistoricalEvents=${skipped}.`);
+      return { appended: result.appended - replacements, repaired: replacements };
+    });
   }
 
     function applyAttendanceBackendFormatting() {

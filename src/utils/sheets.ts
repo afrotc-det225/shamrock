@@ -255,15 +255,27 @@ namespace SheetUtils {
   // Appends rows to the table starting at the first empty row after header rows.
   export function appendRows(sheet: GoogleAppsScript.Spreadsheet.Sheet, rows: Record<string, any>[]) {
     if (!rows.length) return;
-    const headers = restoreHeadersIfMissing(sheet);
-    if (headers.every((h) => !h)) {
-      Log.warn(`appendRows called on ${sheet.getName()} with empty headers; skipping append to avoid data/header loss.`);
-      return;
+    // Allocate rows only while holding the shared writer lock. Concurrent form
+    // and audit handlers must never choose the same getLastRow() + 1 position.
+    const lock = LockService.getScriptLock();
+    const owned = !lock.hasLock();
+    if (owned) lock.waitLock(120000);
+    try {
+      const headers = restoreHeadersIfMissing(sheet);
+      if (!headers.length || headers.every((h) => !h)) {
+        throw new Error('Cannot append records: the destination has no machine headers.');
+      }
+      const startRow = Math.max(3, sheet.getLastRow() + 1);
+      const endRow = startRow + rows.length - 1;
+      const maxRows = sheet.getMaxRows();
+      if (endRow > maxRows) sheet.insertRowsAfter(maxRows, endRow - maxRows);
+      const output = rows.map((r) => headers.map((h) => r[h] ?? ''));
+      sheet.getRange(startRow, 1, output.length, headers.length).setValues(output);
+    } finally {
+      if (owned) {
+        try { SpreadsheetApp.flush(); } finally { lock.releaseLock(); }
+      }
     }
-    const lastCol = headers.length;
-    const startRow = Math.max(3, sheet.getLastRow() + 1);
-    const output = rows.map((r) => headers.map((h) => r[h] ?? ''));
-    sheet.getRange(startRow, 1, output.length, headers.length).setValues(output);
   }
 
   export function lookupRowByEmail(spreadsheetId: string | null, sheetName: string, email: string): Record<string, any> | null {

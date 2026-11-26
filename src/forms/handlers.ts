@@ -134,6 +134,8 @@ namespace FormHandlers {
 			const namedValues = getNamedValues(e);
 			const submittedByEmail = getEmail(e);
 			const submittedAt = formatTimestamp(e.response?.getTimestamp?.() || new Date());
+			const responseId = String(e.response?.getId?.() || '').trim();
+			if (!responseId) throw new Error('Attendance Form response ID is missing; no attendance was committed.');
 
 		// Parse the new multi-category form structure
 		let submittedByName = '';
@@ -295,7 +297,8 @@ namespace FormHandlers {
 			});
 
 			const cadetField = relevantCadets.join('; ');
-			const submissionId = `att-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
+			const digest = Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, JSON.stringify([responseId, eventName.trim()]), Utilities.Charset.UTF_8);
+			const submissionId = `att-form-${digest.map(byte => (byte & 255).toString(16).padStart(2, '0')).join('')}`;
 
 			// Determine flight field based on event type
 			let flightValue = '';
@@ -322,12 +325,10 @@ namespace FormHandlers {
 		});
 
 		if (backendRows.length > 0) {
-			// Persist every event before updating derived cells. A failed mirror can
-			// then be repaired by replay without losing the submitted attendance.
-			AttendanceService.withWriteLock(() => {
-				appendToBackend('Attendance Backend', backendRows);
-				backendRows.forEach((entry) => AttendanceService.applyAttendanceLogEntry(entry));
-			});
+			// Stable native response/event receipts make retries idempotent. Projection
+			// healing uses the latest ordered log, preserving subsequent corrections.
+			const result = AttendanceService.commitAttendanceFormRows(backendRows);
+			if (result.conflicts) throw new Error(`Attendance records are saved, but ${result.conflicts} frontend cell(s) have pending manual corrections. Review before refreshing.`);
 			SetupService.applyAttendanceBackendFormattingPublic();
 			const frontendId = Config.getFrontendId();
 			if (frontendId) {
@@ -407,12 +408,14 @@ namespace FormHandlers {
 			return;
 		}
 
-		// Look up cadet info from Directory Backend (with name fallback if email not found)
-		const cadet = lookupCadetByEmail(email, lastName, firstName);
+		const cadet = ExcusalsService.resolveExcusalCadet(email, lastName, firstName);
+		const responseId = String(e.response?.getId?.() || '').trim();
+		if (!responseId) throw new Error('The excusal Form response identity is missing. No request was saved.');
 
 		// Create one row per event in Excusals Backend
 		const rows = events.map((eventName) => {
-			const requestId = `exc-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
+			const digest = Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, JSON.stringify([responseId, eventName.trim()]), Utilities.Charset.UTF_8);
+			const requestId = `exc-form-${digest.map(byte => (byte & 255).toString(16).padStart(2, '0')).join('')}`;
 			return {
 				request_id: requestId,
 				event: eventName,
@@ -427,26 +430,66 @@ namespace FormHandlers {
 				decided_at: '',
 				requested_outcome: requestedOutcome,
 				attendance_effect: 'R',
-				prior_attendance_code: ExcusalsService.getCurrentAttendanceCode(
-					eventName,
-					String(cadet?.last_name || lastName),
-					String(cadet?.first_name || firstName),
-				),
+				prior_attendance_code: '',
 				submitted_at: submittedAt,
 				last_updated_at: submittedAt,
 				reason,
 			};
 		});
 
-		appendToBackend('Excusals Backend', rows);
-
-		// Send notifications and sync to management panel for each row
-		rows.forEach((row) => {
-			ExcusalsService.auditExcusalSubmission(row);
-			ExcusalsService.notifySquadronCommanderOfNewExcusal(row);
-			ExcusalsService.syncExcusalToManagementPanel(row);
-			ExcusalsService.updateAttendanceOnExcusalSubmission(row);
+		const newRequests = AttendanceService.withWriteLock(() => {
+			const backend = Config.getBackendSheet('Excusals Backend');
+			const table = SheetUtils.readTable(backend);
+			const required = Schemas.getTabSchema('Excusals Backend')?.machineHeaders || [];
+			if (!required.length || required.some(header => table.headers.filter(value => value === header).length !== 1)) {
+				throw new Error('Excusals Backend headers are incomplete or ambiguous. No request was saved.');
+			}
+			const existing = table.rows;
+			const additions: Record<string, any>[] = [];
+			const committed = rows.map(row => {
+				let matches = existing.filter(r => String(r['request_id'] || '') === row.request_id);
+				if (!matches.length) matches = existing.filter(r =>
+					String(r['event'] || '').trim() === row.event && String(r['email'] || '').trim() === row.email
+					&& new Date(r['submitted_at']).getTime() === new Date(row.submitted_at).getTime(),
+				);
+				if (matches.length > 1) throw new Error('Duplicate excusal response identities require review. No new requests were saved.');
+				if (matches.length) {
+					const previous = matches[0];
+					const unchanged = ['event', 'email', 'last_name', 'first_name', 'reason', 'requested_outcome'].every(field =>
+						String(previous[field] ?? '').trim() === String((row as any)[field] ?? '').trim(),
+					) && new Date(previous['submitted_at']).getTime() === new Date(row.submitted_at).getTime();
+					if (!unchanged) throw new Error('This excusal response conflicts with a saved request. Review it before retrying.');
+					return previous;
+				}
+				row.prior_attendance_code = ExcusalsService.getCurrentAttendanceCode(row.event, row.last_name, row.first_name);
+				additions.push(row);
+				return row;
+			});
+			if (additions.length) {
+				SheetUtils.appendRows(backend, additions);
+				SpreadsheetApp.flush();
+				additions.forEach(row => ExcusalsService.auditExcusalSubmission(row));
+			}
+			// Complete durable review/attendance work before email. A retried
+			// response heals missing projections without creating new requests.
+			let failed = false;
+			committed.forEach(row => {
+				try {
+					ExcusalsService.syncExcusalToManagementPanel(row);
+					ExcusalsService.updateAttendanceOnExcusalSubmission(row);
+				} catch (error) {
+					failed = true;
+					AuditService.log({ action: 'excusal_submission_projection', result: 'failed', targetSheet: 'Excusals Backend',
+						requestId: row['request_id'], source: 'FormHandlers.onExcusalsFormSubmit', error,
+						notes: 'Request saved; retry this same Form response to repair review and attendance projections. No new-request email sent by this attempt.' });
+				}
+			});
+			if (failed) throw new Error('Excusal requests were saved, but review or attendance updates need repair. Retry the same saved Form response; do not submit it again.');
+			return additions;
 		});
+		// Repair retries do not resend historical notifications. If processing
+		// failed before notification, an operator must review delivery separately.
+		newRequests.forEach(row => ExcusalsService.notifySquadronCommanderOfNewExcusal(row));
 
 		Log.info(`Excusal submission processed: ${email} requesting ${requestedOutcome} for ${events.length} event(s)`);
 

@@ -57,6 +57,15 @@ function attendanceSubmissionFixture(readEmail, fail = '') {
       appended.push(...rows);
     } },
     AttendanceService: {
+      commitAttendanceFormRows(rows) {
+        return this.withWriteLock(() => {
+          order.push('append');
+          if (fail === 'append') throw Error('append failed');
+          appended.push(...rows);
+          rows.forEach(row => this.applyAttendanceLogEntry(row));
+          return { appended: rows.length, existing: 0, conflicts: 0 };
+        });
+      },
       withWriteLock(fn) { locked = true; try { return fn(); } finally { locked = false; order.push('unlock'); } },
       applyAttendanceLogEntry(row) {
         assert.equal(locked, true);
@@ -68,11 +77,13 @@ function attendanceSubmissionFixture(readEmail, fail = '') {
     },
     SetupService: { applyAttendanceBackendFormattingPublic() {} },
     FormService: { isAttendanceCadetQuestionTitle: title => title.startsWith('Cadets (') },
-    Utilities: { sleep: delay => sleeps.push(delay) },
+    Utilities: { sleep: delay => sleeps.push(delay), DigestAlgorithm: { SHA_256: 'sha256' }, Charset: { UTF_8: 'utf8' },
+      computeDigest: (algorithm, value) => Array.from(require('node:crypto').createHash(algorithm).update(value).digest()) },
     GmailApp: { sendEmail() { throw new Error('Attendance must not send receipts'); } },
   });
   const event = { response: {
     getRespondentEmail: readEmail,
+    getId: () => 'fictional-native-response',
     getTimestamp: () => new Date('2026-10-16T20:15:10Z'),
     getItemResponses: () => [
       ['Select Event (Secondary)', 'TW-8 Secondary'],
@@ -176,12 +187,31 @@ test('full attendance replay preserves a withdrawal clear and later attendance',
   assert.equal(AttendanceService.buildMatrixRows(roster, events, [entry('R'), entry(''), entry('P')])[0]['TW-1 Mando'], 'P');
 });
 
+function incrementalProjectionIO(backend, frontend) {
+  backend.getName = () => 'Attendance Matrix Backend';
+  frontend.getName = () => 'Attendance';
+  backend.getParent = () => ({ getId: () => 'backend' });
+  frontend.getParent = () => ({ getId: () => 'frontend' });
+  return {
+    LockService: { getScriptLock: () => ({ hasLock: () => true }) },
+    Sheets: { Spreadsheets: { Values: { batchUpdate({ data }, id) {
+      const target = id === 'backend' ? backend : frontend;
+      for (const update of data) {
+        const [, letters, row] = /!([A-Z]+)(\d+):/.exec(update.range);
+        const col = [...letters].reduce((n, c) => n * 26 + c.charCodeAt(0) - 64, 0);
+        target.getRange(Number(row), col, update.values.length, 1).setValues(update.values);
+      }
+    } } } },
+  };
+}
+
 test('incremental attendance resolves frontend event headers and cadet identity independently', () => {
   const backend = sheet(['last_name', 'first_name', 'Event A', 'Event B'], [['Example', 'One', 'R', 'A'], ['Example', 'Two', 'E', 'T']]);
   const frontend = sheet(['first_name', 'last_name', 'Event B', 'Event A'], [['Two', 'Example', 'T', 'E'], ['One', 'Example', 'A', 'R']]);
   const { AttendanceService } = load(['services/attendance.ts'], {
     Config: { getBackendId: () => 'backend', getFrontendId: () => 'frontend' },
     SheetUtils: { getSheet: id => id === 'backend' ? backend : frontend, readTable },
+    ...incrementalProjectionIO(backend, frontend),
   });
   assert.equal(AttendanceService.applyAttendanceLogEntry({ event: 'Event A', cadets: 'Example, One', attendance_type: '' }), true);
   assert.equal(backend.cells[2][2], '');
@@ -194,6 +224,7 @@ test('missing frontend event reports repair need without writing a different col
   const { AttendanceService } = load(['services/attendance.ts'], {
     Config: { getBackendId: () => 'backend', getFrontendId: () => 'frontend' },
     SheetUtils: { getSheet: id => id === 'backend' ? backend : frontend, readTable },
+    ...incrementalProjectionIO(backend, frontend),
   });
   assert.throws(() => AttendanceService.applyAttendanceLogEntry({ event: 'Event A', cadets: 'Example, One', attendance_type: 'P' }), /Rebuild Attendance/);
   assert.equal(frontend.cells[2][2], 'T');
@@ -470,11 +501,18 @@ for (const scenario of [
     Config: { getBackendId: () => 'backend' },
     Arrays: { EXCUSAL_DECISIONS: ['Approved', 'Denied', 'Withdrawn', 'Superseded'] },
     SheetUtils: {
-      getSheet: () => ({ ...logSheet, getLastRow: () => 3 }),
-      readTable: () => ({ rows: [{ event: 'Event A', cadets: 'Example, Cadet', attendance_type: scenario.code, submitted_at: scenario.timestamp, submission_id: scenario.id }] }),
+      getSheet: (_id, name) => ({ ...logSheet, name, getLastRow: () => 3 }),
+      readTable: sheet => sheet.name === 'Attendance Backend'
+        ? { rows: [{ event: 'Event A', cadets: 'Example, Cadet', attendance_type: scenario.code, submitted_at: scenario.timestamp, submission_id: scenario.id }] }
+        : sheet.name === 'Events Backend' ? { rows: [{ display_name: 'Event A' }] }
+          : { headers: ['last_name', 'first_name', 'Event A'], rows: [{ last_name: 'Example', first_name: 'Cadet', 'Event A': scenario.code }] },
       appendRows: (_, rows) => appended.push(...rows),
     },
-    AttendanceService: { applyAttendanceLogEntry: entry => applied.push(entry) },
+    AttendanceService: {
+      prepareAttendanceProjections: (entries, options) => { assert.equal(options.frontendPendingOnly, true); return [{ entries, updates: [], conflicts: 0 }]; },
+      applyPreparedAttendanceProjections: batches => batches.forEach(batch => applied.push(...batch.entries)),
+    },
+    SpreadsheetApp: { flush() {} },
     AuditService: { log() {} },
   }, ['repairAuthoritativeAttendanceEffects', 'excusalsBackendIndexes']);
   const headers = ['request_id', 'event', 'last_name', 'first_name', 'decision', 'decided_at', 'requested_outcome', 'prior_attendance_code', 'attendance_effect'];
@@ -485,7 +523,8 @@ for (const scenario of [
   });
   assert.equal(result.preserved, scenario.preserved);
   assert.equal(appended.length, 1 - scenario.preserved);
-  assert.equal(applied.length, appended.length);
+  assert.equal(applied.length, 1);
+  assert.equal(applied[0].attendance_type, scenario.preserved ? scenario.code : 'MED');
   if (appended.length) assert.equal(appended[0].attendance_type, 'MED');
 });
 

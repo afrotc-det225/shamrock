@@ -151,35 +151,42 @@ test('matrix rebuild reads its source and replaces both projections under one lo
 
 test('excusal request persists its attendance entry before projection under the shared lock', () => {
   const f = fixture(), appended = [];
+  const request = { request_id: 'request-one', last_name: 'Example', first_name: 'Cadet', event: 'TW-1 LLAB' };
+  f.context.Arrays = { EXCUSAL_DECISIONS: [] };
   f.context.SheetUtils = {
-    getSheet: () => ({}),
+    getSheet: (_id, name) => ({ name, getLastRow: () => name === 'Attendance Backend' ? 2 : 3 }),
+    readTable: () => ({ rows: [request] }),
     appendRows(_sheet, rows) {
       f.assertHeld('append');
       appended.push(...rows);
     },
   };
-  f.context.AttendanceService.applyAttendanceLogEntry = entry => {
+  f.context.AttendanceService.prepareAttendanceProjections = entries => {
+    f.assertHeld('prepare');
+    return entries;
+  };
+  f.context.AttendanceService.applyPreparedAttendanceProjections = entries => {
     f.assertHeld('mirror');
     assert.equal(appended.length, 1);
-    assert.equal(entry, appended[0]);
+    assert.equal(entries[0], appended[0]);
   };
-  f.context.ExcusalsService.updateAttendanceOnExcusalSubmission({
-    last_name: 'Example', first_name: 'Cadet', event: 'TW-1 LLAB',
-  });
+  f.context.ExcusalsService.updateAttendanceOnExcusalSubmission(request);
   assert.equal(appended[0].attendance_type, 'R');
-  assert.deepEqual(f.calls, [['wait', 120000], ['append'], ['mirror'], ['flush'], ['release']]);
+  assert.deepEqual(f.calls, [['wait', 120000], ['prepare'], ['append'], ['flush'], ['mirror'], ['flush'], ['release']]);
 });
 
 test('failed excusal append cannot update attendance and still releases the shared lock', () => {
   const f = fixture(), failure = new Error('append interrupted');
+  const request = { request_id: 'request-one', last_name: 'Example', first_name: 'Cadet', event: 'TW-1 LLAB' };
+  f.context.Arrays = { EXCUSAL_DECISIONS: [] };
   f.context.SheetUtils = {
-    getSheet: () => ({}),
+    getSheet: (_id, name) => ({ name, getLastRow: () => name === 'Attendance Backend' ? 2 : 3 }),
+    readTable: () => ({ rows: [request] }),
     appendRows() { f.assertHeld('append'); throw failure; },
   };
-  f.context.AttendanceService.applyAttendanceLogEntry = () => { throw new Error('must not mirror'); };
-  assert.throws(() => f.context.ExcusalsService.updateAttendanceOnExcusalSubmission({
-    last_name: 'Example', first_name: 'Cadet', event: 'TW-1 LLAB',
-  }), error => error === failure);
+  f.context.AttendanceService.prepareAttendanceProjections = () => [];
+  f.context.AttendanceService.applyPreparedAttendanceProjections = () => { throw new Error('must not mirror'); };
+  assert.throws(() => f.context.ExcusalsService.updateAttendanceOnExcusalSubmission(request), error => error === failure);
   assert.deepEqual(f.calls, [['wait', 120000], ['append'], ['flush'], ['release']]);
 });
 

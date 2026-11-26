@@ -87,6 +87,8 @@ The backend workbook is authoritative.
 - Attendance is derived from backend logs and decisions.
 - Authorized frontend Attendance edits are an explicit input exception: the entire edited data rectangle is resolved by cadet identity and current event header and persisted as append-only Attendance Backend records, with linked per-cell audit entries. Saved logs remain durable if a later mirror or audit fails. Blank clears are records, not missing input. Bulk old values are unknown unless independently captured.
 - Manual attendance writes, Form attendance commits, matrix rebuilds, initial excusal attendance effects and weekly closeout share the script write lock with excusal decisions. Saved logs precede derived updates. Human spreadsheet edits and external writes are outside that lock; incident recovery requires a quiet window and fresh input verification.
+- Bulk attendance fills also persist before projection under that lock. Incremental projections prevalidate both matrices by unique identity and event, write only affected cells, and freshly verify header, identity and expected-value preconditions before each workbook batch. Sheets provides no atomic compare-and-set against human edits; avoid simultaneous sorting/editing during repair and verify the resulting projection.
+- Native Attendance Form receipt IDs are SHA-256 hashes of the JSON pair `[responseId, originalEventLabel]`. Deduplication and log append occur under the shared lock. Existing receipts project the latest record in physical log order, preserving later decisions and frontend manual conflicts; delayed first-time imports that conflict with newer records fail for review. Renamed event labels are not guessed during replay.
 
 ### 4.3 Cadre & Leadership Ownership
 Default ownership model:
@@ -228,7 +230,8 @@ Cadet groups and display order:
 - Attendance matrix event columns sort by training week, then `Mando`, `Secondary`, and `LLAB`; the matrix does not depend on physical Events Backend row order.
 - POC Third Hour is outside the supported active event model. Event refresh removes legacy active definitions, matrix rebuilds ignore them, new transitions do not generate them, and Attendance/Excusals form submissions reject them.
 - Incremental Attendance Form submissions restore Attendance input validation and summary coloring after writing values so dropdown metadata and presentation remain stable.
-- Excusals Backend and Excusals Management edit handling process every edited Decision row, including pasted or fill-down multi-row ranges, under the same serialized write discipline. Reconciliation first repairs management/backend decision mismatches, then compares the latest authoritative decided excusal for each cadet/event with the effective Attendance Backend log, appends missing corrective effects, rebuilds both attendance matrices, records audit entries, and suppresses duplicate historical notification emails.
+- Excusals Backend and Excusals Management edit handling process every edited Decision row, including pasted or fill-down multi-row ranges, under the same serialized write discipline. Reconciliation first repairs management/backend decision mismatches, then compares the latest authoritative decided excusal for each cadet/event with the effective Attendance Backend log, appends missing corrective effects, sparsely repairs affected matrix cells, records audit entries, and suppresses duplicate historical notification emails. A correct durable effect can still repair a stale frontend `R`; other differing frontend values remain conflicts for review. Historical targets outside the active matrix do not recreate removed events.
+- Pending effects re-read the authoritative request while holding the shared writer lock and use request-bound receipts. Recorded-decision retries recover missing effects without restamping the decision or resending email.
 - An independent Attendance Backend record newer than the decision takes precedence during historical effect repair. This includes a subsequent attendance report, manual correction, or newly pending request. A malformed effect belonging to that same decision remains repairable. Reconciliation reports how many newer records it preserved.
 
 Percent metrics:
@@ -240,7 +243,8 @@ Excusals are captured via a form and processed via backend decisions.
 
 Workflow summary:
 - Cadet submits an attendance exception request with event selection, requested outcome, and reason.
-- Backend enriches flight/squadron from Directory.
+- Backend enriches flight/squadron from one unambiguous Directory record. A unique verified-email match is preferred; exact-name fallback remains supported and is not proof of ownership of the Directory email. Identical repeated `Last, First` name fields may be normalized only when they resolve uniquely. Missing or ambiguous identity/routing stops processing while the original Form response remains available.
+- Native excusal response/event receipts deduplicate retries and retain the verified respondent email. Requests and their review/attendance projections are completed before notifications; retries preserve existing decisions and repair missing review rows without resending historical notifications. A failure before notification requires separate delivery review.
 - Submission records the prior attendance code and marks the matrix `R` while pending.
 - Decision is recorded by authorized staff.
 - Decision propagates to attendance computation.
@@ -255,7 +259,7 @@ Workflow summary:
 ## 10. Audit / Changelog Expectations
 Audit logging is required for key data mutations.
 
-- Audit is append-only.
+- Audit is append-only. Schema repair, row allocation and append run under the shared script lock. The common append helper reuses an existing lock, grows the grid as needed, and fails if machine headers cannot be restored; overlapping executions cannot allocate the same log row.
 - Backend-edit and periodic Directory-reconciliation failures write failed audit entries and propagate the error so Apps Script does not report a successful execution.
 - Record actor identity when available, anonymous actor key, action category/label, what changed, where, old/new values where relevant, result, duration, source, run ID, and structured metadata.
 - Menu actions write paired start and completion rows. Failures include error message/stack so copied logs and Audit Backend rows can be debugged later.
