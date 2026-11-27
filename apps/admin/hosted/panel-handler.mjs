@@ -329,7 +329,7 @@ export default {
         }
         const id=checkChatId(body?.chatId ?? crypto.randomUUID());
         const reply=asksForAdministrators(body?.messages?.at(-1)) ? {content:"SHAMROCK administrators",adminDirectory:true} : rosterQuestion(body?.messages) ?? await eventCancellationReply(body?.messages?.at(-1),backend,service) ?? await answer(env,body,env.operatorGuide,fetch,()=>wingCharts(backend),async profile=>{
-          const view=await browseState(backend,await backend.panelAuthority(),profile);
+          const view=await browseState(backend,await backend.panelAuthority(),profile==="careers"?"cadets":profile);
           return reportTotals(profile,view.tables);
         });
         if(isUnifiedSite(env) && reply.proposal){

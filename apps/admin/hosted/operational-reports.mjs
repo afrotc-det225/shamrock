@@ -1,3 +1,23 @@
+import {profileChoices} from "../../../.build/v3/packages/domain/src/profile-choices.js";
+
+// These descriptions let the router select data by meaning, including follow-up questions.
+export const reportCatalog = {
+  careers:"Current cadets’ desired occupations, AFSC preferences, career interests and academic fields of study (CIP).",
+  cadets:"Current active cadet counts by university or campus.",
+  leadership:"Leadership contact coverage.",
+  overview:"Pending excusals and active event totals.",
+  "event-list":"Events by type and current status.",
+  charts:"Wing attendance, training and historical semester comparisons, commissioning and AS cohorts.",
+  none:"No operational report is needed."
+};
+const choiceIndex = choices => new Map(choices.flatMap(label => [
+  [label.toLowerCase(),label],[label.split(" - ")[0].toLowerCase(),label]
+]));
+const careers=choiceIndex(profileChoices.afsc), majors=choiceIndex(profileChoices.cipBroadArea);
+function category(index,raw){
+  const value=String(raw??"").trim().toLowerCase();
+  return value ? index.get(value) ?? index.get(value.split(" - ")[0]) ?? "Unrecognized entry" : "Not recorded";
+}
 // Only these aggregate fields may leave the panel. Source rows can contain private contact data.
 export function reportSources(question) {
   const sources=[];
@@ -8,6 +28,17 @@ export function reportSources(question) {
   return sources;
 }
 export function reportTotals(profile,tables) {
+  if(profile==="careers"){
+    const desiredAfsc={},academicField={};let activeCadets=0;
+    for(const row of JSON.parse(tables.people)){
+      if(["Inactive","Commissioned","Dropped"].includes(row[7]))continue;
+      activeCadets++;
+      const afsc=category(careers,row[10]),major=category(majors,row[14]);
+      desiredAfsc[afsc]=(desiredAfsc[afsc]??0)+1;
+      academicField[major]=(academicField[major]??0)+1;
+    }
+    return {activeCadets,desiredAfsc,academicField};
+  }
   if(profile==="overview")return {activeEvents:Number(tables.activeEvents),pendingExcusalsForActiveEvents:Number(tables.pending)};
   if(profile==="cadets"){
     const campusCounts={};

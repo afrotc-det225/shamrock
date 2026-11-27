@@ -55,3 +55,12 @@ test("month lookup reads recorded days and names, orders by day, and handles fol
   assert.equal(rosterQuestion([q("May birthdays?"),q("What about June?")]).rosterLookup.value,"June");
   assert.deepEqual(rosterRows("birthday","May",{birthdays:'[["One","Example","05-21","f"],["Two","Example","05-02","f"],["Three","Example","06-01","f"]]'}),["May 2 · Two Example","May 21 · One Example"]);
 });
+
+test("career reports count active preferences separately from majors and redact unknown entries",()=>{
+  const row=(afsc,major,status="Active")=>Object.assign(Array(15).fill("private"),{7:status,10:afsc,14:major});
+  const rows=[row("32E","14"),row("32E - Civil Engineer","15"),row("Undecided","14"),row("private notes",""),row("62E","14","Dropped")];
+  const result=reportTotals("careers",{people:JSON.stringify(rows)});
+  assert.equal(result.activeCadets,4);assert.equal(result.desiredAfsc["32E - Civil Engineer"],2);
+  assert.equal(result.academicField["14 - Engineering"],2);
+  assert.equal(result.desiredAfsc["Unrecognized entry"],1);assert.ok(!JSON.stringify(result).includes("private"));
+});
