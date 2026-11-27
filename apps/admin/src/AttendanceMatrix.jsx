@@ -91,18 +91,24 @@ export function AttendanceMatrix(props) {
   return <SelectableMatrix key={key} {...props}/>;
 }
 
-function SelectableMatrix({rows, events, canCorrect, onEdit, readOnly, actionLabel="Correct attendance"}) {
+function SelectableMatrix({rows, events, canCorrect, onEdit, onEditMany, readOnly, actionLabel="Correct attendance"}) {
   const focused = useRef(null), anchor=useRef(null), activeAxis=useRef(null);
   const [selection,setSelection]=useState(()=>new Set());
   const cols=events.length;
-  const only=selection.size===1 ? [...selection][0] : -1;
-  const currentRow=only<0 ? null : rows[Math.floor(only/cols)];
-  const currentEvent=only<0 ? null : events[only%cols];
-  const currentCell=currentRow?.cells.find(c=>c.eventId===currentEvent.eventId);
-  const editable=currentCell?.eligible===true && !readOnly && canCorrect(currentRow);
+  const targets = [...selection].map(position => {
+    const row = rows[Math.floor(position / cols)], event = events[position % cols];
+    return {row, event, cell: row.cells.find(cell => cell.eventId === event.eventId)};
+  });
+  const editable = !readOnly && targets.length > 0 && targets.every(({row,cell}) => cell?.eligible && canCorrect(row));
+  function editSelected() {
+    if (targets.length > 1) return onEditMany(targets);
+    const [{row,event,cell}] = targets;
+    onEdit(row,event,cell.effectiveCode || "");
+  }
   function select(button,event,origin) {
     const td=button.closest("td"), row=td.parentElement.sectionRowIndex, col=td.cellIndex-3;
-    const toggle=event.ctrlKey || event.metaKey, pos=row*cols+col;
+    const touch=event.nativeEvent?.pointerType==="touch";
+    const toggle=event.ctrlKey || event.metaKey || touch, pos=row*cols+col;
     if(event.shiftKey && anchor.current===null && origin)
       anchor.current=origin.parentElement.sectionRowIndex*cols+origin.cellIndex-3;
     if(event.shiftKey && anchor.current!==null) {
@@ -144,11 +150,11 @@ function SelectableMatrix({rows, events, canCorrect, onEdit, readOnly, actionLab
   return <div onPointerOver={e=>highlight(e.target.closest("td.mark-cell"))}
     onPointerLeave={()=>highlight(null)} onFocus={e=>highlight(e.target.closest("td.mark-cell"))}
     onBlur={e=>{if(!e.currentTarget.contains(e.relatedTarget))highlight(null);}}>
-    <div className="matrix-selection">
-      <span aria-live="polite">{selection.size ? selection.size+" "+(selection.size===1?"cell":"cells")+" selected" : "Shift-click a range. Ctrl or ⌘-click to toggle cells."}</span>
-      {selection.size>0 && <button onClick={clear}>Clear selection</button>}
-      {editable && <button onClick={()=>onEdit(currentRow,currentEvent,currentCell.effectiveCode || "")}>{actionLabel}</button>}
-    </div>
+    {selection.size>0 && <div className="matrix-selection">
+      <span aria-live="polite">{selection.size} {selection.size===1?"cell":"cells"} selected</span>
+      <button onClick={clear}>Clear selection</button>
+      {editable && <button onClick={editSelected}>{actionLabel}</button>}
+    </div>}
     <MatrixTable events={events} label="Attendance" onKeyDown={e=>{
       if(e.key==="Escape"){clear();return;}
       moveFocus(e,select);

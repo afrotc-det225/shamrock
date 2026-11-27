@@ -276,18 +276,21 @@ function Submission({ state, mode, save, disabled }) {
   );
 }
 function PersonalAttendance({state, flags, save, disabled}) {
-  const [selected,setSelected]=useState(null);
-  const cell=state.attendance?.find(row=>row.eventId===selected);
+  const [selected,setSelected]=useState([]);
   const cells=(state.attendance || []).map(e=>({...e,effectiveCode:e.code,eligible:true}));
   const row={...state.profile,cells,overall:calculateAttendanceCredit(cells),llab:calculateAttendanceCredit(cells.filter(e=>e.eventType==="llab"))};
-  return <section><p>Select an event to request a correction from your Squadron Commander.</p><AttendanceKey/>
-    {cells.length ? <AttendanceMatrix actionLabel="Review selected cell" rows={[row]} events={state.attendance} canCorrect={()=>true} onEdit={(_,e)=>setSelected(e.eventId)}/> : <Empty>No attendance events for this semester.</Empty>}
-    {cell && <form key={selected} className="cadet-form" onSubmit={e=>{
-      e.preventDefault();const fields=new FormData(e.currentTarget);
-      save("flag",{eventId:selected,eventVersion:cell.version,baseVersion:cell.baseVersion,code:fields.get("code"),detail:fields.get("reason")},()=>setSelected(null));
-    }}><h2>{cell.label}</h2><p>Recorded attendance: {cell.code||"Blank"}</p>
-      <Field label="Requested code"><select name="code" required defaultValue=""><option value="" disabled>Choose a code</option>{ATTENDANCE_CODES.filter(c=>c!==cell.code).map(c=><option key={c}>{c}</option>)}</select></Field>
-      <Field label="Reason"><textarea name="reason" required maxLength={500}/></Field><button className="primary" disabled={disabled}>Request correction</button></form>}
+  return <section><AttendanceKey/>
+    {cells.length ? <AttendanceMatrix actionLabel="Request correction" rows={[row]} events={state.attendance} canCorrect={()=>true} onEdit={(_,event)=>setSelected([event])} onEditMany={targets=>setSelected(targets.map(t=>t.event))}/> : <Empty>No attendance events for this semester.</Empty>}
+    {selected.length>0 && <form key={JSON.stringify(selected.map(e=>e.eventId))} className="cadet-form" onSubmit={e=>{
+      e.preventDefault();
+      const fields=new FormData(e.currentTarget), code=fields.get("code");
+      const requests=selected.filter(event=>event.code!==code).map(event=>({
+        eventId:event.eventId,eventVersion:event.version,baseVersion:event.baseVersion,code,detail:fields.get("reason")
+      }));
+      save("flag",requests,()=>setSelected([]));
+    }}><h2>{selected.map(event=>event.label).join(", ")}</h2>
+      <Field label="Requested code"><select name="code" required defaultValue=""><option value="" disabled>Choose a code</option>{ATTENDANCE_CODES.filter(code=>selected.some(event=>event.code!==code)).map(c=><option key={c}>{c}</option>)}</select></Field>
+      <Field label="Reason"><textarea name="reason" required maxLength={500}/></Field><button className="primary" disabled={disabled}>Send for Squadron review</button></form>}
     {flags.length>0 && <section><h2>My correction requests</h2>{flags.map(a=><p key={a.actionId}><strong>{a.event}</strong> · {a.change?.code} {a.detail} · {a.resolution || (a.change?"Awaiting Squadron review":"Awaiting Flight review")}</p>)}</section>}
   </section>;
 }
@@ -441,16 +444,20 @@ export default function CadetWorkspace({ session }) {
     setNotice("");
     const signature = JSON.stringify([kind, fields]);
     if (pending.current?.signature !== signature)
-      pending.current = { signature, id: crypto.randomUUID() };
+      pending.current = { signature, actions: (Array.isArray(fields) ? fields : [fields]).map(item=>({kind,fields:item,id:crypto.randomUUID()})), next:0 };
+    const batch=pending.current;
     try {
-      const action = { kind, fields, id: pending.current.id };
-      await api("/cadet", preview ? {entryAuditId:session.viewAs.entryAuditId, action} : action);
+      while(batch.next<batch.actions.length){
+        const action=batch.actions[batch.next];
+        await api("/cadet", preview ? {entryAuditId:session.viewAs.entryAuditId, action} : action);
+        batch.next++;
+      }
       await load();
       pending.current = null;
       done?.();
       setNotice("Saved.");
     } catch (e) {
-      setError(e.message);
+      setError(batch.next && batch.next<batch.actions.length ? batch.next+" of "+batch.actions.length+" saved. "+e.message : e.message);
     } finally {
       active.current = false;
       setBusy(false);
@@ -516,6 +523,7 @@ export default function CadetWorkspace({ session }) {
   };
   return (
     <WorkspaceShell workspace="cadet" pages={pages} page={page} navigate={navigate} account={<>
+      {state && !state.writable && <small role="status" className="submission-status">Submissions are paused.</small>}
       {preview && <ViewAsAccount acting={state?.readOnly === false} label={name || "selected cadet"} busy={busy} onExit={async () => {
         try {
           await api("/view-as", { personId: null });
@@ -547,9 +555,6 @@ export default function CadetWorkspace({ session }) {
       )}
       {notice && <div className="success" role="status">{notice}</div>}
       {!state && !error && <p role="status">Loading your workspace…</p>}
-      {state && !state.writable && (
-        <p className="notice">Submissions are paused.</p>
-      )}
       {preview && state?.profile && !state.linked && <p className="notice">This cadet must connect their school account before you can act on their behalf.</p>}
       {state?.profile && !state.linked && !preview && (
         <button
