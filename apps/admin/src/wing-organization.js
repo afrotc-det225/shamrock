@@ -62,14 +62,17 @@ function offices(roster) {
 }
 
 export function buildWingOrganization(roster) {
-  const records=new Map();
+  const records=new Map(), inactive=new Set();
   for(const person of roster.people) {
-    if(person.active===false || ["Inactive","Dropped","Commissioned"].includes(person.flightPathStatus) || !person.role) continue;
-    records.set(person.personId,person);
+    if(person.active===false || ["Inactive","Dropped","Commissioned"].includes(person.flightPathStatus)) {
+      inactive.add(person.personId);
+    } else if(person.role) {
+      records.set(person.personId,person);
+    }
   }
   for(const contact of roster.leadership) {
     const key=contact.personId ?? contact.contactId;
-    if(contact.active===false) { records.delete(key); continue; }
+    if(contact.active===false || inactive.has(contact.personId)) { records.delete(key); continue; }
     const person=records.get(key);
     records.set(key,{...person,...contact,role:contact.role || person?.role || ""});
   }

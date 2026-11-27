@@ -9,7 +9,7 @@ test("chart uses the reference hierarchy with current occupants and catalog flig
       person("three","PA/PO - Publications & Alpha Flight Uniform Officer"),person("four","Crosstown Liaison Task Force"),
       person("five","Alpha Flight Commander"),person("gone","Alpha Deputy Flight Commander",{active:false}),
       person("six","New appointment")],
-    leadership:[{...person("one","Cadet Wing Commander"),contactId:"contact"}, {contactId:"office",role:"Commander",reportsTo:"Recorded supervisor",active:true}]};
+    leadership:[{...person("one","Cadet Wing Commander"),contactId:"contact"}, {...person("gone","Alpha Deputy Flight Commander"),contactId:"old"}, {contactId:"office",role:"Commander",reportsTo:"Recorded supervisor",active:true}]};
   const {root,other}=buildWingOrganization(roster);
   assert.deepEqual(root.assigned.map(p=>p.personId),["one"]);
   assert.deepEqual(root.children.map(n=>n.id),["gmc","mss","evaluations","operations","plans"]);
