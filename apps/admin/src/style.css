@@ -1442,6 +1442,7 @@ h1.page-title {position:absolute;width:1px;height:1px;margin:0;padding:0;overflo
 .personal-events {width:100%;max-width:44rem;min-width:0;border-collapse:collapse}
 .personal-events th,.personal-events td {text-align:left;padding:.45rem .65rem;border-bottom:1px solid var(--border,#cad4df)}
 .personal-events td {padding:0;width:48%}
+.personal-events th[scope="row"] {background:transparent;white-space:normal;text-transform:none;letter-spacing:normal;font-size:inherit;color:inherit}
 .personal-mark,.personal-mark button {background:var(--mark-bg,#eef2f6);color:var(--mark-ink,#243951)}
 .personal-mark button {width:100%;text-align:left;border:0;border-radius:0;padding:.6rem .75rem}
 .personal-mark button[aria-pressed="true"] {outline:2px solid currentColor;outline-offset:-2px}

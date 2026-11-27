@@ -52,8 +52,8 @@ try {
           const now=Date.now();
           return route.fulfill({json:{asOf:new Date(now).toISOString(),refreshAt:new Date(now+1200).toISOString(),
             flightEvent:{label:"Fixture roll call",startAt:new Date(now-10000).toISOString()},members:[
-              {personId:"member",lastName:"Cadet",firstName:"Test",code:"E"},
-              {personId:"second",lastName:"Sample",firstName:"Test",code:"P"}
+              {personId:"member",asYear:"AS200",lastName:"Cadet",firstName:"Test",code:"E"},
+              {personId:"second",asYear:"AS100",lastName:"Sample",firstName:"Test",code:"P"}
             ]}});
         }
         return route.fulfill({ json: {
