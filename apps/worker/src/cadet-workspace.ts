@@ -108,8 +108,8 @@ export async function readCadetWorkspace(
     JOIN memberships m ON m.person_id=d.person_id AND m.unit_id=d.flight_id AND m.active=1
     JOIN organizational_units u ON u.unit_id=d.flight_id JOIN flight_hierarchy h ON h.unit_id=u.unit_id JOIN squadrons s ON s.squadron_id=h.squadron_id
     WHERE d.person_id IN (SELECT person_id FROM directory_profiles WHERE lower(email)=?
-      UNION ALL SELECT person_id FROM directory_profiles WHERE instr(lower(role),'squadron')>0
-        AND EXISTS(SELECT 1 FROM directory_profiles me WHERE lower(me.email)=? AND instr(lower(me.role),'squadron')>0))
+      UNION ALL SELECT person_id FROM directory_profiles WHERE instr(lower(role),'squadron')>0 AND instr(lower(role),'commander')>0 AND instr(lower(role),'deputy')=0
+        AND EXISTS(SELECT 1 FROM directory_profiles me WHERE lower(me.email)=? AND instr(lower(me.role),'squadron')>0 AND instr(lower(me.role),'commander')>0 AND instr(lower(me.role),'deputy')=0))
     AND d.role<>'' AND d.flight_path_status NOT IN ('Inactive','Dropped','Commissioned')
     AND NOT EXISTS(SELECT 1 FROM leadership_contacts c WHERE c.person_id=d.person_id AND c.active=0)
     AND EXISTS(SELECT 1 FROM permission_policy_control pc,json_each(pc.config_json,'$.operationalSquadronIds') op WHERE pc.enabled=1 AND op.value=s.squadron_id)

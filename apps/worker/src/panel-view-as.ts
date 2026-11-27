@@ -120,6 +120,21 @@ export async function authorizePanelViewAs(env: Env, input: unknown): Promise<Pa
     if (!saved || saved.request_hash !== requestHash) fail(409, 'VIEW_AS_AUDIT_CONFLICT');
     return { contractVersion: 'panel-view-as-v1', readOnly: true, action: 'exit', entryAuditId: String(req.entryAuditId), targetPersonId: String(saved.target_person_id), targetPrincipalId: saved.target_principal_id as string | null, status: 'exited', access: null };
   }
+  // For a directory target, evaluate the binding and record entry in one statement.
+  // RETURNING is empty for retries, non-directory targets and failed checks. Those
+  // cases go through the detailed conflict, access and audit handling below.
+  const candidate=bindingQuery(env,req.principalId,String(req.targetPersonId),null);
+  const [attempt]=await env.DB.batch<Row>([env.DB.prepare(`WITH captured(b) AS MATERIALIZED (${candidate.sql})
+    INSERT INTO panel_view_as_audit
+    SELECT ?,?,'enter',?,?,?,?,json_extract(b,'$[3][0][0]'),'ready',?,? FROM captured
+    WHERE json_extract(b,'$[0]')=1 AND json_extract(b,'$[1]')=1 AND json_extract(b,'$[2]')=1
+      AND json_extract(b,'$[4]')=0 AND json_type(b,'$[6]')='text'
+      AND (json_array_length(b,'$[3]')=0 OR (json_array_length(b,'$[3]')=1 AND json_extract(b,'$[3][0][1]')=json_extract(b,'$[6]')))
+    ON CONFLICT(audit_id) DO NOTHING RETURNING target_person_id,target_principal_id`)
+    .bind(...candidate.values,req.auditId,req.auditId,env.ENVIRONMENT,Number(env.GENERATION),req.principalId,req.targetPersonId,requestHash,now)]);
+  const inserted=attempt.results[0];
+  if(inserted)return {contractVersion:'panel-view-as-v1',readOnly:true,action:'enter',directoryWorkspace:true,
+    entryAuditId:String(req.auditId),targetPersonId:String(inserted.target_person_id),targetPrincipalId:inserted.target_principal_id as string|null,status:'ready',access:null};
   const person = String(req.targetPersonId), { query, binding } = await readBinding(env, req.principalId, person, null);
   let status = binding.status, access: PanelViewAsAuthorization['access'] = null;
   if (status === 'ready' && !binding.directoryEmail) {
