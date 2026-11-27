@@ -6,6 +6,9 @@ import {pageFromUrl, writePageUrl} from "./page-url";
 import WorkspaceShell from "./WorkspaceShell";
 import { ViewAsBanner } from "./ViewAs";
 import { ClipboardList, FileCheck2, Users, UserRound } from "lucide-react";
+import { AttendanceKey, AttendanceMatrix } from "./AttendanceMatrix";
+import { calculateAttendanceCredit } from "../../../packages/domain/src/frontend-reporting";
+import { ATTENDANCE_CODES } from "../../../packages/domain/src/index";
 import { AS_YEARS } from "../../../packages/domain/src/admin";
 
 const fields = [
@@ -287,6 +290,29 @@ function Submission({ state, mode, save, disabled }) {
     </details>
   );
 }
+function PersonalAttendance({state, flags, save, disabled}) {
+  const [selected,setSelected]=useState(null);
+  const cell=state.attendance?.find(row=>row.eventId===selected);
+  const cells=(state.attendance || []).map(e=>({...e,effectiveCode:e.code,eligible:true}));
+  const row={...state.profile,cells,overall:calculateAttendanceCredit(cells),llab:calculateAttendanceCredit(cells.filter(e=>e.eventType==="llab"))};
+  return <section><p>Select an event to request a correction from your Squadron Commander.</p><AttendanceKey/>
+    {cells.length ? <AttendanceMatrix rows={[row]} events={state.attendance} canCorrect={()=>true} onEdit={(_,e)=>setSelected(e.eventId)}/> : <Empty>No attendance events for this semester.</Empty>}
+    {cell && <form key={selected} className="cadet-form" onSubmit={e=>{
+      e.preventDefault();const fields=new FormData(e.currentTarget);
+      save("flag",{eventId:selected,eventVersion:cell.version,baseVersion:cell.baseVersion,code:fields.get("code"),detail:fields.get("reason")},()=>setSelected(null));
+    }}><h2>{cell.label}</h2><p>Recorded attendance: {cell.code||"Blank"}</p>
+      <Field label="Requested code"><select name="code" required defaultValue=""><option value="" disabled>Choose a code</option>{ATTENDANCE_CODES.filter(c=>c!==cell.code).map(c=><option key={c}>{c}</option>)}</select></Field>
+      <Field label="Reason"><textarea name="reason" required maxLength={500}/></Field><button className="primary" disabled={disabled}>Request correction</button></form>}
+    {flags.length>0 && <section><h2>My correction requests</h2>{flags.map(a=><p key={a.actionId}><strong>{a.event}</strong> · {a.change?.code} {a.detail} · {a.resolution || (a.change?"Awaiting Squadron review":"Awaiting Flight review")}</p>)}</section>}
+  </section>;
+}
+
+function AttendanceReviews({state,save,disabled}) {
+  const queue=state.actions.filter(a=>a.change && a.change.squadronId===state.squadronId && !a.resolution);
+  return queue.length ? queue.map(a=><section className="form-section" key={a.actionId}><h2>{a.person}</h2>
+    <p>{a.event} · Requested code: <strong>{a.change.code}</strong></p><p>{a.detail}</p>
+    {["Approved","Denied"].map(decision=><button key={decision} disabled={disabled} onClick={()=>save("reviewFlag",{parentId:a.actionId,decision})}>{decision==="Approved"?"Approve correction":"Deny request"}</button>)}</section>) : <Empty>No attendance corrections awaiting Squadron review.</Empty>;
+}
 function FlightReport({ state, save, disabled }) {
   const [eventId, select] = useState(""),
     [present, setPresent] = useState([]),
@@ -304,8 +330,9 @@ function FlightReport({ state, save, disabled }) {
     (f) => f.flightId === state.profile.flightId,
   );
   return (
-    <details>
-      <summary>Submit Flight attendance</summary>
+    <section>
+      <p>{flight?.label} Flight</p>
+      {!events.length && <Empty>No attendance events are available for this Flight.</Empty>}
       <form
         className="cadet-form"
         onSubmit={(e) => {
@@ -381,16 +408,15 @@ function FlightReport({ state, save, disabled }) {
           </>
         )}
       </form>
-    </details>
+    </section>
   );
 }
 function Flight({ state, save, disabled }) {
   return (
     <>
-      <FlightReport state={state} save={save} disabled={disabled} />
-      <h2>Attendance flags</h2>
+      {state.actions.some(a=>a.kind==="flag" && !a.change && !a.resolution) && <h2>Earlier Flight review requests</h2>}
       {state.actions
-        .filter((a) => a.kind === "flag" && !a.resolution)
+        .filter((a) => a.kind === "flag" && !a.change && !a.resolution)
         .map((a) => (
           <form
             key={a.actionId}
@@ -413,7 +439,7 @@ function Flight({ state, save, disabled }) {
             <button disabled={disabled}>Mark reviewed</button>
           </form>
         ))}
-      {!state.actions.some((a) => a.kind === "flag" && !a.resolution) && (
+      {!state.actions.some((a) => a.kind === "flag" && !a.change && !a.resolution) && (
         <p>No open attendance flags.</p>
       )}
       <h2>Flight duties</h2>
@@ -463,16 +489,19 @@ export default function CadetWorkspace({ session }) {
   const pending = useRef(null),
     active = useRef(false),
     preview = !!session.viewAs;
+  const section = tab==="Submit attendance" ? "report" : tab==="My attendance" ? "attendance" : "";
+  const currentSection=useRef(section);
+  currentSection.current=section;
   const load = async () => {
-    const s = await api("/cadet");
-    setState(s);
+    const s = await api("/cadet"+(section?"?section="+section:""));
+    if(currentSection.current===section)setState(s);
     return s;
   };
   useEffect(() => {
-    load().catch((e) => setError(e.message));
-  }, []);
+    load().catch((e) => {if(currentSection.current===section)setError(e.message);});
+  }, [section]);
   async function save(kind, fields, done) {
-    if (active.current || preview) return;
+    if (active.current || !state?.writable || (preview && state?.readOnly !== false)) return;
     active.current = true;
     setBusy(true);
     setError("");
@@ -481,7 +510,8 @@ export default function CadetWorkspace({ session }) {
     if (pending.current?.signature !== signature)
       pending.current = { signature, id: crypto.randomUUID() };
     try {
-      await api("/cadet", { kind, fields, id: pending.current.id });
+      const action = { kind, fields, id: pending.current.id };
+      await api("/cadet", preview ? {entryAuditId:session.viewAs.entryAuditId, action} : action);
       await load();
       pending.current = null;
       done?.();
@@ -502,6 +532,9 @@ export default function CadetWorkspace({ session }) {
           ...(state.squadron ? [["Excusals", FileCheck2]] : []),
           ...(state.flightCommander ? [["My Flight", Users]] : []),
           ["My requests", ClipboardList],
+          ["My attendance", ClipboardList],
+          ["Submit attendance", ClipboardList],
+          ...(state.squadron ? [["Attendance reviews",FileCheck2]] : []),
           ["My profile", UserRound],
         ]
       : [];
@@ -523,7 +556,7 @@ export default function CadetWorkspace({ session }) {
     : state?.flightCommander && flight ? `${flight} Flight Commander` : "Cadet";
   const disabled =
     busy ||
-    preview ||
+    (preview && state?.readOnly !== false) ||
     !state?.writable ||
     (!state?.linked && !state?.registration);
   const flags = (state?.actions || []).filter(a => a.kind === "flag" && a.personId === state.profile?.personId);
@@ -557,7 +590,7 @@ export default function CadetWorkspace({ session }) {
         {!preview && <button className="sign-out" onClick={() => logout().catch((e) => setError(e.message))}>Sign out</button>}
       </p>
     </>}>
-      {preview && <ViewAsBanner label={name || "selected cadet"} busy={busy} onExit={async () => {
+      {preview && <ViewAsBanner acting={state?.readOnly === false} label={name || "selected cadet"} busy={busy} onExit={async () => {
         try {
           await api("/view-as", { personId: null });
           location.assign("/");
@@ -580,9 +613,10 @@ export default function CadetWorkspace({ session }) {
       )}
       {notice && <div className="success" role="status">{notice}</div>}
       {!state && !error && <p role="status">Loading your workspace…</p>}
-      {state && !preview && !state.writable && (
+      {state && !state.writable && (
         <p className="notice">Submissions are paused.</p>
       )}
+      {preview && state?.profile && !state.linked && <p className="notice">This cadet must connect their school account before you can act on their behalf.</p>}
       {state?.profile && !state.linked && !preview && (
         <button
           disabled={busy || !state.writable}
@@ -595,7 +629,7 @@ export default function CadetWorkspace({ session }) {
         <Excusals
           list={list}
           busy={busy}
-          readOnly={preview || disabled}
+          readOnly={disabled}
           propose={(_, p, done) =>
             save(
               "decide",
@@ -610,6 +644,9 @@ export default function CadetWorkspace({ session }) {
           }
         />
       )}
+      {page==="Attendance reviews" && <AttendanceReviews state={state} save={save} disabled={disabled}/>}
+      {page==="My attendance" && (state.section==="attendance" ? <PersonalAttendance state={state} flags={flags} save={save} disabled={disabled}/> : <p role="status">Loading attendance…</p>)}
+      {page==="Submit attendance" && (state.section==="report" ? <FlightReport state={state} save={save} disabled={disabled}/> : <p role="status">Loading Flight roster…</p>)}
       {page === "My Flight" && (
         <Flight state={state} save={save} disabled={disabled} />
       )}
@@ -650,22 +687,7 @@ export default function CadetWorkspace({ session }) {
               disabled={disabled}
             />
           </section>
-          <section className="form-section">
-            <h2>My attendance flags</h2>
-            {!flags.length && <Empty>No attendance flags this term.</Empty>}
-            {flags.map((a) => (
-                <p key={a.actionId}>
-                  <strong>{a.event}</strong> · {a.detail} ·{" "}
-                  {a.resolution || "Awaiting Flight review"}
-                </p>
-              ))}
-            <Submission
-              mode="flag"
-              state={state}
-              save={save}
-              disabled={disabled}
-            />
-          </section>
+
         </div>
       )}
     </WorkspaceShell>

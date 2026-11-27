@@ -4,7 +4,7 @@ const pages = {
     Attendance:"attendance", Excusals:"excusals", History:"history",
     "Semester planning":"semester", System:"system", Assistant:"assistant",
   },
-  cadet: {"My requests":"requests", "My profile":"profile", "My Flight":"flight", Excusals:"excusals"},
+  cadet: {"My attendance":"attendance","Submit attendance":"submit-attendance","Attendance reviews":"attendance-reviews","My requests":"requests", "My profile":"profile", "My Flight":"flight", Excusals:"excusals"},
 };
 
 export function pageHref(workspace, page) {

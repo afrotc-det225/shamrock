@@ -21,7 +21,7 @@ export function ViewAsSelector({ people, onSelect, busy }) {
     {open && <Drawer title="View as" onClose={() => setOpen(false)}>
       <div className="fields">
         <SearchBox placeholder="Find a person to view" value={query} onChange={setQuery} />
-        <p className="history-caption">Read-only view of their SHAMROCK access.</p>
+        <p className="history-caption">Open the selected person’s workspace.</p>
         <div className="view-as-people">{rows.map(person => <button key={person.personId} disabled={busy}
           onClick={() => { setOpen(false); onSelect(person); }}>{name(person)}<small>{person.role || person.asYear}</small></button>)}</div>
         {error && <p role="alert">{error} <button onClick={()=>setRetry(n=>n+1)}>Retry</button></p>}
@@ -38,7 +38,7 @@ export const viewAsStatus = {
   "no-verified-login": "This person does not have a verified sign-in linked to SHAMROCK.",
   "no-panel-access": "This person does not currently have access to the panel.",
 };
-export function ViewAsBanner({ label, onExit, busy }) {
+export function ViewAsBanner({ label, onExit, busy, acting = false }) {
   const ref = useRef(null);
   useEffect(() => {
     const element = ref.current, workspace = element.closest(".workspace");
@@ -47,7 +47,7 @@ export function ViewAsBanner({ label, onExit, busy }) {
     return () => { observer.disconnect(); workspace.style.removeProperty("--topbar-height"); };
   }, []);
   return <div ref={ref} className="view-as-banner" role="status">
-    <span><strong>Viewing as {label}</strong><small>Read-only · Your administrator account is unchanged</small></span>
+    <span><strong>{acting ? "Acting as" : "Viewing as"} {label}</strong><small>{acting ? "Changes use their permissions and record you as the administrator." : "Read-only view"}</small></span>
     <button disabled={busy} onClick={onExit}>Exit view</button>
   </div>;
 }

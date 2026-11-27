@@ -222,3 +222,50 @@ test('an active Directory assignment supports a read-only admin preview before f
   await f.db.prepare("UPDATE memberships SET active=0 WHERE person_id='unmapped'").run();
   assert.equal((await f.send(target,'/v1/cadet/preview')).status,403);
 });
+
+test('a linked cadet permits an audited profile edit through View as, with the same write pause and exit fence',async t=>{
+  const f=await fixture(t),path='/v1/cadet/preview';
+  const email='fixture'+ '@nd.edu';
+  await f.db.batch([
+    f.db.prepare("UPDATE permission_policy_control SET config_json=?").bind(JSON.stringify({operationalSquadronIds:["blue","gold"]})),
+    f.db.prepare("UPDATE principal_accounts SET email=? WHERE principal_id='cadet'").bind(email),
+    f.db.prepare("UPDATE directory_profiles SET email=? WHERE person_id='cadet'").bind(email),
+    f.db.prepare("INSERT INTO adapter_sources VALUES('test','admin-staging-web',1)"),
+  ]);
+  const entry=await f.send(enter('cadet'));
+  assert.equal(entry.body.directoryWorkspace,true);
+  const target={...base,targetPersonId:'cadet',entryAuditId:'entry'};
+  assert.equal((await f.send(target,path)).body.readOnly,false);
+  const action={id:crypto.randomUUID(),kind:'profile',fields:{changes:{dorm:'Fictional Hall'},version:1}};
+  const input={...target,action};
+  assert.equal((await f.send(input,path)).body.error.code,'WRITES_PAUSED');
+  await f.db.prepare('UPDATE system_control SET accepting_commands=1').run();
+  const saved=await f.send(input,path);
+  assert.equal(saved.status,200,JSON.stringify(saved));
+  assert.equal(saved.body.commandId,'portal.entry.'+action.id);
+  assert.equal((await f.send(input,path)).status,200);
+  assert.equal(await f.db.prepare("SELECT dorm FROM directory_profiles WHERE person_id='cadet'").first('dorm'),'Fictional Hall');
+  assert.equal((await f.send({...input,action:{...action,kind:'link'}},path)).status,403);
+  assert.equal((await f.send({...input,targetPersonId:'lead'},path)).status,403);
+  assert.equal((await f.send({...base,action:'exit',auditId:'exit',entryAuditId:'entry'})).status,200);
+  assert.equal((await f.send(input,path)).status,403);
+});
+
+test('a Wing panel edit uses the target grants and the entry-linked command in the transaction',async t=>{
+  const f=await fixture(t);
+  await f.db.batch([
+    f.db.prepare("UPDATE system_control SET accepting_commands=1"),
+    f.db.prepare("UPDATE permission_policy_control SET config_json=?").bind(JSON.stringify({operationalSquadronIds:["blue","gold"]})),
+    f.db.prepare("INSERT INTO adapter_sources VALUES('test','admin-staging-web',1)"),
+  ]);
+  await f.send(enter('administrator'));
+  const path='/v1/admin/panel/view-as/action';
+  const payload={contractVersion:1,environment:'local',generation:1,commandId:'edit',actor:{principalId:'owner',evidence:'authenticated-confirmation'},
+    source:{kind:'test',resourceKey:'admin-staging-web',submissionId:'edit',revision:1},operation:'directory.selfUpdate',
+    payload:{personId:'administrator',expectedVersion:1,changes:{dorm:'New Hall'}}};
+  const input={...base,targetPersonId:'administrator',entryAuditId:'entry',path:'/v1/admin/commands',payload};
+  const saved=await f.send(input,path);assert.equal(saved.status,200,JSON.stringify(saved));
+  assert.equal(saved.body.commandId,'view.entry.edit');
+  assert.equal(await f.db.prepare("SELECT actor_id FROM admin_commands WHERE command_id='view.entry.edit'").first('actor_id'),'administrator');
+  assert.equal((await f.send({...input,payload:{...payload,commandId:'outside',payload:{...payload.payload,personId:'other'}}},path)).status,403);
+});

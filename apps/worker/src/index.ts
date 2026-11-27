@@ -1,5 +1,5 @@
 import { cadetRoute, knownDirectoryEmail } from './cadet-workspace.js';
-import { previewCadetWorkspace } from './panel-view-as.js';
+import { delegatePanel, previewCadetWorkspace } from './panel-view-as.js';
 import {attendanceDelta} from './panel-delta.js';
 import { meterPanelReads } from './panel-read-meter.js';
 import { cachedPanelRead, wingAttendanceCache } from './panel-cache.js';
@@ -170,7 +170,9 @@ function membershipGuard(ctx: Context): { sql: string; values: (string | number 
 }
 
 function guardParts(env: Env, command: Command, ctx: Context, scope?: CommandScopeGuard): { sql: string; values: (string | number | null)[] } {
-  const decision=command.operation==='excusal.decide',permission=decision?excusalDecisionPermission(command.actor.principalId,command.payload.requestId,ctx.unitId):{sql:permissionSql,values:[command.actor.principalId,capability(command),ctx.unitId,submission(command)?ctx.personId:null]};
+  const decision=command.operation==='excusal.decide',permission=scope?.memberReport && command.operation==='attendance.report'
+    ? {sql:'EXISTS(SELECT 1 FROM principals p JOIN memberships m USING(person_id) WHERE p.principal_id=? AND p.active=1 AND m.active=1 AND m.unit_id=?)',values:[command.actor.principalId,ctx.unitId]}
+    : decision?excusalDecisionPermission(command.actor.principalId,command.payload.requestId,ctx.unitId):{sql:permissionSql,values:[command.actor.principalId,capability(command),ctx.unitId,submission(command)?ctx.personId:null]};
   return {
     sql: `${controlSql} AND ${permission.sql} AND ${sourceSql}
       AND NOT EXISTS (SELECT 1 FROM json_each(?) selected WHERE NOT EXISTS
@@ -488,10 +490,16 @@ const worker = {
       if (request.method !== 'POST' || !request.headers.get('content-type')?.startsWith('application/json')) {
         throw new HttpError(400, 'INVALID_REQUEST', 'Use an authenticated JSON operation.');
       }
-      const input = parseJson(body);
+      let input = parseJson(body);
+      if(url.pathname==='/v1/admin/panel/view-as/action' && !url.search){
+        const delegated=await delegatePanel(env,input);
+        url.pathname=delegated.path;
+        env=delegated.env;
+        input=delegated.input;
+      }
       if (url.pathname === '/v1/cadet/known' && !url.search) return json(await knownDirectoryEmail(env,input));
       if (url.pathname === '/v1/cadet/workspace' && !url.search) return json(await cadetRoute(env,input,(c,guard)=>acceptCommand(env,c,guard)));
-      if (url.pathname === '/v1/cadet/preview' && !url.search) return json(await previewCadetWorkspace(env,input));
+      if (url.pathname === '/v1/cadet/preview' && !url.search) return json(await previewCadetWorkspace(env,input,(guarded,c,g)=>acceptCommand(guarded,c,g)));
       if (url.pathname === '/v1/admin/permissions/recover' && !url.search) return json(await recoverPermissionRefresh(env, input));
       if (url.pathname === '/v1/admin/permissions/fence' && !url.search) return json(await attestPermissionFence(env, input));
       if (url.pathname === '/v1/admin/permissions/commands' && !url.search) return json(await permissionCommand(env, input));

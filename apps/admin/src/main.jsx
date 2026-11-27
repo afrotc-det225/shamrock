@@ -257,16 +257,16 @@ function App() {
   };
   const propose = (operation, payload, close, reviewContext) =>
     run(async () => {
-      const p = await api("/proposals", { operation, payload });
+      const p = await api("/proposals", { operation, payload, ...(preview?{viewEntry:preview.entryAuditId}:{}) });
       setProposal({...p, reviewContext});
       close?.();
     });
   const apply = (id) =>
     run(async () => {
-      let result = await api(`/proposals/${id}/apply`, { approved: true });
+      let result = await api(`/proposals/${id}/apply`, { approved: true, ...(preview?{viewEntry:preview.entryAuditId}:{}) });
       for (let step = 0; result.state === "continuing" && step < 40; step++) {
         setNotice("Preparing the semester. Progress is being saved.");
-        result = await api(`/proposals/${id}/apply`, { approved: true });
+        result = await api(`/proposals/${id}/apply`, { approved: true, ...(preview?{viewEntry:preview.entryAuditId}:{}) });
       }
       setNotice(result.message);
       setProposal(null);
@@ -330,7 +330,7 @@ function App() {
   const visiblePages = blockedPreview ? [] : scoped
     ? pages.filter(([title]) => ["Attendance", "Excusals"].includes(title))
     : pages.filter(([title]) => title !== "History" || data?.meta.hosted);
-  const common = { ...data, propose, busy, readOnly: !!preview, notify: setNotice, refresh: reload, run };
+  const common = { ...data, propose, busy, readOnly: !!preview && !data?.meta.delegatedEdits, notify: setNotice, refresh: reload, run };
   if (signIn) {
     const code = new URLSearchParams(location.search).get("signin");
     const message =
@@ -385,7 +385,7 @@ function App() {
         <p>{readOutage.limited
           ? `The database has reached its daily allowance. We'll check again after ${retryTime}.`
           : `SHAMROCK could not load cadet records. We'll try again after ${retryTime}. You can stay on this page.`}</p>
-        {preview && <p>View as remains read-only.</p>}
+
         {error && errorSource === "action" && <div className="error" role="alert">{error}</div>}
         {busy && <small role="status">Checking records…</small>}
         <div className="outage-actions">
@@ -451,7 +451,7 @@ function App() {
                 disabled={busy}
                 onClick={() =>
                   run(async () => {
-                    await api(`/proposals/${proposal.id}/cancel`, {});
+                    await api(`/proposals/${proposal.id}/cancel`, preview?{viewEntry:preview.entryAuditId}:{});
                     setProposal(null);
                   })
                 }
@@ -468,7 +468,7 @@ function App() {
             </footer>
           </Drawer>
         )}>
-            {preview && <ViewAsBanner busy={busy} onExit={() => viewAs(null)}
+            {preview && <ViewAsBanner acting={data?.meta.delegatedEdits} busy={busy} onExit={() => viewAs(null)}
               label={previewName || [data?.snapshot?.people.find(p => p.personId === preview.personId)?.firstName,
                 data?.snapshot?.people.find(p => p.personId === preview.personId)?.lastName].filter(Boolean).join(" ") || "selected cadet"} />}
             {sync && (

@@ -82,7 +82,7 @@ export default {
         backend = new HostedBackend(env, user.principal_id, preview),
         service = new AdminService(
           backend,
-          new ProposalStore(env.PANEL_DB, backend.binding, user.principal_id, user.token_hash),
+          new ProposalStore(env.PANEL_DB, backend.binding, user.principal_id, preview ? null : user.token_hash),
         );
       let body;
       if (request.method === "POST") {
@@ -97,27 +97,34 @@ export default {
         body = await boundedJson(request);
       }
       if (url.pathname === "/api/cadet" && ["GET","POST"].includes(request.method)) {
+        const section=url.searchParams.get("section");
+        if(section!==null && !["report","attendance"].includes(section))throw new PanelError("INVALID_REQUEST","Unknown workspace section.");
         if (preview) {
-          if (request.method !== "GET" || preview.status !== "ready") throw new PanelError("VIEW_AS_READ_ONLY","Exit View as before making changes.",403);
-          return secure(json(await backend.send("/v1/cadet/preview",{...backend.identity(),targetPersonId:preview.person_id,entryAuditId:preview.entry_audit_id})));
+          if (env.VIEW_AS_ENABLED !== "1" || preview.status !== "ready" || (request.method === "POST" && body?.entryAuditId !== preview.entry_audit_id)) throw new PanelError("VIEW_AS_READ_ONLY","Exit View as before making changes.",403);
+          return secure(json(await backend.send("/v1/cadet/preview",{...backend.identity(),targetPersonId:preview.person_id,entryAuditId:preview.entry_audit_id,...(section?{section}:{}),...(request.method==="POST"?{action:body.action}:{})})));
         }
+        if (request.method==="POST" && body && "entryAuditId" in body) throw new PanelError("VIEW_AS_CHANGED","Reopen the selected workspace.",409);
         if (!user.schoolEmail) throw new PanelError("FORBIDDEN","Sign in with your school account.",403);
         const input={...backend.identity(),principalId:user.principal_id.startsWith("school.") ? "google."+await sha(user.schoolEmail) : user.principal_id,email:user.schoolEmail};
         if (request.method==="POST" && (!body || !body.kind)) throw new PanelError("INVALID_REQUEST","Choose a workspace action.");
-        return secure(json(await backend.post("/v1/cadet/workspace",{...input,...(request.method==="POST"?{action:body}:{})})));
+        return secure(json(await backend.post("/v1/cadet/workspace",{...input,...(section?{section}:{}),...(request.method==="POST"?{action:body}:{})})));
       }
       if (user.principal_id.startsWith("school.")) throw new PanelError("CADET_WORKSPACE","Open your cadet workspace.",403);
       if (request.method === "POST" && url.pathname === "/api/view-as")
         return secure(json(await changePreview(env, user,
           new HostedBackend(env, user.principal_id), body)));
-      if (preview && ![
+      const proposalPath=/^\/api\/proposals(?:\/[a-f0-9-]{36}\/(?:apply|cancel))?$/.test(url.pathname);
+      if(request.method==="POST" && proposalPath && (body?.viewEntry ?? null)!==(preview?.entry_audit_id ?? null))
+        throw new PanelError("VIEW_AS_READ_ONLY","Reload the workspace before saving.",403);
+      backend.delegating=env.VIEW_AS_ENABLED==="1" && preview?.status==="ready";
+      if (preview && !(backend.delegating && (proposalPath || ["/api/cadets/editor","/api/events/editor"].includes(url.pathname))) && ![
         "GET /api/state", "GET /api/wing-charts", "POST /api/page", "GET /api/history/list", "POST /api/history/page", "POST /api/history/report",
       ].includes(`${request.method} ${url.pathname}`))
         throw new PanelError("VIEW_AS_READ_ONLY", "Exit View as before making changes.", 403);
       const editorProfile = {"/api/view-as/people":"view-as-people", "/api/events/editor":"event-editor","/api/cadets/editor":"directory-editor"}[url.pathname];
       if (editorProfile && request.method === "GET") {
         const authority = await backend.panelAuthority();
-        if (!authority.access.capabilities.fullSnapshot || preview ||
+        if (!authority.access.capabilities.fullSnapshot || (preview && !backend.delegating) ||
             (editorProfile === "view-as-people" && env.VIEW_AS_ENABLED !== "1"))
           throw new PanelError("FORBIDDEN","This page is outside your access.",403);
         return secure(json(await browseState(backend,authority,editorProfile,url.searchParams.get("id") || undefined)));
@@ -176,6 +183,7 @@ export default {
               environment: "staging",
               fictional: backend.dataset === "fictional",
               hosted: true,
+              delegatedEdits: !!backend.delegating,
               viewAsEnabled: env.VIEW_AS_ENABLED === "1" && manifest?.access?.capabilities?.canViewAs === true,
               assistantAvailable: available(env, user, preview) && manifest.access.capabilities.fullSnapshot,
               model,

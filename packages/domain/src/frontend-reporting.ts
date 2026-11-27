@@ -196,7 +196,7 @@ export function calculateAttendancePercent(codes: readonly (AttendanceCode | nul
   return calculateAttendanceCredit(codes.map(code => ({ effectiveCode: code === '' ? null : code, eligible: null }))).percentage;
 }
 
-function resolveCell(event: ReportingEvent, personId: string, observations: readonly ReportingObservation[],
+export function resolveCell(event: Pick<ReportingEvent,"termId"|"eventId">, personId: string, observations: readonly ReportingObservation[],
   corrections: readonly ReportingCorrection[], requests: readonly ReportingRequest[], eligible: boolean | null,
   diagnostics: ReportingDiagnostic[], baseline?: ReportingLegacyBaseline): ReportingAttendanceCell {
   const ordered = [...observations.map(f => ({ ...f, kind: 'observation' as const })),

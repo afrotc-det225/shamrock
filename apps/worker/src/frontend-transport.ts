@@ -33,6 +33,7 @@ const queries:Record<FrontendSection,{select:string;from:string;order:string;lim
   termRosters:{select:'term_id AS termId,person_id AS personId,last_name AS lastName,first_name AS firstName,as_year AS asYear,flight_id AS flightId,flight_path_status AS flightPathStatus,date_of_birth AS dateOfBirth',from:'FROM term_roster_snapshots',order:'term_id,person_id',limit:128},
   legacyBaselines:{select:`b.baseline_id AS baselineId,b.person_id AS personId,b.event_id AS eventId,b.code,${baselineRevisionSql} AS baselineRevision`,from:baselineFrom,order:'b.person_id,b.event_id',limit:256},
 };
+export const cadetAttendanceFacts = {observations:queries.observations,corrections:queries.corrections,baselines:queries.legacyBaselines};
 /** A publication reads one semester. Older evidence remains queryable by an explicit term ID. */
 export const scopeCte = `WITH selected_term AS (SELECT term_id FROM terms WHERE term_id=COALESCE(?,(SELECT term_id FROM terms WHERE is_current=1))),
  scoped_events AS (SELECT event_id FROM event_details WHERE term_id IN(SELECT term_id FROM selected_term)),

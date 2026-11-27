@@ -1,4 +1,4 @@
-import { eligibleSchoolSql, readCadetWorkspace } from "./cadet-workspace.js";
+import { cadetRoute, eligibleSchoolSql, readCadetWorkspace } from "./cadet-workspace.js";
 import type {WingTableCache} from './panel-cache.js';
 import {browsePanel, profiles, type Profile} from "./panel-browse.js";
 import { PANEL_VIEW_AS_PAGE_MAX_BYTES, type PanelViewAsAuthorization, type PanelViewAsKind, type PanelViewAsPage, type PanelViewAsStatus } from '../../../packages/domain/src/panel-view-as.js';
@@ -170,24 +170,63 @@ export async function panelViewAsPage(env: Env, input: unknown): Promise<PanelVi
 export async function panelBrowse(env:Env,input:unknown,wingCache?:WingTableCache) {
   const req=identity(env,input), preview=Object.hasOwn(req,'entryAuditId');
   const targeted = Object.hasOwn(req,'recordId');
-  if (targeted && (preview || !['event-editor','directory-editor'].includes(String(req.profile)) || !id(req.recordId)))
+  if (targeted && (!['event-editor','directory-editor'].includes(String(req.profile)) || !id(req.recordId)))
     return fail(400,'INVALID_PANEL_REQUEST');
-  if (Object.keys(req).sort().join(',') !== (preview?'entryAuditId,environment,generation,principalId,profile,targetPersonId':'environment,generation,principalId,profile'+(targeted?',recordId':'')) ||
+  if (Object.keys(req).sort().join(',') !== (preview?'entryAuditId,environment,generation,principalId,profile,'+(targeted?'recordId,':'')+'targetPersonId':'environment,generation,principalId,profile'+(targeted?',recordId':'')) ||
       !profiles.includes(req.profile as Profile)) throw new HttpError(400,'INVALID_PANEL_REQUEST','Invalid page.');
   const actor = {environment:env.ENVIRONMENT,generation:Number(env.GENERATION),principalId:req.principalId};
   if (!preview) return browsePanel(env,actor,req.profile as Profile,wingCache,req.recordId as string|undefined);
-  if (['semester','diagnostics','event-editor','view-as-people','directory-editor'].includes(String(req.profile))) return fail(403,'NOT_AUTHORIZED');
+  if (['view-as-people'].includes(String(req.profile))) return fail(403,'NOT_AUTHORIZED');
   if (!id(req.entryAuditId)||!id(req.targetPersonId)) return fail(400,'INVALID_VIEW_AS_REQUEST');
   const {query,binding}=await readBinding(env,req.principalId,req.targetPersonId,req.entryAuditId);
+  if((targeted || ['semester','event-editor','directory-editor','diagnostics'].includes(String(req.profile))) && !binding.fullSnapshot)return fail(403,'NOT_AUTHORIZED');
   if(binding.directoryEmail || !binding.targetPrincipalId)return fail(403,'NOT_AUTHORIZED');
-  return browsePanel(guardedEnvironment(env,query,binding.raw),{...actor,principalId:binding.targetPrincipalId},req.profile as Profile);
+  return browsePanel(guardedEnvironment(env,query,binding.raw),{...actor,principalId:binding.targetPrincipalId},req.profile as Profile,undefined,req.recordId as string|undefined);
 }
 
-export async function previewCadetWorkspace(env:Env, input:unknown) {
+export async function previewCadetWorkspace<E extends Env>(env:E, input:unknown,
+  submit:(guarded:E,...args:Parameters<Parameters<typeof cadetRoute>[2]>)=>Promise<unknown>) {
   const req=identity(env,input);
-  if(Object.keys(req).sort().join(',')!=='entryAuditId,environment,generation,principalId,targetPersonId'
+  const action = Object.hasOwn(req,'action');
+  const keys = 'entryAuditId,environment,generation,principalId,'+(Object.hasOwn(req,'section')?'section,':'')+'targetPersonId';
+  if(req.section!==undefined && !['report','attendance'].includes(String(req.section)))return fail(400,'INVALID_VIEW_AS_REQUEST');
+  if(Object.keys(req).sort().join(',')!==(action?'action,'+keys:keys)
     || !id(req.entryAuditId) || !id(req.targetPersonId)) return fail(400,'INVALID_VIEW_AS_REQUEST');
-  const {query,binding}=await readBinding(env,req.principalId,String(req.targetPersonId),String(req.entryAuditId));
+  const {query,binding}=await readBinding(env,req.principalId,req.targetPersonId,req.entryAuditId);
   if(!binding.directoryEmail) return fail(403,'VIEW_AS_UNAVAILABLE');
-  return {...await readCadetWorkspace(guardedEnvironment(env,query,binding.raw),binding.directoryEmail,binding.targetPrincipalId ?? undefined),readOnly:true};
+  if(!action) return {...await readCadetWorkspace(guardedEnvironment(env,query,binding.raw),binding.directoryEmail,binding.targetPrincipalId ?? undefined,req.section),readOnly:!binding.targetPrincipalId};
+  if(!object(req.action) || !object(req.action.fields) || !id(req.action.id)) return fail(400,'INVALID_VIEW_AS_REQUEST');
+  // Only the owner of a school account can establish its verified sign-in link.
+  if(!binding.targetPrincipalId || ['register','link'].includes(String(req.action.kind))) return fail(403,'VIEW_AS_UNAVAILABLE');
+  const entry=req.entryAuditId;
+  const guarded=writeEnvironment(env,query,binding.raw);
+  return cadetRoute(guarded,{environment:req.environment,generation:req.generation,principalId:binding.targetPrincipalId,
+    email:binding.directoryEmail,action:req.action},(c,g)=>submit(guarded,c,g),entry);
+}
+
+function writeEnvironment<E extends Env>(env:E,query:ReturnType<typeof bindingQuery>,expected:string):E {
+  // A failed precondition aborts the same D1 transaction that would save the edit.
+  // SELECT only: read batches incur no writes to maintain the fence.
+  const db = {prepare:(sql:string)=>env.DB.prepare(sql), async batch<T>(statements:D1PreparedStatement[]) {
+    const fence=env.DB.prepare(`SELECT CASE WHEN (${query.sql})=? THEN 1 ELSE json('view changed') END`).bind(...query.values,expected);
+    return (await env.DB.batch<T>([fence,...statements])).slice(1);
+  }} as D1Database;
+  return {...env,DB:db};
+}
+
+// Only panel proposal paths reach this adapter. The authenticated operator, directory
+// mapping and open entry must still match inside the transaction that commits.
+export async function delegatePanel<E extends Env>(env:E,input:unknown){
+  const req=identity(env,input);
+  if(!id(req.entryAuditId)||!id(req.targetPersonId)||!object(req.payload)) return fail(400,'INVALID_VIEW_AS_REQUEST');
+  const {query,binding}=await readBinding(env,req.principalId,req.targetPersonId,req.entryAuditId);
+  if(!binding.targetPrincipalId||binding.directoryEmail) return fail(403,'VIEW_AS_UNAVAILABLE');
+  const path=String(req.path),payload=req.payload;
+  if(!['/v1/admin/panel/authorize','/v1/admin/panel/commands','/v1/admin/commands'].includes(path))return fail(403,'NOT_AUTHORIZED');
+  if(path==='/v1/admin/commands' && !binding.fullSnapshot)return fail(403,'NOT_AUTHORIZED');
+  const principalId=binding.targetPrincipalId;
+  if(path.endsWith('authorize'))return {path,env:writeEnvironment(env,query,binding.raw),input:{...payload,principalId}};
+  if(!id(payload.commandId)||!object(payload.source)||!object(payload.actor))return fail(400,'INVALID_VIEW_AS_REQUEST');
+  const commandId='view.'+req.entryAuditId+'.'+payload.commandId;
+  return {path,env:writeEnvironment(env,query,binding.raw),input:{...payload,commandId,actor:{...payload.actor,principalId},source:{...payload.source,submissionId:commandId}}};
 }

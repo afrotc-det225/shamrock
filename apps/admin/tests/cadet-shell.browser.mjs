@@ -8,11 +8,11 @@ await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
 const browser = await chromium.launch(process.env.SHAMROCK_CHROMIUM_PATH
   ? { executablePath: process.env.SHAMROCK_CHROMIUM_PATH } : {});
 const origin = `http://127.0.0.1:${server.address().port}`;
-const requests = ["My requests", "My profile"];
+const requests = ["My requests","My attendance","Submit attendance","My profile"];
 const scenarios = [
   { role: "Cadet", tabs: requests },
   { role: "Flight", tabs: ["My Flight", ...requests] },
-  { role: "Squadron", tabs: ["Excusals", ...requests] },
+  { role: "Squadron", tabs: ["Excusals", ...requests.slice(0,-1),"Attendance reviews","My profile"] },
   { role: "Registration", tabs: [] },
   { role: "View as", tabs: requests },
 ];
@@ -27,11 +27,13 @@ try {
         const path = new URL(route.request().url()).pathname;
         calls.push(route.request().method() + " " + path);
         if (path === "/api/session") return route.fulfill({ json: {
-          csrf: "fixture", schoolLogin: !preview, viewAs: preview ? {status:"ready", personId:"one"} : null,
+          csrf: "fixture", schoolLogin: !preview, viewAs: preview ? {status:"ready", personId:"one",entryAuditId:"entry"} : null,
         } });
         if (path !== "/api/cadet" || route.request().method() !== "GET") return route.abort();
+        const section=new URL(route.request().url()).searchParams.get("section");
         return route.fulfill({ json: {
-          linked: true, writable: true, registration: role === "Registration",
+          section,attendance:section==="attendance"?[{eventId:"llab",label:"TW-1 LLAB",eventType:"llab",version:1,baseVersion:0,code:"A"}]:[],
+          linked: true, writable: true, readOnly:false, registration: role === "Registration",
           profile: role === "Registration" ? null : {personId:"one", firstName:"Sample", lastName:"Cadet", flightId:"alpha",afsc:"13N – Nuclear and Missile Operations ".repeat(6).trim(),photoLink:"https://drive.google.com/file/d/fictional-photo/view"},
           flights: [{ flightId:"alpha", label:"Alpha" }], events: [], actions: [], queue: [],
           requests: [], roster: [], reportRoster: [], flightCommander:role === "Flight",
@@ -54,10 +56,11 @@ try {
         await heading("My requests").waitFor();
         const compose = page.locator("details").filter({has:page.locator("summary", {hasText:"Request an excusal"})});
         await compose.locator("summary").click();
-        assert.equal(await compose.getByRole("button", {name:"Submit"}).isEnabled(), !preview);
+        assert.equal(await compose.getByRole("button", {name:"Submit"}).isEnabled(), true);
         await nav.getByRole("link", {name:"My profile"}).click();
         assert.equal(await nav.locator('[aria-current="page"]').innerText(), "My profile");
         await page.getByLabel("First name", {exact:true}).waitFor();
+        if (preview) await page.getByText("Acting as Sample Cadet").waitFor();
         const afsc = page.getByLabel("Air Force Specialty Code (AFSC)");
         assert.equal(await afsc.inputValue(),"13N – Nuclear and Missile Operations ".repeat(6).trim());
         assert(await afsc.evaluate(el => el.scrollWidth <= el.clientWidth && el.scrollHeight <= el.clientHeight + 1));
@@ -70,6 +73,12 @@ try {
         await heading("My requests").waitFor();
         await page.goForward();
         await heading("My profile").waitFor();
+        await nav.getByRole("link",{name:"My attendance",exact:true}).click();
+        await page.getByRole("button",{name:/TW-1 LLAB.*A · Absent/}).click();
+        await page.getByLabel("Requested code").selectOption("P");
+        assert(await page.getByRole("button",{name:"Request correction"}).isEnabled());
+        await nav.getByRole("link",{name:"Submit attendance",exact:true}).click();
+        await page.getByLabel("Attendance event").waitFor();
       } else {
         await page.getByRole("button", {name:"Continue"}).waitFor();
       }
@@ -82,11 +91,11 @@ try {
       });
       assert(layout.fits && (width === 390 ? layout.stacked : layout.alongside), JSON.stringify(layout));
       assert.deepEqual(errors, []);
-      assert.deepEqual(calls, ["POST /api/session", "GET /api/cadet"]);
+      assert.deepEqual(calls, ["POST /api/session", "GET /api/cadet",...(tabs.length?["GET /api/cadet","GET /api/cadet"]:[])]);
       await page.close();
     }
   }
-  console.log("Cadet, Flight, Squadron, registration and read-only preview passed on desktop and phone.");
+  console.log("Cadet, Flight, Squadron, registration and delegated cadet workspace passed on desktop and phone.");
 } finally {
   await browser.close();
   await new Promise(resolve => server.close(resolve));

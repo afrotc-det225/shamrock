@@ -5,7 +5,10 @@ import {
   type DirectoryRecord,
 } from "../../../packages/domain/src/admin.js";
 import { HttpError } from "./http-error.js";
-import { directoryCatalogQuery } from "./frontend-transport.js";
+import { acceptAttendanceCorrection, pairRevisionSql } from "./corrections.js";
+import { resolveCell, type ReportingObservation, type ReportingCorrection, type ReportingLegacyBaseline, type ReportingRequest } from "../../../packages/domain/src/frontend-reporting.js";
+import { ATTENDANCE_CODES, type AttendanceCode } from "../../../packages/domain/src/index.js";
+import { cadetAttendanceFacts, directoryCatalogQuery } from "./frontend-transport.js";
 
 export interface CadetEnv {
   DB: D1Database;
@@ -51,6 +54,7 @@ export async function readCadetWorkspace(
   env: CadetEnv,
   email: string,
   loginPrincipal?: string,
+  section:unknown=null,
 ) {
   const db = env.DB;
   const principal = await canonicalPrincipal(email);
@@ -140,7 +144,7 @@ export async function readCadetWorkspace(
     predicate: string,
   ) => `SELECT r.request_id AS requestId,r.person_id AS personId,r.unit_id AS flightId,r.event_id AS eventId,
     e.label AS event,p.display_name AS personDisplayName,r.status,r.requested_outcome AS requestedOutcome,r.reason,
-    r.version,r.submitted_at AS submittedAt,r.decision_reason AS decisionReason,sc.flight_label AS capturedFlightLabel,sc.squadron_label AS capturedSquadronLabel
+    COALESCE((SELECT audit_id FROM audit_events WHERE command_id=r.last_command_id),0) AS 'order',(r.origin='legacy' AND r.last_command_id IS NULL) AS legacyStateOnly,r.version,r.submitted_at AS submittedAt,r.decision_reason AS decisionReason,sc.flight_label AS capturedFlightLabel,sc.squadron_label AS capturedSquadronLabel
     FROM excusal_records r JOIN event_details d ON d.event_id=r.event_id JOIN events e ON e.event_id=r.event_id
     JOIN people p ON p.person_id=r.person_id LEFT JOIN excusal_request_scopes sc ON sc.request_id=r.request_id
     WHERE ${predicate} AND ${current} AND ${adopted} ORDER BY r.submitted_at,r.request_id`;
@@ -148,7 +152,7 @@ export async function readCadetWorkspace(
     db.prepare(requests("r.person_id=?")).bind(profile.personId),
     db
       .prepare(
-        `SELECT d.event_id AS eventId,e.label,d.version FROM event_details d JOIN events e ON e.event_id=d.event_id
+        `SELECT d.event_id AS eventId,e.label,d.term_id AS termId,d.event_type AS eventType,d.column_label AS columnLabel,d.training_week AS trainingWeek,d.version FROM event_details d JOIN events e ON e.event_id=d.event_id
       WHERE ${current} AND EXISTS(SELECT 1 FROM event_units u WHERE u.event_id=d.event_id AND u.unit_id=?)
       AND (NOT EXISTS(SELECT 1 FROM event_roster_versions v WHERE v.event_id=d.event_id AND v.version=d.version)
         OR EXISTS(SELECT 1 FROM event_roster_members m WHERE m.event_id=d.event_id AND m.version=d.version AND m.person_id=?))
@@ -166,13 +170,13 @@ export async function readCadetWorkspace(
     a.flight_id AS flightId,a.subject_person_id AS personId,p.display_name AS person,a.event_id AS eventId,e.label AS event,resolved.detail AS resolution
     FROM cadet_workspace_actions a JOIN people p ON p.person_id=a.subject_person_id LEFT JOIN events e ON e.event_id=a.event_id
     LEFT JOIN cadet_workspace_actions resolved ON resolved.parent_id=a.action_id WHERE a.kind IN ('flag','duty')
-    AND (a.subject_person_id=? OR a.flight_id=?) AND (a.kind!='duty' OR NOT EXISTS(
+    AND (a.subject_person_id=? OR (a.flight_id=? AND a.action_id NOT LIKE 'cell.%') OR (a.kind='flag' AND a.action_id LIKE 'cell.%' AND CASE WHEN json_valid(a.detail) THEN json_extract(a.detail,'$.squadronId') END=?)) AND (a.kind!='duty' OR NOT EXISTS(
       SELECT 1 FROM cadet_workspace_actions newer WHERE newer.kind='duty' AND newer.subject_person_id=a.subject_person_id
       AND newer.flight_id=a.flight_id AND newer.rowid>a.rowid)) ORDER BY a.accepted_at DESC`,
       )
-      .bind(profile.personId, flightCommander ? profile.flightId : null),
+      .bind(profile.personId, flightCommander ? profile.flightId : null, squadronCommander ? owner.squadron_id : null),
   );
-  if (flightCommander)
+  if (flightCommander || section==="report")
     data.push(
       db
         .prepare(
@@ -183,7 +187,7 @@ export async function readCadetWorkspace(
         .bind(profile.flightId),
     );
   const reportIndex = data.length;
-  if (flightCommander)
+  if (section==="report")
     data.push(
       db
         .prepare(
@@ -196,6 +200,12 @@ export async function readCadetWorkspace(
         )
         .bind(profile.flightId),
     );
+  const factsIndex=data.length;
+  if (section==="attendance") {
+    for (const [alias, fact] of [["o",cadetAttendanceFacts.observations],["c",cadetAttendanceFacts.corrections],["b",cadetAttendanceFacts.baselines]] as const) {
+      data.push(db.prepare(`SELECT ${fact.select} ${fact.from} WHERE ${alias}.person_id=? AND ${alias}.event_id IN (SELECT d.event_id FROM event_details d WHERE ${current})`).bind(profile.personId));
+    }
+  }
   const all = (await db.batch<Row>([...data, ...fence])).map((r) => r.results);
   if (JSON.stringify(first) !== JSON.stringify(all.slice(data.length)))
     throw new HttpError(
@@ -214,9 +224,21 @@ export async function readCadetWorkspace(
       accounts[0].email === email,
     flightCommander: !!flightCommander,
     squadron: squadronCommander ? String(owner.squadron) : null,
-    reportRoster: flightCommander ? all[reportIndex] : [],
-    actions: all[actionsIndex],
-    roster: flightCommander ? all[actionsIndex + 1] : [],
+    section, squadronId:squadronCommander ? owner.squadron_id : null,
+    attendance:section==="attendance" ? all[1].map(event=>{
+      const pair=(rows:Row[])=>rows.filter(r=>r.eventId===event.eventId);
+      const obs=pair(all[factsIndex]),cor=pair(all[factsIndex+1]),base=pair(all[factsIndex+2])[0],requests=pair(all[0]);
+      const cell=resolveCell({eventId:String(event.eventId),termId:String(event.termId)},profile.personId,
+        obs as unknown as ReportingObservation[],cor as unknown as ReportingCorrection[],requests as unknown as ReportingRequest[],true,[],base as unknown as ReportingLegacyBaseline);
+      return {...event,needsReview:cell.needsReview,code:cell.effectiveCode,baseVersion:Number(base?.baselineRevision||0)+Math.max(0,...[...obs,...cor,...requests].map(r=>Number(r.order)))};
+    }):[],
+    reportRoster: section==="report" ? all[reportIndex] : [],
+    actions: all[actionsIndex].map(a=>{
+      let change=null;
+      if(a.kind==="flag" && String(a.actionId).startsWith("cell."))try {const parsed=JSON.parse(String(a.detail));if(parsed?.type==="cell-review")change=parsed;}catch{}
+      return {...a,change,detail:change?.reason??a.detail} as Row;
+    }),
+    roster: flightCommander || section==="report" ? all[actionsIndex + 1] : [],
     requests: all[0],
     events: all[1],
     queue: squadronCommander ? all[2] : [],
@@ -244,8 +266,9 @@ export async function cadetRoute(
   input: unknown,
   submit: (
     c: Command,
-    guard: { sql: string; values: (string | number | null)[] },
+    guard: { memberReport?:true; sql: string; values: (string | number | null)[] },
   ) => Promise<unknown>,
+  viewEntry?: string,
 ) {
   if (
     !object(input) ||
@@ -267,6 +290,7 @@ export async function cadetRoute(
           "principalId",
           "email",
           "action",
+          "section",
         ].includes(k),
     )
   )
@@ -278,7 +302,9 @@ export async function cadetRoute(
         "revision",
       )
     : null;
-  const state = await readCadetWorkspace(env, input.email, input.principalId);
+  const section=object(a) && a.kind==="report" ? "report" : input.section;
+  if(section!=null && !["attendance","report"].includes(String(section))) throw bad();
+  const state = await readCadetWorkspace(env, input.email, input.principalId, section);
   if (
     !state.linked &&
     input.principalId !== (await canonicalPrincipal(input.email))
@@ -300,7 +326,7 @@ export async function cadetRoute(
   )
     throw bad();
   const f = a.fields,
-    commandId = "portal." + a.id;
+    commandId = (a.kind==="flag" && Object.hasOwn(a.fields,"code") ? "cell." : "portal.") + (viewEntry ? viewEntry+"." : "") + a.id;
   const cip =
     a.kind === "register"
       ? f.cipCode
@@ -382,7 +408,7 @@ export async function cadetRoute(
       "LINK_REQUIRED",
       "Connect your Directory record first.",
     );
-  const permissionGuard = {
+  const permissionGuard: {sql:string;values:(string|number|null)[]} = {
     sql: `(${permissionSourceRevisionSql})=? AND EXISTS(SELECT 1 FROM principal_accounts a
     JOIN principals p ON p.principal_id=a.principal_id WHERE a.principal_id=? AND a.email=? AND p.person_id=? AND p.active=1)`,
     values: [
@@ -394,7 +420,6 @@ export async function cadetRoute(
   };
   if (a.kind === "report") {
     if (
-      !state.flightCommander ||
       !Array.isArray(f.present) ||
       !["complete", "partial"].includes(String(f.completeness))
     )
@@ -432,7 +457,7 @@ export async function cadetRoute(
           presentPersonIds: f.present,
         },
       }),
-      permissionGuard,
+      {...permissionGuard, memberReport:true},
     );
   }
   if (a.kind === "profile") {
@@ -519,6 +544,20 @@ export async function cadetRoute(
       permissionGuard,
     );
   }
+  const pending=state.actions?.find(r=>r.kind==="flag" && r.actionId===f.parentId);
+  if(a.kind==="reviewFlag"){
+    const change=pending?.change as Row|undefined;
+    if(!state.squadronId || !change || state.squadronId!==change.squadronId || !["Approved","Denied"].includes(String(f.decision))) throw denied();
+    const resolution=env.DB.prepare("INSERT INTO cadet_workspace_actions VALUES(?,'resolve',?,?,?,?,?,?,?)").bind(commandId,p!.personId,pending!.personId,pending!.flightId,pending!.eventId,pending!.actionId,f.decision,new Date().toISOString());
+    const guard={sql:permissionGuard.sql+" AND EXISTS(SELECT 1 FROM flight_hierarchy WHERE unit_id=? AND squadron_id=?)",values:[...permissionGuard.values,String(pending!.flightId),String(state.squadronId)]};
+    if(f.decision==="Approved")return acceptAttendanceCorrection(env,{...envelope,operation:"attendance.correct",payload:{
+      personId:pending!.personId,eventId:pending!.eventId,code:change.code,reason:change.reason,expectedBaseVersion:change.baseVersion,expectedEventVersion:change.eventVersion}},guard,{flightId:String(pending!.flightId),resolution});
+    const result=await env.DB.batch<Row>([
+      env.DB.prepare(`INSERT OR IGNORE INTO cadet_workspace_actions SELECT ?, 'resolve',?,?,?,?,?,?,? WHERE ${guard.sql} AND EXISTS(SELECT 1 FROM system_control WHERE singleton=1 AND accepting_commands=1)`).bind(commandId,p.personId,pending!.personId,pending!.flightId,pending!.eventId,pending!.actionId,"Denied",new Date().toISOString(),...guard.values),
+      env.DB.prepare("SELECT action_id FROM cadet_workspace_actions WHERE parent_id=? AND detail='Denied'").bind(pending!.actionId)]);
+    if(result[1].results[0]?.action_id!==commandId)throw new HttpError(409,"REVIEW_CHANGED","Reload the request.");
+    return {commandId,status:"committed"};
+  }
   if (
     !["flag", "resolve", "duty"].includes(a.kind) ||
     typeof f.detail !== "string" ||
@@ -539,7 +578,7 @@ export async function cadetRoute(
     throw denied();
   if (
     a.kind === "resolve" &&
-    (!state.flightCommander || !flag || flag.flightId !== p.flightId)
+    (!state.flightCommander || !flag || flag.change || flag.flightId !== p.flightId)
   )
     throw denied();
   const person =
@@ -551,6 +590,15 @@ export async function cadetRoute(
       ? null
       : adminIdentifier(a.kind === "flag" ? f.eventId : flag!.eventId);
   const parent = a.kind === "resolve" ? adminIdentifier(f.parentId) : null;
+  let detail=f.detail.trim();
+  if(a.kind==="flag" && Object.hasOwn(f,"code")){
+    const event=state.events?.find(e=>e.eventId===f.eventId);
+    const flight=state.flights.find(r=>r.flightId===p.flightId);
+    if(!flight?.squadronId || !event || f.eventVersion!==event.version || !ATTENDANCE_CODES.includes(f.code as AttendanceCode) || !Number.isSafeInteger(f.baseVersion))throw bad();
+    permissionGuard.sql+=` AND (${pairRevisionSql})=? AND EXISTS(SELECT 1 FROM event_details WHERE event_id=? AND version=? AND status='active')`;
+    permissionGuard.values.push(String(f.eventId),p.personId,f.baseVersion as number,String(f.eventId),Number(event.version));
+    detail=JSON.stringify({type:"cell-review",squadronId:flight.squadronId,code:f.code,reason:detail,baseVersion:f.baseVersion,eventVersion:event.version});
+  }
   const values = [
     commandId,
     a.kind,
@@ -559,7 +607,7 @@ export async function cadetRoute(
     p.flightId,
     event,
     parent,
-    f.detail.trim(),
+    detail,
   ];
   const results = await env.DB.batch<Row>([
     env.DB.prepare(

@@ -36,14 +36,15 @@ export const attendanceVersionsSql = `SELECT personId,eventId,MAX(operationalRev
   UNION ALL SELECT c.person_id,c.event_id,a.audit_id,0 FROM attendance_corrections c JOIN audit_events a ON a.command_id=c.command_id
   UNION ALL SELECT b.person_id,b.event_id,0,${baselineRevisionSql} FROM legacy_attendance_baselines b JOIN legacy_import_runs i ON i.import_run_id=b.import_run_id AND i.state='complete'
 ) GROUP BY personId,eventId ORDER BY personId,eventId LIMIT 25001`;
-function authorization(env: CorrectionEnv, command: AttendanceCorrectionCommand, flightId: string, scope?: CommandScopeGuard) {
+interface ApprovedFlag {flightId:string; resolution:D1PreparedStatement}
+function authorization(env: CorrectionEnv, command: AttendanceCorrectionCommand, flightId: string, scope?: CommandScopeGuard, flag?:ApprovedFlag) {
   return {
     sql: `EXISTS(SELECT 1 FROM system_control WHERE singleton=1 AND environment=? AND generation=? AND accepting_commands=1)
       AND EXISTS(SELECT 1 FROM principals WHERE principal_id=? AND active=1)
-      AND EXISTS(SELECT 1 FROM ${effectiveAdminGrants} WHERE principal_id=? AND capability='attendance.correct'
-        AND ((scope_kind='wing' AND scope_key='*') OR (scope_kind='flight' AND scope_key=?)))
+      AND ${flag && scope ? '?=?' : `EXISTS(SELECT 1 FROM ${effectiveAdminGrants} WHERE principal_id=? AND capability='attendance.correct'
+        AND ((scope_kind='wing' AND scope_key='*') OR (scope_kind='flight' AND scope_key=?)))`}
       AND EXISTS(SELECT 1 FROM adapter_sources WHERE source_kind=? AND resource_key=? AND active=1)${scope ? ` AND (${scope.sql})` : ''}`,
-    values: [env.ENVIRONMENT, Number(env.GENERATION), command.actor.principalId, command.actor.principalId,
+    values: [env.ENVIRONMENT, Number(env.GENERATION), command.actor.principalId, flag && scope ? flag.flightId : command.actor.principalId,
       flightId, command.source.kind, command.source.resourceKey, ...(scope?.values ?? [])],
   };
 }
@@ -54,15 +55,15 @@ interface CorrectionReceipt {
   result: { personId: string; eventId: string; version: number; code: string | null };
   pendingEffects: true;
 }
-async function previousReceipt(env: CorrectionEnv, command: AttendanceCorrectionCommand, hash: string, scope?: CommandScopeGuard): Promise<CorrectionReceipt | null> {
+async function previousReceipt(env: CorrectionEnv, command: AttendanceCorrectionCommand, hash: string, scope?: CommandScopeGuard, flag?:ApprovedFlag): Promise<CorrectionReceipt | null> {
   // The stored original scope and current permission are evaluated in the same SQL read.
   const row = await statement(env.DB, `SELECT c.payload_hash AS hash,c.receipt_json AS receipt,c.operation,c.actor_id AS actorId,
     (EXISTS(SELECT 1 FROM system_control WHERE singleton=1 AND environment=? AND generation=? AND accepting_commands=1)
     AND EXISTS(SELECT 1 FROM principals p WHERE p.principal_id=c.actor_id AND p.active=1)
-    AND EXISTS(SELECT 1 FROM ${effectiveAdminGrants} g WHERE g.principal_id=c.actor_id AND g.capability='attendance.correct'
-      AND ((g.scope_kind='wing' AND g.scope_key='*') OR (g.scope_kind='flight' AND g.scope_key=c.unit_id)))
+    AND ${flag && scope ? 'c.unit_id=?' : `EXISTS(SELECT 1 FROM ${effectiveAdminGrants} g WHERE g.principal_id=c.actor_id AND g.capability='attendance.correct'
+      AND ((g.scope_kind='wing' AND g.scope_key='*') OR (g.scope_kind='flight' AND g.scope_key=c.unit_id)))`}
     AND EXISTS(SELECT 1 FROM adapter_sources s WHERE s.source_kind=c.source_kind AND s.resource_key=c.source_resource AND s.active=1)${scope ? ` AND (${scope.sql})` : ''}) AS allowed
-    FROM operation_commands c WHERE c.command_id=?`, env.ENVIRONMENT, Number(env.GENERATION), ...(scope?.values ?? []), command.commandId)
+    FROM operation_commands c WHERE c.command_id=?`, env.ENVIRONMENT, Number(env.GENERATION), ...(flag && scope ? [flag.flightId] : []), ...(scope?.values ?? []), command.commandId)
     .first<{ hash: string; receipt: string; operation: string; actorId: string; allowed: number }>();
   if (!row) return null;
   if (row.operation !== 'attendance.correct') throw new HttpError(409, 'COMMAND_ID_CONFLICT', 'This command ID was already used.');
@@ -70,20 +71,20 @@ async function previousReceipt(env: CorrectionEnv, command: AttendanceCorrection
   if (row.hash !== hash) throw new HttpError(409, 'COMMAND_ID_CONFLICT', 'This command ID was already used for different input.');
   return JSON.parse(row.receipt) as CorrectionReceipt;
 }
-export async function acceptAttendanceCorrection(env: CorrectionEnv, input: unknown, scope?: CommandScopeGuard): Promise<CorrectionReceipt> {
+export async function acceptAttendanceCorrection(env: CorrectionEnv, input: unknown, scope?: CommandScopeGuard, flag?:ApprovedFlag): Promise<CorrectionReceipt> {
   const command = parseAttendanceCorrection(input);
   if (command.environment !== env.ENVIRONMENT || command.generation !== Number(env.GENERATION)) {
     throw new HttpError(409, 'WRONG_GENERATION', 'Reload the current environment before submitting.');
   }
   const hash = await digest(JSON.stringify(command));
-  const previous = await previousReceipt(env, command, hash, scope);
+  const previous = await previousReceipt(env, command, hash, scope, flag);
   if (previous) return previous;
   const payload = command.payload;
   const roster = await statement(env.DB, `SELECT m.flight_id AS flightId,d.version AS eventVersion
     FROM event_details d JOIN event_roster_members m ON m.event_id=d.event_id AND m.version=d.version
     WHERE d.event_id=? AND m.person_id=?`, payload.eventId, payload.personId).first<{ flightId: string; eventVersion: number }>();
   if (!roster) throw new HttpError(409, 'ROSTER_UNAVAILABLE', 'An explicit event roster is required before correcting this attendance cell.');
-  const auth = authorization(env, command, roster.flightId, scope);
+  const auth = authorization(env, command, roster.flightId, scope, flag);
   const allowed = await statement(env.DB, `SELECT (${auth.sql}) AS allowed`, ...auth.values).first<{ allowed: number }>();
   if (allowed?.allowed !== 1) throw new HttpError(403, 'NOT_AUTHORIZED', 'The actor, source or correction is not currently authorized.');
   const now = new Date().toISOString();
@@ -117,13 +118,14 @@ export async function acceptAttendanceCorrection(env: CorrectionEnv, input: unkn
         'pendingEffects',json('true')) WHERE command_id=?`, payload.code, command.commandId),
       statement(env.DB, `INSERT INTO admin_effects(effect_id,command_id,kind,state,created_at) VALUES(?,?,'frontend.refresh','pending',?)`,
         crypto.randomUUID(), command.commandId, now),
+      ...(flag ? [flag.resolution] : []),
       statement(env.DB, 'DELETE FROM command_assertions WHERE command_id=?', command.commandId),
       statement(env.DB, 'SELECT receipt_json AS receipt FROM operation_commands WHERE command_id=?', command.commandId),
     ]);
     return JSON.parse(String(results.at(-1)!.results[0].receipt)) as CorrectionReceipt;
   } catch (error) {
     if (isDailyD1Limit(error)) throw error;
-    const raced = await previousReceipt(env, command, hash, scope);
+    const raced = await previousReceipt(env, command, hash, scope, flag);
     if (raced) return raced;
     if (/command_preconditions|UNIQUE constraint failed/i.test(String(error))) {
       throw new HttpError(409, 'CORRECTION_CONFLICT', 'Attendance, event roster or authority changed. Reload and review this correction.');

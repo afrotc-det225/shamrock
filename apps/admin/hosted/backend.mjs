@@ -3,7 +3,7 @@ import { createHash, createHmac } from "node:crypto";
 import { PanelError } from "../errors.mjs";
 import { boundedJson } from "./http.mjs";
 const paths = new Set([
-  "/v1/cadet/known","/v1/cadet/workspace","/v1/cadet/preview",
+  "/v1/admin/panel/view-as/action", "/v1/cadet/known","/v1/cadet/workspace","/v1/cadet/preview",
   "/v1/admin/panel/view-as/authorize",
   "/v1/admin/panel/view-as/page",
   "/v1/admin/panel/view-as/access",
@@ -103,6 +103,8 @@ export class HostedBackend {
     };
   }
   async post(path, input) {
+    if(this.preview && this.delegating && ["/v1/admin/panel/authorize","/v1/admin/panel/commands","/v1/admin/commands"].includes(path))
+      return this.send("/v1/admin/panel/view-as/action",{...this.identity(),entryAuditId:this.preview.entry_audit_id,targetPersonId:this.preview.person_id,path,payload:input});
     if (this.preview) throw new PanelError("VIEW_AS_READ_ONLY", "Exit View as before making changes.", 403);
     return this.send(path, input);
   }

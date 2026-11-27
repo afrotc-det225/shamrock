@@ -542,11 +542,33 @@ test('campus enrollment, personal excusal, Flight review and duties use the veri
     assert.equal(after.find(r=>r.kind==='flag').resolution,'Reviewed with cadet.');
     assert.equal(after.find(r=>r.kind==='duty').detail,'Guide');
     const report=action('report',{eventId:'portal-event',version:1,rosterVersion:leader.flights.find(f=>f.flightId==='alpha').rosterVersion,present:[self.profile.personId],completeness:'partial'});
-    assert.equal((await route(report)).status,403);
-    assert.equal((await route(report,captain)).status,200);
+    assert.equal((await route({...report,id:crypto.randomUUID(),fields:{...report.fields,present:["other"]}})).status,400);
+    const memberReport=await route(report);assert.equal(memberReport.status,200,JSON.stringify(memberReport));
+    assert.equal((await route({...report,id:crypto.randomUUID()},captain)).status,200);
     const edit=action('profile',{version:self.profile.version,changes:{afsc:'Undecided after review'}});
     assert.equal((await route(edit)).status,200);
     assert.equal((await route()).body.profile.afsc,'Undecided after review');
     await f.db.prepare('UPDATE principals SET active=0 WHERE principal_id=?').bind(principalId).run();
     assert.equal((await route()).status,403);
+});
+
+test('cadet cell requests preserve the mark until their Squadron Commander approves an exact version',async t=>{
+  const f=await fixture(t);
+  await f.db.batch([f.db.prepare("INSERT INTO adapter_sources VALUES('test','admin-staging-web',1)"),
+    f.db.prepare("UPDATE permission_policy_control SET config_json=?").bind(JSON.stringify({operationalSquadronIds:['blue','gold']}))]);
+  const call=(principalId,action,section)=>f.send({environment:'local',generation:1,principalId,email:principalId+'@example.invalid',
+    ...(section?{section}:{}),...(action?{action}:{})},'/v1/cadet/workspace');
+  const action=(kind,fields)=>({id:crypto.randomUUID(),kind,fields});
+  const cell=async()=>{const result=await call('cadet',null,'attendance');assert.equal(result.status,200,JSON.stringify(result));return result.body.attendance.find(e=>e.eventId==='event');};
+  const first=await cell();
+  const flag=action('flag',{eventId:first.eventId,eventVersion:first.version,baseVersion:first.baseVersion,code:'P',detail:'Fictional reason'});
+  const submit=await call('cadet',flag);assert.equal(submit.status,200,JSON.stringify(submit));assert.equal((await cell()).code,null);
+  const review=action('reviewFlag',{parentId:submit.body.commandId,decision:'Approved'});
+  for(const who of ['gold','cadet','flight'])assert.equal((await call(who,review)).status,403);
+  const second=await call('cadet',{...flag,id:crypto.randomUUID()});
+  const ok=await call('blue',review);assert.equal(ok.status,200,JSON.stringify(ok));
+  assert.equal((await call('blue',review)).status,200);assert.equal((await cell()).code,'P');
+  assert.equal((await call('blue',action('reviewFlag',{parentId:second.body.commandId,decision:'Approved'}))).status,409);
+  assert.equal((await call('blue',action('reviewFlag',{parentId:second.body.commandId,decision:'Denied'}))).status,200);
+  assert.equal((await cell()).code,'P');
 });

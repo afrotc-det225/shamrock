@@ -257,20 +257,9 @@ Blue and Gold commanders land in **Excusals**, filtered to requests awaiting a d
 
 ### View as
 
-Administrators can choose **View as**, select a cadet, and inspect that person's
-current panel access. The pinned banner identifies the read-only view and provides
-**Exit view**. Filters remain usable; change controls are disabled. An administrator with Wing access and active permission-management authority can also preview an active school Directory record before its first login. The cadet workspace uses the same role, Flight, Squadron and request scope as the signed-in cadet. Conflicting account links or an inactive membership block the preview. This preview does not establish that the
-person's actual Google login works; that needs separate account acceptance.
+Permission managers with Wing access can select a person in **View as**. A linked cadet can report attendance, request a correction, and edit their own profile. Their Flight and Squadron roles govern additional actions. A verified leadership target can make scoped attendance, excusal and record edits through the proposal workflow. The selected person’s grants apply to each save. Unlinked Directory records are available for inspection until the cadet connects their own school login. Account linking and the owner Assistant require the actual account holder.
 
-The actual Google subject and administrator principal never change. The target
-and audited entry are stored in `session_previews`, outside operational records.
-Every read uses the dedicated backend dual-identity guard. Each snapshot, catalog
-and historical report retains its own revision binding across pages; tokens cannot
-be reused across readers, targets or audited entries. Every mutation and saved-proposal receipt is refused while previewing,
-including requests without preview headers. Entry and saved-command apply leases
-exclude one another. Existing proposals and their bindings are preserved. Exit
-clears the session's preview even if access has been revoked; a failed exit audit
-is reported explicitly and does not trap the operator in preview.
+The banner identifies the effective person and provides **Exit view**. The session retains the administrator’s real identity. Delegated command IDs carry the audited entry ID, which identifies the administrator and the selected person. Switching people, exiting, or revoking access invalidates pending edits. A system-wide submission pause applies equally to direct and delegated saves. Semester transitions and system maintenance use the direct administrative workspace.
 
 Entry and exit audit IDs are saved before network calls in `session_preview_intents`.
 Interrupted entry remains read-only and offers Retry/Exit; retries reuse the exact
