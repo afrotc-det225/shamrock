@@ -445,6 +445,11 @@ try {
     await page.goto(origin+"/me/requests");
     await openNavigation(page);
     await switcher.waitFor();
+    if(width===390) {
+      assert.equal(await nav.getByRole("link").first().textContent(),"View as administrator");
+      const bounds=await switcher.boundingBox();
+      assert(bounds.y >= 0 && bounds.y + bounds.height <= page.viewportSize().height);
+    }
     assert.equal(await page.getByRole("link",{name:"Assistant",exact:true}).count(),0);
     await page.close();
   }

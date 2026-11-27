@@ -42,5 +42,12 @@ test("a chat request, owner approval and verified school account resolve the sam
   assert.equal(conn.prepare("SELECT COUNT(*) n FROM admin_grants").get().n,5);
   assert.equal(conn.prepare("SELECT COUNT(*) n FROM permission_managers").get().n,1);
   assert.equal(conn.prepare("SELECT COUNT(*) n FROM admin_audit_events").get().n,1);
+  const google=principal.replace("school.","google.");
+  assert.equal(await schoolWingAccess(db,principal,"fixture@example.invalid",google),false);
+  conn.prepare("INSERT INTO principals VALUES(?, 'cadet',1)").run(google);
+  conn.prepare("INSERT INTO principal_accounts VALUES(?, 'fixture@example.invalid','authenticated-confirmation',?)").run(google,id);
+  assert.equal(await schoolWingAccess(db,principal,"fixture@example.invalid",google),true);
+  conn.prepare("UPDATE principals SET active=0 WHERE principal_id=?").run(google);
+  assert.equal(await schoolWingAccess(db,principal,"fixture@example.invalid",google),false);
   conn.close();
 });

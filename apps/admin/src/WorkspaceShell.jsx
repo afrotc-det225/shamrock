@@ -77,8 +77,13 @@ export default function WorkspaceShell({ workspace="leadership", pages, page, ta
       content.current?.scrollTo(0,0);
     }
   })}/>;
+  const wingSwitch = showWingSwitch &&
+        <PageLink workspace="leadership" title="Overview" navigate={name=>openPage("leadership",name)}>
+          <Shield size={18} aria-hidden="true"/>View as administrator
+        </PageLink>;
   const links = <>
     <nav aria-label="Main navigation">
+      {mobile && wingSwitch}
       {[
         ...leadership.map(([title,Icon]) => [title,Icon,"leadership"]),
         ...personal.filter(([title]) => !leadership.some(([name]) => name===title)).map(([title,Icon]) => [title,Icon,"cadet"]),
@@ -94,10 +99,7 @@ export default function WorkspaceShell({ workspace="leadership", pages, page, ta
     </nav>
     <div className="sidebar-bottom">
       {key && navigation?.key === key && navigation.failed && <button type="button" data-keep-menu-open onClick={()=>setMenuAttempt(n=>n+1)}>Retry loading menu</button>}
-      {showWingSwitch &&
-        <PageLink workspace="leadership" title="Overview" navigate={name=>openPage("leadership",name)}>
-          <Shield size={18} aria-hidden="true"/>View as administrator
-        </PageLink>}
+      {!mobile && wingSwitch}
       {other?.leadership?.canViewAs && <ViewAsSelector onSelect={async person=>{
         try {
           const result=await api("/view-as",{personId:person.personId});

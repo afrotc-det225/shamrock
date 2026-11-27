@@ -116,10 +116,17 @@ export async function session(request, env) {
   row.schoolEmail = await readSchoolEmail(cookie(request,"__Host-shamrock-school"),env,row.token_hash);
   if (row.principal_id.startsWith("school.") && (!row.schoolEmail || row.principal_id !== "school." + await sha(row.schoolEmail)))
     throw new PanelError("SIGN_IN_REQUIRED","Sign in again with your school account.",401);
-  if(row.principal_id.startsWith("school.") && isUnifiedSite(env)){
+  if(row.schoolEmail && isUnifiedSite(env) && /^(school|google)\./.test(row.principal_id)){
     const path=new URL(request.url).pathname;
-    if(!["/api/cadet","/auth/logout"].includes(path))
-      row.wingAccess=await schoolWingAccess(env.DB,row.principal_id,row.schoolEmail).catch(()=>false);
+    if(!["/api/cadet","/auth/logout"].includes(path)){
+      const suffix=await sha(row.schoolEmail);
+      const school="school."+suffix;
+      const google=row.principal_id==="google."+suffix ? row.principal_id : null;
+      if(row.principal_id===school || google){
+        row.wingAccess=await schoolWingAccess(env.DB,school,row.schoolEmail,google).catch(()=>false);
+        if(row.wingAccess) row.principal_id=school;
+      }
+    }
   }
   return row;
 }

@@ -9,11 +9,14 @@ const manager="EXISTS(SELECT 1 FROM permission_managers m JOIN principals p USIN
 const key=(actor,id)=>"assistant/wing-grant/"+encodeURIComponent(actor)+"/"+id;
 const conflict=()=>new PanelError("STALE_ACCESS","The account or your permissions changed, or changes are paused. Review a new grant.",409);
 
-export async function schoolWingAccess(db,principal,email){
+export async function schoolWingAccess(db,principal,email,googlePrincipal=null){
   if(!db || !email)return false;
   return Boolean(await db.prepare(`SELECT 1 FROM principals p JOIN directory_profiles d USING(person_id)
     JOIN admin_grants g USING(principal_id) WHERE p.principal_id=? AND p.active=1 AND lower(trim(d.email))=? AND ${active}
-    AND g.capability='frontend.read' AND g.scope_kind='wing' AND g.scope_key='*'`).bind(principal,email).first());
+    AND g.capability='frontend.read' AND g.scope_kind='wing' AND g.scope_key='*'
+    AND (? IS NULL OR EXISTS(SELECT 1 FROM principals login JOIN principal_accounts a USING(principal_id)
+      WHERE login.principal_id=? AND login.active=1 AND login.person_id=p.person_id AND a.email=d.email COLLATE NOCASE
+      AND a.evidence IN ('authenticated-confirmation','google-form')))`).bind(principal,email,googlePrincipal,googlePrincipal).first());
 }
 
 export async function prepareWingGrant(env,actor,personId,hash){
