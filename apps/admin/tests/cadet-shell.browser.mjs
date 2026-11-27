@@ -42,19 +42,24 @@ try {
       const nav = page.getByRole("navigation", { name:"Main navigation" });
       const heading = title => page.getByRole("heading", {name:title, level:1, exact:true});
       await heading(tabs[0] || "Create profile").waitFor();
-      assert.deepEqual(await nav.getByRole("button").allTextContents(), tabs);
+      assert.deepEqual(await nav.getByRole("link").allTextContents(), tabs);
       if (role === "Cadet" && process.env.SHAMROCK_SCREENSHOT_DIR) {
         await page.screenshot({path:`${process.env.SHAMROCK_SCREENSHOT_DIR}/cadet-${width}.png`});
       }
       if (tabs.length) {
-        await nav.getByRole("button", {name:"My requests"}).click();
+        await nav.getByRole("link", {name:"My requests"}).click();
         await heading("My requests").waitFor();
         const compose = page.locator("details").filter({has:page.locator("summary", {hasText:"Request an excusal"})});
         await compose.locator("summary").click();
         assert.equal(await compose.getByRole("button", {name:"Submit"}).isEnabled(), !preview);
-        await nav.getByRole("button", {name:"My profile"}).click();
+        await nav.getByRole("link", {name:"My profile"}).click();
         assert.equal(await nav.locator('[aria-current="page"]').innerText(), "My profile");
         await page.getByLabel("First name", {exact:true}).waitFor();
+        assert.equal(new URL(page.url()).searchParams.get("page"),"profile");
+        await page.goBack();
+        await heading("My requests").waitFor();
+        await page.goForward();
+        await heading("My profile").waitFor();
       } else {
         await page.getByRole("button", {name:"Continue"}).waitFor();
       }

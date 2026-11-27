@@ -103,7 +103,7 @@ try {
   const navigate = async (title) => {
     await page
       .getByRole("navigation")
-      .getByRole("button", { name: title, exact: true })
+      .getByRole("link", { name: title, exact: true })
       .click();
     await page.getByRole("heading", { name: title, exact: true }).waitFor();
   };
@@ -231,7 +231,7 @@ try {
     .fill("Fictional browser rehearsal");
   await apply();
   assert.equal((await service.snapshot()).requests[0].status, "Denied");
-  await page.getByRole("button", { name: "Attendance", exact: true }).click();
+  await page.getByRole("link", { name: "Attendance", exact: true }).click();
   const keyTool=page.getByRole("button",{name:"Attendance code key"});
   const matrixTop=await tableTop();
   await keyTool.click();
@@ -316,7 +316,13 @@ try {
   assert.equal(exception.flightId,example.flightId);
   assert.equal(exception.rank,example.rank);
   testOverview = true;
-  // A fresh browser load starts with the Events list and no retained full snapshot.
+  await page.reload();
+  await page.getByRole("heading",{name:"AS year progression"}).waitFor();
+  assert.equal(new URL(page.url()).searchParams.get("page"), "semester");
+  await navigate("Events");
+  await page.goBack();
+  await page.getByRole("heading",{name:"AS year progression"}).waitFor();
+  await page.goForward();
   await page.reload();
   await page.getByRole("button", {name:"Edit Veterans Day ceremony",exact:true}).waitFor();
   await navigate("Overview");
@@ -387,7 +393,7 @@ try {
     throw e;
   }
   assert.equal(
-    await page.getByRole("navigation").getByRole("button").count(),
+    await page.getByRole("navigation").getByRole("link").count(),
     2,
   );
   assert.equal(

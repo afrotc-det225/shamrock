@@ -46,13 +46,13 @@ try{
  await page.screenshot({path:'/tmp/shamrock-loading-desktop.png'});
  await page.setViewportSize({width:390,height:844});await page.screenshot({path:'/tmp/shamrock-loading-mobile.png'});
  await page.setViewportSize({width:1440,height:1000});
- await page.evaluate(()=>{const buttons=[...document.querySelectorAll('nav button')];buttons.find(b=>b.textContent==='Cadets').click();buttons.find(b=>b.textContent==='Leadership').click();});
+ await page.evaluate(()=>{const buttons=[...document.querySelectorAll('nav a')];buttons.find(b=>b.textContent==='Cadets').click();buttons.find(b=>b.textContent==='Leadership').click();});
  await page.getByRole('button',{name:'Add contact',exact:true}).waitFor();release();
  await page.waitForTimeout(80);
  assert(await page.getByRole('heading',{name:'Leadership',exact:true}).isVisible());
  assert.equal(await page.locator('.error').count(),0);
  assert(maximum<=2,`maximum page concurrency was ${maximum}`);
- blockSection=null;await page.reload();await page.getByRole('button',{name:'Edit Veterans Day',exact:true}).waitFor();
+ blockSection=null;await page.goto(`http://127.0.0.1:${server.address().port}/?workspace=leadership&page=events`);await page.getByRole('button',{name:'Edit Veterans Day',exact:true}).waitFor();
  await page.route('**/api/events/editor*',async route=>{
    await gate;
    await route.fulfill({json:await host.post('/v1/admin/panel/browse',{...host.identity(),profile:'event-editor'})});
@@ -65,7 +65,7 @@ try{
  assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
  const account=await page.locator('.sidebar-bottom').boundingBox(),nav=await page.getByRole('navigation').boundingBox();
  assert(account.y+account.height<=nav.y,'account controls have their own row above mobile navigation');
- await page.getByRole('navigation').getByRole('button',{name:'History',exact:true}).click();
+ await page.getByRole('navigation').getByRole('link',{name:'History',exact:true}).click();
  const archive=page.getByRole("table",{name:"History",exact:true});
  await archive.getByRole("rowheader",{name:"Blair River"}).waitFor();
  assert.deepEqual(await archive.getByRole("rowheader").allTextContents(),["Blair River","Avery North"]);
@@ -87,8 +87,8 @@ try{
  assert.equal(await page.locator('.error').count(),0);
  blockSection=null;holdSession=true;const beforeBootstrap=stateCalls;
  await page.reload();
- await page.getByRole('navigation').getByRole('button',{name:'Cadets',exact:true}).click();
- await page.getByRole('navigation').getByRole('button',{name:'Leadership',exact:true}).click();
+ await page.getByRole('navigation').getByRole('link',{name:'Cadets',exact:true}).click();
+ await page.getByRole('navigation').getByRole('link',{name:'Leadership',exact:true}).click();
  await page.waitForTimeout(80);assert.equal(stateCalls,beforeBootstrap,'no reads before session bootstrap');
  releaseSession();await page.getByRole('button',{name:'Add contact',exact:true}).waitFor();
  assert.equal(await page.locator('.error').count(),0,'superseded bootstrap navigation stays silent');
@@ -109,7 +109,7 @@ try{
    await route.fulfill({json:{manifest:await host.panelAuthority(),browse:semester,captureKey:host.binding,
      transport:'paged-v1',reportingTime:Date.now(),history:[],meta:{hosted:true}}});
  });
- await page.getByRole('navigation').getByRole('button',{name:'Semester planning'}).click();
+ await page.getByRole('navigation').getByRole('link',{name:'Semester planning'}).click();
  await page.getByText('Opening Semester planning…').waitFor();
  assert.equal(await page.locator('[inert] h1').textContent(),'Leadership');
  assert.equal(await page.locator('.loading-table').count(),0);
