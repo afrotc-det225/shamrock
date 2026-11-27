@@ -63,9 +63,26 @@ try {
         });
         assert.deepEqual(layout,{overlap:false,truncated:false,pageOverflow:false});
       }
+      async function wingLayout(){
+        await settle();
+        return region.locator('.org-root:has([data-office="wing"]) + ul').evaluate(list=>{
+          const root=list.getBoundingClientRect();
+          return [...list.querySelectorAll("[data-office]")].map(office=>{
+            const r=office.getBoundingClientRect();
+            return [office.dataset.office,Math.round(r.left-root.left),Math.round(r.top-root.top),Math.round(r.width)];
+          });
+        });
+      }
       for(const width of [320,390,1024,1280,1440,1920]){
         await page.setViewportSize({width,height:850});
         await assertChartFits();
+        const before=width>=1280 ? await wingLayout() : null;
+        await region.getByRole("button",{name:"Focus on Operations Officer",exact:true}).click();
+        if(before) assert.deepEqual(await wingLayout(),before,"The cadre chain leaves the Wing its full width");
+        await region.getByRole("button",{name:"Focus on Wing Commander",exact:true}).click();
+        if(before) assert.deepEqual(await wingLayout(),before,"Wing branches keep their layout when focused at "+width);
+        await assertChartFits();
+        if(width<=390) assert.equal(await region.getByRole("button",{name:"Focus on Alpha Flight",exact:true}).count(),0);
         const title=region.getByRole("button",{name:"Focus on Mission Support Squadron",exact:true});
         assert.equal(await title.locator("svg").count(),0);
         await title.focus();

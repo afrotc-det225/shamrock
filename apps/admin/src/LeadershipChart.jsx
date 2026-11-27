@@ -38,7 +38,7 @@ function Office({node,onFocus,focused=false}) {
 
 // A fork can use one column per office while each label has room. Larger
 // sibling sets share reporting rails, with the same order and parentage.
-function OfficeFork({depth, weights, children}) {
+function OfficeFork({depth, weights, priority, children}) {
   const ref=useRef(null);
   const [capacity,setCapacity]=useState(children.length);
   useLayoutEffect(()=>{
@@ -47,7 +47,8 @@ function OfficeFork({depth, weights, children}) {
       const rem=parseFloat(getComputedStyle(document.documentElement).fontSize);
       // On phones CSS already draws a single vertical reporting rail.
       const stacked=getComputedStyle(list).display==="block";
-      setCapacity(stacked ? Infinity : Math.max(1,Math.floor(list.clientWidth/(9*rem))));
+      const laneWidth=parseFloat(getComputedStyle(list).getPropertyValue("--lane-rem"))*rem;
+      setCapacity(stacked ? Infinity : Math.max(1,Math.round(list.clientWidth/laneWidth)));
     };
     measure();
     const observer=new ResizeObserver(measure);
@@ -61,13 +62,14 @@ function OfficeFork({depth, weights, children}) {
   const lanes=weights.map(()=>1);
   let spare=capacity-columns;
   for(let tier=2;spare>0 && tier<=Math.max(...weights);tier++) {
-    for(const [i,weight] of weights.entries()) {
-      if(weight>=tier && spare>0) { lanes[i]++; spare--; }
+    for(const i of priority) {
+      if(weights[i]>=tier && spare>0) { lanes[i]++; spare--; }
     }
   }
   const tracks=grouped ? `repeat(${columns},minmax(0,1fr))` :
     lanes.map(lane=>`minmax(0,${lane}fr)`).join(" ");
-  return <ul ref={ref} className="org-fork" data-tier={depth} style={{"--branches":tracks}}>
+  return <ul ref={ref} className="org-fork" data-tier={depth} style={{"--branches":tracks,
+    "--ideal-fork-width":weights.reduce((a,b)=>a+b,0)*19+"rem"}}>
     {grouped ? Array.from({length:columns},(_,i)=>{
       const start=Math.floor(i*children.length/columns);
       const end=Math.floor((i+1)*children.length/columns);
@@ -76,6 +78,10 @@ function OfficeFork({depth, weights, children}) {
       </li>;
     }) : children}
   </ul>;
+}
+
+function reportingDepth(node) {
+  return 1+Math.max(0,...(node.children || []).map(reportingDepth));
 }
 
 function Branches({nodes=[],depth=1,onFocus,flightRoster=[]}) {
@@ -92,7 +98,14 @@ function Branches({nodes=[],depth=1,onFocus,flightRoster=[]}) {
   if(depth>2) return <ul className="org-rail" data-tier={depth}>{offices}</ul>;
   const weights=nodes.map(n=>depth===1 ? Math.max(1,n.children?.length || 0) : 1);
   if(flightRoster.length) weights.push(1);
-  return <OfficeFork depth={depth} weights={weights}>{offices}</OfficeFork>;
+  // Break ties for a spare column in favor of branches with more levels below them.
+  const heights=depth===1 ? nodes.map(reportingDepth) : [];
+  const priority=weights.map((_,i)=>i).sort((a,b)=>(heights[b] || 0)-(heights[a] || 0));
+  return <OfficeFork depth={depth} weights={weights} priority={priority}>{offices}</OfficeFork>;
+}
+
+function CadreReports({node,onFocus}) {
+  return <div className="cadre-reports"><Branches nodes={node.children?.filter(n=>n.id!=="wing")} depth={3} onFocus={onFocus}/></div>;
 }
 
 function CadreCommand({commander,ops,hasWing,onFocus}) {
@@ -101,7 +114,7 @@ function CadreCommand({commander,ops,hasWing,onFocus}) {
   function cadreOffice(node) {
     return <li key={node.id} className={node===ops && hasWing ? "cadre-main" : undefined}>
       <div className="org-post"><Office node={node} onFocus={onFocus(node)}/></div>
-      <div className="cadre-reports"><Branches nodes={node.children?.filter(n=>n.id!=="wing")} depth={3} onFocus={onFocus}/></div>
+      <CadreReports node={node} onFocus={onFocus}/>
     </li>;
   }
   function staffColumn(nodes) {
@@ -145,8 +158,9 @@ export default function LeadershipChart({roster,query="",onEdit}) {
   const parent=branches.get(branch)?.parent;
   const onFocus=node=>node.id!==selected?.id && node.id!==root.id && branches.has(node.id) ? ()=>focusBranch(node.id) : undefined;
   const tree=filterWingOrganization(selected || root,needle);
-  const ops=tree?.children?.find(n=>n.id==="cadre-operations");
-  const wingTree=selected ? tree : ops?.children?.find(n=>n.id==="wing");
+  const focusOps=selected?.id==="cadre-operations";
+  const ops=focusOps ? tree : tree?.children?.find(n=>n.id==="cadre-operations");
+  const wingTree=selected && !focusOps ? tree : ops?.children?.find(n=>n.id==="wing");
   const contactFields=contact && [
     ["Appointment",contact.role],["Flight",roster.flights.find(f=>f.flightId===contact.flightId)?.label],
     ["Email",contact.email,"mailto:"],["Cell phone",contact.personId ? contact.phone : contact.cellPhone,"tel:"],
@@ -163,10 +177,13 @@ export default function LeadershipChart({roster,query="",onEdit}) {
       </select>
       </div>
     </header>
-    {tree ? <div className="org-canvas" data-full={!selected && !needle} aria-label={selected?.title || "Wing chain of command"}>
+    {tree ? <div key={JSON.stringify([selected?.id,!!needle])} className="org-canvas" data-full={!selected && !needle}
+      data-focus={selected && !needle ? (focusOps ? "operations-officer" : selected.id==="wing" ? "wing" : "branch") : undefined} aria-label={selected?.title || "Wing chain of command"}>
       {!selected && <CadreCommand commander={tree} ops={ops} hasWing={!!wingTree} onFocus={onFocus}/>}
-      {wingTree && <><div className="org-root"><Office node={wingTree} onFocus={selected ? undefined : onFocus(wingTree)} focused={!!selected}/></div>
-        <Branches nodes={wingTree.children} depth={selected ? 2 : 1} onFocus={onFocus} flightRoster={selected?.flight ? wingTree.team : undefined}/></>}
+      {focusOps && <><div className="org-root"><Office node={tree}/></div>
+        <div className={wingTree ? "cadre-main focused-cadre" : "focused-cadre"}><CadreReports node={tree} onFocus={onFocus}/></div></>}
+      {wingTree && <><div className="org-root"><Office node={wingTree} onFocus={onFocus(wingTree)} focused={selected?.id===wingTree.id}/></div>
+        <Branches nodes={wingTree.children} onFocus={onFocus} flightRoster={selected?.flight ? wingTree.team : undefined}/></>}
     </div> : <p role="status">No matching people or offices.</p>}
   </section>
     {contact && <Drawer title={name(contact)} onClose={()=>selectContact(null)}>
