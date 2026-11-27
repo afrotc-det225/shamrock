@@ -127,8 +127,8 @@ export default {
         try {
           if (include === "personal") {
             if (!user.schoolEmail && !preview) return secure(json({}));
-            const {registration, flightCommander, squadron} = await cadetWorkspace("profile");
-            return secure(json({personal:{registration, flightCommander:!!flightCommander, squadron:!!squadron}}));
+            const {registration, flightCommander, squadron, profile} = await cadetWorkspace("profile");
+            return secure(json({personal:{registration, name:[profile?.firstName,profile?.lastName].filter(Boolean).join(" "), role:profile?.role || "", flightCommander:!!flightCommander, squadron:!!squadron}}));
           }
           if (include === "leadership") {
             if (user.principal_id.startsWith("school.") && !user.wingAccess) return secure(json({}));

@@ -414,7 +414,7 @@ function App() {
     <div hidden={!!outageScreen} inert={outageScreen ? true : undefined}>
     <EditorSuspended.Provider value={!!outageScreen}>
     <EditorError.Provider value={error}>
-      <WorkspaceShell session={sessionInfo} preview={preview} mobileContext={preview && ((data?.meta.delegatedEdits ? "Acting as " : "Viewing as ") + viewAsLabel)} tabTitle={outageScreen ? "Records unavailable" : navigationPage === "History" ? "Attendance history" : navigationPage} pages={visiblePages} page={navigationPage === "History" ? "Attendance" : navigationPage} navigate={navigate} account={<>
+      <WorkspaceShell fullWing={access?.capabilities.fullSnapshot} session={sessionInfo} preview={preview} mobileContext={preview && ((data?.meta.delegatedEdits ? "Acting as " : "Viewing as ") + viewAsLabel)} tabTitle={outageScreen ? "Records unavailable" : navigationPage === "History" ? "Attendance history" : navigationPage} pages={visiblePages} page={navigationPage === "History" ? "Attendance" : navigationPage} navigate={navigate} account={<>
       {preview && <ViewAsAccount acting={data?.meta.delegatedEdits} busy={busy} onExit={() => viewAs(null)}
               label={viewAsLabel} />}
             {!preview && !scoped && data?.meta.viewAsEnabled &&

@@ -402,7 +402,7 @@ In the Assistant, the sidebar button beside the title opens recent conversations
 
 The Assistant can suggest improvements and discuss your selection. Ask it to implement the selected change when you want a tested proposal.
 
-On phones, open **Menu** on a cadet page to find **View as administrator** at the top. A verified personal Google login and a Wing grant for the same school email and Directory record use the same Wing workspace. **View as administrator** opens the Wing overview when the signed-in or selected cadet has Wing access. During View as, switching pages keeps that cadet selected. If the sidebar cannot load permissions, use **Retry loading menu**.
+On phones, open **Menu** on a cadet page to find **View as administrator** at the top. A verified personal Google login and a Wing grant for the same school email and Directory record use the same Wing workspace. **View as administrator** opens the Wing overview when the signed-in or selected cadet has Wing access. The administrator menu contains Wing pages. Select **View as [name] ([role])** to return to the cadet’s personal workspace. Flight commanders return to **My Flight**. During View as, switching workspaces keeps that cadet selected. If the sidebar cannot load permissions, use **Retry loading menu**.
 
 Cadets can update their first and last names, AS year, rank, and university under **My profile**. Select **Save changes** to update the Directory.
 Cadets may also select a non-command position in their assigned Flight. A Directory manager handles command or combined roles. Contact email is shared in the cadet Directory. Clearing it restores the school address. Google sign-in, permission grants, and official notifications use the school address.

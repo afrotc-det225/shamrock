@@ -1,12 +1,11 @@
 import React, {useContext, useEffect, useLayoutEffect, useRef, useState} from "react";
-import {Menu, Shield, Sparkles, UserRound, X} from "lucide-react";
+import {Menu, Shield, UserRound, X} from "lucide-react";
 import Brand from "./Brand";
 import {usePhone} from "./use-phone";
 import {EditorSuspended} from "./components";
 
 import {api} from "./api";
 import {leadershipPages, personalPages} from "./site-navigation";
-import {ViewAsSelector} from "./ViewAs";
 import {pageHref,writePageUrl} from "./page-url";
 
 const navigationOrder = ["Overview","My Flight","My excusals","My attendance","Submit attendance","Events","Attendance","Excusals","Attendance reviews","Cadets","Leadership","My profile","Semester planning","System"];
@@ -19,7 +18,7 @@ export function PageLink({workspace, title, navigate, children, className="", ..
   }}>{children}</a>;
 }
 
-export default function WorkspaceShell({ workspace="leadership", pages, page, tabTitle=page, navigate, account, children, drawer, mobileContext, session, preview }) {
+export default function WorkspaceShell({ workspace="leadership", pages, page, fullWing, tabTitle=page, navigate, account, children, drawer, mobileContext, session, preview }) {
   useLayoutEffect(() => {
     document.title = tabTitle ? tabTitle + " · SHAMROCK" : "SHAMROCK";
     return () => { document.title = "SHAMROCK"; };
@@ -37,7 +36,6 @@ export default function WorkspaceShell({ workspace="leadership", pages, page, ta
     return () => cancelAnimationFrame(frame);
   }, [workspace,page]);
   const [open, setOpen] = useState(false);
-  const [accountError,setAccountError] = useState("");
   const suspended = useContext(EditorSuspended);
   useEffect(() => {
     if (!mobile) setOpen(false);
@@ -60,9 +58,9 @@ export default function WorkspaceShell({ workspace="leadership", pages, page, ta
   }, [key,include,menuAttempt]);
   const other = key && navigation?.key === key ? navigation.value : null;
   const showWingSwitch = workspace === "cadet" && (other ? other.leadership?.full : !preview && session?.schoolWingAccess);
-  const personal = workspace === "cadet" ? pages : other?.personal?.registration
+  const personal = workspace === "cadet" ? pages : fullWing !== false ? [] : other?.personal?.registration
     ? [["My profile",UserRound]] : personalPages(other?.personal);
-  const leadership = workspace === "leadership" ? pages : other?.leadership ? leadershipPages(other.leadership.full,preview) : [];
+  const leadership = workspace === "leadership" ? pages : other?.leadership && !showWingSwitch ? leadershipPages(false,preview) : [];
   const openPage = (source,title) => {
     writePageUrl(source,title);
     window.dispatchEvent(new PopStateEvent("popstate"));
@@ -81,9 +79,17 @@ export default function WorkspaceShell({ workspace="leadership", pages, page, ta
         <PageLink workspace="leadership" title="Overview" navigate={name=>openPage("leadership",name)}>
           <Shield size={18} aria-hidden="true"/>View as administrator
         </PageLink>;
+  const member = other?.personal;
+  const personalHome = member?.registration ? "My profile" : member?.flightCommander ? "My Flight" : "Overview";
+  const personalSwitch = fullWing && member && (
+    <PageLink workspace="cadet" title={personalHome} navigate={name=>openPage("cadet",name)}>
+      <UserRound size={18} aria-hidden="true"/>
+      {member.name ? "View as "+member.name+(member.role ? " ("+member.role+")" : "") : "View personal workspace"}
+    </PageLink>
+  );
   const links = <>
     <nav aria-label="Main navigation">
-      {mobile && wingSwitch}
+      {mobile && (wingSwitch || personalSwitch)}
       {[
         ...leadership.map(([title,Icon]) => [title,Icon,"leadership"]),
         ...personal.filter(([title]) => !leadership.some(([name]) => name===title)).map(([title,Icon]) => [title,Icon,"cadet"]),
@@ -99,15 +105,7 @@ export default function WorkspaceShell({ workspace="leadership", pages, page, ta
     </nav>
     <div className="sidebar-bottom">
       {key && navigation?.key === key && navigation.failed && <button type="button" data-keep-menu-open onClick={()=>setMenuAttempt(n=>n+1)}>Retry loading menu</button>}
-      {!mobile && wingSwitch}
-      {other?.leadership?.canViewAs && <ViewAsSelector onSelect={async person=>{
-        try {
-          const result=await api("/view-as",{personId:person.personId});
-          location.assign(result.directoryWorkspace ? "/me/profile" : "/attendance");
-        } catch { setAccountError("Could not open View as. Reload to check your session."); }
-      }}/>}
-      {other?.leadership?.assistantAvailable && !preview && <PageLink workspace="leadership" title="Assistant" navigate={name=>openPage("leadership",name)}><Sparkles size={20}/>Assistant</PageLink>}
-      {accountError && <p role="alert">{accountError}</p>}
+      {!mobile && (wingSwitch || personalSwitch)}
       {account}
     </div>
   </>;

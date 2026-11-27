@@ -377,7 +377,7 @@ try {
       }
       if(url.pathname==="/api/navigation" && failMenu)return route.fulfill({status:503,json:{error:{message:"Unavailable"}}});
       if(url.pathname==="/api/navigation")return route.fulfill({json:url.searchParams.get("include")==="personal"
-        ? {personal:{flightCommander:true,squadron:false}} : {leadership:{full,canViewAs:full}}});
+        ? {personal:{name:"Sample Cadet",role:"Alpha Flight Commander",flightCommander:true,squadron:false}} : {leadership:{full,canViewAs:full}}});
       if(url.pathname==="/api/cadet")return route.fulfill({json:{
         linked:true,writable:true,profile:{personId:"fixture",flightId:"alpha"},flights:[],requests:[],actions:[],events:[],flightCommander:true,
       }});
@@ -433,12 +433,15 @@ try {
     assert.equal(await homeLink.getAttribute("href"),"/overview");
     assert.equal(await page.getByRole("link",{name:"Assistant",exact:true}).count(),0);
     assert.equal(sessions,2,"switch keeps the same sign-in");
-    await nav.getByRole("link",{name:"My excusals",exact:true}).click();
-    await page.getByRole("heading",{name:"My excusals",level:1}).waitFor();
-    if(width===390)await openNavigation(page);
-    await homeLink.click();
+    assert.equal(await nav.getByRole("link",{name:"My Flight",exact:true}).count(),0);
+    assert.equal(await nav.getByRole("link",{name:"My profile",exact:true}).count(),0);
+    await page.getByRole("link",{name:"View as Sample Cadet (Alpha Flight Commander)",exact:true}).click();
     await page.waitForURL("**/me/flight");
-    assert.equal(await page.getByRole("dialog",{name:"Navigation"}).count(),0);
+    await openNavigation(page);
+    await switcher.waitFor();
+    assert.equal(await nav.getByRole("link",{name:"System",exact:true}).count(),0);
+    await page.goBack();
+    await page.waitForURL("**/overview");
     assert.equal(documents,2,"logo navigation keeps the current document");
     await page.route("**/api/session",route=>route.fulfill({json:{hosted:true,cadetWorkspace:true,csrf:"fixture",
       viewAs:{personId:"fixture",status:"ready",entryAuditId:"entry"}}}));
