@@ -27,6 +27,29 @@ const full = (principal: string) => `EXISTS(SELECT 1 FROM principals p WHERE p.p
   EXISTS(SELECT 1 FROM admin_grants g WHERE g.principal_id=p.principal_id AND g.capability='frontend.read' AND g.scope_kind='wing' AND g.scope_key='*')
   OR EXISTS(SELECT 1 FROM permission_managers m JOIN ${effectiveAdminGrants} g ON g.principal_id=m.principal_id
     WHERE m.principal_id=p.principal_id AND m.active=1 AND g.capability='frontend.read' AND g.scope_kind='wing' AND g.scope_key='*')))`;
+/** The picker needs only the delegation capability and the directory display fields. */
+export async function viewAsPeople(env: Env, input: unknown) {
+  const req = identity(env, input);
+  if (Object.keys(req).sort().join(',') !== 'environment,generation,principalId') return fail(400,'INVALID_VIEW_AS_REQUEST');
+  const [result] = await env.DB.batch<Row>([env.DB.prepare(`WITH actor AS (SELECT ? AS id)
+    SELECT ${full('(SELECT id FROM actor)')} AND EXISTS (
+      SELECT 1 FROM permission_managers WHERE principal_id=(SELECT id FROM actor) AND active=1) AS allowed,
+      EXISTS(SELECT 1 FROM system_control WHERE singleton=1 AND environment=? AND generation=?)
+      AND (SELECT COUNT(*) FROM terms WHERE is_current=1)=1
+      AND NOT EXISTS(SELECT 1 FROM legacy_import_runs WHERE state<>'complete')
+      AND NOT EXISTS(SELECT 1 FROM legacy_operational_adoptions WHERE state<>'complete')
+      AND NOT EXISTS(SELECT 1 FROM event_roster_refresh_work) AS ready,
+      (SELECT entries FROM cadet_attendance_index WHERE kind='directory_profiles' AND bucket='*') AS entries`)
+    .bind(req.principalId,env.ENVIRONMENT,Number(env.GENERATION))]);
+  const row=result.results[0];
+  if(row?.allowed!==1)return fail(403,'NOT_AUTHORIZED');
+  if(row.ready!==1)return fail(409,'PANEL_NOT_READY');
+  const people=Object.values(JSON.parse(String(row.entries ?? '{}'))) as string[][];
+  people.sort((a,b)=>a[0]<b[0]?-1:a[0]>b[0]?1:0);
+  const packed=JSON.stringify(people);
+  if(people.length>2000 || packed.length>900000)return fail(409,'BROWSE_TOO_LARGE');
+  return {tables:{people:packed}};
+}
 interface Binding { directoryEmail: string | null; raw: string; targetPrincipalId: string | null; status: PanelViewAsStatus; fullSnapshot: boolean }
 /** Small private capture repeated inside every data batch. Email evidence stays in the capture, never the response. */
 function bindingQuery(env: Env, actor: string, person: string, entry: string | null) {
@@ -97,6 +120,21 @@ export async function authorizePanelViewAs(env: Env, input: unknown): Promise<Pa
     if (!saved || saved.request_hash !== requestHash) fail(409, 'VIEW_AS_AUDIT_CONFLICT');
     return { contractVersion: 'panel-view-as-v1', readOnly: true, action: 'exit', entryAuditId: String(req.entryAuditId), targetPersonId: String(saved.target_person_id), targetPrincipalId: saved.target_principal_id as string | null, status: 'exited', access: null };
   }
+  // For a directory target, evaluate the binding and record entry in one statement.
+  // RETURNING is empty for retries, non-directory targets and failed checks. Those
+  // cases go through the detailed conflict, access and audit handling below.
+  const candidate=bindingQuery(env,req.principalId,String(req.targetPersonId),null);
+  const [attempt]=await env.DB.batch<Row>([env.DB.prepare(`WITH captured(b) AS MATERIALIZED (${candidate.sql})
+    INSERT INTO panel_view_as_audit
+    SELECT ?,?,'enter',?,?,?,?,json_extract(b,'$[3][0][0]'),'ready',?,? FROM captured
+    WHERE json_extract(b,'$[0]')=1 AND json_extract(b,'$[1]')=1 AND json_extract(b,'$[2]')=1
+      AND json_extract(b,'$[4]')=0 AND json_type(b,'$[6]')='text'
+      AND (json_array_length(b,'$[3]')=0 OR (json_array_length(b,'$[3]')=1 AND json_extract(b,'$[3][0][1]')=json_extract(b,'$[6]')))
+    ON CONFLICT(audit_id) DO NOTHING RETURNING target_person_id,target_principal_id`)
+    .bind(...candidate.values,req.auditId,req.auditId,env.ENVIRONMENT,Number(env.GENERATION),req.principalId,req.targetPersonId,requestHash,now)]);
+  const inserted=attempt.results[0];
+  if(inserted)return {contractVersion:'panel-view-as-v1',readOnly:true,action:'enter',directoryWorkspace:true,
+    entryAuditId:String(req.auditId),targetPersonId:String(inserted.target_person_id),targetPrincipalId:inserted.target_principal_id as string|null,status:'ready',access:null};
   const person = String(req.targetPersonId), { query, binding } = await readBinding(env, req.principalId, person, null);
   let status = binding.status, access: PanelViewAsAuthorization['access'] = null;
   if (status === 'ready' && !binding.directoryEmail) {
@@ -106,9 +144,12 @@ export async function authorizePanelViewAs(env: Env, input: unknown): Promise<Pa
   const results = await env.DB.batch<Row>([
     env.DB.prepare(`INSERT INTO panel_view_as_audit SELECT ?,?,'enter',?,?,?,?,?,?,?,? WHERE (${query.sql})=? ON CONFLICT(audit_id) DO NOTHING`)
       .bind(req.auditId, req.auditId, env.ENVIRONMENT, Number(env.GENERATION), req.principalId, person, binding.targetPrincipalId, status, requestHash, now, ...query.values, binding.raw),
-    env.DB.prepare(auditSelect).bind(req.auditId), query.statement(),
+    env.DB.prepare(auditSelect).bind(req.auditId), ...(binding.directoryEmail ? [] : [query.statement()]),
   ]);
-  if (results[2].results[0]?.binding !== binding.raw) fail(409, 'VIEW_AS_CHANGED');
+  // A successful conditional insert already validated the binding in this transaction.
+  // Idempotent retries must still prove the current mapping before returning the existing entry.
+  const checked=results[2] ?? (!results[0].meta?.changes ? (await env.DB.batch<Row>([query.statement()]))[0] : null);
+  if (checked && checked.results[0]?.binding !== binding.raw) fail(409, 'VIEW_AS_CHANGED');
   const saved = results[1].results[0];
   if (!saved || saved.request_hash !== requestHash || saved.target_principal_id !== binding.targetPrincipalId) fail(409, 'VIEW_AS_AUDIT_CONFLICT');
   if (saved.closed === 1 || saved.status !== status) fail(409, 'VIEW_AS_CHANGED');
@@ -189,9 +230,27 @@ export async function previewCadetWorkspace<E extends Env>(env:E, input:unknown,
   const req=identity(env,input);
   const action = Object.hasOwn(req,'action');
   const keys = 'entryAuditId,environment,generation,principalId,'+(Object.hasOwn(req,'section')?'section,':'')+'targetPersonId';
-  if(req.section!==undefined && !reportSection(req.section) && !['report','attendance'].includes(String(req.section)))return fail(400,'INVALID_VIEW_AS_REQUEST');
+  if(req.section!==undefined && !reportSection(req.section) && !['profile','report','attendance'].includes(String(req.section)))return fail(400,'INVALID_VIEW_AS_REQUEST');
   if(Object.keys(req).sort().join(',')!==(action?'action,'+keys:keys)
     || !id(req.entryAuditId) || !id(req.targetPersonId)) return fail(400,'INVALID_VIEW_AS_REQUEST');
+  if (!action && (req.section==='profile' || req.section==='attendance')) {
+    // Hints only identify candidate rows. Validate the open audit and the actor's
+    // live grants in the same transaction as those rows before decoding any data.
+    const [hint]=await env.DB.batch<Row>([env.DB.prepare(`SELECT lower(d.email) AS email,a.target_principal_id AS principal
+      FROM panel_view_as_audit a JOIN directory_profiles d ON d.person_id=a.target_person_id
+      WHERE a.audit_id=? AND a.actor_id=? AND a.target_person_id=? AND a.action='enter'`)
+      .bind(req.entryAuditId,req.principalId,req.targetPersonId)]);
+    const email=String(hint.results[0]?.email ?? ''),principal=hint.results[0]?.principal as string|null ?? null;
+    const person=req.targetPersonId,entry=req.entryAuditId,actor=req.principalId;
+    const query=bindingQuery(env,actor,person,entry);
+    const db={prepare:(sql:string)=>env.DB.prepare(sql),async batch<T>(statements:D1PreparedStatement[]) {
+      const results=await env.DB.batch<T|Row>([query.statement(),...statements]);
+      const binding=decodeBinding((results[0].results[0] as Row)?.binding,actor,person,entry);
+      if(!binding.directoryEmail || binding.directoryEmail!==email || binding.targetPrincipalId!==principal)fail(403,'VIEW_AS_UNAVAILABLE');
+      return results.slice(1) as D1Result<T>[];
+    }} as D1Database;
+    return {...await readCadetWorkspace({...env,DB:db},email,principal ?? undefined,req.section),readOnly:!principal};
+  }
   const {query,binding}=await readBinding(env,req.principalId,req.targetPersonId,req.entryAuditId);
   if(!binding.directoryEmail) return fail(403,'VIEW_AS_UNAVAILABLE');
   if(!action) return {...await readCadetWorkspace(guardedEnvironment(env,query,binding.raw),binding.directoryEmail,binding.targetPrincipalId ?? undefined,req.section),readOnly:!binding.targetPrincipalId};

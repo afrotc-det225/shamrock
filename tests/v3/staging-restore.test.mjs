@@ -23,7 +23,7 @@ function dump(db) {
         for (const row of db.prepare(`SELECT ${expr} AS row FROM "${table.name}"`).all())
             out.push(`INSERT INTO "${table.name}" VALUES(${row.row})`);
     }
-    out.push(...db.prepare("SELECT sql FROM sqlite_schema WHERE type='index' AND sql IS NOT NULL ORDER BY name").all().map(r => r.sql));
+    out.push(...db.prepare("SELECT sql FROM sqlite_schema WHERE type IN ('index','trigger') AND sql IS NOT NULL ORDER BY type,name").all().map(r => r.sql));
     return out.join(';\n') + ';\n';
 }
 async function scenario() {

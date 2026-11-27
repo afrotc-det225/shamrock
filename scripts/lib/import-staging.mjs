@@ -169,11 +169,11 @@ export async function verifyStagingImportReadback(plan,{readBatch,expectedRunSta
 
 // Reviewed migration-8 indexes, including automatic PRIMARY KEY/UNIQUE indexes.
 // The fixture checks these against SQLite; count partial indexes conservatively for every inserted row.
-export const STAGING_IMPORT_INDEX_COUNTS=Object.freeze({legacy_source_occurrences:1,squadrons:2,organizational_units:1,flight_hierarchy:1,terms:3,people:1,directory_profiles:2,memberships:2,legacy_profile_sources:1,events:1,command_registry:1,admin_commands:2,admin_audit_events:1,event_details:2,event_units:1,event_roster_versions:2,event_roster_members:2,legacy_event_sources:1,legacy_attendance_baselines:3,legacy_matrix_snapshots:1,legacy_matrix_snapshot_rows:1,legacy_native_response_provenance:1,legacy_import_assertions:1,legacy_import_runs:2,legacy_import_batches:1,principals:1});
+export const STAGING_IMPORT_INDEX_COUNTS=Object.freeze({legacy_source_occurrences:1,squadrons:2,organizational_units:1,flight_hierarchy:1,terms:3,people:1,directory_profiles:4,memberships:2,legacy_profile_sources:1,events:1,command_registry:1,admin_commands:2,admin_audit_events:1,event_details:2,event_units:1,event_roster_versions:2,event_roster_members:2,legacy_event_sources:1,legacy_attendance_baselines:3,legacy_matrix_snapshots:1,legacy_matrix_snapshot_rows:1,legacy_native_response_provenance:1,legacy_import_assertions:1,legacy_import_runs:2,legacy_import_batches:1,principals:2});
 /** Conservative planning estimate; actual provider rows_written and account-wide usage remain authoritative. */
 export function estimateStagingImportWrites(plan){
   const {executionSha256,...body}=plan;check(executionSha256===importDigest(body),'IMPORT_EXECUTION_HASH');
-  const cost=table=>{check(Number.isInteger(STAGING_IMPORT_INDEX_COUNTS[table]),'IMPORT_WRITE_ESTIMATE_SCHEMA');return 1+STAGING_IMPORT_INDEX_COUNTS[table];};
+  const cost=table=>{check(Number.isInteger(STAGING_IMPORT_INDEX_COUNTS[table]),'IMPORT_WRITE_ESTIMATE_SCHEMA');const projectionWrites=['directory_profiles','events','event_details','event_units','event_roster_versions','event_roster_members','legacy_attendance_baselines'].includes(table)?1:0;return 1+STAGING_IMPORT_INDEX_COUNTS[table]+projectionWrites;};
   const guardAndReceipt=cost('legacy_import_assertions')+cost('legacy_import_batches');
   const steps=plan.steps.map(step=>({index:step.index,estimatedWrites:step.rows*cost(step.table)+guardAndReceipt}));
   const byIndex=new Map(steps.map(s=>[s.index,s.estimatedWrites]));

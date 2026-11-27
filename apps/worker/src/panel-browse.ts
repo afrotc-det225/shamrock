@@ -15,6 +15,16 @@ const error = (code:string,status=409) => new HttpError(status,code,'Reload the 
 export async function browsePanel(env:Env, identity:{environment:string;generation:number;principalId:string}, profile:Profile, wingCache?:WingTableCache, recordId?:string) {
   if (!profiles.includes(profile)) throw error('INVALID_PANEL_REQUEST',400);
   if (env.ENVIRONMENT!==identity.environment || Number(env.GENERATION)!==identity.generation) throw error('WRONG_GENERATION');
+  if(profile==='view-as-people'){
+    const result=await env.DB.batch<Record<string,unknown>>([...authorityStatements(env,identity.principalId),
+      env.DB.prepare("SELECT entries FROM cadet_attendance_index WHERE kind='directory_profiles' AND bucket='*'")]);
+    const {access,control,revision}=await panelContextFromRows(result.slice(0,-1).map(r=>r.results),identity.principalId);
+    if(!access.capabilities.fullSnapshot)throw error('NOT_AUTHORIZED',403);
+    const people=Object.values(JSON.parse(String(result.at(-1)?.results[0]?.entries ?? '{}'))) as string[][];
+    people.sort((a,b)=>a[0]<b[0]?-1:a[0]>b[0]?1:0);
+    if(people.length>2000 || JSON.stringify(people).length>900000)throw error('BROWSE_TOO_LARGE');
+    return {profile,scope:{termId:String(control.termId),currentTermId:String(control.termId)},revision,tables:{people:JSON.stringify(people)} as Record<string,string|number|null>};
+  }
   if(profile==='directory-editor'){
 
     // Evaluate authorization and the primary-key lookup in one D1 transaction.
@@ -60,9 +70,7 @@ export async function browsePanel(env:Env, identity:{environment:string;generati
   const eventRef=reference('events','event_id','eventId');
   const activeEvents="eventId IN (SELECT event_id FROM event_details WHERE term_id=(SELECT term_id FROM terms WHERE is_current=1) AND status='active')";
   const activePeople="flightPathStatus NOT IN ('Inactive','Commissioned','Dropped')";
-  if(profile==='view-as-people'){
-    table('people',people,'personId,lastName,firstName,asYear,role');
-  } else if(profile==='event-list'){
+  if(profile==='event-list'){
     table('terms',q.terms,'termId,label,sortOrder,isCurrent');
     table('events',q.events,'eventId,termId,eventType,displayOrder,label,status,startAt,endAt,location,notes');
   } else if(profile==='event-editor'){
@@ -153,6 +161,6 @@ export async function browsePanel(env:Env, identity:{environment:string;generati
     }
     return tables;
   };
-  const tables = wing && (profile === 'attendance' || profile === 'semester' || profile === 'leadership' || profile === 'view-as-people') && wingCache ? await wingCache({profile,termId:String(control.termId),principalId:identity.principalId,revision,authority},load) : await load();
+  const tables = wing && (profile === 'attendance' || profile === 'semester' || profile === 'leadership') && wingCache ? await wingCache({profile,termId:String(control.termId),principalId:identity.principalId,revision,authority},load) : await load();
   return {profile,scope:{termId:control.termId,currentTermId:control.termId},revision,tables};
 }

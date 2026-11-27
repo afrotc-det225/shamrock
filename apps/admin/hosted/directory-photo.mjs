@@ -28,3 +28,17 @@ export async function directoryPortrait(env, backend, user, preview, params, own
   return new Response(bytes, {headers:{"Content-Type":type, "Cross-Origin-Resource-Policy":"same-origin",
     "X-Shamrock-D1-Rows-Read":String(directoryReads ?? "unknown")}});
 }
+
+// The authorized profile already identifies the owner and file. Include its small
+// thumbnail in that response to avoid a second full identity/preview lookup.
+export async function profileWithPortrait(env,workspace){
+  const profile=workspace.profile, file=drivePhoto(profile?.photoLink)?.file;
+  if(!file || !profile?.personId)return workspace;
+  let portrait=null;
+  try{
+    const bytes=await env.HISTORY_FILES?.get(await portraitKey(profile.personId,file),"arrayBuffer");
+    const type=bytes && imageType(new Uint8Array(bytes));
+    if(type && bytes.byteLength<=128*1024)portrait="data:"+type+";base64,"+Buffer.from(bytes).toString("base64");
+  }catch{ /* The existing Google preview remains available. */ }
+  return {...workspace,profile:{...profile,portrait}};
+}

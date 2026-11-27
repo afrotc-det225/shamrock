@@ -316,7 +316,7 @@ function App() {
       if (current?.viewAs) { setPreview(current.viewAs); setData(null); }
       throw error;
     }
-    if(result.directoryWorkspace){location.assign("/me");return;}
+    if(result.directoryWorkspace){location.assign("/me/profile");return;}
     setPreview(result.viewAs); if (!person) setPreviewName("");
     setProposal(null); setData(null); setNotice("");
     await reload(true);

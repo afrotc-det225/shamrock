@@ -1,3 +1,4 @@
+import {splitMigrationSql} from '../../scripts/lib/v3-migrations.mjs';
 import assert from 'node:assert/strict';
 import {createHash,createHmac} from 'node:crypto';
 import {readFile,readdir} from 'node:fs/promises';
@@ -14,7 +15,7 @@ import {commandsFromManagedForm} from '../../.build/v3/apps/google-adapter/src/f
 const secret='fictional-admin-test-secret-never-for-deployment';
 const keyId='admin-fixture';
 const directory=new URL('../../database/migrations/',import.meta.url);
-const migration=(await Promise.all((await readdir(directory)).filter(n=>/^\d{4}_.*\.sql$/.test(n)).sort().map(n=>readFile(new URL(n,directory),'utf8')))).join('\n');
+const migration=(await Promise.all((await readdir(directory)).filter(n=>/^\d{4}_.*\.sql$/.test(n)).sort().map(n=>readFile(new URL(n,directory),'utf8')))).flatMap(splitMigrationSql);
 function nativeRequest(input,path='/v1/admin/commands',method='POST') {
   const body=method==='GET'?'':JSON.stringify(input);const timestamp=String(Math.floor(Date.now()/1000));
   const signature=createHmac('sha256',secret).update(`${method}\n${path}\n${timestamp}\n${createHash('sha256').update(body).digest('hex')}`).digest('hex');
@@ -23,7 +24,7 @@ function nativeRequest(input,path='/v1/admin/commands',method='POST') {
 async function fixture(t) {
   const mf=new Miniflare({modules:true,scriptPath:resolve('.build/v3-artifacts/worker.mjs'),compatibilityDate:'2026-07-01',d1Databases:{DB:'admin-fixture-db'},bindings:{ENVIRONMENT:'local',GENERATION:'1',BRIDGE_KEY_ID:keyId,BRIDGE_SECRET:secret},log:new Log(LogLevel.NONE)});
   t.after(()=>mf.dispose());const db=await mf.getD1Database('DB');
-  await db.batch(migration.replace(/^\s*--.*$/gm,'').split(';').map(s=>s.trim()).filter(Boolean).map(sql=>db.prepare(sql)));
+  await db.batch(migration.map(sql=>db.prepare(sql)));
   await db.batch([
     db.prepare("INSERT INTO system_control VALUES(1,'local',1,1)"),
     db.prepare("INSERT INTO principals VALUES('admin',NULL,1),('flight-admin',NULL,1),('outsider',NULL,1)"),

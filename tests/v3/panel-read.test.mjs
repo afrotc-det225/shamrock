@@ -1,3 +1,4 @@
+import {splitMigrationSql} from '../../scripts/lib/v3-migrations.mjs';
 import assert from 'node:assert/strict';
 import { createHash, createHmac } from 'node:crypto';
 import { readFile, readdir } from 'node:fs/promises';
@@ -13,13 +14,13 @@ import worker from '../../.build/v3/apps/worker/src/index.js';
 
 const secret = 'fictional-panel-test-secret-not-for-deployment', keyId = 'fixture';
 const directory = new URL('../../database/migrations/', import.meta.url);
-const migration = (await Promise.all((await readdir(directory)).filter(n => /^\d{4}_.+\.sql$/.test(n)).sort().map(n => readFile(new URL(n, directory), 'utf8')))).join('\n');
+const migration = (await Promise.all((await readdir(directory)).filter(n => /^\d{4}_.+\.sql$/.test(n)).sort().map(n => readFile(new URL(n, directory), 'utf8')))).flatMap(splitMigrationSql);
 const base = principalId => ({ environment: 'local', generation: 1, principalId, section: 'manifest', offset: 0, revision: null });
 const hash = v => createHash('sha256').update(JSON.stringify(v)).digest('hex');
 async function fixture(t) {
     const mf = new Miniflare({ modules: true, scriptPath: resolve('.build/v3-artifacts/worker.mjs'), compatibilityDate: '2026-07-01', d1Databases: { DB: 'panel' }, bindings: { ENVIRONMENT: 'local', GENERATION: '1', BRIDGE_KEY_ID: keyId, BRIDGE_SECRET: secret }, log: new Log(LogLevel.NONE) });
     t.after(() => mf.dispose()); const db = await mf.getD1Database('DB');
-    await db.batch(migration.replace(/^\s*--.*$/gm, '').split(';').map(s => s.trim()).filter(Boolean).map(s => db.prepare(s)));
+    await db.batch(migration.map(s => db.prepare(s)));
     await db.batch([
         db.prepare("INSERT INTO system_control VALUES(1,'local',1,1)"),
         db.prepare("INSERT INTO organizational_units VALUES('alpha','Alpha',1),('bravo','Bravo',1)"),
@@ -472,7 +473,7 @@ test('a cold Wing viewer uses private storage and replays a correction; a Flight
     assert.deepEqual(Object.keys(checks.tables).sort(),['EVENTS_MISSING_DETAILS','EVENTS_MISSING_ROSTER','FLIGHTS_MISSING_SQUADRON','PEOPLE_MISSING_PROFILES']);
     assert(Object.values(checks.tables).every(n=>Number.isInteger(n) && n>=0));
     await assert.rejects(browse('flight','diagnostics'),{status:403});
-    assert.equal(kv.size,3);
+    assert.equal(kv.size,2);
     await f.db.prepare("INSERT INTO admin_grants VALUES('outsider','frontend.read','wing','*')").run();
     bookmark='second-wing-authorized';
     const leadership=await browse('owner','leadership');
@@ -481,7 +482,7 @@ test('a cold Wing viewer uses private storage and replays a correction; a Flight
     const wingOnlyReads=gets;
     await assert.rejects(browse('flight','leadership'),{status:403});
     assert.equal(gets,wingOnlyReads);
-    assert.equal(kv.size,4);
+    assert.equal(kv.size,3);
     await f.db.prepare("UPDATE directory_profiles SET role='Updated fixture role' WHERE person_id='cadet'").run();
     bookmark='directory-edited';
     const changed=await browse('owner','leadership');

@@ -398,7 +398,7 @@ export default function CadetWorkspace({ session }) {
   const pending = useRef(null),
     active = useRef(false),
     preview = !!session.viewAs;
-  const section = tab==="Submit attendance" ? "report" : tab==="My attendance" ? "attendance" : "";
+  const section = tab==="My profile" ? "profile" : tab==="Submit attendance" ? "report" : tab==="My attendance" ? "attendance" : "";
   const currentSection=useRef(section);
   currentSection.current=section;
   const load = async () => {

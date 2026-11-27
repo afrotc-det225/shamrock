@@ -1,4 +1,4 @@
-import { directoryPortrait } from "./directory-photo.mjs";
+import { directoryPortrait,profileWithPortrait } from "./directory-photo.mjs";
 import {isWorkspacePath} from "../src/page-url.js";
 import {isUnifiedSite} from "./site.mjs";
 import { checkChatId, readChats, saveTurn } from "./chat-history.mjs";
@@ -110,12 +110,13 @@ export default {
         return backend.post("/v1/cadet/workspace",{...input,...(section?{section}:{}),...(request.method==="POST"?{action:body}:{})});
       };
       if (url.pathname === "/api/directory/photo" && request.method === "GET") {
-        return secure(await directoryPortrait(env, backend, user, preview, url.searchParams, () => cadetWorkspace(null)));
+        return secure(await directoryPortrait(env, backend, user, preview, url.searchParams, () => cadetWorkspace("profile")));
       }
       if (url.pathname === "/api/cadet" && ["GET","POST"].includes(request.method)) {
         const section=url.searchParams.get("section");
-        if(section!==null && !/^report:[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/.test(section) && !["report","attendance"].includes(section))throw new PanelError("INVALID_REQUEST","Unknown workspace section.");
-        return secure(json(await cadetWorkspace(section)));
+        if(section!==null && !/^report:[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/.test(section) && !["profile","report","attendance"].includes(section))throw new PanelError("INVALID_REQUEST","Unknown workspace section.");
+        const workspace=await cadetWorkspace(section);
+        return secure(json(section==="profile" && request.method==="GET" ? await profileWithPortrait(env,workspace) : workspace));
       }
       if (user.principal_id.startsWith("school.")) throw new PanelError("CADET_WORKSPACE","Open your cadet workspace.",403);
       if (request.method === "POST" && url.pathname === "/api/view-as")
@@ -130,6 +131,10 @@ export default {
       ].includes(`${request.method} ${url.pathname}`))
         throw new PanelError("VIEW_AS_READ_ONLY", "Exit View as before making changes.", 403);
       const editorProfile = {"/api/view-as/people":"view-as-people", "/api/events/editor":"event-editor","/api/cadets/editor":"directory-editor"}[url.pathname];
+      if(editorProfile==="view-as-people" && request.method==="GET"){
+        if(preview || env.VIEW_AS_ENABLED!=="1")throw new PanelError("FORBIDDEN","View as is unavailable.",403);
+        return secure(json(await backend.send("/v1/admin/panel/view-as/people",backend.identity())));
+      }
       if (editorProfile && request.method === "GET") {
         const authority = await backend.panelAuthority();
         if (!authority.access.capabilities.fullSnapshot || (preview && !backend.delegating) ||

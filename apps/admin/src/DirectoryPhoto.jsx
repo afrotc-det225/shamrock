@@ -4,7 +4,7 @@ import { createPortal } from "react-dom";
 import { ExternalLink, Image as PhotoIcon, X } from "lucide-react";
 import { drivePhoto } from "../drive-photo.mjs";
 
-function directoryPhotoSource(value, size, personId) {
+function directoryPhotoSource(value, size, personId, portrait) {
   if (!value) return null;
   let url;
   try { url = new URL(value); } catch { return null; }
@@ -22,11 +22,11 @@ function directoryPhotoSource(value, size, personId) {
   const direct = "https://drive.google.com/thumbnail?" + parameters;
   const query = new URLSearchParams({file:drive.file});
   if (personId) query.set("person", personId);
-  return { ...link, preview:preview.href, src:personId === undefined ? direct : "/api/directory/photo?" + query, direct };
+  return { ...link, preview:preview.href, src:portrait || (portrait===null || personId === undefined ? direct : "/api/directory/photo?" + query), direct };
 }
 
-export function useDirectoryPhoto(value, size, personId) {
-  const source = directoryPhotoSource(value, size, personId);
+export function useDirectoryPhoto(value, size, personId, portrait) {
+  const source = directoryPhotoSource(value, size, personId, portrait);
   const [directOnly, setDirectOnly] = useState("");
   const [failed, setFailed] = useState("");
   const src = source?.src === directOnly ? source?.direct : source?.src;
@@ -56,7 +56,7 @@ function PhotoPreview({source, src, onError, name, onClose}) {
 }
 
 export function DirectoryPhoto({ value, person, avatar = false, portrait = false, personId = person?.personId }) {
-  const {source,src,onError}=useDirectoryPhoto(value, avatar ? 96 : 320, personId);
+  const {source,src,onError}=useDirectoryPhoto(value, avatar ? 96 : 320, personId, portrait ? person?.portrait : undefined);
   const [opened,setOpened]=useState(null);
   const name=[person?.firstName, person?.lastName].filter(Boolean).join(" ") || "Directory portrait";
   const initials=[person?.firstName,person?.lastName].map(n=>n?.trim()[0]).join("") || "–";

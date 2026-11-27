@@ -1,3 +1,4 @@
+import {splitMigrationSql} from '../../scripts/lib/v3-migrations.mjs';
 import assert from 'node:assert/strict';
 import { createHash, createHmac } from 'node:crypto';
 import { readFile, readdir } from 'node:fs/promises';
@@ -8,7 +9,7 @@ import { buildRolePermissionPolicy } from '../../.build/v3/packages/domain/src/p
 import worker from '../../.build/v3/apps/worker/src/index.js';
 
 const directory = new URL('../../database/migrations/', import.meta.url);
-const migration = (await Promise.all((await readdir(directory)).filter(n => /^\d{4}_.+\.sql$/.test(n)).sort().map(n => readFile(new URL(n, directory), 'utf8')))).join('\n');
+const migration = (await Promise.all((await readdir(directory)).filter(n => /^\d{4}_.+\.sql$/.test(n)).sort().map(n => readFile(new URL(n, directory), 'utf8')))).flatMap(splitMigrationSql);
 const secret = 'fictional-view-as-secret-not-for-deployment', keyId = 'fixture';
 const base = { environment: 'local', generation: 1, principalId: 'owner' };
 const manifest = { section: 'manifest', offset: 0, revision: null };
@@ -17,7 +18,7 @@ const preview = (targetPersonId = 'lead', kind = 'panel', entryAuditId = 'entry'
 async function fixture(t) {
   const mf = new Miniflare({ modules: true, scriptPath: resolve('.build/v3-artifacts/worker.mjs'), compatibilityDate: '2026-07-01', d1Databases: { DB: 'view-as' }, bindings: { ENVIRONMENT: 'local', GENERATION: '1', BRIDGE_KEY_ID: keyId, BRIDGE_SECRET: secret }, log: new Log(LogLevel.NONE) });
   t.after(() => mf.dispose()); const db = await mf.getD1Database('DB');
-  await db.batch(migration.replace(/^\s*--.*$/gm, '').split(';').map(s => s.trim()).filter(Boolean).map(s => db.prepare(s)));
+  await db.batch(migration.map(s => db.prepare(s)));
   await db.batch([
     db.prepare("INSERT INTO system_control VALUES(1,'local',1,0)"),
     db.prepare("INSERT INTO organizational_units VALUES('alpha','Alpha',1),('bravo','Bravo',1)"),
@@ -218,6 +219,16 @@ test('an active Directory assignment supports a read-only admin preview before f
   const principalId='google.'+createHash('sha256').update(email).digest('hex');
   const actual=await f.send({...base,email,principalId},'/v1/cadet/workspace');
   const {readOnly,...same}=preview.body;assert.deepEqual(same,actual.body);
+  for(const section of ['profile','attendance']){
+    const personal=await f.send({...target,section},'/v1/cadet/preview');
+    const direct=await f.send({...base,email,principalId,section},'/v1/cadet/workspace');
+    assert.equal(personal.status,200);
+    const {readOnly,...visible}=personal.body;
+    assert.equal(readOnly,true);assert.deepEqual(visible,direct.body);
+  }
+  const picker='/v1/admin/panel/view-as/people';
+  assert.equal((await f.send(base,picker)).status,200);
+  assert.equal((await f.send({...base,principalId:'outsider'},picker)).status,403);
   assert.equal((await f.send({...target,action:{kind:'decide'}},'/v1/cadet/preview')).status,400);
   await f.db.prepare("UPDATE memberships SET active=0 WHERE person_id='unmapped'").run();
   assert.equal((await f.send(target,'/v1/cadet/preview')).status,403);

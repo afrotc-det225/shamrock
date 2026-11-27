@@ -1,7 +1,7 @@
 /** Staging-only, dependency-free backup proof. Provider IO is injected and never restores hosted data. */
 import { createHash } from 'node:crypto';
 import { DatabaseSync, constants } from 'node:sqlite';
-import { classifyMigrationState, migrationEvidenceHash } from './v3-migrations.mjs';
+import { classifyMigrationState, migrationEvidenceHash, schemaObjects } from './v3-migrations.mjs';
 export const BACKUP_LIMITS = { sqlBytes: 128 * 1024 * 1024, pageRows: 32, queries: 10000, tableRows: 1000000, polls: 120, pollMs: 1000 };
 export const backupHash = value => createHash('sha256').update(value).digest('hex');
 const check = (ok, code) => {
@@ -79,14 +79,14 @@ export function restoreBackupSql(sql, plan, file = ':memory:') {
         check(db.prepare("SELECT COUNT(*) n FROM sqlite_schema WHERE name NOT LIKE 'sqlite_%'").get().n === 0, 'BACKUP_RESTORE_NOT_EMPTY');
         const names = new Set(plan.expectedObjects.map(o => o.name));
         db.setAuthorizer((action, a, b) => {
-            if ([constants.SQLITE_ATTACH, constants.SQLITE_DETACH, constants.SQLITE_SELECT, constants.SQLITE_RECURSIVE, constants.SQLITE_CREATE_TRIGGER, constants.SQLITE_CREATE_TEMP_TABLE, constants.SQLITE_CREATE_TEMP_INDEX, constants.SQLITE_CREATE_TEMP_TRIGGER, constants.SQLITE_CREATE_VTABLE, constants.SQLITE_CREATE_VIEW, constants.SQLITE_CREATE_TEMP_VIEW, constants.SQLITE_ALTER_TABLE, ...[constants.SQLITE_DROP_TABLE, constants.SQLITE_DROP_INDEX, constants.SQLITE_DROP_VIEW, constants.SQLITE_DROP_TRIGGER]].includes(action))
+            if ([constants.SQLITE_ATTACH, constants.SQLITE_DETACH, constants.SQLITE_SELECT, constants.SQLITE_RECURSIVE, constants.SQLITE_CREATE_TEMP_TABLE, constants.SQLITE_CREATE_TEMP_INDEX, constants.SQLITE_CREATE_TEMP_TRIGGER, constants.SQLITE_CREATE_VTABLE, constants.SQLITE_CREATE_VIEW, constants.SQLITE_CREATE_TEMP_VIEW, constants.SQLITE_ALTER_TABLE, ...[constants.SQLITE_DROP_TABLE, constants.SQLITE_DROP_INDEX, constants.SQLITE_DROP_VIEW, constants.SQLITE_DROP_TRIGGER]].includes(action))
                 return constants.SQLITE_DENY;
             if (action === constants.SQLITE_PRAGMA && !['defer_foreign_keys', 'foreign_keys'].includes(a))
                 return constants.SQLITE_DENY;
             // Native D1 dumps encode multiline strings with replace(...,char(10)).
-            if (action === constants.SQLITE_FUNCTION && !['length', 'lower', 'json_valid', 'json_type', 'json_extract', 'replace', 'char'].includes(String(b ?? a).toLowerCase()))
+            if (action === constants.SQLITE_FUNCTION && !['length', 'lower', 'json_valid', 'json_type', 'json_extract', 'replace', 'char', 'instr'].includes(String(b ?? a).toLowerCase()))
                 return constants.SQLITE_DENY;
-            if ([constants.SQLITE_CREATE_TABLE, constants.SQLITE_CREATE_INDEX].includes(action) && !names.has(a) && !String(a).startsWith('sqlite_'))
+            if ([constants.SQLITE_CREATE_TABLE, constants.SQLITE_CREATE_INDEX, constants.SQLITE_CREATE_TRIGGER].includes(action) && !names.has(a) && !String(a).startsWith('sqlite_'))
                 return constants.SQLITE_DENY;
             if (action === constants.SQLITE_UPDATE && !['sqlite_master', 'sqlite_schema'].includes(a))
                 return constants.SQLITE_DENY;
@@ -96,6 +96,8 @@ export function restoreBackupSql(sql, plan, file = ':memory:') {
         });
         db.exec(sql);
         db.setAuthorizer(null);
+        const triggers = schemaObjects(db.prepare("SELECT type,name,sql FROM sqlite_schema WHERE type='trigger'").all());
+        check(triggers.every(trigger => plan.expectedObjects.some(expected => same(expected, trigger))), 'BACKUP_TRIGGER');
         db.exec('PRAGMA foreign_keys=ON');
         return db;
     }

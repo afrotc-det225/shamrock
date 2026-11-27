@@ -6,9 +6,9 @@ import {
 } from "../../../packages/domain/src/admin.js";
 import { HttpError } from "./http-error.js";
 import { acceptAttendanceCorrection, pairRevisionSql } from "./corrections.js";
-import { resolveCell, type ReportingObservation, type ReportingCorrection, type ReportingLegacyBaseline, type ReportingRequest } from "../../../packages/domain/src/frontend-reporting.js";
 import { ATTENDANCE_CODES, type AttendanceCode } from "../../../packages/domain/src/index.js";
-import { cadetAttendanceFacts, directoryCatalogQuery } from "./frontend-transport.js";
+import {personalAttendance,personalAttendanceQueries} from "./cadet-personal-attendance.js";
+import { directoryCatalogQuery } from "./frontend-transport.js";
 
 export interface CadetEnv {
   DB: D1Database;
@@ -68,6 +68,12 @@ const reportMembers = `FROM directory_profiles reporter CROSS JOIN event_details
   AND (NOT EXISTS(SELECT 1 FROM event_roster_versions v WHERE v.event_id=d.event_id AND v.version=d.version)
     OR EXISTS(SELECT 1 FROM event_roster_members rm WHERE rm.event_id=d.event_id AND rm.version=d.version AND rm.person_id=m.person_id AND rm.flight_id=m.unit_id))`;
 
+function workspaceAction(a:Row){
+      let change=null;
+      if(a.kind==="flag" && String(a.actionId).startsWith("cell."))try {const parsed=JSON.parse(String(a.detail));if(parsed?.type==="cell-review")change=parsed;}catch{}
+      return {...a,change,detail:change?.reason??a.detail} as Row;
+    }
+
 export async function readCadetWorkspace(
   env: CadetEnv,
   email: string,
@@ -87,28 +93,35 @@ export async function readCadetWorkspace(
   const bindings = db
     .prepare(
       `SELECT p.principal_id,p.person_id,p.active,a.email FROM principals p
-    LEFT JOIN principal_accounts a ON a.principal_id=p.principal_id WHERE p.principal_id=? OR a.email=?
-    OR p.person_id IN (SELECT person_id FROM directory_profiles WHERE lower(email)=?) ORDER BY p.principal_id LIMIT 3`,
+    LEFT JOIN principal_accounts a ON a.principal_id=p.principal_id WHERE p.principal_id IN (
+      SELECT ? UNION SELECT principal_id FROM principal_accounts WHERE email=? UNION
+      SELECT p2.principal_id FROM principals p2 JOIN directory_profiles d ON d.person_id=p2.person_id WHERE lower(d.email)=?)
+    ORDER BY p.principal_id LIMIT 3`,
     )
     .bind(principal, email, email);
+  const personal=section==="profile" || section==="attendance";
   const flights = db.prepare(
-    "SELECT u.unit_id AS flightId,u.label,u.roster_version AS rosterVersion,h.squadron_id AS squadronId,s.label AS squadron FROM organizational_units u JOIN flight_hierarchy h ON h.unit_id=u.unit_id JOIN squadrons s ON s.squadron_id=h.squadron_id ORDER BY u.label",
+    "SELECT u.unit_id AS flightId,u.label,u.roster_version AS rosterVersion,h.squadron_id AS squadronId,s.label AS squadron FROM organizational_units u JOIN flight_hierarchy h ON h.unit_id=u.unit_id JOIN squadrons s ON s.squadron_id=h.squadron_id " + (personal ? " WHERE u.unit_id=(SELECT flight_id FROM directory_profiles WHERE lower(email)=?)" : "") + " ORDER BY u.label",
   );
   const leadership =
     db.prepare(`SELECT d.person_id,d.role,u.label AS flight,s.label AS squadron,s.squadron_id FROM directory_profiles d
     JOIN memberships m ON m.person_id=d.person_id AND m.unit_id=d.flight_id AND m.active=1
     JOIN organizational_units u ON u.unit_id=d.flight_id JOIN flight_hierarchy h ON h.unit_id=u.unit_id JOIN squadrons s ON s.squadron_id=h.squadron_id
-    WHERE d.role<>'' AND d.flight_path_status NOT IN ('Inactive','Dropped','Commissioned')
+    WHERE d.person_id IN (SELECT person_id FROM directory_profiles WHERE lower(email)=?
+      UNION ALL SELECT person_id FROM directory_profiles WHERE instr(lower(role),'squadron')>0 AND instr(lower(role),'commander')>0 AND instr(lower(role),'deputy')=0
+        AND EXISTS(SELECT 1 FROM directory_profiles me WHERE lower(me.email)=? AND instr(lower(me.role),'squadron')>0 AND instr(lower(me.role),'commander')>0 AND instr(lower(me.role),'deputy')=0))
+    AND d.role<>'' AND d.flight_path_status NOT IN ('Inactive','Dropped','Commissioned')
     AND NOT EXISTS(SELECT 1 FROM leadership_contacts c WHERE c.person_id=d.person_id AND c.active=0)
     AND EXISTS(SELECT 1 FROM permission_policy_control pc,json_each(pc.config_json,'$.operationalSquadronIds') op WHERE pc.enabled=1 AND op.value=s.squadron_id)
-    ORDER BY d.person_id`);
+    ORDER BY d.person_id`).bind(email,email);
   const control = db
     .prepare(
       "SELECT accepting_commands AS writable FROM system_control WHERE singleton=1 AND environment=? AND generation=?",
     )
     .bind(env.ENVIRONMENT, Number(env.GENERATION));
-  const fence = [lookup, bindings, flights, leadership, control];
-  const first = (await db.batch<Row>(fence)).map((r) => r.results);
+  const fence = [lookup,bindings,personal ? flights.bind(email) : flights,leadership,control];
+  const capture = await db.batch<Row>(section==="attendance" ? [...fence,...personalAttendanceQueries(db,email)] : fence);
+  const first = capture.slice(0,fence.length).map(r=>r.results);
   const [people, accounts, flightList, leaders, controls] = first;
   if (
     controls.length !== 1 ||
@@ -130,7 +143,7 @@ export async function readCadetWorkspace(
       registration: true,
       school: schoolForEmail(email),
       writable,
-      flights: flightList,
+      flights: personal ? (await db.batch<Row>([db.prepare("SELECT u.unit_id AS flightId,u.label,u.roster_version AS rosterVersion,h.squadron_id AS squadronId,s.label AS squadron FROM organizational_units u JOIN flight_hierarchy h ON h.unit_id=u.unit_id JOIN squadrons s USING(squadron_id) ORDER BY u.label")]))[0].results : flightList,
       profile: null,
     };
   }
@@ -158,6 +171,12 @@ export async function readCadetWorkspace(
       String(owner.flight).toLowerCase() + " flight commander",
       String(owner.flight).toLowerCase() + " deputy flight commander",
     ].includes(title || "");
+  if(personal){
+    const personalData=section==="attendance" ? personalAttendance(profile.personId,capture.slice(fence.length).map(r=>r.results)) : {attendance:[],flags:[]};
+    return {registration:false,profile,flights:flightList,writable,linked:accounts.length===1 && accounts[0].principal_id===actor && accounts[0].email===email,
+      flightCommander:!!flightCommander,squadron:squadronCommander ? String(owner.squadron) : null,squadronId:squadronCommander ? owner.squadron_id : null,
+      section,attendance:personalData.attendance,actions:personalData.flags.map(workspaceAction),reportEvents:[],reportRoster:[],ownFlightCount:null,roster:[],requests:[],events:[],queue:[]};
+  }
   const requests = (
     predicate: string,
   ) => `SELECT r.request_id AS requestId,r.person_id AS personId,r.unit_id AS flightId,r.event_id AS eventId,
@@ -217,12 +236,6 @@ export async function readCadetWorkspace(
     candidate.first_name AS firstName,candidate.last_name AS lastName,candidate.as_year AS asYear,
     d.event_id AS eventId,d.event_type AS eventType,d.version,${campus("reporter")} AS campus ${reportMembers}`)
     .bind(profile.personId,String(section).slice(7)));
-  const factsIndex=data.length;
-  if (section==="attendance") {
-    for (const [alias, fact] of [["o",cadetAttendanceFacts.observations],["c",cadetAttendanceFacts.corrections],["b",cadetAttendanceFacts.baselines]] as const) {
-      data.push(db.prepare(`SELECT ${fact.select} ${fact.from} WHERE ${alias}.person_id=? AND ${alias}.event_id IN (SELECT d.event_id FROM event_details d WHERE ${current})`).bind(profile.personId));
-    }
-  }
   const all = (await db.batch<Row>([...data, ...fence])).map((r) => r.results);
   if (JSON.stringify(first) !== JSON.stringify(all.slice(data.length)))
     throw new HttpError(
@@ -242,20 +255,10 @@ export async function readCadetWorkspace(
     flightCommander: !!flightCommander,
     squadron: squadronCommander ? String(owner.squadron) : null,
     section, squadronId:squadronCommander ? owner.squadron_id : null,
-    attendance:section==="attendance" ? all[1].map(event=>{
-      const pair=(rows:Row[])=>rows.filter(r=>r.eventId===event.eventId);
-      const obs=pair(all[factsIndex]),cor=pair(all[factsIndex+1]),base=pair(all[factsIndex+2])[0],requests=pair(all[0]);
-      const cell=resolveCell({eventId:String(event.eventId),termId:String(event.termId)},profile.personId,
-        obs as unknown as ReportingObservation[],cor as unknown as ReportingCorrection[],requests as unknown as ReportingRequest[],true,[],base as unknown as ReportingLegacyBaseline);
-      return {...event,needsReview:cell.needsReview,code:cell.effectiveCode,baseVersion:Number(base?.baselineRevision||0)+Math.max(0,...[...obs,...cor,...requests].map(r=>Number(r.order)))};
-    }):[],
+    attendance:[],
     reportEvents:section==="report" ? all[reportIndex] : [],
     reportRoster:reportSection(section) ? all[reportIndex] : [],
-    actions: reporting ? [] : all[actionsIndex].map(a=>{
-      let change=null;
-      if(a.kind==="flag" && String(a.actionId).startsWith("cell."))try {const parsed=JSON.parse(String(a.detail));if(parsed?.type==="cell-review")change=parsed;}catch{}
-      return {...a,change,detail:change?.reason??a.detail} as Row;
-    }),
+    actions: reporting ? [] : all[actionsIndex].map(workspaceAction),
     roster: !reporting && flightCommander ? all[ownIndex] : [],
     ownFlightCount:reportSection(section) ? Number(all[ownIndex][0].n) : null,
     requests: reporting ? [] : all[0],
@@ -321,8 +324,8 @@ export async function cadetRoute(
         "revision",
       )
     : null;
-  const section=object(a) && a.kind==="report" && object(a.fields) ? "report:"+a.fields.eventId : input.section;
-  if(section!=null && !reportSection(section) && !["attendance","report"].includes(String(section))) throw bad();
+  const section=object(a) ? (a.kind==="report" && object(a.fields) ? "report:"+a.fields.eventId : undefined) : input.section;
+  if(section!=null && !reportSection(section) && !["profile","attendance","report"].includes(String(section))) throw bad();
   const state = await readCadetWorkspace(env, input.email, input.principalId, section);
   if (
     !state.linked &&

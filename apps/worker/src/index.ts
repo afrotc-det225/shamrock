@@ -15,7 +15,7 @@ import { retainedHistorySummary } from './retained-history-summary.js';
 import { legacyHistoryPage } from './legacy-history-transport.js';
 import { frontendSnapshotPage } from './frontend-transport.js';
 import { panelReadAuthority, panelSnapshotPage, preparePanelAuthorization } from './panel-read.js';
-import { authorizePanelViewAs, panelBrowse, panelViewAsAuthority, panelViewAsPage } from './panel-view-as.js';
+import { viewAsPeople, authorizePanelViewAs, panelBrowse, panelViewAsAuthority, panelViewAsPage } from './panel-view-as.js';
 import type { CommandScopeGuard } from './command-scope.js';
 import { parseAttendanceCorrection } from '../../../packages/domain/src/corrections.js';
 import { prepareCloseout, advanceCloseout, closeoutStatus } from './closeout.js';
@@ -564,6 +564,7 @@ const worker = {
       if (url.pathname === '/v1/admin/panel/attendance-delta' && !url.search)
         return await cachedPanelRead(env,url,body,async () => json(await attendanceDelta(env,input)));
       if (url.pathname === '/v1/admin/panel/access' && !url.search) return await cachedPanelRead(env,url,body,async bookmark => json(await panelReadAuthority(env,input,bookmark)));
+      if (url.pathname === '/v1/admin/panel/view-as/people' && !url.search) return json(await viewAsPeople(env,input));
       if (url.pathname === '/v1/admin/panel/view-as/authorize' && !url.search) return json(await authorizePanelViewAs(env, input));
       if (url.pathname === '/v1/admin/panel/view-as/page' && !url.search) return json(await panelViewAsPage(env, input));
       if (url.pathname === '/v1/admin/panel/view-as/access' && !url.search) return await cachedPanelRead(env,url,body,async () => json(await panelViewAsAuthority(env,input)));
@@ -609,6 +610,7 @@ export default {
   async fetch(request:Request,env:Env):Promise<Response> {
     const path=new URL(request.url).pathname;
     if (!env.DB || !['/v1/admin/panel/access','/v1/admin/panel/browse','/v1/admin/panel/attendance-delta',
+      '/v1/cadet/workspace','/v1/cadet/preview','/v1/admin/panel/view-as/people','/v1/admin/panel/view-as/authorize',
       '/v1/admin/snapshot/page','/v1/admin/history/list','/v1/admin/panel/view-as/access'].includes(path)) return worker.fetch(request,env);
     const meter=meterPanelReads(env.DB);
     const response=await worker.fetch(request,{...env,DB:meter.db});
