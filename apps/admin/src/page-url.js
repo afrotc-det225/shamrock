@@ -7,14 +7,33 @@ const pages = {
   cadet: {"My requests":"requests", "My profile":"profile", "My Flight":"flight", Excusals:"excusals"},
 };
 
-export function pageFromUrl(workspace, url = new URL(location.href)) {
-  if (url.searchParams.get("workspace") !== workspace) return null;
-  const slug = url.searchParams.get("page");
-  return Object.keys(pages[workspace]).find(page => pages[workspace][page] === slug) ?? null;
+export function pageHref(workspace, page) {
+  const slug = pages[workspace][page];
+  return workspace === "cadet" ? "/me/" + slug : "/" + slug;
 }
 
-export function pageHref(workspace, page) {
-  return "/?" + new URLSearchParams({workspace, page:pages[workspace][page]});
+const routes = new Map(Object.entries(pages).flatMap(([workspace, entries]) =>
+  Object.keys(entries).map(page => [pageHref(workspace,page), {workspace,page}])));
+routes.set("/me", {workspace:"cadet",page:null});
+
+function pathRoute(pathname) {
+  return routes.get(pathname.replace(/\/$/,""));
+}
+
+export function isWorkspacePath(pathname) {
+  return !!pathRoute(pathname);
+}
+
+export function workspaceFromUrl(url = new URL(location.href)) {
+  return pathRoute(url.pathname)?.workspace ?? (url.pathname === "/" ? url.searchParams.get("workspace") : null);
+}
+
+export function pageFromUrl(workspace, url = new URL(location.href)) {
+  const route = pathRoute(url.pathname);
+  if (route) return route.workspace === workspace ? route.page : null;
+  if (url.pathname !== "/" || workspaceFromUrl(url) !== workspace) return null;
+  const slug = url.searchParams.get("page");
+  return Object.keys(pages[workspace]).find(page => pages[workspace][page] === slug) ?? null;
 }
 
 export function writePageUrl(workspace, page, replace = false) {
@@ -25,7 +44,7 @@ export function writePageUrl(workspace, page, replace = false) {
 
 const returnKey = "shamrock-signin-page";
 export function rememberSignInPage() {
-  const workspace = new URLSearchParams(location.search).get("workspace");
+  const workspace = workspaceFromUrl();
   if (!Object.hasOwn(pages,workspace)) return;
   const page = pageFromUrl(workspace);
   if (page) {
@@ -37,7 +56,7 @@ export function restoreSignInPage() {
   try {
     const saved = JSON.parse(sessionStorage.getItem(returnKey));
     sessionStorage.removeItem(returnKey);
-    if (location.search || !saved || Date.now()-saved.time > 600000) return;
+    if (location.pathname !== "/" || location.search || !saved || Date.now()-saved.time > 600000) return;
     if (Object.hasOwn(pages,saved.workspace) && Object.hasOwn(pages[saved.workspace],saved.page))
       writePageUrl(saved.workspace,saved.page,true);
   } catch {}

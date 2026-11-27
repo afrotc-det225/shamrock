@@ -1,3 +1,4 @@
+import {isWorkspacePath} from "./src/page-url.js";
 import http from "node:http";
 import { randomBytes, timingSafeEqual } from "node:crypto";
 import { readFile, mkdir } from "node:fs/promises";
@@ -200,7 +201,7 @@ export function createPanelServer(service, { assistantKey, port = 4173 } = {}) {
       if (req.method !== "GET")
         throw new PanelError("NOT_FOUND", "Not found.", 404);
       const path =
-        url.pathname === "/"
+        (url.pathname === "/" || isWorkspacePath(url.pathname))
           ? "index.html"
           : decodeURIComponent(url.pathname.slice(1));
       const file = resolve(base, "dist", path);

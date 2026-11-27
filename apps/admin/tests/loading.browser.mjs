@@ -45,6 +45,7 @@ try{
  assert.equal(await page.locator('.error').count(),0);
  assert(maximum<=2,`maximum page concurrency was ${maximum}`);
  blockSection=null;await page.goto(`http://127.0.0.1:${server.address().port}/?workspace=leadership&page=events`);await page.getByRole('button',{name:'Edit Veterans Day',exact:true}).waitFor();
+ assert.equal(new URL(page.url()).pathname,'/events','legacy bookmark opens at the canonical path');
  await page.route('**/api/events/editor*',async route=>{
    await gate;
    await route.fulfill({json:await host.post('/v1/admin/panel/browse',{...host.identity(),profile:'event-editor'})});

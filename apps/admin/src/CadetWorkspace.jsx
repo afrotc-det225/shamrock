@@ -503,7 +503,7 @@ export default function CadetWorkspace({ session }) {
   };
   return (
     <WorkspaceShell workspace="cadet" pages={pages} page={page} navigate={navigate} account={<>
-      {!preview && !session.schoolLogin && <a className="workspace-switch" href="/?workspace=leadership">Leadership workspace</a>}
+      {!preview && !session.schoolLogin && <a className="workspace-switch" href="/events">Leadership workspace</a>}
       <p>
         {name && <strong className="account-name">{name}</strong>}
         {role}

@@ -55,7 +55,7 @@ try {
         await nav.getByRole("link", {name:"My profile"}).click();
         assert.equal(await nav.locator('[aria-current="page"]').innerText(), "My profile");
         await page.getByLabel("First name", {exact:true}).waitFor();
-        assert.equal(new URL(page.url()).searchParams.get("page"),"profile");
+        assert.equal(new URL(page.url()).pathname,"/me/profile");
         await page.goBack();
         await heading("My requests").waitFor();
         await page.goForward();

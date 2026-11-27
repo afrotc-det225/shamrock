@@ -373,4 +373,4 @@ Semester planning groups active cadets by current AS year. For Fall to Spring, A
 
 The panel keeps the last loaded page visible while opening another page within the same session. The previous page is temporarily read-only during the switch. Visiting the sign-in link with a valid SHAMROCK session returns to the workspace. Expired or revoked sessions follow the Google sign-in flow.
 
-Workspace navigation uses bookmarkable links, such as `/?workspace=leadership&page=attendance` and `/?workspace=cadet&page=profile`. Refresh, opening a link in another tab, and browser Back and Forward preserve the requested page. Links carry only the workspace and page name. Existing sign-in and role checks still determine what the viewer can open.
+Workspace navigation uses bookmarkable links, such as `/attendance` and `/me/profile`. Refresh, opening a link in another tab, and browser Back and Forward preserve the requested page. Leadership pages use top-level paths. Personal pages use /me/. Existing query-string bookmarks resolve to the corresponding path. Existing sign-in and role checks still determine what the viewer can open.

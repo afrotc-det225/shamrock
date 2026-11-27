@@ -1,3 +1,4 @@
+import {isWorkspacePath} from "../src/page-url.js";
 import {isUnifiedSite} from "./site.mjs";
 import { available, answer, model } from "./openai-assistant.mjs";
 import { authRoute, session, csrfCheck, sha } from "./auth.mjs";
@@ -60,12 +61,13 @@ export default {
           404,
         );
       if (!url.pathname.startsWith("/api/")) {
-        const asset = await env.ASSETS.fetch(request);
+        const workspacePage = isWorkspacePath(url.pathname);
+        const asset = await env.ASSETS.fetch(workspacePage ? new Request(new URL("/",url),request) : request);
         // Asset uploads may retain a stale binary MIME type for the HTML entry.
         // Keep nosniff and fix only the known successful document routes.
         if (
           asset.status === 200 &&
-          ["/", "/index.html"].includes(url.pathname)
+          (workspacePage || ["/", "/index.html"].includes(url.pathname))
         ) {
           const headers = new Headers(asset.headers);
           headers.set("content-type", "text/html; charset=utf-8");

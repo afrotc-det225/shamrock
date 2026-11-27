@@ -28,7 +28,7 @@ import "@fontsource/libre-franklin/latin-600.css";
 import "@fontsource/libre-franklin/latin-700.css";
 import "@fontsource/barlow-condensed/latin-600.css";
 import Brand from "./Brand";
-import {pageFromUrl, writePageUrl, rememberSignInPage, restoreSignInPage} from "./page-url";
+import {workspaceFromUrl, pageFromUrl, writePageUrl, rememberSignInPage, restoreSignInPage} from "./page-url";
 import WorkspaceShell, {PageLink} from "./WorkspaceShell";
 import { ViewAsSelector, ViewAsBanner, viewAsStatus } from "./ViewAs";
 import "./style.css";
@@ -109,8 +109,8 @@ function App() {
     if (!force && pendingRead.current) return pendingRead.current;
     const intent = ++readIntent.current;
     const currentSession = await initialize();
-    if (new URLSearchParams(location.search).get("workspace")==="cadet" ||
-        !currentSession.viewAs && (currentSession.schoolLogin || currentSession.cadetWorkspace && new URLSearchParams(location.search).get("workspace")!=="leadership")) return;
+    if (workspaceFromUrl()==="cadet" ||
+        !currentSession.viewAs && (currentSession.schoolLogin || currentSession.cadetWorkspace && workspaceFromUrl()!=="leadership")) return;
     if (intent !== readIntent.current)
       throw Object.assign(new Error("A newer view is loading."), {code:"SUPERSEDED"});
     if (pendingRead.current) {
@@ -147,7 +147,7 @@ function App() {
       setSync("");
       return value;
     }).catch(error => {
-      if(error.code==="CADET_WORKSPACE"){location.replace("/?workspace=cadet");return;}
+      if(error.code==="CADET_WORKSPACE"){location.replace("/me");return;}
       controller.abort();
       if (controller.superseded) throw Object.assign(new Error("A newer view is loading."), {code:"SUPERSEDED"});
       if (error.name === "AbortError") throw new Error("Loading stopped.");
@@ -293,7 +293,7 @@ function App() {
   };
   useEffect(() => {
     const restore = () => {
-      if (sessionInfo && (new URLSearchParams(location.search).get("workspace") === "cadet" ||
+      if (sessionInfo && (workspaceFromUrl() === "cadet" ||
           (!preview && sessionInfo.schoolLogin))) return;
       navigate(pageFromUrl("leadership") || "Events", true);
     };
@@ -317,7 +317,7 @@ function App() {
       if (current?.viewAs) { setPreview(current.viewAs); setData(null); }
       throw error;
     }
-    if(result.directoryWorkspace){location.assign("/?workspace=cadet");return;}
+    if(result.directoryWorkspace){location.assign("/me");return;}
     setPreview(result.viewAs); if (!person) setPreviewName("");
     setProposal(null); setData(null); setNotice("");
     await reload(true);
@@ -369,8 +369,8 @@ function App() {
   }
 
   let outageScreen = null;
-  if(sessionInfo && (new URLSearchParams(location.search).get("workspace")==="cadet" ||
-    !preview && (sessionInfo.schoolLogin || sessionInfo.cadetWorkspace && new URLSearchParams(location.search).get("workspace")!=="leadership")))
+  if(sessionInfo && (workspaceFromUrl()==="cadet" ||
+    !preview && (sessionInfo.schoolLogin || sessionInfo.cadetWorkspace && workspaceFromUrl()!=="leadership")))
     return <CadetWorkspace session={sessionInfo}/>;
   if (sessionInfo && readOutage) {
     const retryTime = new Intl.DateTimeFormat(undefined, {
@@ -403,7 +403,7 @@ function App() {
     <EditorSuspended.Provider value={!!outageScreen}>
     <EditorError.Provider value={error}>
       <WorkspaceShell pages={visiblePages} page={destination?.page ?? page} navigate={navigate} account={<>
-            {sessionInfo?.cadetWorkspace && !preview && <a href="/?workspace=cadet">My cadet workspace</a>}
+            {sessionInfo?.cadetWorkspace && !preview && <a href="/me">My cadet workspace</a>}
             {!preview && !scoped && data?.meta.viewAsEnabled &&
               <ViewAsSelector people={data.snapshot?.people ?? (["cadets","leadership","cadet-details","semester"].includes(data.browse?.profile) ? data.list.people : null)} onSelect={viewAs} busy={busy} />}
             {!preview && !scoped && (

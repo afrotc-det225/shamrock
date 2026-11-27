@@ -311,7 +311,7 @@ try {
   testOverview = true;
   await page.reload();
   await page.getByRole("heading",{name:"AS year progression"}).waitFor();
-  assert.equal(new URL(page.url()).searchParams.get("page"), "semester");
+  assert.equal(new URL(page.url()).pathname, "/semester");
   await navigate("Events");
   await page.goBack();
   await page.getByRole("heading",{name:"AS year progression"}).waitFor();
