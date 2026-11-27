@@ -135,3 +135,24 @@ test("a Decisions refusal never dispatches a coding call; key scope denial uses 
   });
   assert.deepEqual(endpoints,["decisions","responses","responses"]);
 });
+
+test("discussing improvements and selecting an idea are inexpensive text-only turns", async()=>{
+  const history=[];
+  for(const question of ["What graphs should we add to Overview?", "The second one"]){
+    history.push({role:"user",content:question});
+    const reply=await answer(env,{messages:history},"Guide",async(_,options)=>{
+      const q=JSON.parse(options.body);
+      if(q.questions){
+        assert.ok(q.questions[0].choices.some(c=>c.value==="suggest"));
+        return decision(q,"suggest","No matching source area.");
+      }
+      assert.equal(q.model,model);
+      assert.ok(q.max_output_tokens<=360);
+      assert.deepEqual(JSON.parse(q.input),history);
+      assert.match(q.instructions,/ask whether to implement/);
+      return respond("Would you like to prepare this change?");
+    });
+    assert.equal(reply.proposal,undefined);
+    history.push({role:"assistant",content:reply.content});
+  }
+});

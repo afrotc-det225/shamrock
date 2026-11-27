@@ -8,10 +8,15 @@ export function rosterQuestion(messages) {
   if(!Array.isArray(messages) || messages.at(-1)?.role!=="user")return null;
   const text=String(messages.at(-1).content).trim();
   const previous=messages.slice(0,-1).filter(m=>m.role==="user").at(-1);
-  const birthday=/\bbirthdays?\b/i;
-  if(/^(?:fix|change|implement|build|redesign|remove|edit|add|why|how (?:does|do))\b/i.test(text))return null;
-  if(birthday.test(text) || (/^(?:what about |how about |and |in )?[a-z]+[?.! ]*$/i.test(text) && birthday.test(previous?.content || ""))){
-    const matches=monthIn(text);
+  // Only shortcut direct calendar lookups. Product ideas can mention birthdays too.
+  const directBirthdayLookup=value=>{
+    const normalized=normalize(value).replace(/[?.!]+$/,"");
+    const stripped=normalized.split(/\s+/).filter(word=>!months.some(month=>
+      word===normalize(month) || word===normalize(month.slice(0,3)))).join(" ");
+    return /^(?:(?:list|show)(?: me)? (?:the )?)?birthdays?(?: in)?$|^whose birthdays?(?: are)?(?: in)?$|^who has (?:a )?birthdays?(?: in)?$/.test(stripped);
+  };
+  const matches=monthIn(text);
+  if(directBirthdayLookup(text) || (matches.length===1 && /^(?:what about |how about |and |in )?[a-z]+[?.! ]*$/i.test(text) && directBirthdayLookup(previous?.content || ""))){
     if(matches.length!==1)return {content:"Which month should I check for birthdays?"};
     return {content:matches[0]+" birthdays",rosterLookup:{kind:"birthday",value:matches[0]}};
   }

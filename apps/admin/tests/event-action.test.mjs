@@ -50,6 +50,7 @@ test("owner lookup names active Wing accounts and excludes flight grants and ina
 import {rosterQuestion,rosterRows} from "../hosted/roster-questions.mjs";
 test("month lookup reads recorded days and names, orders by day, and handles follow-ups",()=>{
   const q=content=>({role:"user",content});
+  assert.equal(rosterQuestion([q("What could we improve about birthdays?")]), null);
   const {rosterLookup}=rosterQuestion([q("Whose birthdays are in may?")]);
   assert.deepEqual(rosterLookup,{kind:"birthday",value:"May"});
   assert.equal(rosterQuestion([q("May birthdays?"),q("What about June?")]).rosterLookup.value,"June");
