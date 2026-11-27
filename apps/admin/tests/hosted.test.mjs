@@ -930,6 +930,29 @@ test("Wing charts share a revision across Wing readers and close on revocation o
   assert.equal((await updated.json()).revision.operations,first.revision.operations+1);
 });
 
+test('a Google-linked Wing administrator keeps the entry actor on delegated cadet reads and writes',async t=>{
+  const f=await fixture(t), token=random(), key=await sha(token), email='cadet@example.invalid';
+  const google='google.'+await sha(email),school='school.'+await sha(email);
+  const {siteOrigin}=await import('../hosted/site.mjs');
+  const {sealSchoolEmail}=await import('../hosted/school-account.mjs');
+  let granted=true, checks=0;
+  const env={PANEL_DB:f.db,APP_ORIGIN:siteOrigin,BACKEND_ORIGIN:siteOrigin,BACKEND_SERVICE_NAME:'shamrock',
+    STAGING_DATASET:'real',ENVIRONMENT:'staging',GOOGLE_CLIENT_SECRET:'test-secret',
+    DB:{prepare:()=>({bind:(principal,addr,bound)=>({first:async()=>{
+      checks++;assert.deepEqual([principal,addr,bound],[school,email,google]);return granted?{allowed:1}:null;
+    }})})}};
+  await f.run('INSERT INTO identity_bindings VALUES(?,?,1)','verified-user',google);
+  await f.run('INSERT INTO sessions VALUES(?,?,?,?)',key,'verified-user',random(),Date.now()+60000);
+  const cookie='__Host-shamrock-v2='+token+'; __Host-shamrock-school='+await sealSchoolEmail(email,env,key);
+  const actor=async(path,method='GET')=>(await session(new Request(siteOrigin+path,{method,headers:{cookie}}),env)).principal_id;
+  assert.equal(await actor('/api/cadet'),google);assert.equal(checks,0);
+  assert.equal(await actor('/api/view-as','POST'),school);
+  await f.run("INSERT INTO session_previews VALUES(?,?,?,'ready')",key,'selected-cadet','entry');
+  assert.equal(await actor('/api/cadet?section=profile'),school);
+  assert.equal(await actor('/api/cadet','POST'),school);
+  granted=false;assert.equal(await actor('/api/cadet'),google);
+});
+
 test('campus sign-in binds a verified school subject once, outside operational D1',async t=>{
   const f=await fixture(t),login=await invitationLogin(f);
   const addr='fictional-cadet@nd.edu',sub='fictional-managed-subject';

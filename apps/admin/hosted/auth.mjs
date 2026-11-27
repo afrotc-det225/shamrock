@@ -118,7 +118,8 @@ export async function session(request, env) {
     throw new PanelError("SIGN_IN_REQUIRED","Sign in again with your school account.",401);
   if(row.schoolEmail && isUnifiedSite(env) && /^(school|google)\./.test(row.principal_id)){
     const path=new URL(request.url).pathname;
-    if(!["/api/cadet","/auth/logout"].includes(path)){
+    // A delegated cadet request must use the same verified administrator as its entry audit.
+    if(path!=="/auth/logout" && (path!=="/api/cadet" || row.preview_entry_audit_id)){
       const suffix=await sha(row.schoolEmail);
       const school="school."+suffix;
       const google=row.principal_id==="google."+suffix ? row.principal_id : null;
