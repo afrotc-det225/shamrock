@@ -29,8 +29,8 @@ try{
     "tar xf - && git init -q && git add . && git -c user.name=Fixture -c user.email=fixture@invalid commit -qm baseline && npm ci --no-audit && npm --prefix apps/admin ci --no-audit"]);
   const test="npm run check && npm --prefix apps/admin run build:domain && npm --prefix apps/admin test && npm --prefix apps/admin run build";
   docker(...run,"--network=none",image,"sh","-ec",test);
-  pipe(source.replace(before,()=>after),["--network=none",image,"sh","-ec",
-    'cat > "$1" && '+test,"codex-test",path]);
+  pipe(JSON.stringify(proposal),["--network=none",image,"sh","-ec",
+    "node scripts/apply-reviewed-proposal.mjs && "+test]);
   console.log("Released code and proposal passed repository checks.");
 }finally{
   docker("volume","rm","-f",volume);

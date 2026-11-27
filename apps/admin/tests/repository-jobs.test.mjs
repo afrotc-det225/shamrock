@@ -36,3 +36,12 @@ test("publication requires owner approval of the exact passing patch",async()=>{
   assert.deepEqual(await send("finish",{run:"1/1",passed:true}),{state:"publishing"});
   assert.deepEqual(await send("finish",{run:"2/1",passed:true}),{state:"published"});
 });
+
+test("multi-file changes require unique release matches in every selected file",async()=>{
+  const {areas,validateEdits}=await import("../hosted/maintenance.mjs");
+  const edits=["Flight home","Cadet profile fields"].map(area=>({area,path:areas[area],before:"return 1",after:"return 2"}));
+  const files=Object.fromEntries(edits.map(e=>[e.area,"function fixture(){return 1}"]));
+  assert.deepEqual(validateEdits(edits,files),edits);
+  assert.throws(()=>validateEdits([edits[0],edits[0]],files));
+  assert.throws(()=>validateEdits(edits,{...files,[edits[1].area]:"other"}));
+});

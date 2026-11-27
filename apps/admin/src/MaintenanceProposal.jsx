@@ -49,8 +49,8 @@ export function MaintenanceProposal({proposal:p,autoTest=false}) {
     setTimeout(()=>URL.revokeObjectURL(url),1000);
   };
   return <section><strong>{p.path} · {p.commit.slice(0,12)}</strong>
-    <details><summary>Review proposed edit</summary>{p.routing && <p>Routed by {p.routing} · GPT-5.3-Codex</p>}<p>Current</p><pre>{p.before}</pre><p>Proposed</p><pre>{p.after || "(remove)"}</pre></details>
-    <button onClick={download}>Download proposed file</button>
+    <details><summary>Review proposed edit</summary>{p.routing && <p>Routed by {p.routing} · GPT-5.3-Codex</p>}{(p.edits ?? [p]).map(edit=><div key={edit.path}><strong>{edit.path}</strong><p>Current</p><pre>{edit.before}</pre><p>Proposed</p><pre>{edit.after || "(remove)"}</pre></div>)}</details>
+    {(!p.edits || p.edits.length===1) && <button onClick={download}>Download proposed file</button>}
     {p.jobId && <p role="status">Repository tests · {testState}</p>}
     {testState==="passed" && <button onClick={publish}>Publish tested change to a public review branch</button>}
     {testState==="published" && <a href={"https://github.com/afrotc-det225/shamrock-staging-runner/tree/proposals/"+p.jobId} target="_blank" rel="noreferrer">Open tested branch</a>}

@@ -289,8 +289,8 @@ export default {
         const id=checkChatId(body?.chatId ?? crypto.randomUUID());
         const reply=await answer(env,body,env.operatorGuide,fetch,()=>wingCharts(backend));
         if(isUnifiedSite(env) && reply.proposal){
-          const {area,path,commit,before,after}=reply.proposal;
-          reply.proposal.jobId=await env.PANEL_DB.repositoryJob({operation:"create",id:crypto.randomUUID(),patch:{area,path,commit,before,after}});
+          const {area,path,commit,before,after,edits}=reply.proposal;
+          reply.proposal.jobId=await env.PANEL_DB.repositoryJob({operation:"create",id:crypto.randomUUID(),patch:{area,path,commit,before,after,edits}});
           if(reply.proposal.jobId)await wakeRunner(env);
         }
         let saved=false;
