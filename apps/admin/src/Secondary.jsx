@@ -111,17 +111,27 @@ class ReplyBoundary extends React.Component {
   static getDerivedStateFromError(){return {failed:true};}
   render(){return this.state.failed ? this.props.fallback : this.props.children;}
 }
-function AdministratorList(){
+function AdministratorList({lookup}){
+  const endpoint=lookup ? "/chat/roster?"+new URLSearchParams(lookup) : "/chat/administrators";
   const [rows,setRows]=useState(null),[error,setError]=useState(""),[attempt,retry]=useState(0);
   useEffect(()=>{
     const controller=new AbortController();
-    api("/chat/administrators",undefined,{signal:controller.signal}).then(r=>setRows(r.administrators)).catch(e=>{if(!controller.signal.aborted)setError(e.message);});
+    api(endpoint,undefined,{signal:controller.signal}).then(r=>setRows(r)).catch(e=>{if(!controller.signal.aborted)setError(e.message);});
     return ()=>controller.abort();
-  },[attempt]);
+  },[attempt,endpoint]);
   if(error)return <p role="alert">{error} <button onClick={()=>{setError("");retry(i=>i+1);}}>Retry</button></p>;
-  if(!rows)return <p role="status">Checking current access…</p>;
-  if(!rows.length)return <p>No active accounts have Wing administrator access.</p>;
-  return <ul>{rows.map((r,i)=><li key={i}>{r.name}{r.managesAccess ? " · Manages permissions" : ""}</li>)}</ul>;
+  if(!rows)return <p role="status">Checking current records…</p>;
+  if(lookup)return rows.rows.length ? <ul>{rows.rows.map((row,i)=><li key={i}>{row}</li>)}</ul> : <p>No matching cadets were found.</p>;
+  const workbook=rows.workbook;
+  const checked=workbook && new Date(workbook.checkedAt);
+  const recent=checked && Date.now()-checked.getTime()<86400000;
+  return <div>
+    <strong>Operational workbook</strong>
+    {checked ? <><p>{recent ? "Drive access checked" : "Last known access, checked"} {checked.toLocaleString()}.</p>
+      <ul>{workbook.admins.map(a=><li key={a.account}>{a.label}{a.account!==a.label ? " ("+a.account+")" : ""} · {a.role}</li>)}</ul></> :
+      <p>The workbook access list has not been verified.</p>}
+    <strong>Staging panel</strong>
+  <ul>{rows.administrators.map((r,i)=><li key={i}>{r.name} · {r.managesAccess ? "Manages permissions" : "Wing panel access"}</li>)}</ul></div>;
 }
 function PlainReply({text}){
   return <div className="assistant-answer plain-reply">{text}</div>;
@@ -234,7 +244,7 @@ function AssistantWorkspace({ meta }) {
           messages:next.slice(-15).map(({role,content})=>({role,content})),
         }),
       ]);
-      const transcript=[...next,{role:"assistant",content:reply.content,proposal:reply.proposal,eventAction:reply.eventAction,adminDirectory:reply.adminDirectory,autoTest:true}];
+      const transcript=[...next,{role:"assistant",content:reply.content,proposal:reply.proposal,eventAction:reply.eventAction,adminDirectory:reply.adminDirectory,rosterLookup:reply.rosterLookup,autoTest:true}];
       setReply(()=>renderer);setMessages(transcript);setActive(chat);
       threads.current.set(chat.id,transcript);
       setChats(rows=>[{...chat,at:Date.now()},...rows.filter(row=>row.id!==chat.id)]);
@@ -276,7 +286,7 @@ function AssistantWorkspace({ meta }) {
         {m.role==="user" ? <p>{m.content}</p> : <ReplyBoundary fallback={<PlainReply text={m.content}/>}>
           <Reply text={m.content}/>
         </ReplyBoundary>}
-        {m.adminDirectory && <AdministratorList/>}
+        {(m.rosterLookup || m.adminDirectory) && <AdministratorList lookup={m.rosterLookup}/>}
         {m.eventAction && <EventApproval action={m.eventAction}/>}
         {m.proposal && <ReplyBoundary fallback={<p role="status">The saved proposal could not be displayed.</p>}><MaintenanceProposal proposal={m.proposal} autoTest={m.autoTest}/></ReplyBoundary>}
       </article>)}

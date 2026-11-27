@@ -13,6 +13,7 @@ import { json, boundedJson, secure } from "./http.mjs";
 import { TRANSITION_POLICY } from "../../../packages/domain/src/transitions.ts";
 import { previewFromSession, previewResponse, changePreview } from "./view-as.mjs";
 import { browseState, browseProfiles } from "./browse.mjs";
+import {rosterQuestion,rosterRows} from "./roster-questions.mjs";
 import {asksForAdministrators,currentAdministrators} from "./admin-directory.mjs";
 import {reportTotals} from "./operational-reports.mjs";
 import {eventCancellationReply} from "./event-action.mjs";
@@ -293,12 +294,23 @@ export default {
       const chatHistory=request.method==="GET" && url.pathname==="/api/chat/history";
       const testJob=["GET","POST"].includes(request.method) && url.pathname==="/api/chat/repository-test";
       const adminDirectory=request.method==="GET" && url.pathname==="/api/chat/administrators";
-      if (adminDirectory || testJob || chatHistory || (request.method==="POST" && url.pathname==="/api/chat")) {
+      const rosterLookup=request.method==="GET" && url.pathname==="/api/chat/roster";
+      if (rosterLookup || adminDirectory || testJob || chatHistory || (request.method==="POST" && url.pathname==="/api/chat")) {
         if (!available(env,user,preview) || !(await backend.panelAuthority()).access.capabilities.fullSnapshot)
           throw new PanelError("FORBIDDEN","Assistant access is restricted.",403);
+        if(rosterLookup){
+          const kind=url.searchParams.get("kind"),value=url.searchParams.get("value");
+          if(!["birthday","flight"].includes(kind))throw new PanelError("INVALID_REQUEST","Unknown roster question.");
+          const view=await browseState(backend,await backend.panelAuthority(),kind==="birthday"?"overview":"cadets");
+          const rows=rosterRows(kind,value,view.tables);
+          if(!rows)throw new PanelError("INVALID_REQUEST","Unknown roster filter.");
+          return secure(json({rows}));
+        }
         if(adminDirectory){
           if(!isUnifiedSite(env))throw new PanelError("UNAVAILABLE","Administrator records are unavailable here.",503);
-          return secure(json(await currentAdministrators(env.DB)));
+          const panel=await currentAdministrators(env.DB);
+          const workbook=await env.HISTORY_FILES.get("assistant/admin-directory/v1","json");
+          return secure(json({...panel,workbook}));
         }
         if(testJob){
           const approve=request.method==="POST";
@@ -316,7 +328,7 @@ export default {
           return secure(json(history));
         }
         const id=checkChatId(body?.chatId ?? crypto.randomUUID());
-        const reply=asksForAdministrators(body?.messages?.at(-1)) ? {content:"Current Wing panel administrators",adminDirectory:true} : await eventCancellationReply(body?.messages?.at(-1),backend,service) ?? await answer(env,body,env.operatorGuide,fetch,()=>wingCharts(backend),async profile=>{
+        const reply=asksForAdministrators(body?.messages?.at(-1)) ? {content:"SHAMROCK administrators",adminDirectory:true} : rosterQuestion(body?.messages) ?? await eventCancellationReply(body?.messages?.at(-1),backend,service) ?? await answer(env,body,env.operatorGuide,fetch,()=>wingCharts(backend),async profile=>{
           const view=await browseState(backend,await backend.panelAuthority(),profile);
           return reportTotals(profile,view.tables);
         });

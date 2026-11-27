@@ -46,3 +46,12 @@ test("owner lookup names active Wing accounts and excludes flight grants and ina
   const result=await currentAdministrators({prepare:sql=>({all:()=>({results:db.prepare(sql).all()})})});
   assert.deepEqual(result.administrators.map(r=>r.name),["wing"]);db.close();
 });
+
+import {rosterQuestion,rosterRows} from "../hosted/roster-questions.mjs";
+test("month lookup reads recorded days and names, orders by day, and handles follow-ups",()=>{
+  const q=content=>({role:"user",content});
+  const {rosterLookup}=rosterQuestion([q("Whose birthdays are in may?")]);
+  assert.deepEqual(rosterLookup,{kind:"birthday",value:"May"});
+  assert.equal(rosterQuestion([q("May birthdays?"),q("What about June?")]).rosterLookup.value,"June");
+  assert.deepEqual(rosterRows("birthday","May",{birthdays:'[["One","Example","05-21","f"],["Two","Example","05-02","f"],["Three","Example","06-01","f"]]'}),["May 2 · Two Example","May 21 · One Example"]);
+});

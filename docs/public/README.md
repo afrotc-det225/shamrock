@@ -377,3 +377,7 @@ In the staging Assistant, the owner can request “Cancel” followed by an exac
 The owner can also ask the Assistant for active cadets by campus, active leadership contact coverage, the number of pending excusals for active events, and current-semester event counts by type and status. Attendance reports can include flight and historical semester comparisons. Operational reports send counts to the model and keep contact details and excusal explanations inside SHAMROCK.
 
 Ask “Who are the current SHAMROCK administrators?” to list active Wing panel accounts from access grants. The list identifies which accounts can manage permissions and refreshes when the conversation is reopened. Names are displayed directly inside the owner’s panel and are excluded from model context and saved chat text.
+
+The same answer separately lists operational backend workbook owners and editors from the latest verified Google Drive permission list. The displayed timestamp distinguishes this list from live staging access. To refresh it, run `scripts/read-workbook-administrators.mjs` with the backend file ID and a Google Drive read token in its documented environment variables, then pipe the JSON to the real-data staging HISTORY_FILES key `assistant/admin-directory/v1`. The source workbook is read-only during this check.
+
+For named roster questions, ask “Whose birthdays are in May?” or “Who is in Alpha Flight?” Birthday answers use the active directory’s month and day, ordered by day. These lists load directly for the signed-in owner and reopen against the current records.
