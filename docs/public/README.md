@@ -375,3 +375,5 @@ The Cadets table initially shows the combined Cadet column and all Directory det
 In the staging Assistant, the owner can request “Cancel” followed by an exact current-semester event name. Review the event and semester, then select **Approve cancellation**. The Assistant uses the Events page’s reviewed change and checks the saved status. A missing or ambiguous event does not produce an approval.
 
 The owner can also ask the Assistant for active cadets by campus, active leadership contact coverage, the number of pending excusals for active events, and current-semester event counts by type and status. Attendance reports can include flight and historical semester comparisons. Operational reports send counts to the model and keep contact details and excusal explanations inside SHAMROCK.
+
+Ask “Who are the current SHAMROCK administrators?” to list active Wing panel accounts from access grants. The list identifies which accounts can manage permissions and refreshes when the conversation is reopened. Names are displayed directly inside the owner’s panel and are excluded from model context and saved chat text.

@@ -111,6 +111,18 @@ class ReplyBoundary extends React.Component {
   static getDerivedStateFromError(){return {failed:true};}
   render(){return this.state.failed ? this.props.fallback : this.props.children;}
 }
+function AdministratorList(){
+  const [rows,setRows]=useState(null),[error,setError]=useState(""),[attempt,retry]=useState(0);
+  useEffect(()=>{
+    const controller=new AbortController();
+    api("/chat/administrators",undefined,{signal:controller.signal}).then(r=>setRows(r.administrators)).catch(e=>{if(!controller.signal.aborted)setError(e.message);});
+    return ()=>controller.abort();
+  },[attempt]);
+  if(error)return <p role="alert">{error} <button onClick={()=>{setError("");retry(i=>i+1);}}>Retry</button></p>;
+  if(!rows)return <p role="status">Checking current access…</p>;
+  if(!rows.length)return <p>No active accounts have Wing administrator access.</p>;
+  return <ul>{rows.map((r,i)=><li key={i}>{r.name}{r.managesAccess ? " · Manages permissions" : ""}</li>)}</ul>;
+}
 function PlainReply({text}){
   return <div className="assistant-answer plain-reply">{text}</div>;
 }
@@ -222,7 +234,7 @@ function AssistantWorkspace({ meta }) {
           messages:next.slice(-15).map(({role,content})=>({role,content})),
         }),
       ]);
-      const transcript=[...next,{role:"assistant",content:reply.content,proposal:reply.proposal,eventAction:reply.eventAction,autoTest:true}];
+      const transcript=[...next,{role:"assistant",content:reply.content,proposal:reply.proposal,eventAction:reply.eventAction,adminDirectory:reply.adminDirectory,autoTest:true}];
       setReply(()=>renderer);setMessages(transcript);setActive(chat);
       threads.current.set(chat.id,transcript);
       setChats(rows=>[{...chat,at:Date.now()},...rows.filter(row=>row.id!==chat.id)]);
@@ -264,6 +276,7 @@ function AssistantWorkspace({ meta }) {
         {m.role==="user" ? <p>{m.content}</p> : <ReplyBoundary fallback={<PlainReply text={m.content}/>}>
           <Reply text={m.content}/>
         </ReplyBoundary>}
+        {m.adminDirectory && <AdministratorList/>}
         {m.eventAction && <EventApproval action={m.eventAction}/>}
         {m.proposal && <ReplyBoundary fallback={<p role="status">The saved proposal could not be displayed.</p>}><MaintenanceProposal proposal={m.proposal} autoTest={m.autoTest}/></ReplyBoundary>}
       </article>)}

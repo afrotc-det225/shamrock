@@ -13,6 +13,7 @@ import { json, boundedJson, secure } from "./http.mjs";
 import { TRANSITION_POLICY } from "../../../packages/domain/src/transitions.ts";
 import { previewFromSession, previewResponse, changePreview } from "./view-as.mjs";
 import { browseState, browseProfiles } from "./browse.mjs";
+import {asksForAdministrators,currentAdministrators} from "./admin-directory.mjs";
 import {reportTotals} from "./operational-reports.mjs";
 import {eventCancellationReply} from "./event-action.mjs";
 import { eventsState } from "./events-list.mjs";
@@ -291,9 +292,14 @@ export default {
       }
       const chatHistory=request.method==="GET" && url.pathname==="/api/chat/history";
       const testJob=["GET","POST"].includes(request.method) && url.pathname==="/api/chat/repository-test";
-      if (testJob || chatHistory || (request.method==="POST" && url.pathname==="/api/chat")) {
+      const adminDirectory=request.method==="GET" && url.pathname==="/api/chat/administrators";
+      if (adminDirectory || testJob || chatHistory || (request.method==="POST" && url.pathname==="/api/chat")) {
         if (!available(env,user,preview) || !(await backend.panelAuthority()).access.capabilities.fullSnapshot)
           throw new PanelError("FORBIDDEN","Assistant access is restricted.",403);
+        if(adminDirectory){
+          if(!isUnifiedSite(env))throw new PanelError("UNAVAILABLE","Administrator records are unavailable here.",503);
+          return secure(json(await currentAdministrators(env.DB)));
+        }
         if(testJob){
           const approve=request.method==="POST";
           const id=checkChatId(approve?body?.id:url.searchParams.get("id"));
@@ -310,7 +316,7 @@ export default {
           return secure(json(history));
         }
         const id=checkChatId(body?.chatId ?? crypto.randomUUID());
-        const reply=await eventCancellationReply(body?.messages?.at(-1),backend,service) ?? await answer(env,body,env.operatorGuide,fetch,()=>wingCharts(backend),async profile=>{
+        const reply=asksForAdministrators(body?.messages?.at(-1)) ? {content:"Current Wing panel administrators",adminDirectory:true} : await eventCancellationReply(body?.messages?.at(-1),backend,service) ?? await answer(env,body,env.operatorGuide,fetch,()=>wingCharts(backend),async profile=>{
           const view=await browseState(backend,await backend.panelAuthority(),profile);
           return reportTotals(profile,view.tables);
         });

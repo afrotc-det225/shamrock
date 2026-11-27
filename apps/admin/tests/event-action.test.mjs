@@ -33,3 +33,16 @@ test("reports select relevant sources and omit names, phones and free text",()=>
   assert.deepEqual(reportTotals("cadets",{people:JSON.stringify([person])}),{activeCadetsByCampus:{"St. Mary's":1}});
   assert.deepEqual(reportTotals("event-list",{terms:'[["fall","Fall",1,1]]',events:'[["id","fall","llab",1,"PRIVATE","active"],["old","spring","llab",1,"PRIVATE","active"]]'}),{currentSemesterEventsByTypeAndStatus:{"llab / active":1}});
 });
+
+import {asksForAdministrators,currentAdministrators} from "../hosted/admin-directory.mjs";
+import {DatabaseSync} from "node:sqlite";
+import {readdirSync,readFileSync} from "node:fs";
+test("owner lookup names active Wing accounts and excludes flight grants and inactive accounts",async()=>{
+  assert.ok(asksForAdministrators({role:"user",content:"Who are the current shamrock administrators?"}));
+  const db=new DatabaseSync(":memory:");
+  const folder=new URL("../../../database/migrations/",import.meta.url);
+  for(const file of readdirSync(folder).filter(n=>n.endsWith(".sql")).sort())db.exec(readFileSync(new URL(file,folder),"utf8"));
+  db.exec("INSERT INTO principals(principal_id,active) VALUES ('wing',1),('flight',1),('retired',0); INSERT INTO admin_grants VALUES ('wing','frontend.read','wing','*'),('flight','frontend.read','flight','alpha'),('retired','frontend.read','wing','*')");
+  const result=await currentAdministrators({prepare:sql=>({all:()=>({results:db.prepare(sql).all()})})});
+  assert.deepEqual(result.administrators.map(r=>r.name),["wing"]);db.close();
+});
