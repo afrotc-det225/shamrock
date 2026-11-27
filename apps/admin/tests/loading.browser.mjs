@@ -188,8 +188,8 @@ try{
  const roster=page.locator('.cadet-roster tbody tr td:first-child button');
  const names=await roster.allTextContents();
  assert(names.length>0);
- await page.getByRole('button',{name:'More fields'}).click();
- await page.getByLabel('Show field').selectOption('phone');
+ await page.getByRole('button',{name:'Columns'}).click();
+ await page.getByRole("checkbox",{name:"Phone",exact:true}).check();
  await page.getByText('Loading directory fields…',{exact:true}).waitFor();
  assert.deepEqual(await roster.allTextContents(),names);
  assert(await page.getByRole('textbox',{name:/Filter by/}).isDisabled());

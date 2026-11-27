@@ -171,12 +171,12 @@ try {
   assert.deepEqual(afterSchedule.observations, beforeSchedule.observations);
   await navigate("Cadets");
   await page.getByLabel("Sort by", {exact:true}).selectOption("flight");
-  const fieldTool = page.getByRole("button", {name:"More fields", exact:true});
+  const fieldTool = page.getByRole("button", {name:"Columns", exact:true});
   const tableTop = () => page.locator("main table").first().evaluate(el=>el.getBoundingClientRect().top);
   const rosterTop = await tableTop();
   await fieldTool.focus();
   await page.keyboard.press("Enter");
-  await page.getByRole("region",{name:"More fields",exact:true}).waitFor();
+  await page.getByRole("region",{name:"Columns",exact:true}).waitFor();
   assert.equal(await tableTop(),rosterTop);
   const colors = (locator) => locator.evaluate(node => {
     const { backgroundColor, color } = getComputedStyle(node);
@@ -188,10 +188,25 @@ try {
   assert.deepEqual(await colors(cadetRow.getByText("AS400", {exact:true})), ["rgb(52, 78, 102)", "rgb(255, 255, 255)"]);
   assert.deepEqual(await colors(cadetRow.getByText("Alpha", {exact:true})), ["rgb(56, 107, 163)", "rgb(255, 255, 255)"]);
   assert.deepEqual(await colors(cadetRow.getByText("Active 3/4", {exact:true})), ["rgb(135, 201, 195)", "rgb(18, 58, 54)"]);
-  await page.getByLabel("Show field", {exact:true}).selectOption("cipCode");
+  await page.getByRole("checkbox",{name:"CIP code",exact:true}).check();
   assert.deepEqual(await colors(cadetRow.getByText("11.0701", {exact:true})), ["rgb(194, 223, 230)", "rgb(20, 62, 73)"]);
-  await page.getByLabel("Show field", {exact:true}).selectOption("afsc");
+  await page.getByRole("checkbox",{name:"AFSC",exact:true}).check();
   assert.deepEqual(await colors(cadetRow.getByText("14N - Intelligence", {exact:true})), ["rgb(40, 78, 134)", "rgb(255, 255, 255)"]);
+  await page.getByRole("checkbox",{name:"Flight",exact:true}).uncheck();
+  assert.equal(await page.getByRole("columnheader",{name:"Sort by Flight",exact:true}).count(),0);
+  assert(await cadetRow.getByText("11.0701",{exact:true}).isVisible());
+  await page.getByRole("button",{name:"Columns",exact:true}).click();
+  const afscSort=page.getByRole("button",{name:"Sort by AFSC",exact:true});
+  await afscSort.click();
+  const afscValues=()=>afscSort.evaluate(button=>{
+    const th=button.closest("th");
+    return [...th.closest("table").tBodies[0].rows].map(row=>row.cells[th.cellIndex].textContent).filter(v=>v!=="—");
+  });
+  const values=await afscValues();
+  assert.deepEqual(values,[...values].sort((a,b)=>a.localeCompare(b,"en",{numeric:true,sensitivity:"base"})));
+  await afscSort.click();
+  assert.deepEqual(await afscValues(),[...values].reverse());
+  await page.getByRole("button",{name:"Columns",exact:true}).click();
   await page.getByLabel("Filter by AFSC", {exact:true}).fill("no-such-field-value");
   assert.equal(await page.getByRole("button", {name:"Edit Alex Morgan", exact:true}).count(), 0);
   await page.getByLabel("Filter by AFSC", {exact:true}).fill("");

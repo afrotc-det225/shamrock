@@ -16,7 +16,20 @@ import { cellStyle, flightColors, flightPathColors, profileColorStyle, yearColor
 import { LeadershipChart, textOrder, alphabetic } from "./RosterViews";
 import { api,name, label, years, statuses, profileFields } from "./api";
 import { DIRECTORY_FIELDS } from "../../../packages/domain/src/admin";
-import { compareCadetsForDisplay, compareLeadershipForDisplay } from "../../../packages/domain/src/cadet-display-order";
+import { compareAsYearsForDisplay, compareCadetsForDisplay, compareLeadershipForDisplay } from "../../../packages/domain/src/cadet-display-order";
+
+const defaultColumns = ["asYear","flight","flightPathStatus"];
+const columnKeys = [...defaultColumns,"squadron",...profileFields.filter(k=>!defaultColumns.includes(k) && !["firstName","lastName"].includes(k))];
+const columnLabel = k=>({flight:"Flight",squadron:"Squadron",flightPathStatus:"Status",classYear:"Graduation year"}[k] || label(k));
+const detailFields = new Set(["phone","dorm","homeTown","homeState","dateOfBirth"]);
+const preferenceKey = "shamrock.cadets.columns.v1";
+function initialColumns(){
+  try {
+    const keys=JSON.parse(localStorage.getItem(preferenceKey));
+    if(Array.isArray(keys))return columnKeys.filter(k=>keys.includes(k));
+  } catch {}
+  return defaultColumns;
+}
 
 function DirectoryValue({ field, value, person }) {
   if (field === "photoLink") return value ? <DirectoryPhoto value={value} person={person} /> : "—";
@@ -98,9 +111,26 @@ export default function People({
     [field,setField]=useState(""), [match,setMatch]=useState(""), [view,setView]=useState("List");
   const flightOf = p => s.flights.find(f=>f.flightId===p.flightId);
   const squadronOf = f => s.squadrons?.find(q=>q.squadronId===f?.squadronId)?.label;
-  const visibleField = field && !leadership;
+  const [columns,setColumns]=useState(initialColumns), [descending,setDescending]=useState(false);
+  const valueOf=(p,k)=>k==="flight" ? flightOf(p)?.label : k==="squadron" ? squadronOf(flightOf(p)) : p[k];
+  function toggleColumn(key){
+    const shown=columns.includes(key);
+    const next=columnKeys.filter(k=>k===key ? !shown : columns.includes(k));
+    setColumns(next);
+    try{localStorage.setItem(preferenceKey,JSON.stringify(next));}catch{}
+    if(!shown || field===key)selectField(shown ? "" : key);
+  }
+  function headerSort(key){
+    setDescending(sort===key && !descending);
+    setSort(key);
+  }
+  function header(key,title){
+    return <button className="roster-sort" type="button" aria-label={"Sort by "+title} onClick={()=>headerSort(key)}>
+      {title}{sort===key && (descending ? " ↓" : " ↑")}
+    </button>;
+  }
   const [extended,setExtended]=useState(null),[fieldError,setFieldError]=useState(""),[retry,setRetry]=useState(0);
-  const extra = !snapshot && ["phone","dorm","homeTown","homeState","dateOfBirth"].includes(field);
+  const extra = !leadership && !snapshot && [...columns,sort,field].some(k=>detailFields.has(k));
   const binding=JSON.stringify([captureKey,manifest?.revision,viewAsRevision]);
   useEffect(()=>{
     if(!extra || extended?.binding===binding)return;
@@ -118,12 +148,16 @@ export default function People({
     if (!leadership && (flight && p.flightId!==flight || year && p.asYear!==year ||
       status==="current" && ["Dropped","Commissioned"].includes(p.flightPathStatus) ||
       !["current","all"].includes(status) && p.flightPathStatus!==status ||
-      field && match && !waitingForField && !String(p[field] ?? "").toLowerCase().includes(match.toLowerCase()))) return false;
+      field && match && !waitingForField && !String(valueOf(p,field) ?? "").toLowerCase().includes(match.toLowerCase()))) return false;
     return [name(p),p.email,p.role,p.rank].join(" ").toLowerCase().includes(query.toLowerCase());
   }).sort(leadership ? compareLeadershipForDisplay : (a,b)=>{
-    if (sort==="name") return alphabetic(a,b);
-    if (sort==="flight") return textOrder(flightOf(a)?.label,flightOf(b)?.label) || compareCadetsForDisplay(a,b);
-    return compareCadetsForDisplay(a,b);
+    if(sort==="seniority")return compareCadetsForDisplay(a,b);
+    const direction=descending ? -1 : 1;
+    if(sort==="name")return direction*alphabetic(a,b);
+    const left=valueOf(a,sort),right=valueOf(b,sort);
+    if(!left || !right)return Number(!left)-Number(!right) || alphabetic(a,b);
+    const order=sort==="asYear" ? compareAsYearsForDisplay(left,right) : textOrder(left,right);
+    return direction*order || (sort==="flight" ? compareCadetsForDisplay(a,b) : alphabetic(a,b));
   });
   const selectField = key => {setField(key);setMatch("");};
   const basic = leadership
@@ -169,13 +203,15 @@ export default function People({
         <Heading title={leadership ? "Leadership" : "Cadets"}>
           <div className="heading-tools">
             {!leadership && (
-              <ToolbarPopover label={field ? "More fields · "+label(field) : "More fields"} shortLabel="More fields" icon={Columns3} active={!!field}>
+              <ToolbarPopover label="Columns" icon={Columns3}>
                 <div className="field-options">
-                  <Select label="Show field" value={field} onChange={selectField} options={[
-                    {value:"",label:"Choose a field"},
-                    ...profileFields.filter(k=>!["firstName","lastName","asYear","flightPathStatus"].includes(k)).map(k=>({value:k,label:label(k)})),
+                  <div className="directory-columns">{columnKeys.map(key=><label key={key}>
+                    <input type="checkbox" checked={columns.includes(key)} onChange={()=>toggleColumn(key)}/>{columnLabel(key)}
+                  </label>)}</div>
+                  <Select label="Filter column" value={field} onChange={selectField} options={[
+                    {value:"",label:"Choose a column"}, ...columns.map(k=>({value:k,label:columnLabel(k)}))
                   ]}/>
-                  {field && <Field label={"Filter by "+label(field)} disabled={waitingForField} value={match} onChange={e=>setMatch(e.target.value)}/>}
+                  {field && <Field label={"Filter by "+columnLabel(field)} disabled={waitingForField} value={match} onChange={e=>setMatch(e.target.value)}/>}
                 </div>
               </ToolbarPopover>
             )}
@@ -196,7 +232,7 @@ export default function People({
             <Select label="Flight" value={flight} onChange={setFlight} options={[{value:"",label:"All flights"},...s.flights.map(f=>({value:f.flightId,label:f.label})).sort((a,b)=>textOrder(a.label,b.label))]}/>
             <Select label="AS year" value={year} onChange={setYear} options={[{value:"",label:"All AS years"},...years]}/>
             <Select label="Roster status" value={status} onChange={setStatus} options={[{value:"current",label:"Current roster"},{value:"all",label:"All statuses"},...statuses]}/>
-            <Select label="Sort by" value={sort} onChange={setSort} options={[{value:"seniority",label:"Default"},{value:"flight",label:"Flight, then AS year"},{value:"name",label:"Last name"}]}/>
+            <Select label="Sort by" value={sort} onChange={key=>{setSort(key);setDescending(false);}} options={[{value:"seniority",label:"Default"},{value:"name",label:"Last name"},...columnKeys.map(k=>({value:k,label:columnLabel(k)}))]}/>
           </>}
         </div>
 
@@ -209,7 +245,7 @@ export default function People({
         headers={
           leadership
             ? ["Name", "Role", "Email", "Office", ""]
-            : ["Name", "AS year", "Flight", "Status", ...(visibleField?[label(field)]:[]), ""]
+            : [header("name","Name"), ...columns.map(k=>header(k,columnLabel(k))), ""]
         }
       >
         {rows.map((p) => (
@@ -232,19 +268,13 @@ export default function People({
                 <td>{p.officeLocation || "—"}</td>
               </>
             ) : (
-              <>
-                <td className="formation" style={cellStyle(yearColors(p.asYear))}>{p.asYear || "—"}</td>
-                <td className="formation" style={cellStyle(flightColors(flightOf(p)?.label,squadronOf(flightOf(p))))}>
-                  {flightOf(p)?.label || "Unassigned"}
-                </td>
-                <td>
-                  <span className="status" style={cellStyle(flightPathColors(p.flightPathStatus))}>
-                    {p.flightPathStatus || "—"}
-                  </span>
-                </td>
-              </>
+              columns.map(key=>{
+                const value=valueOf(p,key);
+                if(key==="flight" || key==="asYear")return <td key={key} className="formation" style={cellStyle(key==="flight" ? flightColors(value,squadronOf(flightOf(p))) : yearColors(value))}>{value || (key==="flight" ? "Unassigned" : "—")}</td>;
+                if(key==="flightPathStatus")return <td key={key}><span className="status" style={cellStyle(flightPathColors(value))}>{value || "—"}</span></td>;
+                return <td key={key}><DirectoryValue field={key} value={value} person={p}/></td>;
+              })
             )}
-            {visibleField && <td>{waitingForField ? "—" : <DirectoryValue field={field} value={p[field]} person={p} />}</td>}
             <td>
               <button
                 className="icon"

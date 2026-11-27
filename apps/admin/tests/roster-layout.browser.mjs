@@ -62,8 +62,8 @@ try {
       await page.waitForFunction(() => document.querySelector('.directory-avatar img')?.naturalWidth > 0);
       const failedRow = page.getByRole("row").filter({has:page.getByRole("button",{name:"Sample Cadet 1",exact:true})});
       await failedRow.locator(".directory-avatar").getByText("SC").waitFor();
-      await page.getByRole("button",{name:"More fields",exact:true}).click();
-      await page.getByLabel("Show field").selectOption("photoLink");
+      await page.getByRole("button",{name:"Columns",exact:true}).click();
+      await page.getByRole("checkbox",{name:"Photo link",exact:true}).check();
       await page.keyboard.press("Escape");
       assert.equal(await failedRow.getByRole("link",{name:"Open photo"}).getAttribute("href"),people[1].photoLink);
       await page.route("https://drive.google.com/file/d/fixture1/preview?*",route => route.fulfill({contentType:"text/html",body:"Image preview"}));

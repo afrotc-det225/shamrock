@@ -347,3 +347,5 @@ In **View as**, a permission manager can act in a linked cadet workspace and sub
 On Attendance and My attendance, hover or focus a mark to highlight the cadet and event. Click to select one cell, Shift-click for a rectangle, and Command-click (Mac) or Ctrl-click to toggle individual cells. Shift with an arrow key extends the range. Escape clears it. Use the single-cell action or double-click to open an authorized correction or personal review. Multi-cell selection is local to the page.
 
 Selecting eligible attendance cells opens the correction panel. The panel follows the selection until it is closed. Shift selects a range and Command or Ctrl toggles individual cells. Cadets can send several events for Squadron review with one code and reason. Authorized leadership can review and apply corrections to several eligible cells together. Each correction retains its own receipt.
+
+On **Cadets**, use **Columns** to show or hide Directory fields. The browser remembers your column choices. Select a column heading to sort by it and select it again to reverse the order. **Sort by → Default** restores AS seniority followed by last and first name.
