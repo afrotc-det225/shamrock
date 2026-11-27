@@ -53,7 +53,7 @@ export function secure(response) {
   headers.set("Referrer-Policy", "no-referrer");
   headers.set(
     "Content-Security-Policy",
-    "default-src 'self'; script-src 'self'; style-src 'self'; font-src 'self'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
+    "default-src 'self'; script-src 'self'; style-src 'self'; font-src 'self'; img-src 'self' data: https://drive.google.com https://drive.usercontent.google.com https://lh3.googleusercontent.com https://work.fife.usercontent.google.com; connect-src 'self'; frame-src 'self' https://drive.google.com; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
   );
   return new Response(response.body, { status: response.status, headers });
 }

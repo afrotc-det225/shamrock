@@ -4,6 +4,8 @@ Cadets and staff use Google sign-in at [SHAMROCK](https://shamrock.det225.worker
 
 The Cadets roster uses slate for AS-year progression and matched blue and gold shades for flights. Flight path statuses use blue, teal, and green, with dark green for Commissioned. Under **More fields**, CIP codes and broad areas share the color of their academic family, and officer AFSCs use the color of their career group. The exact names and codes remain visible. Empty and undecided values are gray.
 
+On laptop screens the list heading and filters stay in place as the roster scrolls. The Cadets roster loads Google Drive photo thumbnails as rows come into view. A missing or inaccessible thumbnail shows the cadet’s initials. Under **More fields → Photo link**, in the cadet editor, and in **My profile**, open the source photo or use the Drive preview when the thumbnail is unavailable. Drive checks the viewer’s existing access.
+
 Attendance and History share the Overall and LLAB color scale from coral at 80% or below through amber to green at 100%. Blank and N/A marks are gray, Present is green, and Unexcused is white on deep red. Both matrices show Cadet, Overall, LLAB and event columns. Use the Flight and AS year filters or the Sort by menu to organize the rows. The code key opens from either page heading. Corrections are available on eligible current attendance cells. History displays the saved semester report.
 
 ## Try the panel

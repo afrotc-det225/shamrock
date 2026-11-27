@@ -3,6 +3,7 @@ import { api, logout } from "./api";
 import { Empty, Field, Heading, Select, Status, Table } from "./components";
 import Excusals from "./Excusals";
 import {pageFromUrl, writePageUrl} from "./page-url";
+import { DirectoryPhoto } from "./DirectoryPhoto";
 import WorkspaceShell from "./WorkspaceShell";
 import { ViewAsBanner } from "./ViewAs";
 import { ClipboardList, FileCheck2, Users, UserRound } from "lucide-react";
@@ -72,6 +73,7 @@ function Profile({ state, save, disabled }) {
   }
   return (
     <form onSubmit={submit} className="cadet-form form-section">
+      {!register && <DirectoryPhoto value={state.profile?.photoLink} person={state.profile} />}
       {register && <h2>{step === 0 ? "Directory information" : "Academic and career information"}</h2>}
       <fieldset disabled={disabled && !register}>
         <div className="cadet-fields">

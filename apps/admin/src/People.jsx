@@ -10,6 +10,7 @@ import {
   Empty,
 
 } from "./components";
+import { DirectoryPhoto } from "./DirectoryPhoto";
 import { ToolbarPopover } from "./ToolbarPopover";
 import { cellStyle, flightColors, flightPathColors, profileColorStyle, yearColors } from "./roster-colors";
 import { LeadershipChart, textOrder, alphabetic } from "./RosterViews";
@@ -17,7 +18,8 @@ import { api,name, label, years, statuses, profileFields } from "./api";
 import { DIRECTORY_FIELDS } from "../../../packages/domain/src/admin";
 import { compareCadetsForDisplay, compareLeadershipForDisplay } from "../../../packages/domain/src/cadet-display-order";
 
-function DirectoryValue({ field, value }) {
+function DirectoryValue({ field, value, person }) {
+  if (field === "photoLink") return value ? <DirectoryPhoto value={value} person={person} /> : "—";
   const style = profileColorStyle(field, value);
   const label = String(value || "—");
   return style ? <span className="profile-tag" style={style}>{label}</span> : label;
@@ -98,7 +100,7 @@ export default function People({
   const squadronOf = f => s.squadrons?.find(q=>q.squadronId===f?.squadronId)?.label;
   const visibleField = field && !leadership;
   const [extended,setExtended]=useState(null),[fieldError,setFieldError]=useState(""),[retry,setRetry]=useState(0);
-  const extra = !snapshot && ["phone","dorm","homeTown","homeState","dateOfBirth","photoLink"].includes(field);
+  const extra = !snapshot && ["phone","dorm","homeTown","homeState","dateOfBirth"].includes(field);
   const binding=JSON.stringify([captureKey,manifest?.revision,viewAsRevision]);
   useEffect(()=>{
     if(!extra || extended?.binding===binding)return;
@@ -200,6 +202,7 @@ export default function People({
       </section>
       {extra && extended?.binding!==binding && <p role="status">{fieldError || "Loading directory fields…"} {fieldError && <button onClick={()=>setRetry(retry+1)}>Retry</button>}</p>}
       {leadership && view==="Organization" ? <LeadershipChart records={rows} roster={s}/> : <Table
+        className={leadership ? "leadership-roster" : "cadet-roster"}
         headers={
           leadership
             ? ["Name", "Role", "Email", "Office", ""]
@@ -210,10 +213,7 @@ export default function People({
           <tr key={p.contactId || p.personId}>
             <td>
               <div className="person-cell">
-                <span className="initials" aria-hidden="true">
-                  {p.firstName?.[0]}
-                  {p.lastName?.[0]}
-                </span>
+                <DirectoryPhoto avatar value={p.photoLink} person={p} />
                 <span>
                   <button className="text-button" disabled={readOnly} onClick={() => open(p)}>
                     {name(p)}
@@ -241,7 +241,7 @@ export default function People({
                 </td>
               </>
             )}
-            {visibleField && <td><DirectoryValue field={field} value={p[field]} /></td>}
+            {visibleField && <td><DirectoryValue field={field} value={p[field]} person={p} /></td>}
             <td>
               <button
                 className="icon"
@@ -296,6 +296,7 @@ export default function People({
                   })),
                 ]}
               />
+              <DirectoryPhoto value={edit.profile.photoLink} person={edit.profile} />
               <details>
                 <summary>Academic, personal & photo details</summary>
                 {profileFields.filter((k) => !basic.includes(k)).map(input)}
