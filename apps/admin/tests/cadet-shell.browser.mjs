@@ -83,7 +83,13 @@ try {
         await page.goForward();
         await heading("My profile").waitFor();
         await nav.getByRole("link",{name:"My attendance",exact:true}).click();
+        const matrix=page.getByRole("table",{name:"Attendance",exact:true});
+        const before=await matrix.boundingBox();
         await page.getByRole("button",{name:/TW-1 LLAB.*A · Absent/}).click();
+        const after=await matrix.boundingBox();
+        assert.equal(after.y,before.y);
+        const selection=page.getByRole("group",{name:"Attendance selection"});
+        assert(await selection.evaluate(el=>el.previousElementSibling.classList.contains("matrix-scroll") && el.scrollWidth<=el.clientWidth));
         await page.getByRole("button",{name:/TW-2 LLAB.*A · Absent/}).click({modifiers:["Shift"]});
         await page.getByRole("button",{name:"Request correction"}).click();
         await page.getByLabel("Requested code").selectOption("P");

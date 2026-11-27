@@ -150,11 +150,6 @@ function SelectableMatrix({rows, events, canCorrect, onEdit, onEditMany, readOnl
   return <div onPointerOver={e=>highlight(e.target.closest("td.mark-cell"))}
     onPointerLeave={()=>highlight(null)} onFocus={e=>highlight(e.target.closest("td.mark-cell"))}
     onBlur={e=>{if(!e.currentTarget.contains(e.relatedTarget))highlight(null);}}>
-    {selection.size>0 && <div className="matrix-selection">
-      <span aria-live="polite">{selection.size} {selection.size===1?"cell":"cells"} selected</span>
-      <button onClick={clear}>Clear selection</button>
-      {editable && <button onClick={editSelected}>{actionLabel}</button>}
-    </div>}
     <MatrixTable events={events} label="Attendance" onKeyDown={e=>{
       if(e.key==="Escape"){clear();return;}
       moveFocus(e,select);
@@ -235,7 +230,13 @@ function SelectableMatrix({rows, events, canCorrect, onEdit, onEditMany, readOnl
           </tr>
         );
       })}
-    </MatrixTable></div>;
+    </MatrixTable>
+    {selection.size>0 && <div className="matrix-selection" role="group" aria-label="Attendance selection">
+      <span aria-live="polite">{selection.size} {selection.size===1?"cell":"cells"} selected</span>
+      <button onClick={clear} aria-label="Clear selection">Clear</button>
+      {editable && <button className="primary" onClick={editSelected}>{actionLabel}</button>}
+    </div>}
+  </div>;
 }
 
 export function MatrixTable({events, label, onKeyDown, children}) {
