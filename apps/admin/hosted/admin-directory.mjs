@@ -1,6 +1,7 @@
 import {effectiveAdminGrants} from "../../../.build/v3/apps/worker/src/permission-grants.js";
+export const administratorReply=()=>({content:"SHAMROCK administrators",adminDirectory:true});
 export function asksForAdministrators(message){
-  return message?.role==="user" && /^(?:who (?:are|is)|(?:please )?(?:list|show|name)(?: me)?) (?:all )?(?:(?:the|our|current|shamrock|system|panel|staging) )*admin(?:istrator)?s?(?: (?:of|for|in) (?:the )?(?:shamrock|system|panel))?[?.! ]*$/i.test(message.content?.trim() || "");
+  return message?.role==="user" && /^(?:who (?:are|is)|which (?:users|accounts|people) are|(?:please )?(?:list|show|name)(?: me)?) (?:all )?(?:(?:the|our|current|currently|shamrock|system|panel|staging) )*admin(?:istrator)?s?(?: (?:of|for|in) (?:the )?(?:shamrock|system|panel))?[?.! ]*$/i.test(message.content?.trim() || "");
 }
 // Mirrors the explicit Wing grant and permission-manager paths in resolvePanelAccess.
 export async function currentAdministrators(db){

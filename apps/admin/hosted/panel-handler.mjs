@@ -15,7 +15,7 @@ import { previewFromSession, previewResponse, changePreview } from "./view-as.mj
 import { browseState, browseProfiles } from "./browse.mjs";
 import {rosterDataset,cohortNames} from "./roster-query.mjs";
 import {rosterQuestion,rosterRows} from "./roster-questions.mjs";
-import {asksForAdministrators,currentAdministrators} from "./admin-directory.mjs";
+import {administratorReply,asksForAdministrators,currentAdministrators} from "./admin-directory.mjs";
 import {reportTotals} from "./operational-reports.mjs";
 import {eventCancellationReply} from "./event-action.mjs";
 import { eventsState } from "./events-list.mjs";
@@ -340,7 +340,7 @@ export default {
           return secure(json(history));
         }
         const id=checkChatId(body?.chatId ?? crypto.randomUUID());
-        const reply=asksForAdministrators(body?.messages?.at(-1)) ? {content:"SHAMROCK administrators",adminDirectory:true} : rosterQuestion(body?.messages) ?? await eventCancellationReply(body?.messages?.at(-1),backend,service) ?? await answer(env,body,env.operatorGuide,fetch,()=>wingCharts(backend),async profile=>{
+        const reply=asksForAdministrators(body?.messages?.at(-1)) ? administratorReply() : rosterQuestion(body?.messages) ?? await eventCancellationReply(body?.messages?.at(-1),backend,service) ?? await answer(env,body,env.operatorGuide,fetch,()=>wingCharts(backend),async profile=>{
           const view=await browseState(backend,await backend.panelAuthority(),profile==="careers"?"cadets":profile);
           return reportTotals(profile,view.tables);
         },readRoster);

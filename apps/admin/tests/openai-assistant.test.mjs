@@ -156,3 +156,16 @@ test("discussing improvements and selecting an idea are inexpensive text-only tu
     history.push({role:"assistant",content:reply.content});
   }
 });
+
+test("administrator identity questions routed by meaning open the protected directory",async()=>{
+  let requests=0;
+  const reply=await answer(env,{messages:[{role:"user",content:"Who has the keys to manage SHAMROCK?"}]},"Guide",async(_,options)=>{
+    requests++;
+    const q=JSON.parse(options.body);
+    assert.ok(q.questions.find(x=>x.name==="dataset").choices.some(x=>x.value==="administrators"));
+    return Response.json({answers:Object.entries({route:"report",source:"none",dataset:"administrators"})
+      .map(([name,choice])=>({type:"choice",name,choice}))});
+  });
+  assert.equal(requests,1);
+  assert.deepEqual(reply,{content:"SHAMROCK administrators",adminDirectory:true});
+});

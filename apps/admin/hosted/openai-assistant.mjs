@@ -1,3 +1,4 @@
+import {administratorReply} from "./admin-directory.mjs";
 import {planSchema,rosterVocabulary,runRosterQuery} from "./roster-query.mjs";
 import {reportSources,reportCatalog} from "./operational-reports.mjs";
 import {afrotcContext} from "./afrotc-context.mjs";
@@ -64,7 +65,7 @@ function summaryOf({dashboard,history}) {
 async function classify(env,history,send){
   const types = {
     procedure: "Explain how SHAMROCK works or how to use it.",
-    report: "Answer factual questions about current records: Wing attendance, historical terms, career interests, AFSC preferences, academic majors, roster, campuses, leadership coverage, events and excusal workload.",
+    report: "Answer factual questions about current records: Wing attendance, historical terms, administrator identities, career interests, AFSC preferences, academic majors, roster, campuses, leadership coverage, events and excusal workload.",
     suggest: "Explore possibilities, give recommendations or examples, compare options, or discuss a previously offered choice. Selecting an option alone continues the discussion.",
     patch: "User requests a specific change, or agrees to an explicit offer to implement a particular change. A suggestion about what we should add is not permission to implement.",
     design: "User explicitly wants a technical design, architecture analysis, or detailed engineering plan."
@@ -123,6 +124,7 @@ export async function answer(env, body, guide, send = fetch, readCharts, readOpe
   if(allowance!==true)throw new PanelError("ASSISTANT_LIMIT",allowance==="daily" ? `The ${dailyMessages}-message rolling daily allowance is used. Messages become available as earlier requests age out.` :
     allowance==="monthly" ? "The shared 32-day Assistant budget is used. Capacity returns as earlier reservations expire." : "The Assistant could not verify its spending allowance.",429);
   route ??= await classify(env,history,send);
+  if(route.type==="report" && route.dataset==="administrators")return administratorReply();
   const request={model,reasoning:{effort:"none"},max_output_tokens:700,input:JSON.stringify(history)};
   let maxBytes=16000, timeout=30000;
   const area=route.type==="patch" ? patchSourceArea(question,route.areas?.[0],env.maintenanceSource?.files) : route.areas?.[0];

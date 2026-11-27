@@ -5,6 +5,7 @@ export const reportCatalog = {
   careers:"Current cadets’ desired occupations, AFSC preferences, career interests and academic fields of study (CIP).",
   rosterExcusals:"Which cadets have pending, approved or denied excusals, optionally grouped or filtered by directory attributes. Joins the current excusal queue to the Directory.",
   cadets:"Active cadet directory: count, name or group cadets; filter by AS year, graduation year, campus, flight, squadron, AFSC interest or major. Use for which of those cadets and similar follow-ups.",
+  administrators:"List the accounts or people who currently have SHAMROCK administrator access. Use for administrator identities, including follow-ups asking for their names.",
   leadership:"Leadership contact coverage.",
   overview:"Pending excusals and active event totals.",
   "event-list":"Events by type and current status.",

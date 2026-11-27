@@ -38,6 +38,8 @@ import {asksForAdministrators,currentAdministrators} from "../hosted/admin-direc
 import {DatabaseSync} from "node:sqlite";
 import {readdirSync,readFileSync} from "node:fs";
 test("owner lookup names active Wing accounts and excludes flight grants and inactive accounts",async()=>{
+  assert.ok(asksForAdministrators({role:"user",content:"Which users are currently administrators?"}));
+  assert.equal(asksForAdministrators({role:"user",content:"Which users are currently administrators of Alpha Flight?"}),false);
   assert.ok(asksForAdministrators({role:"user",content:"Who are the current shamrock administrators?"}));
   const db=new DatabaseSync(":memory:");
   const folder=new URL("../../../database/migrations/",import.meta.url);
