@@ -224,7 +224,7 @@ test('an active Directory assignment supports a read-only admin preview before f
   const principalId='google.'+createHash('sha256').update(email).digest('hex');
   const actual=await f.send({...base,email,principalId},'/v1/cadet/workspace');
   const {readOnly,...same}=preview.body;assert.deepEqual(same,actual.body);
-  for(const section of ['profile','attendance','directory','overview','overview-charts']){
+  for(const section of ['profile','attendance','directory','leadership','overview','overview-charts']){
     const personal=await f.send({...target,section},'/v1/cadet/preview');
     const direct=await f.send({...base,email,principalId,section},'/v1/cadet/workspace');
     assert.equal(personal.status,200);

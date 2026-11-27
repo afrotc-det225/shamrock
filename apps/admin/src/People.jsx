@@ -26,7 +26,7 @@ import { compareAsYearsForDisplay, compareCadetsForDisplay } from "../../../pack
 const coreColumns = ["cadet","asYear","flight","squadron","flightPathStatus"];
 const adminColumns = ["cadet","lastName","firstName","rank","asYear","flight","squadron","flightPathStatus",
   ...profileFields.filter(k => !["lastName","firstName","rank",...coreColumns].includes(k))];
-const memberColumns = ["cadet","lastName","firstName","rank","asYear","flight","squadron","flightPathStatus","role","university","email","cipBroadArea","cipCode","afsc","classYear"];
+const memberColumns = ["cadet","lastName","firstName","rank","asYear","flight","squadron","flightPathStatus","role","university","email","phone","cipBroadArea","cipCode","afsc","classYear","photoLink"];
 const memberStatuses = statuses.filter(value => !["Inactive","Dropped","Commissioned"].includes(value));
 const columnLabel = k=>({cadet:"Cadet",lastName:"Last name",firstName:"First name",flight:"Flight",squadron:"Squadron",flightPathStatus:"Status",classYear:"Graduation year"}[k] || label(k));
 const detailFields = new Set(["phone","dorm","homeTown","homeState","dateOfBirth"]);
@@ -49,8 +49,8 @@ export function cadetBrowseProfile() {
   return initialColumns().some(key => detailFields.has(key)) ? "cadet-details" : "cadets";
 }
 
-function DirectoryValue({ field, value, person }) {
-  if (field === "photoLink") return value ? <DirectoryPhoto value={value} person={person} /> : "—";
+function DirectoryValue({ field, value, person, member }) {
+  if (field === "photoLink") return value ? <DirectoryPhoto member={member} value={value} person={person} /> : "—";
   if (!value) return "—";
   const style = profileColorStyle(field, value);
   const label = String(value || "—");
@@ -308,7 +308,7 @@ export default function People({
           <tr key={p.contactId || p.personId}>
             {hasCadet && <td>
               <div className="person-cell">
-                <DirectoryPhoto avatar value={member ? undefined : p.photoLink} person={p} />
+                <DirectoryPhoto avatar member={member} value={p.photoLink} person={p} />
                 <span>
                   {member ? <strong className="member-name" title={name(p)}>{name(p)}</strong> : <button className="text-button" disabled={readOnly} title={name(p)} onClick={() => open(p)}>
                     {name(p)}
@@ -325,7 +325,7 @@ export default function People({
                 return <td key={key} title={key === "photoLink" ? undefined : String(value || "")} className={formation ? "formation" : undefined} style={style}>
                   <span className="roster-value">{formation ? value || (key==="flight" ? "Unassigned" : "—") :
                     key==="flightPathStatus" ? <span className="status" style={cellStyle(flightPathColors(value))}>{value || "—"}</span> :
-                    <DirectoryValue field={key} value={value} person={p}/>}</span>
+                    <DirectoryValue member={member} field={key} value={value} person={p}/>}</span>
                   {key===columns[0] && !readOnly && editButton}
                 </td>;
               })}

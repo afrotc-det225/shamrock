@@ -10,13 +10,13 @@ const browser = await chromium.launch(process.env.SHAMROCK_CHROMIUM_PATH
   ? { executablePath: process.env.SHAMROCK_CHROMIUM_PATH } : {});
 const origin = `http://127.0.0.1:${server.address().port}`;
 const selfService = ["My excusals","My attendance","Submit attendance"];
-const requests = ["Overview",...selfService,"Cadets","My profile"];
+const requests = ["Overview",...selfService,"Cadets","Leadership","My profile"];
 const scenarios = [
   { role: "Cadet", tabs: requests },
-  { role: "Flight", tabs: ["Overview","My Flight",...selfService,"Excusals","Cadets","My profile"] },
-  { role: "Squadron", tabs: ["Overview",...selfService,"Excusals","Attendance reviews","Cadets","My profile"] },
+  { role: "Flight", tabs: ["Overview","My Flight",...selfService,"Excusals","Cadets","Leadership","My profile"] },
+  { role: "Squadron", tabs: ["Overview",...selfService,"Excusals","Attendance reviews","Cadets","Leadership","My profile"] },
   { role: "Registration", tabs: [] },
-  { role: "View as Squadron", tabs: ["Overview",...selfService,"Excusals","Attendance reviews","Cadets","My profile"] },
+  { role: "View as Squadron", tabs: ["Overview",...selfService,"Excusals","Attendance reviews","Cadets","Leadership","My profile"] },
   { role: "View as", tabs: requests },
 ];
 try {
@@ -58,7 +58,7 @@ try {
             ]}});
         }
         return route.fulfill({ json: {
-          section,eventsForFlight:[{eventId:"other",label:"Earlier Mando"}],directory:[{personId:"peer",rank:"C/AB",firstName:"Directory",lastName:"Peer",asYear:"AS100",flight:"Alpha",squadron:"Blue",flightPathStatus:"Active 3/4",afsc:"13N",university:"Notre Dame"},
+          section,leadership:[],eventsForFlight:[{eventId:"other",label:"Earlier Mando"}],directory:[{personId:"peer",rank:"C/AB",phone:"202-555-0199",role:"Alpha Flight Commander",photoLink:"https://example.org/fictional-photo",firstName:"Directory",lastName:"Peer",asYear:"AS100",flight:"Alpha",squadron:"Blue",flightPathStatus:"Active 3/4",afsc:"13N",university:"Notre Dame"},
             {personId:"senior",rank:"C/Capt",firstName:"Senior",lastName:"Sample",asYear:"AS400",flight:"Delta",squadron:"Gold",afsc:"17S",flightPathStatus:"Ready 4/4"}],attendance:section==="attendance"?[{eventId:"llab",label:"TW-1 LLAB",eventType:"llab",version:1,baseVersion:0,code:"A"},{eventId:"lab2",label:"TW-2 LLAB",eventType:"llab",version:2,baseVersion:0,code:"A"}]:[],
           linked: true, writable: true, readOnly:false, registration: role === "Registration",
           profile: role === "Registration" ? null : {personId:"one", firstName:"Sample", lastName:"Cadet", flightId:"alpha",afsc:"13N – Nuclear and Missile Operations ".repeat(6).trim(),photoLink:"https://drive.google.com/file/d/fictional-photo/view"},
@@ -276,14 +276,8 @@ try {
           for(const [x,y,height] of taps){assert(height>=44);await page.touchscreen.tap(x,y);}
         } else {await target.nth(1).click();await target.nth(2).click();}
         assert.equal(await page.getByLabel("Report coverage").count(),0);
-        const opts=page.getByRole("button",{name:"Submission options"});
-        await opts.click();
-        await page.getByLabel("Entire Flight accounted for").check();
-        await page.keyboard.press("Escape");
-        assert(await page.getByRole("button",{name:"Submit full Flight report"}).isEnabled());
-        await opts.click();
-        await page.getByLabel("Entire Flight accounted for").uncheck();
-        await page.keyboard.press("Escape");
+        assert.equal(await page.getByRole("button",{name:"Submission options"}).count(),0);
+        assert.equal(await page.getByLabel("Entire Flight accounted for").count(),0);
         await page.getByRole("button",{name:"Save for later"}).click();
         await page.getByRole("button",{name:"Saved",exact:true}).waitFor();
         await openNavigation(page);
@@ -307,12 +301,21 @@ try {
         assert.equal(await peerRow.locator("td.formation").count(),2);
         await page.getByRole("button",{name:"Columns",exact:true}).click();
         const options=page.getByRole("region",{name:"Columns"});
-        assert.equal(await options.getByLabel("Phone",{exact:true}).count(),0);
+        assert(await options.getByLabel("Phone",{exact:true}).isChecked());
+        assert(await peerRow.getByText("202-555-0199",{exact:true}).count());
+        assert(await peerRow.getByRole("button",{name:"Preview photo of Directory Peer"}).count());
         await options.getByLabel("Filter column",{exact:true}).selectOption("afsc");
         await options.getByLabel("Filter by AFSC",{exact:true}).fill("17S");
         assert.deepEqual(await names.allTextContents(),["Senior Sample"]);
         await page.keyboard.press("Escape");
         assert.equal(await page.getByRole("button",{name:"Add cadet"}).count(),0);
+        await openNavigation(page);
+        await nav.getByRole("link",{name:"Leadership",exact:true}).click();
+        await page.getByLabel("Organization branch").selectOption("operations");
+        await page.getByRole("button",{name:"Contact details for Directory Peer",exact:true}).click();
+        await page.getByRole("link",{name:"202-555-0199",exact:true}).waitFor();
+        assert.equal(await page.getByRole("button",{name:"Add contact",exact:true}).count(),0);
+        await page.keyboard.press("Escape");
         if(width===390) await page.evaluate(()=>window.scrollTo(0,document.documentElement.scrollHeight));
 
         await openNavigation(page);
@@ -359,7 +362,7 @@ try {
       });
       assert(layout.fits && (width === 390 ? layout.stacked : layout.alongside), JSON.stringify(layout));
       assert.deepEqual(errors, []);
-      assert.deepEqual(calls, ["POST /api/session", "GET /api/cadet",...(role==="Flight"?["GET /api/cadet?section=flight","GET /api/cadet?section=flight","GET /api/cadet?section=flight:other","GET /api/cadet?section=excusals","GET /api/cadet"]:[]),...(squadron?["GET /api/cadet?section=excusals","POST /api/cadet","GET /api/cadet?section=excusals","GET /api/cadet"]:[]),...(tabs.length?["GET /api/cadet?section=profile","GET /api/cadet","GET /api/cadet?section=profile","GET /api/cadet?section=attendance","POST /api/cadet","POST /api/cadet","GET /api/cadet?section=attendance","GET /api/cadet?section=report","GET /api/cadet?section=report:lab16","GET /api/cadet?section=directory","GET /api/cadet?section=report","GET /api/cadet?section=report:lab16","GET /api/cadet?section=report:lab16","POST /api/cadet","GET /api/cadet?section=report"]:[])]);
+      assert.deepEqual(calls, ["POST /api/session", "GET /api/cadet",...(role==="Flight"?["GET /api/cadet?section=flight","GET /api/cadet?section=flight","GET /api/cadet?section=flight:other","GET /api/cadet?section=excusals","GET /api/cadet"]:[]),...(squadron?["GET /api/cadet?section=excusals","POST /api/cadet","GET /api/cadet?section=excusals","GET /api/cadet"]:[]),...(tabs.length?["GET /api/cadet?section=profile","GET /api/cadet","GET /api/cadet?section=profile","GET /api/cadet?section=attendance","POST /api/cadet","POST /api/cadet","GET /api/cadet?section=attendance","GET /api/cadet?section=report","GET /api/cadet?section=report:lab16","GET /api/cadet?section=directory","GET /api/cadet?section=leadership","GET /api/cadet?section=report","GET /api/cadet?section=report:lab16","GET /api/cadet?section=report:lab16","POST /api/cadet","GET /api/cadet?section=report"]:[])]);
       await page.close();
     }
   }
@@ -398,7 +401,7 @@ try {
       await openNavigation(page);
       await nav.getByRole("link",{name:"My profile",exact:true}).waitFor();
       await nav.getByRole("link",{name:"Attendance",exact:true}).waitFor();
-      assert.deepEqual(await nav.getByRole("link").allTextContents(),["Overview","My Flight",...selfService,"Attendance","Excusals","Cadets","My profile"]);
+      assert.deepEqual(await nav.getByRole("link").allTextContents(),["Overview","My Flight",...selfService,"Attendance","Excusals","Cadets","Leadership","My profile"]);
     };
     await page.getByRole("heading",{name:"My excusals",level:1,exact:true}).waitFor();
     await checkMenu();

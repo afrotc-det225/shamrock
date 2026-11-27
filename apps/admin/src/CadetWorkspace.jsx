@@ -9,13 +9,12 @@ import { DirectoryPhoto } from "./DirectoryPhoto";
 import WorkspaceShell from "./WorkspaceShell";
 import { ViewAsAccount } from "./ViewAs";
 import {personalPages} from "./site-navigation";
-import { ChevronDown, ExternalLink } from "lucide-react";
+import { ExternalLink } from "lucide-react";
 import { attendanceMeanings } from "./AttendanceMatrix";
 import {loadReportDraft, restoreSelections, rosterSignature} from "./report-draft";
 import {Overview} from "./Secondary";
 import CadetDirectory from "./CadetDirectory";
 import { cellStyle, yearColors, rateStyle } from "./roster-colors";
-import { ToolbarPopover } from "./ToolbarPopover";
 import { FlightHome } from "./FlightHome";
 import { calculateAttendanceCredit } from "../../../packages/domain/src/frontend-reporting";
 import { ATTENDANCE_CODES } from "../../../packages/domain/src/index";
@@ -317,12 +316,12 @@ function FlightReport({ state, save, disabled, previewId }) {
   const [draftNotice,setDraftNotice]=useState("");
   const restore=useRef(draft);
   const [details,setDetails]=useState(null), [error,setError]=useState(""), [attempt,retry]=useState(0);
-  const [present,setPresent]=useState([]), [complete,setComplete]=useState(false);
+  const [present,setPresent]=useState([]);
   const [search,setSearch]=useState("");
   const event=events.find(e=>e.eventId===eventId);
   function choose(id){
     restore.current=id===draft?.eventId ? draft : null;setDraftNotice("");
-    setEvent(id);setDetails(null);setError("");setPresent([]);setComplete(false);setSearch("");
+    setEvent(id);setDetails(null);setError("");setPresent([]);setSearch("");
   }
   useEffect(()=>{
     if(!eventId)return;
@@ -334,7 +333,6 @@ function FlightReport({ state, save, disabled, previewId }) {
         if(saved?.eventId===eventId){
           const selection=restoreSelections(saved,v);
           setPresent(selection.present);
-          setComplete(selection.complete);
           if(selection.changed)setDraftNotice("The event roster changed. Review your selections before submitting.");
           restore.current=null;
         }
@@ -356,9 +354,8 @@ function FlightReport({ state, save, disabled, previewId }) {
   }
   const campus=roster[0]?.campus;
   const flight=state.flights.find(f=>f.flightId===state.profile.flightId)?.label;
-  const crossFlight=type==="secondary" || (type==="mando" && !!campus);
   function currentDraft(){
-    return {eventId,present:[...present].sort(),complete,roster:signature};
+    return {eventId,present:[...present].sort(),roster:signature};
   }
   function storeDraft(){
     const next={...currentDraft(),id:crypto.randomUUID()};
@@ -375,13 +372,13 @@ function FlightReport({ state, save, disabled, previewId }) {
   }
   const savedEvent=events.find(e=>e.eventId===draft?.eventId);
   const savedHere=draft && draft.eventId===eventId;
-  const matches=savedHere && details && draft.roster===signature && draft.complete===complete
+  const matches=savedHere && details && draft.roster===signature && !draft.complete
     && JSON.stringify(draft.present)===JSON.stringify([...present].sort());
   return <section><form className="cadet-form" onSubmit={e=>{
     e.preventDefault();
     if(!event || !roster.length)return;
     save("report",{eventId,version:roster[0].version,rosterVersions:Object.fromEntries(details.flights.map(f=>[f.flightId,f.rosterVersion])),
-      present:[...present].sort(),completeness:complete?"complete":"partial"},()=>{
+      present:[...present].sort(),completeness:"partial"},()=>{
         if(savedHere)forgetDraft(draft);
         choose(""); setType("");
       }, matches ? draft.id : undefined);
@@ -407,11 +404,7 @@ function FlightReport({ state, save, disabled, previewId }) {
         }}/>
         {r.lastName}, {r.firstName}</label>)}</fieldset>)}
       <div className="cadet-inline-actions">
-        <button className="primary" disabled={disabled || (!present.length && !complete)}>{complete ? "Submit full Flight report" : "Submit attendance"}</button>
-        {!crossFlight && details.ownFlightCount===roster.length && <ToolbarPopover label="Submission options" icon={ChevronDown} iconOnly>
-          <label className="report-completion"><input type="checkbox" checked={complete} disabled={disabled}
-            onChange={e=>setComplete(e.target.checked)}/>Entire Flight accounted for</label>
-        </ToolbarPopover>}
+        <button className="primary" disabled={disabled || !present.length}>Submit attendance</button>
         <button type="button" disabled={disabled || matches} onClick={storeDraft}>{matches ? "Saved" : savedHere ? "Save changes" : draft ? "Replace saved draft" : "Save for later"}</button>
       </div>
     </> : <Empty>No eligible cadets for this event.</Empty>)}
@@ -462,7 +455,7 @@ export default function CadetWorkspace({ session }) {
   const pending = useRef(null),
     active = useRef(false),
     preview = !!session.viewAs;
-  const section = tab==="Overview" ? "overview" : tab==="Cadets" ? "directory" : tab==="Excusals" ? "excusals" : tab==="My profile" ? "profile" : tab==="Submit attendance" ? "report" : tab==="My attendance" ? "attendance" : "";
+  const section = tab==="Overview" ? "overview" : tab==="Cadets" ? "directory" : tab==="Leadership" ? "leadership" : tab==="Excusals" ? "excusals" : tab==="My profile" ? "profile" : tab==="Submit attendance" ? "report" : tab==="My attendance" ? "attendance" : "";
   const currentSection=useRef(section);
   currentSection.current=section;
   const load = async () => {
@@ -615,6 +608,7 @@ export default function CadetWorkspace({ session }) {
       )}
       {page==="Overview" && (state?.overview ? <Overview overview={state.overview} memberReport={state.compiled}
         birthdayCalendar={state.birthdayCalendar} birthdayFlights={state.birthdayFlights} birthdaySquadrons={state.birthdaySquadrons}/> : <p role="status">Loading Overview…</p>)}
+      {page==="Leadership" && (state?.section==="leadership" ? <CadetDirectory rows={state.directory} contacts={state.leadership}/> : <p role="status">Loading Leadership…</p>)}
       {page==="Cadets" && (state?.section==="directory" ? <CadetDirectory rows={state.directory}/> : <p role="status">Loading Directory…</p>)}
       {page==="Attendance reviews" && <AttendanceReviews state={state} save={save} disabled={disabled}/>}
       {page==="My attendance" && (state.section==="attendance" ? <PersonalAttendance state={state} flags={flags} save={save} disabled={disabled}/> : <p role="status">Loading attendance…</p>)}

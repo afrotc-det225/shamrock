@@ -148,7 +148,7 @@ export default {
       }
       if (url.pathname === "/api/cadet" && ["GET","POST"].includes(request.method)) {
         const section=url.searchParams.get("section");
-        if(section!==null && !/^(?:report|flight):[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/.test(section) && !["overview","profile","report","attendance","flight","excusals","directory"].includes(section))throw new PanelError("INVALID_REQUEST","Unknown workspace section.");
+        if(section!==null && !/^(?:report|flight):[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/.test(section) && !["overview","profile","report","attendance","flight","excusals","directory","leadership"].includes(section))throw new PanelError("INVALID_REQUEST","Unknown workspace section.");
         const workspace=await cadetWorkspace(section);
         if (section==="overview" && workspace.overview && request.method==="GET") {
           workspace.compiled=await memberCharts(backend,workspace.stamp,()=>cadetWorkspace("overview-charts"));

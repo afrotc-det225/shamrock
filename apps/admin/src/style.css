@@ -1804,7 +1804,6 @@ main:has(.matrix-scroll) { padding-bottom: 8px; }
 .draft-banner span {flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:.9rem;font-weight:600}
 .cadet-form .draft-banner button {flex:none;margin:0;padding:.35rem .5rem;min-height:44px;border:0;background:transparent;color:var(--navy);font-weight:600}
 .cadet-form .draft-banner button:hover {text-decoration:underline}
-.report-completion {display:flex;gap:.5rem;align-items:center;min-height:44px}
 .excusal-queue tbody tr {cursor:pointer}
 .cadet-inline-actions:empty {display:none}
 .cadet-form .cadet-inline-actions > button {margin:.5rem 0 0}

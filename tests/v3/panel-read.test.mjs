@@ -508,6 +508,8 @@ test('campus enrollment, personal excusal, Flight review and duties use the veri
     assert((await route()).body.registration);
     const directory=()=>route(null,{...identity,section:"directory"});
     assert.equal((await directory()).body.directory,undefined);
+    const chart=()=>route(null,{...identity,section:"leadership"});
+    assert.equal((await chart()).body.leadership,undefined);
     const register=action('register',{firstName:'Fictional',lastName:'Applicant',asYear:'AS100',flightId:'alpha',university:'Notre Dame',
       classYear:'2030',phone:'2025550100',dateOfBirth:'2006-01-01',homeTown:'Fictional',homeState:'Indiana',cipCode:'11.0101',afsc:'Undecided'});
     assert.equal((await route({...register,fields:{...register.fields,role:'Blue Squadron Commander'}})).status,400);
@@ -519,7 +521,11 @@ test('campus enrollment, personal excusal, Flight review and duties use the veri
     assert.equal((await route(register)).body.commandId,saved.body.commandId);
     const peers=(await directory()).body.directory;
     assert(peers.length>1);
-    for (const peer of peers) assert.deepEqual(Object.keys(peer).sort(),["afsc","asYear","cipBroadArea","cipCode","classYear","email","firstName","flight","flightPathStatus","lastName","personId","rank","role","squadron","university"]);
+    const organization=(await chart()).body;
+    assert.deepEqual(organization.directory,peers);
+    assert(Array.isArray(organization.leadership));
+    assert(organization.leadership.every(contact=>contact.active && (!contact.personId || peers.some(peer=>peer.personId===contact.personId))));
+    for (const peer of peers) assert.deepEqual(Object.keys(peer).sort(),["afsc","asYear","cipBroadArea","cipCode","classYear","email","firstName","flight","flightPathStatus","lastName","personId","phone","photoLink","rank","role","squadron","university"]);
     const self=(await route()).body;assert(self.linked);assert.equal(self.squadron,null);assert.equal(self.queue.length,0);
     await f.db.batch([
       f.db.prepare("INSERT INTO events VALUES('portal-event','Fictional workshop',1)"),

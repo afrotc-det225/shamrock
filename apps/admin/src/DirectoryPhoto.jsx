@@ -4,7 +4,7 @@ import { createPortal } from "react-dom";
 import { ExternalLink, Image as PhotoIcon, X } from "lucide-react";
 import { drivePhoto } from "../drive-photo.mjs";
 
-function directoryPhotoSource(value, size, personId, portrait) {
+function directoryPhotoSource(value, size, personId, portrait, member) {
   if (!value) return null;
   let url;
   try { url = new URL(value); } catch { return null; }
@@ -21,12 +21,13 @@ function directoryPhotoSource(value, size, personId, portrait) {
   }
   const direct = "https://drive.google.com/thumbnail?" + parameters;
   const query = new URLSearchParams({file:drive.file});
+  if (member) query.set("scope","member");
   if (personId) query.set("person", personId);
   return { ...link, preview:preview.href, src:portrait || (portrait===null || personId === undefined ? direct : "/api/directory/photo?" + query), direct };
 }
 
-export function useDirectoryPhoto(value, size, personId, portrait) {
-  const source = directoryPhotoSource(value, size, personId, portrait);
+export function useDirectoryPhoto(value, size, personId, portrait, member) {
+  const source = directoryPhotoSource(value, size, personId, portrait, member);
   const [directOnly, setDirectOnly] = useState("");
   const [failed, setFailed] = useState("");
   const src = source?.src === directOnly ? source?.direct : source?.src;
@@ -64,8 +65,8 @@ function PhotoPreview({source, src, onError, name, opener, onClose}) {
   </dialog>,document.body);
 }
 
-export function DirectoryPhoto({ value, person, avatar = false, portrait = false, personId = person?.personId }) {
-  const {source,src,onError}=useDirectoryPhoto(value, avatar ? 96 : 320, personId, portrait ? person?.portrait : undefined);
+export function DirectoryPhoto({ value, person, avatar = false, member = false, portrait = false, personId = person?.personId }) {
+  const {source,src,onError}=useDirectoryPhoto(value, avatar ? 96 : 320, personId, portrait ? person?.portrait : undefined, member);
   const opener=useRef(null);
   const [opened,setOpened]=useState(null);
   const name=[person?.firstName, person?.lastName].filter(Boolean).join(" ") || "Directory portrait";

@@ -22,11 +22,16 @@ test("published portraits require the current Directory association and the view
   await assert.rejects(get({file:"portrait"},"school.fixture",null,null),{status:403});
   await assert.rejects(get({person:"one",file:"portrait"},"school.fixture"),{status:403});
   await assert.rejects(get({file:"portrait"},"owner",{status:"starting"}),{status:403});
+  const peer={person:"one",file:"portrait",scope:"member"};
+  await get(peer,"school.fixture");
+  await get(peer,"owner",{status:"ready"});
+  await assert.rejects(get(peer,"school.fixture",null,null),{status:403});
+  await assert.rejects(get({...peer,file:"stale"},"school.fixture"),{status:404});
   wing=false;
   await assert.rejects(get({person:"one",file:"portrait"},"owner",{status:"ready"}),{status:403});
   profile.photoLink="https://example.org/image";
   await assert.rejects(get({file:"portrait"}),{status:404});
-  assert.equal(reads,2);
+  assert.equal(reads,4);
   assert.equal(drivePhoto("https://example.org/open?id=portrait"),null);
   assert.deepEqual(drivePhoto("https://drive.google.com/file/d/demo/view?resourcekey=key"),{file:"demo",resourceKey:"key"});
 });

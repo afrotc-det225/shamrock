@@ -4,7 +4,7 @@ const pages = {
     Attendance:"attendance", Excusals:"excusals", History:"history",
     "Semester planning":"semester", System:"system", Assistant:"assistant",
   },
-  cadet: {Overview:"overview", Cadets:"cadets","My attendance":"attendance","Submit attendance":"submit-attendance","Attendance reviews":"attendance-reviews","My excusals":"requests", "My profile":"profile", "My Flight":"flight", Excusals:"excusals"},
+  cadet: {Overview:"overview", Cadets:"cadets", Leadership:"leadership","My attendance":"attendance","Submit attendance":"submit-attendance","Attendance reviews":"attendance-reviews","My excusals":"requests", "My profile":"profile", "My Flight":"flight", Excusals:"excusals"},
 };
 
 export function pageHref(workspace, page, semester="latest") {

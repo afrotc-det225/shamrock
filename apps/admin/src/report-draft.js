@@ -19,7 +19,6 @@ export function restoreSelections(draft, details) {
   const changed = draft.roster!==rosterSignature(details);
   return {
     present:draft.present.filter(id=>eligible.has(id)),
-    complete:!changed && draft.complete===true && details.ownFlightCount===eligible.size,
     changed,
   };
 }

@@ -14,6 +14,15 @@ export async function directoryPortrait(env, backend, user, preview, params, own
     if (!profile?.personId) throw forbidden();
     personId = profile.personId;
     link = profile.photoLink;
+  } else if (params.get("scope") === "member") {
+    if (!personId || personId.length > 200) throw missing();
+    const viewer = await ownWorkspace();
+    if (viewer.registration || !viewer.profile?.personId) throw forbidden();
+    const lookup = await env.DB.prepare(`SELECT d.photo_link FROM directory_profiles d
+      JOIN memberships m ON m.person_id=d.person_id AND m.unit_id=d.flight_id AND m.active=1
+      WHERE d.person_id=? AND d.flight_path_status NOT IN ('Inactive','Dropped','Commissioned')`).bind(personId).all();
+    link = lookup.results[0]?.photo_link;
+    directoryReads = lookup.meta?.rows_read;
   } else {
     if (!personId || personId.length > 200 || (user.principal_id.startsWith("school.") && !user.wingAccess)) throw forbidden();
     if (!(await backend.panelAuthority()).access?.capabilities?.fullSnapshot) throw forbidden();
