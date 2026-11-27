@@ -1,21 +1,22 @@
 import assert from "node:assert/strict";
-import { chromium } from "playwright";
+import { chromium, webkit } from "playwright";
 import { createPanelServer } from "../server.mjs";
 
 const server=createPanelServer();
 await new Promise(resolve=>server.listen(0,"127.0.0.1",resolve));
-const browser=await chromium.launch(process.env.SHAMROCK_CHROMIUM_PATH ?
+const browser=process.env.SHAMROCK_WEBKIT_PATH ? await webkit.launch({executablePath:process.env.SHAMROCK_WEBKIT_PATH}) : await chromium.launch(process.env.SHAMROCK_CHROMIUM_PATH ?
   {executablePath:process.env.SHAMROCK_CHROMIUM_PATH} : {});
 try {
   for(const width of [1440,900,390]){
-    const page=await browser.newPage({viewport:{width,height:850}});
+    const page=await browser.newPage({viewport:{width,height:850},isMobile:width===390,hasTouch:width===390});
     const threads=new Map();
-    let paidCalls=0;
+    let paidCalls=0, failHistory=width===390;
     await page.route("**/api/**",route=>{
       const path=new URL(route.request().url()).pathname;
       if(path==="/api/session")return route.fulfill({json:{csrf:"fixture",schoolLogin:false}});
       if(path==="/api/state")return route.fulfill({json:{meta:{hosted:true,assistantAvailable:true},transport:"paged-v1",manifest:{access:{capabilities:{fullSnapshot:true}}},history:[]}});
       if(path==="/api/chat/history"){
+        if(failHistory){failHistory=false;return route.fulfill({status:503,json:{error:{message:"Try again."}}});}
         const id=new URL(route.request().url()).searchParams.get("id");
         return route.fulfill({json:id ? {messages:threads.get(id).messages} : {chats:[...threads.values()].map(({messages,...chat})=>chat)}});
       }
@@ -34,6 +35,10 @@ try {
     await page.goto((process.env.SHAMROCK_TEST_ORIGIN || "http://127.0.0.1:"+server.address().port)+"/assistant");
     const heading=page.getByRole("heading",{name:"Assistant",exact:true}), input=page.getByLabel("Ask SHAMROCK");
     await input.waitFor();
+    if(width===390){
+      await page.getByRole("button",{name:"Retry loading recent chats"}).click();
+      await page.getByRole("region",{name:"Recent conversations"}).getByText("No conversations yet.").waitFor();
+    }
     const box=await input.boundingBox();
     const form=page.locator(".chat-form");
     const workspace=await page.locator(".workspace").boundingBox();
@@ -44,7 +49,7 @@ try {
     assert.deepEqual(await form.boundingBox(),centered);
     await page.keyboard.press("Escape");
     assert.equal(await recent.getAttribute("aria-expanded"),"false");
-    assert(box.y>300 && box.y<600,JSON.stringify(box));
+    assert(width===390 ? box.y>700 && box.y+box.height<=850 : box.y>300 && box.y<600,JSON.stringify(box));
     assert.equal(await input.evaluate(el=>getComputedStyle(el).resize),"none");
     await input.fill("First line");
     await input.press("Shift+Enter");
@@ -63,6 +68,13 @@ try {
     await page.getByRole("button",{name:"New chat"}).click();
     assert.equal(await answer.count(),0);
     await page.reload();
+    if(width===390){
+      await page.getByRole("region",{name:"Recent conversations"}).getByRole("button",{name:/How is the detachment/}).click();
+      await answer.getByRole("cell",{name:"98%"}).waitFor();
+      await input.focus();
+      await page.setViewportSize({width,height:460});
+      await page.waitForFunction(()=>{const r=document.querySelector(".chat-form textarea").getBoundingClientRect();return r.top>=0 && r.bottom<=460;},null,{timeout:4000});
+    }
     await recent.click();
     await page.getByRole("complementary",{name:"Recent chats"}).getByRole("button",{name:/How is the detachment/}).click();
     await answer.getByRole("cell",{name:"98%"}).waitFor();

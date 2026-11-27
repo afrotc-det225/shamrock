@@ -1734,3 +1734,19 @@ main:has(.matrix-scroll) { padding-bottom: 8px; }
   .event-toolbar > .toolbar-tool {min-width:40px}
   .event-toolbar > .toolbar-tool > span {display:none}
 }
+
+.mobile-recent {display:none}
+@media(max-width:640px){
+  .app:has(.chat-workspace) {height:var(--chat-visible-height,100dvh)}
+  .chat-main.empty-chat {justify-content:flex-end}
+  .mobile-recent {display:grid;align-content:start;overflow-y:auto;gap:.3rem;margin-block:auto;width:100%}
+  .mobile-recent h2 {font-size:1rem;margin:.5rem 0}
+  .mobile-recent .chat-link {display:flex;align-items:center;justify-content:space-between;gap:.5rem;text-align:left;min-height:44px;background:white;border:0;border-bottom:1px solid var(--border)}
+  .mobile-recent .chat-link span {min-width:0;overflow-wrap:anywhere}
+  .mobile-recent time {flex:none}
+  .chat-actions,.chat-form {flex:none}
+  .chat-actions button,.chat-form .chat-send {min-height:44px}
+  .chat-form .chat-send {min-width:44px}
+  .chat-form {margin-bottom:env(safe-area-inset-bottom)}
+  .chat-library {z-index:10;width:100%;max-height:min(22rem,50dvh)}
+}

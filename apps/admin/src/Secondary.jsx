@@ -114,6 +114,8 @@ function AssistantWorkspace({ meta }) {
   const input=useRef(null), inFlight=useRef(false);
   const [active,setActive]=useState(null), [chats,setChats]=useState([]), [showChats,setShowChats]=useState(false);
   const [opening,setOpening]=useState(false), [query,setQuery]=useState("");
+  const [historyState,setHistoryState]=useState("loading"), [historyAttempt,retryHistory]=useState(0);
+  const page=useRef(null);
   const historyMenu=useRef(null), historyToggle=useRef(null);
   useEffect(()=>{
     if(!showChats)return;
@@ -132,16 +134,41 @@ function AssistantWorkspace({ meta }) {
       document.removeEventListener("keydown",escape);
     };
   },[showChats]);
-  const threads=useRef(new Map());
   const hosted=meta.hosted && meta.assistantAvailable;
+  const threads=useRef(new Map()), lastHistoryRead=useRef(0);
+  function refreshStaleHistory(){
+    if(document.visibilityState==="visible" && Date.now()-lastHistoryRead.current>60000){
+      lastHistoryRead.current=Date.now();
+      retryHistory(n=>n+1);
+    }
+  }
+  useEffect(()=>{
+    if(!hosted)return;
+    document.addEventListener("visibilitychange",refreshStaleHistory);
+    return ()=>document.removeEventListener("visibilitychange",refreshStaleHistory);
+  },[hosted]);
   useEffect(()=>{
     if(!hosted)return;
     const controller=new AbortController();
+    lastHistoryRead.current=Date.now();
+    setHistoryState("loading");
     api("/chat/history",undefined,{signal:controller.signal}).then(({chats:stored})=>{
-      setChats(current=>[...current,...stored.filter(row=>!current.some(chat=>chat.id===row.id))]);
-    }).catch(()=>{if(!controller.signal.aborted)setError("Recent chats could not be loaded.");});
+      setHistoryState("ready");
+      setChats(current=>{
+        const byId=new Map(stored.map(row=>[row.id,row]));
+        for(const row of current)if(!byId.has(row.id) || row.at>byId.get(row.id).at)byId.set(row.id,row);
+        return [...byId.values()].sort((a,b)=>b.at-a.at);
+      });
+    }).catch(()=>{if(!controller.signal.aborted)setHistoryState("failed");});
     return ()=>controller.abort();
-  },[hosted]);
+  },[hosted,historyAttempt]);
+  useLayoutEffect(()=>{
+    const viewport=window.visualViewport, shell=page.current?.closest(".app");
+    if(!viewport || !shell)return;
+    function fit(){if(viewport.scale===1)shell.style.setProperty("--chat-visible-height",viewport.height+"px");}
+    fit();viewport.addEventListener("resize",fit);
+    return ()=>{viewport.removeEventListener("resize",fit);shell.style.removeProperty("--chat-visible-height");};
+  },[]);
   const log=useRef(null);
   useLayoutEffect(()=>{
     const field=input.current;
@@ -184,18 +211,23 @@ function AssistantWorkspace({ meta }) {
       setMessages(messages);setText(draft=>draft || question);setError(e.message);
     }finally{inFlight.current=false;setBusy(false);}
   }
-  return <section className="assistant-page">
+  const historyNotice=historyState==="loading" ? <small role="status">Loading recent chats…</small> :
+    historyState==="failed" ? <button type="button" onClick={()=>retryHistory(n=>n+1)}>Retry loading recent chats</button> :
+    !chats.length ? <small>No conversations yet.</small> : null;
+  function chatLink(row){
+    return <button key={row.id} className="chat-link" aria-current={active?.id===row.id ? "true" : undefined} disabled={busy || opening} onClick={()=>openChat(row)}>
+      <span>{row.title}</span><time dateTime={new Date(row.at).toISOString()}>{new Date(row.at).toLocaleDateString(undefined,{month:"short",day:"numeric"})}</time>
+    </button>;
+  }
+  return <section ref={page} className="assistant-page">
     <Heading title="Assistant" />
       <div className="chat-actions">
         <div ref={historyMenu} className="chat-history-menu">
-          <button ref={historyToggle} aria-controls="assistant-history" aria-expanded={showChats} onClick={()=>setShowChats(!showChats)}><MessagesSquare size={16}/>Recent chats</button>
+          <button ref={historyToggle} aria-controls="assistant-history" aria-expanded={showChats} onClick={()=>{if(!showChats && hosted)refreshStaleHistory();setShowChats(!showChats);}}><MessagesSquare size={16}/>Recent chats</button>
           <aside aria-label="Recent chats" id="assistant-history" className="chat-library" hidden={!showChats}>
             {chats.length>1 && <input type="search" aria-label="Search chat titles" placeholder="Search chats" value={query} onChange={e=>setQuery(e.target.value)}/>}
-            {!chats.length && <small>No conversations yet.</small>}
-            {chats.filter(row=>row.title.toLowerCase().includes(query.trim().toLowerCase())).map(row=>
-              <button key={row.id} className="chat-link" aria-current={active?.id===row.id ? "true" : undefined} disabled={busy || opening} onClick={()=>openChat(row)}>
-                <span>{row.title}</span><time dateTime={new Date(row.at).toISOString()}>{new Date(row.at).toLocaleDateString(undefined,{month:"short",day:"numeric"})}</time>
-              </button>)}
+            {historyNotice}
+            {chats.filter(row=>row.title.toLowerCase().includes(query.trim().toLowerCase())).map(chatLink)}
           </aside>
         </div>
         <button disabled={busy || opening} onClick={newChat}><SquarePen size={16}/>New chat</button>
@@ -204,6 +236,9 @@ function AssistantWorkspace({ meta }) {
 
     <div className={"chat-main"+(messages.length ? "" : " empty-chat")} aria-busy={opening}>
     {opening && <p role="status">Opening conversation…</p>}
+    {hosted && !messages.length && !showChats && <section className="mobile-recent" aria-label="Recent conversations">
+      <h2>Recent chats</h2>{historyNotice}{chats.slice(0,3).map(chatLink)}
+    </section>}
     <div ref={log} className="conversation" role="log" aria-label="Conversation">
       {messages.map((m,i)=><article key={i} className={"message "+m.role}>
         <span className="message-author">{m.role==="user" ? "You" : "SHAMROCK assistant"}</span>
