@@ -33,7 +33,7 @@ export function MaintenanceProposal({proposal:p,autoTest=false}) {
     setTimeout(()=>URL.revokeObjectURL(url),1000);
   };
   return <section><strong>{p.path} · {p.commit.slice(0,12)}</strong>
-    <details><summary>Review proposed edit</summary><p>Current</p><pre>{p.before}</pre><p>Proposed</p><pre>{p.after || "(remove)"}</pre></details>
+    <details><summary>Review proposed edit</summary>{p.routing && <p>Routed by {p.routing} · GPT-5.3-Codex</p>}<p>Current</p><pre>{p.before}</pre><p>Proposed</p><pre>{p.after || "(remove)"}</pre></details>
     <button onClick={download}>Download proposed file</button>
     <button onClick={downloadJob}>Download repository test job</button>
     {Object.hasOwn(runnable,p.area) ? <button disabled={status==="Running…"} onClick={run}>Test with fictional data</button>

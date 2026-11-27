@@ -85,7 +85,7 @@ async function classify(env,history,send){
     const result=JSON.parse(await dispatch(env,fallback,send,9000,20000));
     if(!Object.hasOwn(types,result.type) || !(result.area==="none" || names.includes(result.area)))
       throw new PanelError("ASSISTANT_ROUTE","Could not determine the task.",503);
-    return {type:result.type,areas:result.area==="none" ? [] : [result.area]};
+    return {router:"Responses fallback",type:result.type,areas:result.area==="none" ? [] : [result.area]};
   }
   if(!response.ok)throw new PanelError("ASSISTANT_ROUTE","OpenAI Decisions is unavailable for this project ("+response.status+").",503);
   const {answers} = await response.json();
@@ -94,7 +94,7 @@ async function classify(env,history,send){
   const area = names.find((_,i)=>source==="area_"+i);
   if(!Object.hasOwn(types,type) || (!area && source!=="none"))
     throw new PanelError("ASSISTANT_ROUTE","Could not determine the task. Please rephrase it.",503);
-  return {type,areas:area ? [area] : []};
+  return {router:"Decisions",type,areas:area ? [area] : []};
 }
 
 export async function answer(env, body, guide, send = fetch, readCharts) {
@@ -124,7 +124,11 @@ export async function answer(env, body, guide, send = fetch, readCharts) {
   }else if(route.type==="patch" && area && catalog?.files?.[area]){
     Object.assign(request,maintenanceRequest(area,JSON.stringify(history),catalog),{model:"gpt-5.3-codex",reasoning:{effort:"low"},max_output_tokens:2200});
     const content=await dispatch(env,request,send,40000,75000);
-    try{return proposalResult(area,content,catalog);}catch{throw new PanelError("ASSISTANT_PROPOSAL","The assistant returned an unreadable proposal.",503);}
+    try{
+      const reply=proposalResult(area,content,catalog);
+      if(reply.proposal)reply.proposal.routing=route.router;
+      return reply;
+    }catch{throw new PanelError("ASSISTANT_PROPOSAL","The assistant returned an unreadable proposal.",503);}
   }else if(route.type==="patch"){
     return {content:"Which SHAMROCK page or workflow should change, and what should it do differently?"};
   }else{

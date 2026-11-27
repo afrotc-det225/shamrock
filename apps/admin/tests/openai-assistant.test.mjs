@@ -65,6 +65,7 @@ test("maintenance charges three slots against existing reservations and binds th
   const r=await answer(config,{mode:"maintenance",area,messages},"Guide",send);
   assert.deepEqual(r.proposal.example,{args:[{}],expected:[]});
   assert.equal(r.proposal.source,source);
+  assert.equal(r.proposal.routing,"Decisions");
   await assert.rejects(answer(config,{messages},"Guide",async()=>respond(JSON.stringify({type:"patch",areas:["../secrets"]}))));
 });
 

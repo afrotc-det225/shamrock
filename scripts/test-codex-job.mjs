@@ -30,7 +30,7 @@ try{
   const image="node:26-bookworm";
   docker("volume","create",volume);
   docker(...run,"-v",resolve(dir)+":/input:ro",image,"sh","-ec",
-    "tar xf /input/source.tar && npm ci && npm --prefix apps/admin ci");
+    "tar xf /input/source.tar && git init -q && git add . && git -c user.name=Fixture -c user.email=fixture@invalid commit -qm baseline && npm ci --no-audit && npm --prefix apps/admin ci --no-audit");
   const test="npm run check && npm --prefix apps/admin run build:domain && npm --prefix apps/admin test && npm --prefix apps/admin run build";
   docker(...run,"--network=none",image,"sh","-ec",test);
   docker(...run,"--network=none","-v",resolve(dir)+":/input:ro",image,"sh","-ec",
