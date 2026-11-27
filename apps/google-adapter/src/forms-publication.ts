@@ -38,7 +38,7 @@ export interface ManagedFormBinding {
   attendanceProfiles?: Record<string, FormRosterFilter>;
   attendanceLayout?: AttendanceLayout;
 }
-export type RetainedChoice = { editionId: string; questionId: string } & (
+export type RetainedChoice = { editionId: string; questionId: string; label?: string } & (
   { kind: 'category'; key: string }
   | { kind: 'scope-group'; key: string; scopes: FrozenFormScope[] }
   | { kind: 'event'; eventId: string; expectedEventVersion: number }
@@ -122,7 +122,7 @@ function choiceCandidates(snapshot: FormCatalogSnapshot, source: FormChoiceSourc
   }
   return choices;
 }
-export function planNativeFormPublication(input: { snapshot: FormCatalogSnapshot; binding: ManagedFormBinding; current: NativeFormRead; signer: Signer; previousEdition?: FormEdition }): NativeFormPlan {
+export function planNativeFormPublication(input: { snapshot: FormCatalogSnapshot; binding: ManagedFormBinding; current: NativeFormRead; signer: Signer; previousEdition?: FormEdition; plainLabels?: boolean }): NativeFormPlan {
   const { snapshot, signer } = input;
   const configured = input.binding, original = input.current;
   const expanded = configured.attendanceLayout ? expandAttendanceLayout(snapshot, configured, original, signer, input.previousEdition) : undefined;
@@ -133,7 +133,7 @@ export function planNativeFormPublication(input: { snapshot: FormCatalogSnapshot
     || binding.choices.length > (binding.attendanceLayout ? 250 : 150) || new Set(binding.choices.map(b => b.itemId)).size !== binding.choices.length) fail('Existing verified Form bindings differ from the reviewed resource.');
   const term = snapshot.terms.filter(t => t.isCurrent); if (term.length !== 1) fail('A single current term is required.');
   const attendanceScopes = Object.fromEntries(Object.entries(binding.attendanceProfiles ?? {}).map(([key, filter]) => [key, frozenScopes(snapshot, filter)]));
-  const editionId = hash(signer, { generation: snapshot.generation, binding, attendanceScopes, choices: binding.choices.map(b => choiceCandidates(snapshot, b.source, binding.key, term[0].termId)), people: binding.key === 'directory' ? snapshot.people : [] });
+  const editionId = hash(signer, { ...(input.plainLabels ? {plainLabels: true} : {}), generation: snapshot.generation, binding, attendanceScopes, choices: binding.choices.map(b => choiceCandidates(snapshot, b.source, binding.key, term[0].termId)), people: binding.key === 'directory' ? snapshot.people : [] });
   const edition: FormEdition = { editionId, formId: binding.formId, resourceKey: binding.resourceKey, generation: snapshot.generation,
     revision: copy(snapshot.revision), references: {}, attendanceScopes, ...(expanded ? { attendanceRules: copy(expanded.rules), attendanceChoices: copy(binding.choices.filter(c => c.source.kind === 'people')) } : {}), people: binding.key === 'directory' ? copy(snapshot.people) : [] };
   const after = copy(current); after.acceptingResponses = false;
@@ -147,15 +147,17 @@ export function planNativeFormPublication(input: { snapshot: FormCatalogSnapshot
     if (!b.navigation && !b.navigationDefault && q.choiceQuestion.options?.some((o: any) => o.goToSectionId || o.goToAction)) fail('Existing branching requires explicit stable destination bindings.');
     const choices = choiceCandidates(snapshot, b.source, binding.key, term[0].termId);
     if (choices.length > 500) fail('A native choice list exceeds the reviewed capacity.');
+    if (input.plainLabels && new Set(choices.map(choice => choice.label)).size !== choices.length)
+      fail('Two choices have the same visible label in one question. Disambiguate the catalog before publishing.');
     const options = choices.map(({ label, key, reference }) => {
       if (!label || label.length > 500) fail('A choice label exceeds its bound.');
       const token = hash(signer, { editionId, questionId: b.questionId, reference }).slice(0, 12);
       if (edition.references[token]) fail('A short Form reference collided; publication needs review.');
-      edition.references[token] = { ...reference, editionId, questionId: b.questionId } as RetainedChoice;
+      edition.references[token] = { ...reference, ...(input.plainLabels ? {label} : {}), editionId, questionId: b.questionId } as RetainedChoice;
       const navigation = b.navigation?.[key] ?? b.navigationDefault;
       if ((b.navigation || b.navigationDefault) && !navigation) fail('A new branch requires an explicitly bound existing destination.');
       if (navigation && 'goToSectionId' in navigation && !current.items.some(i => i.itemId === navigation.goToSectionId && i.pageBreakItem)) fail('A native branch target is missing.');
-      return { value: `${label} [sr:${token}]`, ...(navigation ?? {}) };
+      return { value: input.plainLabels ? label : `${label} [sr:${token}]`, ...(navigation ?? {}) };
     });
     if (!options.length) { options.push({ value: 'No available choices — contact the Wing staff' }); if (q.required && !b.canBeEmpty) canAccept = false; }
     // Never rewrite/delete/move questions, response destinations, settings, images or other unowned metadata.

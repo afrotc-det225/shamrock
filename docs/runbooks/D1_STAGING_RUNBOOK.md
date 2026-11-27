@@ -281,3 +281,11 @@ The baseline continuation is the final delivered person and event pair. Use it w
 My profile and My attendance each request their own section. Both verify current identity, enrollment and leadership in the same D1 transaction as the records. Schema 18 maintains grouped attendance facts and directory picker fields as source rows change. Access decisions are always evaluated against the current grants and assignments. A View as entry is audited, and its target profile rechecks the open entry. The picker requires a current Wing permission manager.
 
 To measure cold access, record the D1 rows-read response header for each section and for the picker, audited entry and first target profile. Also account for session database work when measuring the browser journey. Check a revoked assignment and a closed preview before accepting a release.
+
+### Respondent-facing choices and excusal queue formatting
+
+The real-data Forms display the event, flight, cadet or Directory option by name. The private Forms checkpoint records when each choice edition became active. Intake resolves each answer against its original Form, question and submission time, including delayed retries. Earlier submissions retain their original references. A missing edition or unrecognized choice sends the submission to review. Give choices within the same question distinct names before publication.
+
+To convert an existing catalog, close intake, retain the current Form definitions and private checkpoint, and match each existing choice to its reference in the published edition. Update only the choice values using a required revision ID. Verify all choices and branch destinations before saving the clean publication fingerprints, initial label mappings and activation times in the private checkpoint. Resume through the normal controls after verification.
+
+Blue and Gold use native alternating table bands. The timestamp column displays the submitted local date and time. Newly allocated queue rows inherit these formats, including when an existing table grows.

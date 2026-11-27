@@ -106,6 +106,10 @@ test('new decision rows inherit the native arrow rule and require targeted valid
   const table = buildExcusalPublicationTables(binding(snapshot()))[0], input = excusalInput(table);
   const added = structuredClone(table.rows[0]); added.key = 'request-second'; added.values.request_id = added.key; added.values.decision = null; added.versions.decision = 1; added.commandBindings.decision = { operation: 'excusal.decide', entityId: added.key, field: 'decision', expectedVersion: 1 }; table.rows.push(added);
   const plan = planExcusalPublication(input); assert.equal(plan.validationExpectations.length, 1);
+  const formats = plan.requests.filter(request => request.repeatCell).map(request => request.repeatCell);
+  assert.equal(formats.length, 2);
+  assert.ok(formats.every(format => format.range.startRowIndex === input.current.range.endRowIndex));
+  assert.equal(formats[1].cell.userEnteredFormat.numberFormat.type, 'DATE_TIME');
   const [{ expectedRule, ...range }] = plan.validationExpectations;
   assert.equal(verifyFrontendValidationReadback(plan, [{ ...range, rows: [[expectedRule]] }]), true);
   assert.equal(verifyFrontendValidationReadback(plan, [{ ...range, rows: [[null]] }]), false);

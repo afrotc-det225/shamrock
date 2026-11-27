@@ -9,6 +9,8 @@ export interface FormsClaim { effectId: string; claimToken: string; kind: 'forms
 export interface FormsState {
   version: 1; environment: 'local' | 'staging'; generation: number;
   editions: Record<string, FormEdition>; current: Record<string, string>;
+  /** Closed-window activation times; delayed triggers resolve the edition visible at submission. */
+  choiceWindows?: Record<string, { from: number; editionId: string; initialLabels?: Record<string, string> }[]>;
   published?: Record<string, string>;
   canAccept?: Record<string, boolean>;
   claim?: FormsClaim;
@@ -88,7 +90,7 @@ export function consumeFormsRefresh(io: FormsRefreshPorts): { status: 'disabled'
         if (projected.effect.effectId !== claim.effectId || projected.effect.kind !== 'forms.refresh' || projected.snapshot.environment !== io.config.environment || projected.snapshot.generation !== io.config.generation) fail('forms_snapshot', 'Form publication requires one coherent matching snapshot.');
         if (io.closedWindow && formsCanonical(projected.snapshot.revision) !== formsCanonical(io.closedWindow.revision)) fail('forms_snapshot', 'The reviewed Form revision has changed.');
         const reads = bindings.map(b => io.forms.read(b));
-        const plans = bindings.map((binding, i) => planNativeFormPublication({ snapshot: projected.snapshot, binding, current: reads[i], signer: io.signer, previousEdition: state.editions[state.current[binding.key]] }));
+        const plans = bindings.map((binding, i) => planNativeFormPublication({ snapshot: projected.snapshot, binding, current: reads[i], signer: io.signer, plainLabels: !!state.choiceWindows?.[binding.key], previousEdition: state.editions[state.current[binding.key]] }));
         // Catalog history is frozen alongside the plans before a respondent can see a new token.
         if(io.retainCatalog)state.editions=io.retainCatalog(state,plans.map(p=>p.edition));
         else for (const plan of plans) state.editions = retainFormEdition(state.editions, plan.edition);
@@ -108,7 +110,7 @@ export function consumeFormsRefresh(io: FormsRefreshPorts): { status: 'disabled'
               projected.snapshot.generation !== io.config.generation || projected.snapshot.environment !== io.config.environment ||
               formsCanonical(projected.snapshot.revision) !== formsCanonical(io.closedWindow.revision)) fail('forms_snapshot', 'The original publication revision is required.');
           const original = {...JSON.parse(plan.expectedBefore), revisionId:plan.requiredRevisionId, acceptingResponses:false};
-          const replacement = planNativeFormPublication({snapshot:projected.snapshot, binding:plan.binding, current:original, signer:io.signer});
+          const replacement = planNativeFormPublication({snapshot:projected.snapshot, binding:plan.binding, current:original, signer:io.signer, plainLabels:!!state.choiceWindows?.[plan.binding.key]});
           // Existing items are verified above. Only the edition-dependent options need rewriting.
           replacement.requests = replacement.requests.filter(request => !request.createItem);
           if (replacement.requests.some(request => (request.updateItem as {updateMask?:string})?.updateMask !== 'questionItem.question.choiceQuestion.options')) fail('forms_state', 'Unexpected layout recovery mutation.');
@@ -138,7 +140,10 @@ export function consumeFormsRefresh(io: FormsRefreshPorts): { status: 'disabled'
       for (const plan of pending.plans) if (!verifyNativeFormPlan(plan, io.forms.read(plan.binding))) fail('forms_readback', 'One Form changed before the shared checkpoint.');
       state.published ??= {};
       state.canAccept ??= {};
-      for (const plan of pending.plans) { state.current[plan.binding.key] = plan.edition.editionId; state.published[plan.binding.key] = formReadFingerprint(plan.expectedAfter); state.canAccept[plan.binding.key] = plan.canAccept; }
+      for (const plan of pending.plans) {
+        const windows = state.choiceWindows?.[plan.binding.key];
+        if (windows && windows.at(-1)?.editionId !== plan.edition.editionId) windows.push({from: io.now(), editionId: plan.edition.editionId});
+        state.current[plan.binding.key] = plan.edition.editionId; state.published[plan.binding.key] = formReadFingerprint(plan.expectedAfter); state.canAccept[plan.binding.key] = plan.canAccept; }
       state.completed = { claim: copy(claim), reopen: Object.fromEntries(pending.plans.map(p => [p.binding.key, pending.previouslyAccepting[p.binding.key] && p.canAccept])), ...(io.closedWindow ? {closedRevision: copy(io.closedWindow.revision)} : {}) };
       delete state.pending; save();
     }
