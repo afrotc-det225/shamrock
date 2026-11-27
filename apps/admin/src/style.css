@@ -1832,3 +1832,23 @@ main:has(.matrix-scroll) { padding-bottom: 8px; }
   .personal-excusals .personal-decision::before {content:"Decision · ";font-weight:600}
   .personal-excusals .empty-decision {display:none}
 }
+
+/* A fixed row rhythm at each table zoom, including rows with a photo or a long name. */
+.cadet-roster tbody td,.member-directory tbody td {
+  box-sizing:border-box;height:4rem;padding-block:.25rem;vertical-align:middle
+}
+.cadet-roster .person-cell .text-button,.cadet-roster .roster-value {
+  display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;
+  line-height:1.15rem
+}
+.cadet-roster .roster-value {max-width:21rem;overflow-wrap:anywhere}
+.cadet-roster .roster-value > .profile-tag {
+  display:-webkit-inline-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;max-width:100%;
+  line-height:1.15rem;vertical-align:middle
+}
+.cadet-roster .roster-value:has(.photo-trigger) {display:inline-flex;overflow:visible}
+.cadet-roster:not(.with-cadet) td:first-child .roster-value {display:inline-block;vertical-align:middle;white-space:nowrap;text-overflow:ellipsis}
+.cadet-roster:not(.with-cadet) td:first-child {white-space:nowrap}
+.cadet-roster .person-cell small {line-height:1rem;margin-top:.1rem}
+.member-directory table {width:max-content;min-width:100%}
+.member-directory tbody td {height:2.75rem;white-space:nowrap}

@@ -310,7 +310,7 @@ export default function People({
               <div className="person-cell">
                 <DirectoryPhoto avatar value={p.photoLink} person={p} />
                 <span>
-                  <button className="text-button" disabled={readOnly} onClick={() => open(p)}>
+                  <button className="text-button" disabled={readOnly} title={name(p)} onClick={() => open(p)}>
                     {name(p)}
                   </button>
                   <small>{p.rank}</small>
@@ -329,10 +329,10 @@ export default function People({
                 const formation=key==="flight" || key==="asYear";
                 const style=key==="flight" ? cellStyle(flightColors(value,squadronOf(flightOf(p)))) :
                   key==="asYear" ? cellStyle(yearColors(value)) : undefined;
-                return <td key={key} className={formation ? "formation" : undefined} style={style}>
-                  {formation ? value || (key==="flight" ? "Unassigned" : "—") :
+                return <td key={key} title={key === "photoLink" ? undefined : String(value || "")} className={formation ? "formation" : undefined} style={style}>
+                  <span className="roster-value">{formation ? value || (key==="flight" ? "Unassigned" : "—") :
                     key==="flightPathStatus" ? <span className="status" style={cellStyle(flightPathColors(value))}>{value || "—"}</span> :
-                    <DirectoryValue field={key} value={value} person={p}/>}
+                    <DirectoryValue field={key} value={value} person={p}/>}</span>
                   {key===columns[0] && !readOnly && editButton}
                 </td>;
               })

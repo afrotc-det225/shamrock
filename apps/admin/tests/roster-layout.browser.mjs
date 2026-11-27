@@ -63,6 +63,10 @@ try {
       assert(await page.evaluate(() => scrollY > 0 || document.querySelector(".table-scroll")?.scrollTop > 0));
       assert.equal(start[0],0);
       assert(start[3] <= 240);
+      if (path==="cadets") {
+        const heights=await page.locator(".cadet-roster tbody tr").evaluateAll(rows=>rows.map(row=>row.getBoundingClientRect().height));
+        assert(Math.max(...heights)-Math.min(...heights)<=1, "uniform desktop rows: "+[Math.min(...heights),Math.max(...heights)]);
+      }
       start.forEach((value,i) => assert(Math.abs(value-end[i]) < 1,`${path} at ${width}px, metric ${i}`));
     }
     if (path==="cadets") {
@@ -84,7 +88,13 @@ try {
       const photo=editor.getByRole("button",{name:"Preview photo of Sample Cadet 0"});
       assert((await photo.boundingBox()).height>=44);
       await photo.click();
-      await page.getByRole("dialog",{name:"Photo of Sample Cadet 0"}).getByLabel("Close preview").click();
+      const editorPhoto=page.getByRole("dialog",{name:"Photo of Sample Cadet 0"});
+      await editorPhoto.locator("img").click();
+      assert(await editorPhoto.isVisible());
+      await page.mouse.click(3,3);
+      await editorPhoto.waitFor({state:"detached"});
+      assert(await editor.isVisible());
+      assert(await photo.evaluate(el=>el===document.activeElement));
       await editor.getByRole("button",{name:"Close editor"}).click();
       const failedRow = page.getByRole("row").filter({has:page.getByRole("button",{name:"Sample Cadet 1",exact:true})});
       await failedRow.locator(".directory-avatar").getByText("SC").waitFor();
@@ -145,6 +155,10 @@ try {
         await filters.click();
         await page.getByLabel("Find a cadet",{exact:true}).fill("Sample");
         assert.equal(await page.locator(".search-count").textContent(),"27 matches");
+      }
+      if(path==="cadets"){
+        const heights=await page.locator(".cadet-roster tbody tr").evaluateAll(rows=>rows.map(row=>row.getBoundingClientRect().height));
+        assert(Math.max(...heights)-Math.min(...heights)<=1, "uniform phone rows: "+[Math.min(...heights),Math.max(...heights)]);
       }
       assert(await page.locator(".person-cell .text-button").evaluateAll(elements=>elements.every(el=>{
         const td=el.closest("td").getBoundingClientRect(), box=el.getBoundingClientRect();

@@ -85,6 +85,7 @@ try {
       await heading(role==="Flight" ? "My Flight" : tabs.length ? "My excusals" : "Create profile").waitFor();
       await openNavigation(page);
       assert.deepEqual(await nav.getByRole("link").allTextContents(), tabs);
+      assert.equal(await page.getByRole("link",{name:"View as administrator"}).count(),0);
       if (width === 390) await page.keyboard.press("Escape");
       if(role==="Flight"){
         await page.getByRole("cell",{name:"Excused",exact:true}).waitFor();
@@ -197,7 +198,11 @@ try {
         assert.equal(await page.getByRole("link",{name:"Open original photo"}).count(),0);
         await page.getByRole("button",{name:"Preview photo of Sample Cadet"}).click();
         assert.equal(await page.getByRole("link",{name:"Open original photo"}).getAttribute("href"), "https://drive.google.com/file/d/fictional-photo/view");
-        await page.getByRole("button",{name:"Close preview"}).click();
+        const previewDialog=page.getByRole("dialog",{name:"Photo of Sample Cadet"});
+        const box=await previewDialog.boundingBox();
+        if(width===390) await page.touchscreen.tap(2,Math.max(1,box.y-2));
+        else await page.keyboard.press("Escape");
+        await previewDialog.waitFor({state:"detached"});
         assert.equal(new URL(page.url()).pathname,"/me/profile");
         await page.goBack();
         await heading("My excusals").waitFor();
@@ -286,7 +291,7 @@ try {
   // pages in one menu and session, including via browser history.
   for (const width of [1440,390]) {
     const page=await browser.newPage({viewport:{width,height:850}});
-    let sessions=0, documents=0;
+    let sessions=0, documents=0, full=false, failMenu=false;
     page.on("request",r=>{if(r.resourceType()==="document") documents++;});
     await page.route("**/api/**",route=>{
       const url=new URL(route.request().url());
@@ -294,11 +299,17 @@ try {
         sessions++;
         return route.fulfill({json:{hosted:true,csrf:"fixture",cadetWorkspace:true,schoolLogin:false}});
       }
+      if(url.pathname==="/api/navigation" && failMenu)return route.fulfill({status:503,json:{error:{message:"Unavailable"}}});
       if(url.pathname==="/api/navigation")return route.fulfill({json:url.searchParams.get("include")==="personal"
-        ? {personal:{flightCommander:true,squadron:false}} : {leadership:{full:false,canViewAs:false}}});
+        ? {personal:{flightCommander:true,squadron:false}} : {leadership:{full,canViewAs:full}}});
       if(url.pathname==="/api/cadet")return route.fulfill({json:{
         linked:true,writable:true,profile:{personId:"fixture",flightId:"alpha"},flights:[],requests:[],actions:[],events:[],flightCommander:true,
       }});
+      if(url.pathname==="/api/state" && full)return route.fulfill({json:{
+        meta:{hosted:true,viewAsEnabled:true},manifest:{access:{capabilities:{fullSnapshot:true,canViewAs:true}}},
+        browse:{profile:"overview"},overview:{activeCadets:4},birthdayCalendar:[]
+      }});
+      if(url.pathname==="/api/wing-charts")return route.fulfill({json:{history:[]}});
       if(url.pathname==="/api/state")return route.fulfill({json:{
         meta:{hosted:true},manifest:{access:{capabilities:{fullSnapshot:false}}},browse:{profile:"excusals"},
         list:{access:{capabilities:{fullSnapshot:false}},people:[],events:[],terms:[],flights:[],requests:[]},
@@ -325,6 +336,22 @@ try {
     await page.getByText("No requests match these filters.").waitFor();
     assert.equal(sessions,1);
     assert.equal(documents,1);
+    full=true; failMenu=true;
+    await page.goto(origin+"/me/requests");
+    await page.getByRole("heading",{name:"My excusals",level:1}).waitFor();
+    await openNavigation(page);
+    assert.equal(await page.getByRole("button",{name:"Retry loading menu"}).count(),0);
+    assert.equal(await page.getByRole("link",{name:"View as administrator"}).count(),0);
+    failMenu=false;
+    await page.evaluate(()=>window.dispatchEvent(new Event("online")));
+    const switcher=page.getByRole("link",{name:"View as administrator",exact:true});
+    await switcher.click();
+    await page.getByRole("heading",{name:"Overview",level:1}).waitFor();
+    assert.equal(new URL(page.url()).pathname,"/overview");
+    await openNavigation(page);
+    await page.getByRole("button",{name:"View as",exact:true}).waitFor();
+    await page.getByRole("link",{name:"Assistant",exact:true}).waitFor();
+    assert.equal(sessions,2,"switch keeps the same sign-in");
     await page.close();
   }
   console.log("Cadet, Flight, Squadron, registration and delegated cadet workspace passed on desktop and phone.");

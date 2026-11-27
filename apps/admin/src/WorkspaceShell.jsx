@@ -1,5 +1,5 @@
 import React, {useContext, useEffect, useLayoutEffect, useRef, useState} from "react";
-import {Menu, Sparkles, UserRound, X} from "lucide-react";
+import {Menu, Shield, Sparkles, UserRound, X} from "lucide-react";
 import Brand from "./Brand";
 import {usePhone} from "./use-phone";
 import {EditorSuspended} from "./components";
@@ -40,19 +40,20 @@ export default function WorkspaceShell({ workspace="leadership", pages, page, na
     if (suspended && menu.current?.open) menu.current.close();
   }, [mobile, suspended]);
   const include = workspace === "cadet" ? "leadership" : "personal";
-  const dual = session && !session.schoolLogin && (preview ? preview.status === "ready" && session.hosted : session.cadetWorkspace);
+  const dual = session && !session.schoolLogin && (preview ? preview.status === "ready" && session.hosted : (session.cadetWorkspace || workspace === "cadet" && session.hosted));
   const key = dual ? include + "/" + (preview?.entryAuditId || "self") : null;
-  const [result, setResult] = useState(null), [retry, setRetry] = useState(0);
+  const [navigation, setNavigation] = useState(null);
   useEffect(() => {
     if (!key) return;
     const controller = new AbortController();
-    api("/navigation?include="+include, undefined, {signal:controller.signal})
-      .then(value => { if (!controller.signal.aborted) setResult({key,value}); })
-      .catch(() => { if (!controller.signal.aborted) setResult({key,error:true}); });
-    return () => controller.abort();
-  }, [key,include,retry]);
-  const navigation = key && result?.key === key ? result : null;
-  const other = navigation?.value;
+    const load = () => api("/navigation?include="+include, undefined, {signal:controller.signal})
+      .then(value => { if (!controller.signal.aborted) setNavigation({key,value}); })
+      .catch(() => { if (!controller.signal.aborted) setNavigation(null); });
+    load();
+    window.addEventListener("online",load);
+    return () => { controller.abort(); window.removeEventListener("online",load); };
+  }, [key,include]);
+  const other = key && navigation?.key === key ? navigation.value : null;
   const personal = workspace === "cadet" ? pages : other?.personal?.registration
     ? [["My profile",UserRound]] : personalPages(other?.personal);
   const leadership = workspace === "leadership" ? pages : other?.leadership ? leadershipPages(other.leadership.full,preview) : [];
@@ -76,7 +77,10 @@ export default function WorkspaceShell({ workspace="leadership", pages, page, na
       ))}
     </nav>
     <div className="sidebar-bottom">
-      {navigation?.error && <button onClick={()=>setRetry(v=>v+1)}>Retry loading menu</button>}
+      {workspace === "cadet" && other?.leadership?.full && !preview &&
+        <PageLink workspace="leadership" title="Overview" navigate={name=>openPage("leadership",name)}>
+          <Shield size={18} aria-hidden="true"/>View as administrator
+        </PageLink>}
       {other?.leadership?.canViewAs && <ViewAsSelector onSelect={async person=>{
         try {
           const result=await api("/view-as",{personId:person.personId});

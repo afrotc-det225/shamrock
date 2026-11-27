@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useLayoutEffect, useRef, useState } from "react";
 
 import { createPortal } from "react-dom";
 import { ExternalLink, Image as PhotoIcon, X } from "lucide-react";
@@ -37,16 +37,25 @@ export function useDirectoryPhoto(value, size, personId, portrait) {
   return { source, src:src === failed ? null : src, onError };
 }
 
-function PhotoPreview({source, src, onError, name, onClose}) {
+function PhotoPreview({source, src, onError, name, opener, onClose}) {
   const ref=useRef(null);
+  const backdropPress=useRef(false);
+  const outside = event => {
+    if (event.target !== event.currentTarget) return false;
+    const box=event.currentTarget.getBoundingClientRect();
+    return event.clientX < box.left || event.clientX >= box.right || event.clientY < box.top || event.clientY >= box.bottom;
+  };
   const previewSrc = src && src === source.direct ? new URL(src) : null;
   previewSrc?.searchParams.set("sz","w960");
-  useEffect(()=>{
+  useLayoutEffect(()=>{
     const dialog=ref.current;
+    const trigger=opener.current;
     dialog.showModal();
-    return ()=>dialog.close();
-  },[]);
+    return ()=>{dialog.close(); if (trigger?.isConnected) trigger.focus({preventScroll:true});};
+  },[opener]);
   return createPortal(<dialog ref={ref} className="portrait-preview" aria-label={"Photo of "+name}
+    onPointerDown={e=>{backdropPress.current=outside(e);}}
+    onClick={e=>{if(backdropPress.current && outside(e)) onClose(); backdropPress.current=false;}}
     onCancel={e=>{e.preventDefault();onClose();}}>
     <header><strong>{name}</strong><a className="photo-original" href={source.href} target="_blank" rel="noreferrer" aria-label="Open original photo" title="Open original photo"><ExternalLink size={16}/></a><button type="button" aria-label="Close preview" onClick={onClose}><X size={18}/></button></header>
     {src ? <img src={previewSrc?.href || src} alt={name} referrerPolicy="no-referrer" onError={onError}/> :
@@ -57,6 +66,7 @@ function PhotoPreview({source, src, onError, name, onClose}) {
 
 export function DirectoryPhoto({ value, person, avatar = false, portrait = false, personId = person?.personId }) {
   const {source,src,onError}=useDirectoryPhoto(value, avatar ? 96 : 320, personId, portrait ? person?.portrait : undefined);
+  const opener=useRef(null);
   const [opened,setOpened]=useState(null);
   const name=[person?.firstName, person?.lastName].filter(Boolean).join(" ") || "Directory portrait";
   const initials=[person?.firstName,person?.lastName].map(n=>n?.trim()[0]).join("") || "–";
@@ -64,7 +74,7 @@ export function DirectoryPhoto({ value, person, avatar = false, portrait = false
   const appearance=portrait ? "profile-portrait" : avatar ? "initials directory-avatar" : "directory-photo";
   if(!source)return avatar || portrait ? <span className={appearance}>{content}</span> : null;
   return <>
-    <button type="button" className={appearance+" photo-trigger"} aria-label={"Preview photo of "+name} aria-haspopup="dialog" onClick={()=>setOpened(source.href)}>{avatar || portrait ? content : <><PhotoIcon size={16}/>View photo</>}</button>
-    {opened===source.href && <PhotoPreview source={source} src={src} name={name} onError={onError} onClose={()=>setOpened(null)}/>}
+    <button ref={opener} type="button" className={appearance+" photo-trigger"} aria-label={"Preview photo of "+name} aria-haspopup="dialog" onClick={()=>setOpened(source.href)}>{avatar || portrait ? content : <><PhotoIcon size={16}/>View photo</>}</button>
+    {opened===source.href && <PhotoPreview opener={opener} source={source} src={src} name={name} onError={onError} onClose={()=>setOpened(null)}/>}
   </>;
 }

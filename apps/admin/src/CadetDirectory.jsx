@@ -23,7 +23,7 @@ export default function CadetDirectory({rows}) {
         {zoom.control}
       </ToolbarFilters>
     </div></section>
-    {roster.length ? <Table zoom={zoom.scale} headers={["Cadet","AS year","Flight","Squadron",...directoryFields.map(([,label])=>label)]}>
+    {roster.length ? <Table className="member-directory" zoom={zoom.scale} headers={["Cadet","AS year","Flight","Squadron",...directoryFields.map(([,label])=>label)]}>
       {roster.map(row => <tr key={row.personId}><td>{row.rank} {row.firstName} {row.lastName}</td>
         <td style={cellStyle(yearColors(row.asYear))}>{row.asYear}</td>
         <td style={cellStyle(flightColors(row.flight,row.squadron))}>{row.flight}</td>

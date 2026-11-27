@@ -545,7 +545,7 @@ export default function CadetWorkspace({ session }) {
       {preview && <ViewAsAccount acting={state?.readOnly === false} label={name || "selected cadet"} busy={busy} onExit={async () => {
         try {
           await api("/view-as", { personId: null });
-          location.assign("/");
+          location.assign("/overview");
         } catch (e) { setError(e.message); }
       }} />}
       <p>
