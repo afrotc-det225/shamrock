@@ -1,5 +1,7 @@
 # D1 prototype: development and handoff
 
+For a production transition that retains the existing Google bookmarks, use the [in-place adoption rehearsal and cutover order](D1_PRODUCTION_CUTOVER.md).
+
 Status: isolated local, Cloudflare and Google staging implementation, not a production replacement. The current source includes native Forms and spreadsheet workflows, real-data import/reconciliation tools, bounded current/historical reporting, reviewed operational administration, and independently gated maintenance consumers. Production remains on the supported `src/` Apps Script system. No D1 cutover is authorized by these capabilities or the staging results below.
 
 Use the private operations record and live readback to establish each deployment's source, schema, bindings, gates and completed rehearsals. The dated milestones in this document retain their original evidence; their release pins, test counts and pause observations are not assertions about the current deployment. Authorized real-data staging uses a separate private dataset and suppresses operational recipients; fictional smoke fixtures remain separate.

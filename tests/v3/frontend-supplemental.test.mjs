@@ -233,3 +233,83 @@ test('chart comparison rejects ambiguous axis positions even when both inputs re
     assert.equal(equivalentDashboardChart(changed, structuredClone(changed)), false);
   }
 });
+
+test('adopted historical excusals keep their original values and cannot receive new decisions', () => {
+  const table = buildExcusalPublicationTables(binding(snapshot()))[0],
+    input = excusalInput(table);
+  const row = input.baseline.rows[0];
+  input.baseline.slots = { headers: input.current.headers, keys: [row.key] };
+  Object.assign(row, {
+    retired: true,
+    retainedLegacyExcusal: true,
+    readonlyHeaders: [...input.current.headers],
+    commandBindings: {}
+  });
+  assert.throws(() => planExcusalPublication(input), /read-only slot/);
+  input.table = { ...table, rows: [] };
+  const first = planExcusalPublication(input);
+  const retry = planExcusalPublication({ ...input, baseline: first.nextBaseline, current: first.expectedAfter });
+  assert.deepEqual(retry.expectedAfter.rows, input.current.rows);
+  assert.equal(retry.nextBaseline.rows[0].retainedLegacyExcusal, true);
+  input.current.rows[0][1] = frontendLiteralCell('Denied');
+  assert.throws(() => planExcusalPublication(input), /changed and needs review/);
+});
+
+test('Dashboard adoption uses original chart IDs and rebinds the links on the legacy canvas', async () => {
+  const { prepareNativeDashboard, verifyAdoptedDashboard } = await import('../../scripts/lib/native-cutover-dashboard.mjs');
+  const { importDigest } = await import('../../scripts/lib/import-capture.mjs');
+  const input = dashboardInput(),
+    c = input.current;
+  const names = [
+    'Overall Attendance by AS Year — Current vs Historical',
+    'Detachment Attendance Trend by Term',
+    'Current Overall Attendance by Flight',
+    'Current Roster by AS Year'
+  ];
+  c.charts.forEach((chart, i) => {
+    chart.spec.title = names[i];
+  });
+  const canvas = {
+    metadata: {
+      properties: { sheetId: c.sheetId, gridProperties: { rowCount: 70, columnCount: 12 } },
+      charts: c.charts,
+      merges: c.merges
+    },
+    rows: c.canvas
+  };
+  const data = {
+    metadata: { properties: { sheetId: c.dataSheetId, gridProperties: { rowCount: 52, columnCount: 16 }, hidden: true } },
+    rows: c.data
+  };
+  const capture = {
+    consistent: true,
+    manifestSha256: 'manifest',
+    resources: [{ providerId: 'original', kind: 'workbook', sheets: [canvas, data] }]
+  };
+  capture.snapshotSha256 = importDigest(capture);
+  const packet = {
+    books: {
+      main: {
+        spreadsheetId: 'original',
+        tabs: { Dashboard: { sheetId: c.sheetId }, 'Dashboard Data': { sheetId: c.dataSheetId } }
+      }
+    },
+    rows: { snapshotSha256: capture.snapshotSha256, revision: input.revision },
+    dashboardActions: input.actions
+  };
+  const plan = prepareNativeDashboard(packet, capture, input.reporting);
+  assert.deepEqual(plan.chartIds, input.chartIds);
+  assert.ok(plan.requests.every((r) => !r.deleteSheet && !r.addChart && !r.deleteEmbeddedObject));
+  const expected = plan.expectedAfter;
+  canvas.rows = expected.canvas;
+  canvas.metadata.charts = expected.charts.map((chart) => ({ ...chart, position: plan.positions[chart.chartId] }));
+  canvas.metadata.merges = expected.merges;
+  data.rows = expected.data;
+  delete capture.snapshotSha256;
+  capture.snapshotSha256 = importDigest(capture);
+  verifyAdoptedDashboard(plan, capture);
+  canvas.metadata.charts[0].position = structuredClone(plan.positions[input.chartIds[1]]);
+  delete capture.snapshotSha256;
+  capture.snapshotSha256 = importDigest(capture);
+  assert.throws(() => verifyAdoptedDashboard(plan, capture), /position differs/);
+});

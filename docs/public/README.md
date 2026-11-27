@@ -1,5 +1,7 @@
 # SHAMROCK Operator Feature Catalog
 
+The planned D1 transition keeps the existing spreadsheet and Form bookmarks. Operators can review the [original-file adoption procedure](../runbooks/D1_PRODUCTION_CUTOVER.md).
+
 This is the operator-facing feature catalog for SHAMROCK. Keep it concise, current, and free of secrets, raw IDs, personal emails, phone numbers, and cadet data.
 
 Use this file to answer: what does the feature do, where does an operator use it, what data does it touch, and how can it be validated after a change?

@@ -1,12 +1,14 @@
 # Paused staging data refresh
 
+Schema 19 adds a separate Directory contact-email table. The staging incremental planner preserves that table. Verify contact-email overrides separately when reconciling the final Directory snapshot.
+
 Use `scripts/lib/import-refresh.mjs` after the initial private import. The initial importer and operational-adoption initializer require an empty destination and must not be replayed against an existing rehearsal. This workflow has no production target or Google mutation client.
 
 ## Prepare and review
 
 1. Finish or preserve any running native History publication. Its pinned snapshot IDs remain immutable. Keep Google frontend/input/Form/permission publishers paused during a canonical refresh; a pending publication must not apply stale command bindings.
 2. Export the exact staging database to an ignored private directory and retain its SHA-256. Capture current production resources read-only using the private import workflow. Recheck Drive versions and actual Form-response content immediately before application; recapture any changed source. A coherent capture is optimistic evidence, not a production writer lock.
-3. Compare the capture against the retained source occurrences and canonical rows. Review concrete changes, ambiguous rows, source locators and source versions. Supply the planner with complete before/after rows, an append-only evidence ledger, explicit review and the immutable source commit. Record the exact schema-16 migration ledger, staging generation, administration revision and backup hash.
+3. Compare the capture against the retained source occurrences and canonical rows. Review concrete changes, ambiguous rows, source locators and source versions. Supply the planner with complete before/after rows, an append-only evidence ledger, explicit review and the immutable source commit. Record the exact migration ledger for the supported schema version, staging generation, administration revision and backup hash.
 4. Preserve existing person, event, baseline, request and contact IDs. Contacts in the initial importer were keyed by source position: match retained linked contacts by canonical person ID, and manual contacts by exact unique name/email identity before allocating a new ID. A moved source row must never retarget an existing contact.
 5. Increment changed profile/contact/request/event versions. A changed event gets a new audited event command and a copy of its retained frozen roster at the new event version. For each changed or new attendance baseline, reference a source occurrence from this refresh. Completion advances the edit token on those cells, so a spreadsheet draft created before the change must be reviewed again. Unchanged baselines keep their original evidence and token.
 6. Rehearse every batch against the exact local backup. Check interrupted execution, repeated batches, stale-row rollback, exact readback, foreign keys, unchanged canonical keys and all previous raw evidence. Obtain a fresh account-wide free-tier sample and reserve headroom for subsequent permission reconciliation and spreadsheet publication. Do not upgrade a plan to make an import fit.

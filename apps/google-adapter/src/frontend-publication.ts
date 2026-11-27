@@ -22,6 +22,8 @@ export interface FrontendPublicationRow {
   key: string;
   /** An immutable input slot retains its identity when its record leaves the view. */
   retired?: boolean;
+  /** A reviewed legacy queue row retains its original display and has no input binding. */
+  retainedLegacyExcusal?: true;
   values: Record<string, FrontendValue>;
   /** Domain record versions for editable cells; zero is an explicit absent record. */
   versions: Record<string, number>;
@@ -332,9 +334,19 @@ export function planFrontendPublication(input: FrontendPublicationInput): Fronte
   const previousRetirements = new Map(input.baseline.retiredEventColumns?.map(c => [c.header, c.wasHidden]));
   const positions = new Map<string, number>(); readRows.forEach((r, i) => { if (id(r[table.keyHeader])) positions.set(r[table.keyHeader] as string, i); });
   const dirty = (row: Record<string, FrontendValue>, base: FrontendPublicationRow, header: string) => columns.get(header)!.editable && !base.readonlyHeaders?.includes(header) && (!equal(row[header], base.values[header]) || drafts.has(cellKey(base.key, header)));
+  for (const base of baseline.values()) if (base.retainedLegacyExcusal) {
+    if (table.kind !== 'excusal' || !base.retired || !input.baseline.slots || desired.has(base.key)
+      || headers.length !== current.headers.length || Object.keys(base.commandBindings ?? {}).length
+      || !current.headers.every(h => base.readonlyHeaders?.includes(h))) fail('A retained legacy excusal requires its original read-only slot.');
+  }
   // Retire only verified clean rows; an unsent edit pins its row and identity.
   for (const [key, index] of positions) if (!desired.has(key)) {
     const row = readRows[index], base = baseline.get(key)!;
+    if (base.retainedLegacyExcusal) {
+      if (current.headers.some(h => !equal(row[h], base.values[h]) || drafts.has(cellKey(key, h)))) fail('A retained legacy excusal has changed and needs review.');
+      nextRows.set(key, clone(base));
+      continue;
+    }
     if (current.headers.some(h => dirty(row, base, h))) {
       if (headers.length !== current.headers.length) fail('Resolve a retired row with pending edits before expanding its schema.');
       diagnostics.push({ code: 'retired-row-with-edit', key }); nextRows.set(key, clone(base));

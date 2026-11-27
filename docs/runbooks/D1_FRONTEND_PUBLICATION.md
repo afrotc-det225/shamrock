@@ -1,5 +1,7 @@
 # D1 keyed frontend publication
 
+For populated production originals, use the [in-place adoption procedure](D1_PRODUCTION_CUTOVER.md) to prepare original physical slots and first-publication baselines. Reviewed legacy excusal rows retain their displayed evidence across refreshes and have no decision binding.
+
 Status: local pure planner and fictional provider-shape tests. `apps/google-adapter/src/frontend-publication.ts` makes no Google or D1 calls and does not authorize production cutover. Live ownership, edit fencing, authenticated snapshot retrieval, signed command receipts and publication recovery belong to the host runtime.
 
 ## Inputs and normal refresh
