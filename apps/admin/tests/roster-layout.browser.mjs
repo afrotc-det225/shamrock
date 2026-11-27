@@ -46,7 +46,37 @@ try {
   const settle = () => page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
   for (const path of ["cadets","leadership"]) {
     await page.goto(`http://127.0.0.1:${server.address().port}/${path}`);
+    if(path==="leadership") {
+      await page.getByRole("heading",{name:"Cadet Wing Organization"}).waitFor();
+      for (const width of [320,390,1024,1440]) {
+        await page.setViewportSize({width,height:850});
+        await page.getByLabel("Find a person or office").fill("Sample Cadet 0");
+        const person=page.getByRole("button",{name:"Contact details for Sample Cadet 0",exact:true}).first();
+        await person.click();
+        await page.getByRole("dialog",{name:"Sample Cadet 0"}).waitFor();
+        await page.keyboard.press("Escape");
+        assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
+      }
+      continue;
+    }
     await page.getByRole("button",{name:"Sample Cadet 0",exact:true}).waitFor();
+    for (const width of [390,1440]) {
+      await page.setViewportSize({width,height:850});
+      await page.getByRole("button",{name:"Sample Cadet 0",exact:true}).click();
+      const editor=page.getByRole("dialog",{name:"Cadet profile"});
+      const tools=editor.locator(".cadet-profile-tools");
+      await tools.scrollIntoViewIfNeeded();
+      await editor.evaluate(el=>el.scrollTo(0,el.scrollHeight));
+      const spacing=await tools.evaluate(el=>{
+        const photo=el.querySelector(".photo-trigger").getBoundingClientRect(),summary=el.querySelector("summary").getBoundingClientRect();
+        const footer=el.closest("form").querySelector("footer"),divider=footer.getBoundingClientRect().top;
+        return {top:summary.top-photo.top,gap:divider-Math.max(summary.bottom,photo.bottom),actions:footer.querySelector(".actions").getBoundingClientRect().top-divider};
+      });
+      assert(Math.abs(spacing.top)<1 && spacing.gap>=-1 && spacing.gap<=12 && spacing.actions<=12,JSON.stringify({width,spacing}));
+      await tools.locator("summary").click();
+      await editor.getByLabel("Photo link",{exact:true}).waitFor();
+      await page.keyboard.press("Escape");
+    }
     await page.evaluate(() => document.fonts.ready);
     for (const width of [1280,1440,1600]) {
       await page.setViewportSize({width,height:850});
@@ -173,6 +203,7 @@ try {
       assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
     }
   }
+  await page.setViewportSize({width:390,height:844});
   await page.route("**/api/state*", async route => {
     const request = snapshot.requests[0];
     const requests = ["Blue","Gold"].map(squadron => ({...request, requestId:squadron, capturedSquadronLabel:squadron,

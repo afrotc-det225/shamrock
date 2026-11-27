@@ -1463,14 +1463,14 @@ h1.page-title {position:absolute;width:1px;height:1px;margin:0;padding:0;overflo
   .table-scroll[data-horizontal="true"] {max-height:calc(100dvh - var(--topbar-height) - var(--controls-height, 0px))}
 }
 
-.cadet-roster, .leadership-roster {width:fit-content;max-width:100%}
-.cadet-roster table, .leadership-roster table {width:max-content}
-.cadet-roster.with-cadet :is(th,td):first-child, .leadership-roster :is(th,td):first-child {
+.cadet-roster {width:fit-content;max-width:100%}
+.cadet-roster table {width:max-content}
+.cadet-roster.with-cadet :is(th,td):first-child {
   width:clamp(12rem,16vw,15rem);max-width:15rem;white-space:normal;
 }
 .person-cell > span:last-child {min-width:0}
 .person-cell .text-button {max-width:100%;white-space:normal;overflow-wrap:anywhere;text-align:left}
-.cadet-roster td:not(:first-child), .leadership-roster td:not(:first-child) {max-width:22rem;white-space:normal;overflow-wrap:anywhere}
+.cadet-roster td:not(:first-child) {max-width:22rem;white-space:normal;overflow-wrap:anywhere}
 .directory-avatar {overflow:hidden}
 .directory-avatar img {display:block;width:100%;height:100%;object-fit:cover}
 .directory-photo {display:inline-flex;align-items:center;gap:.5rem;max-width:100%;font-size:.85rem}
@@ -1779,14 +1779,21 @@ main:has(.matrix-scroll) { padding-bottom: 8px; }
 }
 @keyframes chat-loading {to {transform:rotate(1turn)}}
 
-.drawer .fields > .directory-photo.photo-trigger {
+.cadet-profile-tools {position:relative}
+.cadet-profile-tools details {border:0;padding:0}
+.cadet-profile-tools summary {display:list-item;align-content:center;min-height:44px;padding:0}
+.cadet-profile-tools:has(.photo-trigger) summary {padding-right:7.5rem}
+.drawer .fields:has(> .cadet-profile-tools) {padding-bottom:.5rem}
+.drawer form:has(.cadet-profile-tools) > footer {padding-block:.5rem max(.5rem,env(safe-area-inset-bottom))}
+.cadet-profile-tools .directory-photo.photo-trigger {
+  position:absolute;right:0;top:0;
   width:fit-content;min-height:44px;padding:.5rem .85rem;gap:.5rem;
   background:#f1f5f8;border:1px solid var(--border);border-radius:.4rem;
   font:inherit;font-weight:600;cursor:pointer;
 }
-.drawer .fields > .directory-photo.photo-trigger:hover {background:#e5edf4}
+.cadet-profile-tools .directory-photo.photo-trigger:hover {background:#e5edf4}
 @media(max-width:800px) {
-  .cadet-roster.with-cadet :is(th,td):first-child, .leadership-roster :is(th,td):first-child {
+  .cadet-roster.with-cadet :is(th,td):first-child {
     width:13.5rem;min-width:13.5rem;max-width:13.5rem;
   }
 }

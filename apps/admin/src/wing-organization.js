@@ -5,23 +5,22 @@ const deputy = (roles,code="") => ({roles,code});
 const normalize = value => String(value ?? "").toLowerCase().replaceAll("&"," and ").replace(/[^a-z0-9]+/g," ").trim();
 
 function offices(roster) {
-  const operations = roster.squadrons.flatMap(sq => {
-    const flights = roster.flights.filter(f=>f.squadronId===sq.squadronId)
-      .sort((a,b)=>a.label.localeCompare(b.label));
-    if (!["blue","gold"].includes(normalize(sq.label)) && !flights.some(f=>
-      roster.leadership.some(p=>normalize(p.role)===normalize(f.label+" Flight Commander")))) return [];
-    return [office(sq.squadronId,sq.label+" Squadron",[sq.label+" Squadron Commander"],sq.label+" Sq/CC",{
-      tone:normalize(sq.label), deputy:deputy([sq.label+" Deputy Squadron Commander",sq.label+" Squadron Deputy Commander"]),
-      children:flights.map(f=>{
-        const letters={alpha:"A",bravo:"B",charlie:"C",delta:"D",echo:"E",foxtrot:"F"};
-        const letter=letters[normalize(f.label)];
-        const symbol=letter ? sq.label+" Sq/DO"+letter : "";
-        return office(f.flightId,f.label+" Flight",[f.label+" Flight Commander"],symbol,{
-          deputy:deputy([f.label+" Deputy Flight Commander",f.label+" Flight Deputy Commander"],symbol),
-        });
-      }),
-    })];
-  });
+  function flightOffice(f,sq) {
+    const letter={alpha:"A",bravo:"B",charlie:"C",delta:"D",echo:"E",foxtrot:"F"}[normalize(f.label)];
+    const symbol=sq && letter ? sq.label+" Sq/DO"+letter : "";
+    return office(f.flightId,f.label+" Flight",[f.label+" Flight Commander"],symbol,{
+      flight:true,deputy:deputy([f.label+" Deputy Flight Commander",f.label+" Flight Deputy Commander"],symbol),
+    });
+  }
+  const sortedFlights=[...roster.flights].sort((a,b)=>a.label.localeCompare(b.label));
+  const operations=roster.squadrons.map(sq=>office(sq.squadronId,sq.label+" Squadron",
+    [sq.label+" Squadron Commander"],sq.label+" Sq/CC",{
+      tone:normalize(sq.label),deputy:deputy([sq.label+" Deputy Squadron Commander",sq.label+" Squadron Deputy Commander"]),
+      children:sortedFlights.filter(f=>f.squadronId===sq.squadronId).map(f=>flightOffice(f,sq)),
+    }));
+  for(const flight of sortedFlights) {
+    if(!roster.squadrons.some(sq=>sq.squadronId===flight.squadronId)) operations.push(flightOffice(flight));
+  }
   const support = [
     office("pa","Public Affairs & Outreach",["Chief, Public Affairs & Outreach"],"225 MSS/PA",{children:[
       office("social","Social Media",["PA/PO - Social Media"],"225 MSS/PAM"),
@@ -61,40 +60,124 @@ function offices(roster) {
   });
 }
 
-export function buildWingOrganization(roster) {
-  const records=new Map(), inactive=new Set();
-  for(const person of roster.people) {
-    if(person.active===false || ["Inactive","Dropped","Commissioned"].includes(person.flightPathStatus)) {
-      inactive.add(person.personId);
-    } else if(person.role) {
-      records.set(person.personId,person);
+// Prefer a whole title (many office names contain "&"), then recover distinct
+// appointments on either side of an ampersand when one is a known office.
+function splitTitles(title, roles) {
+  const whole = title.trim();
+  if (!whole || roles.has(normalize(whole))) return whole ? [whole] : [];
+  const parts = whole.split(/\s+&\s+/);
+  for (let i=1;i<parts.length;i++) {
+    const left=parts.slice(0,i).join(" & "), right=parts.slice(i).join(" & ");
+    if (roles.has(normalize(left)) || roles.has(normalize(right)) || /^(?:\w+ (?:flight|flt) |mss - )/i.test(right)) {
+      return [...splitTitles(left,roles),...splitTitles(right,roles)];
     }
   }
-  for(const contact of roster.leadership) {
-    const key=contact.personId ?? contact.contactId;
-    if(contact.active===false || inactive.has(contact.personId)) { records.delete(key); continue; }
-    const person=records.get(key);
-    records.set(key,{...person,...contact,role:contact.role || person?.role || ""});
-  }
-  const root=offices(roster),roles=new Map();
+  return [whole];
+}
+
+export function buildWingOrganization(roster) {
+  const wing=offices(roster);
+  const ops=office("cadre-operations","Operations Officer",["Operations Officer","Ops Officer","Detachment Operations Officer"],"",{children:[wing]});
+  const root=office("detachment","Detachment Commander",["Commander","Detachment Commander"],"",{children:[ops]});
+  const roles=new Map(), flights=new Map(), records=new Map();
   function register(node) {
     node.assigned=[];node.team=[];
-    const add=(titles,slot)=>titles?.forEach(title=>roles.set(normalize(title),slot));
-    add(node.roles,node.assigned);
-    if(node.deputy){node.deputy.assigned=[];add(node.deputy.roles,node.deputy.assigned);}
-    add(node.members,node.team);
+    for(const title of node.roles) roles.set(normalize(title),node.assigned);
+    if(node.deputy) {
+      node.deputy.assigned=[];
+      for(const title of node.deputy.roles) roles.set(normalize(title),node.deputy.assigned);
+    }
+    for(const title of node.members || []) roles.set(normalize(title),node.team);
+    if(node.flight) flights.set(node.id,node);
     node.children?.forEach(register);
   }
   register(root);
-  const other=[];
-  for(const person of records.values()) {
-    // Match whole titles first: an ampersand can be part of an office name.
-    const exact=roles.get(normalize(person.role));
-    const appointments=exact ? [exact] : person.role.split(/;|\s+&\s+/).map(s=>roles.get(normalize(s))).filter(Boolean);
-    if(!appointments.length) other.push(person);
-    for(const slot of new Set(appointments))slot.push(person);
+  function child(parent,title) {
+    const id=parent.id+"/"+normalize(title);
+    parent.children ??= [];
+    let node=parent.children.find(n=>n.id===id);
+    if(!node) {node={id,title,assigned:[],team:[]};parent.children.push(node);}
+    return node;
   }
-  return {root,other};
+  for(const person of roster.people) {
+    if(person.active!==false && !["Inactive","Dropped","Commissioned"].includes(person.flightPathStatus)) records.set(person.personId,person);
+  }
+  for(const contact of roster.leadership) {
+    if(contact.active===false) continue;
+    const person=records.get(contact.personId);
+    if(contact.personId && !person) continue;
+    records.set(contact.personId || contact.contactId,{...person,...contact,
+      flightId:person?.flightId,role:person?.role || contact.role || "",
+    });
+  }
+  const staff=[];
+  const operations=wing.children.find(n=>n.id==="operations"), support=wing.children.find(n=>n.id==="mss");
+  const prefixes=[];
+  for(const f of roster.flights) {
+    const node=flights.get(f.flightId);
+    if(!node) continue;
+    prefixes.push([normalize(f.label+" Flight")+" ",node]);
+    const letter={alpha:"a",bravo:"b",charlie:"c",delta:"d",echo:"e",foxtrot:"f"}[normalize(f.label)];
+    if(letter) prefixes.push([letter+" flt ",node]);
+  }
+  const ordered=[...records.values()].sort((a,b)=>(a.lastName || "").localeCompare(b.lastName || "") || (a.firstName || "").localeCompare(b.firstName || ""));
+  for(const person of ordered) {
+    const slots=new Set();
+    const raw=person.role || "";
+    const titles=raw.split(";").flatMap(t=>splitTitles(t,roles));
+    const flight=flights.get(person.flightId);
+    const homeFlight=()=>flight || child(operations,"Flight unassigned");
+    for(const title of titles) {
+      const normalized=normalize(title);
+      const known=flight?.roles.some(r=>normalize(r)===normalized) ? flight.assigned :
+        flight?.deputy.roles.some(r=>normalize(r)===normalized) ? flight.deputy.assigned : roles.get(normalized);
+      if(known) {slots.add(known);continue;}
+      if(!person.personId) {staff.push(person);break;}
+      if(flight && ["flight commander","deputy flight commander","flight deputy commander"].includes(normalized)) {
+        slots.add(normalized==="flight commander" ? flight.assigned : flight.deputy.assigned);
+        continue;
+      }
+      if(normalized==="squadron commander" && flight) {
+        const squadron=operations.children.find(n=>n.children?.includes(flight));
+        if(squadron) {slots.add(squadron.assigned);continue;}
+      }
+      const matches=prefixes.filter(([prefix])=>normalized.startsWith(prefix));
+      const entry=matches.find(([,node])=>node===flight) || matches[0];
+      if(entry) {
+        const duty=title.replace(/^.*?\b(?:flight|flt)\s+/i,"");
+        slots.add(child(entry[1],duty).assigned);
+      } else if(/^MSS\s*-\s*/i.test(title)) {
+        slots.add(child(support,title.replace(/^MSS\s*-\s*/i,"")).assigned);
+      } else slots.add(child(homeFlight(),title).assigned);
+    }
+    if(!titles.length) {
+      if(person.personId) slots.add(homeFlight().team);
+      else staff.push(person);
+    }
+    for(const slot of slots) slot.push(person);
+  }
+  // Standalone cadre contacts identify their supervisor by office title.
+  const officesByTitle=new Map([...root.roles.map(t=>[normalize(t),root]),...ops.roles.map(t=>[normalize(t),ops])]);
+  const staffOffices=new Map();
+  for(const person of staff) {
+    const title=person.role || "Cadre contact", id=normalize(title);
+    if(!staffOffices.has(id)) staffOffices.set(id,{id:"cadre/"+id,title,assigned:[],team:[],children:[]});
+    const node=staffOffices.get(id);
+    node.assigned.push(person);
+    officesByTitle.set(id,node);
+  }
+  const parents=new Map();
+  for(const node of staffOffices.values()) {
+    const supervisors=new Set(node.assigned.map(p=>officesByTitle.get(normalize(p.reportsTo))).filter(Boolean));
+    parents.set(node,supervisors.size===1 ? [...supervisors][0] : root);
+  }
+  for(const [node,parent] of parents) {
+    const seen=new Set([node]);
+    let ancestor=parent;
+    while(ancestor && !seen.has(ancestor)) {seen.add(ancestor);ancestor=parents.get(ancestor);}
+    (ancestor ? root : parent).children.push(node);
+  }
+  return {root,wing,records};
 }
 
 export function filterWingOrganization(node,query) {
