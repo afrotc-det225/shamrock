@@ -291,7 +291,7 @@ export default {
         if(isUnifiedSite(env) && reply.proposal){
           const {area,path,commit,before,after,edits}=reply.proposal;
           reply.proposal.jobId=await env.PANEL_DB.repositoryJob({operation:"create",id:crypto.randomUUID(),patch:{area,path,commit,before,after,edits}});
-          if(reply.proposal.jobId)await wakeRunner(env);
+          if(reply.proposal.jobId)reply.proposal.dispatch=await wakeRunner(env);
         }
         let saved=false;
         try {

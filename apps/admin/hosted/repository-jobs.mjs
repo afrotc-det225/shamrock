@@ -72,11 +72,12 @@ export async function repositoryJob(storage,input,now){
   });
 }
 export async function wakeRunner(env){
-  if(!env.STAGING_RUNNER_DISPATCH)return;
+  if(!env.STAGING_RUNNER_DISPATCH)return "scheduled";
   try{
-    await fetch("https://api.github.com/repos/"+repo+"/actions/workflows/check.yml/dispatches",{
+    const response=await fetch("https://api.github.com/repos/"+repo+"/actions/workflows/check.yml/dispatches",{
       method:"POST",redirect:"error",signal:AbortSignal.timeout(5000),headers:{
         authorization:"Bearer "+env.STAGING_RUNNER_DISPATCH,"user-agent":"SHAMROCK-staging",
         "content-type":"application/json"},body:JSON.stringify({ref:"main"})});
-  }catch{ /* Scheduled pickup also handles dispatch outages. */ }
+    return response.ok ? "dispatched" : "scheduled (GitHub "+response.status+")";
+  }catch{ return "scheduled (dispatch unavailable)"; }
 }
