@@ -386,7 +386,7 @@ export default function CadetWorkspace({ session }) {
   const pending = useRef(null),
     active = useRef(false),
     preview = !!session.viewAs;
-  const section = tab==="My profile" ? "profile" : tab==="Submit attendance" ? "report" : tab==="My attendance" ? "attendance" : "";
+  const section = tab==="Excusals" ? "excusals" : tab==="My profile" ? "profile" : tab==="Submit attendance" ? "report" : tab==="My attendance" ? "attendance" : "";
   const currentSection=useRef(section);
   currentSection.current=section;
   const load = async () => {
@@ -430,8 +430,8 @@ export default function CadetWorkspace({ session }) {
   const pages =
     state && !state.registration
       ? [
-          ...(state.squadron ? [["Excusals", FileCheck2]] : []),
           ...(state.flightCommander ? [["My Flight", Users]] : []),
+          ...(state.squadron || state.flightCommander ? [["Excusals", FileCheck2]] : []),
           ["My requests", ClipboardList],
           ["My attendance", ClipboardList],
           ["Submit attendance", ClipboardList],
@@ -462,7 +462,7 @@ export default function CadetWorkspace({ session }) {
   const disabled = busy || readOnly;
   const flags = (state?.actions || []).filter(a => a.kind === "flag" && a.personId === state.profile?.personId);
   const queue = state?.queue || [];
-  const list = state?.squadron && {
+  const list = (state?.squadron || state?.flightCommander) && {
     terms: [{ termId: "current", isCurrent: true }],
     events: [
       ...new Map(
@@ -479,7 +479,7 @@ export default function CadetWorkspace({ session }) {
     ],
     flights: state.flights,
     people: [],
-    requests: queue.map((r) => ({ ...r, canDecide: true })),
+    requests: queue.map((r) => ({ ...r, canDecide: Boolean(state.squadron) })),
     access: { capabilities: { fullSnapshot: false } },
   };
   return (
@@ -529,7 +529,7 @@ export default function CadetWorkspace({ session }) {
         <Excusals
           list={list}
           busy={busy}
-          readOnly={readOnly}
+          readOnly={readOnly || !state.squadron}
           error={error}
           onDecide={(p, done) =>
             save(
@@ -562,23 +562,18 @@ export default function CadetWorkspace({ session }) {
       {page === "My requests" && (
         <div className="cadet-requests">
           <section className="form-section">
-            <Submission
-              mode="excusal"
-              state={state}
-              save={save}
-              disabled={disabled}
-            />
             <h2>My excusals</h2>
             {!state.requests.length ? (
               <Empty>No requests this term.</Empty>
             ) : (
               <Table
-                headers={["Event", "Requested", "Status", "Decision reason"]}
+                className="personal-excusals" headers={["Event", "Code", "Excusal reason", "Status", "Decision reason"]}
               >
                 {state.requests.map((r) => (
                   <tr key={r.requestId}>
                     <td>{r.event}</td>
                     <td>{r.requestedOutcome}</td>
+                    <td>{r.reason || "—"}</td>
                     <td>
                       <Status>{r.status}</Status>
                     </td>
@@ -589,7 +584,14 @@ export default function CadetWorkspace({ session }) {
             )}
 
           </section>
-
+          <section className="form-section">
+            <Submission
+              mode="excusal"
+              state={state}
+              save={save}
+              disabled={disabled}
+            />
+          </section>
         </div>
       )}
     </WorkspaceShell>

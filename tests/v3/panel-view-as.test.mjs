@@ -15,7 +15,7 @@ const base = { environment: 'local', generation: 1, principalId: 'owner' };
 const manifest = { section: 'manifest', offset: 0, revision: null };
 const enter = (targetPersonId, auditId = 'entry') => ({ ...base, action: 'enter', auditId, targetPersonId });
 const preview = (targetPersonId = 'lead', kind = 'panel', entryAuditId = 'entry', page = manifest, viewRevision = null) => ({ ...base, targetPersonId, entryAuditId, kind, page, viewRevision });
-async function fixture(t) {
+async function fixture(t, {squadronCommand = false} = {}) {
   const mf = new Miniflare({ modules: true, scriptPath: resolve('.build/v3-artifacts/worker.mjs'), compatibilityDate: '2026-07-01', d1Databases: { DB: 'view-as' }, bindings: { ENVIRONMENT: 'local', GENERATION: '1', BRIDGE_KEY_ID: keyId, BRIDGE_SECRET: secret }, log: new Log(LogLevel.NONE) });
   t.after(() => mf.dispose()); const db = await mf.getD1Database('DB');
   await db.batch(migration.map(s => db.prepare(s)));
@@ -43,6 +43,11 @@ async function fixture(t) {
     db.prepare("INSERT INTO principals VALUES('duplicate-one','ambiguous',1),('duplicate-two','ambiguous',1)"),
     db.prepare("INSERT INTO principal_accounts VALUES('duplicate-one','duplicate-one@example.invalid','authenticated-confirmation','binding'),('duplicate-two','duplicate-two@example.invalid','authenticated-confirmation','binding')"),
     db.prepare("INSERT INTO admin_grants VALUES('administrator','frontend.read','wing','*')"),
+  ]);
+  if (squadronCommand) await db.batch([
+    db.prepare("UPDATE directory_profiles SET email=person_id||'@nd.edu'"),
+    db.prepare("UPDATE principal_accounts SET email=principal_id||'@nd.edu' WHERE principal_id IN ('lead','other','cadet')"),
+    db.prepare("UPDATE directory_profiles SET role='Gold Squadron Commander' WHERE person_id='other'"),
   ]);
   const people = (await db.prepare('SELECT person_id AS personId,version,flight_id AS flightId,email,role,flight_path_status AS flightPathStatus,1 AS active FROM directory_profiles').all()).results;
   const flights = (await db.prepare('SELECT u.unit_id AS flightId,u.label,h.squadron_id AS squadronId FROM organizational_units u JOIN flight_hierarchy h ON h.unit_id=u.unit_id').all()).results;
@@ -279,4 +284,45 @@ test('a Wing panel edit uses the target grants and the entry-linked command in t
   assert.equal(saved.body.commandId,'view.entry.edit');
   assert.equal(await f.db.prepare("SELECT actor_id FROM admin_commands WHERE command_id='view.entry.edit'").first('actor_id'),'administrator');
   assert.equal((await f.send({...input,payload:{...payload,commandId:'outside',payload:{...payload.payload,personId:'other'}}},path)).status,403);
+});
+
+test('school and View as queues honor captured flight and squadron ownership, including decision writes',async t=>{
+  const {db,send}=await fixture(t,{squadronCommand:true});
+  const route='/v1/cadet/workspace';
+  const direct=(person,extra)=>send({...base,principalId:person,email:person+'@nd.edu',...extra},route);
+  await db.batch([
+    db.prepare("UPDATE system_control SET accepting_commands=1"),
+    db.prepare("UPDATE permission_policy_control SET config_json=?").bind(JSON.stringify({operationalSquadronIds:['blue','gold']})),
+    db.prepare("INSERT INTO adapter_sources VALUES('test','admin-staging-web',1)"),
+    db.prepare("INSERT INTO events VALUES('lab','Fictional LLAB',1)"),
+    db.prepare("INSERT INTO event_units VALUES('lab','alpha'),('lab','bravo')"),
+    db.prepare("INSERT INTO event_details VALUES('lab',1,'current','llab',1,1,'LLAB','','active',NULL,NULL,'','','2026-01-01','owner','2026-01-01')"),
+  ]);
+  for(const [flight,squadron,person] of [['alpha','blue','cadet'],['bravo','gold','other']]) {
+    await db.batch([
+      db.prepare("INSERT INTO operation_commands VALUES(?,'hash','owner','excusal.submit',?,'lab',?,'test','fixture',?,1,'2026-01-01','{}')").bind(flight,flight,person,flight),
+      db.prepare("INSERT INTO excusal_records(request_id,event_id,person_id,unit_id,requested_outcome,reason,status,version,submitted_at,submitted_by,updated_at,source_json,command_id,last_command_id) VALUES(?,'lab',?,?,'E','Fictional exam','Submitted',1,'2026-01-01','owner','2026-01-01','{}',?,?)").bind(flight,person,flight,flight,flight),
+      db.prepare("INSERT INTO excusal_request_scopes VALUES(?,?,?,?,?,'submission','2026-01-01')").bind(flight,flight,squadron,flight,squadron),
+    ]);
+  }
+  const action=requestId=>({kind:'decide',id:crypto.randomUUID(),fields:{requestId,version:1,decision:'Approved',reason:'Reviewed'}});
+  for(const [person,expected] of [['lead','alpha'],['other','bravo']]){
+    const read=await direct(person,{section:'excusals'});
+    assert.equal(read.status,200,JSON.stringify(read));
+    assert.deepEqual(read.body.queue.map(r=>r.requestId),[expected]);
+    const auditId='entry-'+person;
+    assert.equal((await send(enter(person,auditId))).status,200);
+    const delegated={...base,targetPersonId:person,entryAuditId:auditId};
+    const preview=await send({...delegated,section:'excusals'},'/v1/cadet/preview');
+    assert.equal(preview.status,200,JSON.stringify(preview));
+    assert.deepEqual(preview.body.queue,read.body.queue);
+    if(person==='lead')assert.equal((await send({...delegated,action:action('alpha')},'/v1/cadet/preview')).status,403);
+    assert.equal((await send({...base,action:'exit',entryAuditId:auditId,auditId:'exit-'+person})).status,200);
+  }
+  assert.equal((await direct('cadet',{section:'excusals'})).status,403);
+  assert.equal((await direct('lead',{action:action('alpha')})).status,403);
+  assert.equal((await direct('other',{action:action('alpha')})).status,403);
+  const approved=await direct('other',{action:action('bravo')});
+  assert.equal(approved.status,200,JSON.stringify(approved));
+  assert.deepEqual((await db.prepare("SELECT status FROM excusal_records ORDER BY request_id").all()).results.map(r=>r.status),['Submitted','Approved']);
 });

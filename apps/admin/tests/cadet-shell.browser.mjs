@@ -12,7 +12,7 @@ const origin = `http://127.0.0.1:${server.address().port}`;
 const requests = ["My requests","My attendance","Submit attendance","My profile"];
 const scenarios = [
   { role: "Cadet", tabs: requests },
-  { role: "Flight", tabs: ["My Flight", ...requests] },
+  { role: "Flight", tabs: ["My Flight", "Excusals", ...requests] },
   { role: "Squadron", tabs: ["Excusals", ...requests.slice(0,-1),"Attendance reviews","My profile"] },
   { role: "Registration", tabs: [] },
   { role: "View as Squadron", tabs: ["Excusals", ...requests.slice(0,-1),"Attendance reviews","My profile"] },
@@ -60,10 +60,10 @@ try {
           section,attendance:section==="attendance"?[{eventId:"llab",label:"TW-1 LLAB",eventType:"llab",version:1,baseVersion:0,code:"A"},{eventId:"lab2",label:"TW-2 LLAB",eventType:"llab",version:2,baseVersion:0,code:"A"}]:[],
           linked: true, writable: true, readOnly:false, registration: role === "Registration",
           profile: role === "Registration" ? null : {personId:"one", firstName:"Sample", lastName:"Cadet", flightId:"alpha",afsc:"13N – Nuclear and Missile Operations ".repeat(6).trim(),photoLink:"https://drive.google.com/file/d/fictional-photo/view"},
-          flights: [{ flightId:"alpha", label:"Alpha" }], events: [], actions: [], queue: squadron ? [{requestId:"example",version:3,personId:"cadet",eventId:"llab",event:"TW-2 LLAB",
+          flights: [{ flightId:"alpha", label:"Alpha" }], events: [], actions: [], queue: (squadron || role==="Flight") ? [{requestId:"example",version:3,personId:"cadet",eventId:"llab",event:"TW-2 LLAB",
             personDisplayName:"Test Requester",requestedOutcome:"E",status:decision?.decision || "Submitted",
             submittedAt:"2026-10-10T13:20:00Z",reason:"Fixture scheduling conflict",flightId:"test-flight",capturedFlightLabel:flight,capturedSquadronLabel:squadron}] : [],
-          requests: [], roster: [{name:"Test Cadet",personId:"member",version:1,role:""}], ownFlightCount:4, reportEvents:[{eventId:"lab16",eventType:"llab",label:"TW-16 LLAB"},{eventId:"sec16",eventType:"secondary",label:"TW-16 Secondary"}],
+          requests: [{requestId:"own",event:"TW-3 LLAB",requestedOutcome:"E",reason:"Conflicting lab",status:"Approved",decisionReason:"Reviewed schedule"}], roster: [{name:"Test Cadet",personId:"member",version:1,role:""}], ownFlightCount:4, reportEvents:[{eventId:"lab16",eventType:"llab",label:"TW-16 LLAB"},{eventId:"sec16",eventType:"secondary",label:"TW-16 Secondary"}],
           reportRoster:section==="report:lab16"?[["AS100","Able","Tom"],["AS400","Zed","Ron"],["AS400","Able","Zoe"],["AS400","Able","Amy"]].map(([asYear,lastName,firstName],i)=>({asYear,lastName,firstName,personId:"fixture"+i,flightId:"alpha",version:1})):[], flightCommander:role === "Flight",
           squadron,
         } });
@@ -91,6 +91,15 @@ try {
         await page.getByRole("button",{name:"Save role"}).click();
         await page.getByText("Saved.",{exact:true}).waitFor();
         assert.deepEqual(assignments,[{personId:"member",role:"Alpha Flight Accountability Officer",version:1}]);
+      }
+      if (role === "Flight") {
+        await openNavigation(page);
+        await nav.getByRole("link", {name:"Excusals",exact:true}).click();
+        const row=page.locator(".excusal-queue tbody tr");
+        await row.getByText("Test Requester").click();
+        assert.equal(await page.getByRole("button",{name:/^(Approve|Deny)$/}).count(),0);
+        assert.equal(await page.getByLabel("More decisions").count(),0);
+        await page.keyboard.press("Escape");
       }
       if (squadron) {
         const row = page.locator(".excusal-queue tbody tr");
@@ -121,7 +130,11 @@ try {
         await openNavigation(page);
         await nav.getByRole("link", {name:"My requests"}).click();
         await heading("My requests").waitFor();
+        const personal=page.locator(".personal-excusals table");
+        assert.deepEqual(await personal.locator("th").allTextContents(),["Event","Code","Excusal reason","Status","Decision reason"]);
+        assert.deepEqual(await personal.locator("td").allTextContents(),["TW-3 LLAB","E","Conflicting lab","Approved","Reviewed schedule"]);
         const compose=page.locator(".cadet-compose");
+        assert((await personal.boundingBox()).y < (await compose.boundingBox()).y);
         assert(await compose.getByRole("heading",{name:"Request an excusal"}).isVisible());
         assert.equal(await compose.getByRole("button", {name:"Submit"}).isEnabled(), true);
         await openNavigation(page);
@@ -201,7 +214,7 @@ try {
       });
       assert(layout.fits && (width === 390 ? layout.stacked : layout.alongside), JSON.stringify(layout));
       assert.deepEqual(errors, []);
-      assert.deepEqual(calls, ["POST /api/session", "GET /api/cadet",...(role==="Flight"?["GET /api/cadet?section=flight","GET /api/cadet?section=flight","POST /api/cadet","GET /api/cadet"]:[]),...(squadron?["POST /api/cadet","GET /api/cadet"]:[]),...(tabs.length?["GET /api/cadet?section=profile","GET /api/cadet","GET /api/cadet?section=profile","GET /api/cadet?section=attendance","POST /api/cadet","POST /api/cadet","GET /api/cadet?section=attendance","GET /api/cadet?section=report","GET /api/cadet?section=report:lab16","POST /api/cadet","GET /api/cadet?section=report"]:[])]);
+      assert.deepEqual(calls, ["POST /api/session", "GET /api/cadet",...(role==="Flight"?["GET /api/cadet?section=flight","GET /api/cadet?section=flight","POST /api/cadet","GET /api/cadet","GET /api/cadet?section=excusals","GET /api/cadet"]:[]),...(squadron?["POST /api/cadet","GET /api/cadet"]:[]),...(tabs.length?["GET /api/cadet?section=profile","GET /api/cadet","GET /api/cadet?section=profile","GET /api/cadet?section=attendance","POST /api/cadet","POST /api/cadet","GET /api/cadet?section=attendance","GET /api/cadet?section=report","GET /api/cadet?section=report:lab16","POST /api/cadet","GET /api/cadet?section=report"]:[])]);
       await page.close();
     }
   }

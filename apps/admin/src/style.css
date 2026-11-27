@@ -1448,7 +1448,8 @@ h1.page-title {position:absolute;width:1px;height:1px;margin:0;padding:0;overflo
 .personal-mark button:disabled {opacity:1}
 .flight-roll {max-width:44rem}.flight-roll header {justify-content:space-between}
 
-.cadet-requests {display:grid;grid-template-columns:repeat(auto-fit,minmax(min(25rem,100%),1fr));gap:1rem;align-items:start}
+.personal-excusals td:nth-child(3),.personal-excusals td:nth-child(5) {white-space:pre-wrap;overflow-wrap:anywhere}
+.cadet-requests {display:grid;grid-template-columns:minmax(0,1fr);gap:1rem;align-items:start}
 .cadet-requests .form-section {min-width:0;margin:0}
 .cadet-requests .cadet-form {margin-bottom:0}
 .cadet-compose {margin-bottom:1.5rem}
