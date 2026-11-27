@@ -1762,3 +1762,11 @@ main:has(.matrix-scroll) { padding-bottom: 8px; }
 }
 
 .plain-reply {white-space:pre-wrap;overflow-wrap:anywhere}
+
+.chat-date {position:relative;display:inline-grid;justify-items:start;flex:none}
+.chat-date[data-loading] time {visibility:hidden}
+.chat-loading-ring {position:absolute;align-self:center;width:.85rem;height:.85rem;border:2px solid var(--border);border-top-color:var(--green);border-radius:50%}
+@media(prefers-reduced-motion:no-preference){
+  .chat-loading-ring {animation:chat-loading .8s linear infinite}
+}
+@keyframes chat-loading {to {transform:rotate(1turn)}}

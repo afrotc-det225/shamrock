@@ -67,10 +67,23 @@ try {
     assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
     await page.getByRole("button",{name:"New chat"}).click();
     assert.equal(await answer.count(),0);
+    let releaseRenderer;
+    if(width===390){
+      const held=new Promise(resolve=>{releaseRenderer=resolve});
+      await page.route("**/assets/AssistantResponse-*.js",async route=>{await held;await route.continue();},{times:1});
+    }
     await page.reload();
     if(width===390){
+      const composerBefore=await form.boundingBox();
       await page.getByRole("region",{name:"Recent conversations"}).getByRole("button",{name:/How is the detachment/}).click();
+      const indicator=page.getByRole("status",{name:"Loading chat"});
+      await indicator.waitFor();
+      assert.equal(await answer.count(),0);
+      assert.deepEqual(await form.boundingBox(),composerBefore);
+      releaseRenderer();
       await answer.getByRole("cell",{name:"98%"}).waitFor();
+      assert.equal(await page.locator(".plain-reply").count(),0);
+      assert.equal(await indicator.count(),0);
       await input.focus();
       await page.setViewportSize({width,height:460});
       await page.waitForFunction(()=>{const r=document.querySelector(".chat-form textarea").getBoundingClientRect();return r.top>=0 && r.bottom<=460;},null,{timeout:4000});
