@@ -11,11 +11,12 @@ function ledger(times) {
   }};
 }
 test("shared budget serializes dispatches and rolls over only expired reservations", async () => {
+  const fresh=ledger([]);assert.equal(await reserve(fresh,now),true);assert.equal(await reserve(fresh,now+1),true);
   const last = ledger(Array(199).fill(now - 2 * day));
   assert.deepEqual(await Promise.all([reserve(last, now), reserve(last, now)]), [true, false]);
   assert.equal(await reserve(last, now + day), false);
   assert.equal(await reserve(last, now + 32 * day), true);
-  assert.equal(await reserve(ledger(Array(8).fill(now - 31_000)), now), false);
+  assert.equal(await reserve(ledger(Array(32).fill(now - 31_000)), now), false);
   assert.equal(await reserve(ledger([now + 1]), now), false);
 });
 const env = {ENVIRONMENT:"staging", STAGING_DATASET:"real", GENERATION:"1", BACKEND_SERVICE_NAME:"shamrock-real-parity",
@@ -89,4 +90,19 @@ test("follow-up overhaul selects stronger reasoning and only reviewed release ex
     assert.equal(q.reasoning.effort,"high");assert.match(q.model,/^gpt-5.4-2026/);
     assert.match(q.input,/cached/);assert(!q.input.includes("../../other"));return respond("Plan");
   },()=>{throw Error("unexpected records read");});assert.equal(calls,2);
+});
+
+test("commissioning forecasts get current and prior cohorts without exposing cadet records",async()=>{
+  let calls=0;
+  await answer(env,{messages:[{role:"user",content:"How many cadets will we commission this year? How does that compare?"}]},"Guide",async(_,options)=>{
+    const q=JSON.parse(options.body);calls++;
+    assert.match(q.instructions,/typically commission in spring/);
+    assert.match(q.instructions,/"term":"2026-Fall"/);
+    assert.match(q.instructions,/"AS400":21/);
+    assert.match(q.instructions,/"AS400":13/);
+    assert(!q.instructions.includes("private-fixture"));
+    return respond("The AS400 cohort is a projection.");
+  },async()=>({dashboard:{termLabel:"2026-Fall",rosterByYear:[{asYear:"AS400",cadets:21,person:"private-fixture"}]},
+    history:[{label:"2025 Fall",rosterByYear:[{asYear:"AS400",cadets:13}]}]}));
+  assert.equal(calls,1);
 });

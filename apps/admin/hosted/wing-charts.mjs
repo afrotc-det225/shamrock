@@ -17,7 +17,7 @@ export function currentChartsKey(backend, authority) {
     authority.revision.administration,
   ];
   return (
-    "overview/v1/" +
+    "overview/v2/" +
     createHash("sha256").update(JSON.stringify(identity)).digest("hex")
   );
 }
@@ -58,12 +58,12 @@ async function currentDashboard(backend, authority, key) {
     let value = await store?.get(key, "json");
     if (!value) {
       const browse = await browseState(backend, authority, "attendance");
-      const { reporting } = await decodeBrowse({
+      const { reporting,list } = await decodeBrowse({
         browse,
         manifest: authority,
         reportingTime: Date.now(),
       });
-      value = chartFields(reporting.dashboard);
+      value = {...chartFields(reporting.dashboard),termLabel:list?.terms?.find(t=>t.isCurrent)?.label ?? null};
       // Cache failure must not prevent delivery of an already compiled report.
       if (store) {
         try {

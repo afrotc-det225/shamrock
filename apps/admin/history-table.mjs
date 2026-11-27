@@ -25,5 +25,6 @@ export function semesterAverages(label, rows) {
     years.get(year).push(row.overall);
   }
   return {label, overall:mean(rows.map(r => r.overall)), llab:mean(rows.map(r => r.llab)),
+    rosterByYear:[...years].map(([asYear,values])=>({asYear,cadets:values.length})),
     byYear:Object.fromEntries([...years].map(([year, values]) => [year, mean(values)]))};
 }
