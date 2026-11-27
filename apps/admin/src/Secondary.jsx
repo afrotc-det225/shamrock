@@ -1,9 +1,9 @@
 import { MaintenanceProposal } from "./MaintenanceProposal";
-import React, { lazy, Suspense, useEffect, useRef, useState } from "react";
+import React, { lazy, Suspense, useLayoutEffect, useEffect, useRef, useState } from "react";
 import {overviewRoster} from "../../../packages/domain/src/frontend-reporting";
 import {operationallyActive} from "../../../packages/domain/src/admin";
 import OverviewInsights from "./OverviewInsights";
-import { Send, SquarePen, MessagesSquare } from "lucide-react";
+import { ArrowUp, SquarePen, MessagesSquare } from "lucide-react";
 import { Heading, Table, Status, Empty } from "./components";
 import {readUsage} from "./read-usage";
 import { api } from "./api";
@@ -130,6 +130,17 @@ function AssistantWorkspace({ meta }) {
     }).catch(()=>{if(!controller.signal.aborted)setError("Recent chats could not be loaded.");});
     return ()=>controller.abort();
   },[hosted]);
+  const log=useRef(null);
+  useLayoutEffect(()=>{
+    const field=input.current;
+    field.style.height="auto";
+    field.style.height=field.scrollHeight+"px";
+  },[text]);
+  useLayoutEffect(()=>{
+    const transcript=log.current;
+    const latest=transcript.lastElementChild;
+    if(latest)transcript.scrollTop+=latest.getBoundingClientRect().top-transcript.getBoundingClientRect().top;
+  },[messages]);
   function newChat(){
     setActive(null);setMessages([]);setText("");setError("");setShowChats(false);input.current?.focus();
   }
@@ -178,9 +189,9 @@ function AssistantWorkspace({ meta }) {
           <span>{row.title}</span><time dateTime={new Date(row.at).toISOString()}>{new Date(row.at).toLocaleDateString(undefined,{month:"short",day:"numeric"})}</time>
         </button>)}
     </aside>
-    <div className="chat-main" aria-busy={opening}>
+    <div className={"chat-main"+(messages.length ? "" : " empty-chat")} aria-busy={opening}>
     {opening && <p role="status">Opening conversation…</p>}
-    <div className="conversation" role="log" aria-label="Conversation">
+    <div ref={log} className="conversation" role="log" aria-label="Conversation">
       {messages.map((m,i)=><article key={i} className={"message "+m.role}>
         <span className="message-author">{m.role==="user" ? "You" : "SHAMROCK assistant"}</span>
         {m.role==="user" ? <p>{m.content}</p> : <Suspense fallback={<p role="status">Formatting response…</p>}>
@@ -192,17 +203,13 @@ function AssistantWorkspace({ meta }) {
     </div>
     {error && <p className="error" role="alert">{error}</p>}
     <form className="chat-form" onSubmit={send}>
-      <textarea ref={input} aria-label="Ask SHAMROCK" aria-describedby="assistant-privacy"
-        rows={2} placeholder={messages.length ? "Ask a follow-up…" : "Ask about the wing or SHAMROCK…"}
+      <textarea ref={input} aria-label="Ask SHAMROCK"
+        rows={1} placeholder={messages.length ? "Ask a follow-up…" : "Ask SHAMROCK…"}
         maxLength={meta.hosted ? 1000 : 6000} value={text} onChange={e=>setText(e.target.value)}
         onKeyDown={e=>{if(e.key==="Enter" && !e.shiftKey && !e.nativeEvent.isComposing){e.preventDefault();e.currentTarget.form.requestSubmit();}}}
         disabled={opening || !meta.assistantAvailable}/>
-      <button className="primary" aria-label="Send question" title="Send question" disabled={opening || busy || !meta.assistantAvailable || !text.trim()}><Send size={18}/></button>
+      <button className="chat-send" aria-label="Send question" title="Send question" disabled={opening || busy || !meta.assistantAvailable || !text.trim()}><ArrowUp size={19} strokeWidth={2.5}/></button>
     </form>
-    {!messages.length && meta.assistantAvailable && <div className="assistant-prompts">
-      {["How is the detachment doing?","How do corrections work?"].map(prompt=><button type="button" key={prompt} onClick={()=>{setText(prompt);input.current?.focus();}}>{prompt}</button>)}
-    </div>}
-    <small id="assistant-privacy">{meta.hosted ? "OpenAI may receive your question, relevant code, and Wing totals. Omit personal details and secrets." : "Questions are sent to the CRC. Omit personal details and secrets."}</small>
     </div></div>
   </section>;
 }
