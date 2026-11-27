@@ -84,7 +84,7 @@ export default function WorkspaceShell({ workspace="leadership", pages, page, fu
   const personalSwitch = fullWing && member && (
     <PageLink workspace="cadet" title={personalHome} navigate={name=>openPage("cadet",name)}>
       <UserRound size={18} aria-hidden="true"/>
-      {member.name ? "View as "+member.name+(member.role ? " ("+member.role+")" : "") : "View personal workspace"}
+      {preview ? "Personal workspace" : "Exit view"}
     </PageLink>
   );
   const links = <>

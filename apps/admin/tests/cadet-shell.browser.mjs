@@ -435,7 +435,7 @@ try {
     assert.equal(sessions,2,"switch keeps the same sign-in");
     assert.equal(await nav.getByRole("link",{name:"My Flight",exact:true}).count(),0);
     assert.equal(await nav.getByRole("link",{name:"My profile",exact:true}).count(),0);
-    await page.getByRole("link",{name:"View as Sample Cadet (Alpha Flight Commander)",exact:true}).click();
+    await page.getByRole("link",{name:"Exit view",exact:true}).click();
     await page.waitForURL("**/me/flight");
     await openNavigation(page);
     await switcher.waitFor();
