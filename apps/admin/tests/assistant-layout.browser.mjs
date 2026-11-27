@@ -7,7 +7,7 @@ await new Promise(resolve=>server.listen(0,"127.0.0.1",resolve));
 const browser=await chromium.launch(process.env.SHAMROCK_CHROMIUM_PATH ?
   {executablePath:process.env.SHAMROCK_CHROMIUM_PATH} : {});
 try {
-  for(const width of [1440,390]){
+  for(const width of [1440,900,390]){
     const page=await browser.newPage({viewport:{width,height:850}});
     const threads=new Map();
     let paidCalls=0;
@@ -35,6 +35,15 @@ try {
     const heading=page.getByRole("heading",{name:"Assistant",exact:true}), input=page.getByLabel("Ask SHAMROCK");
     await input.waitFor();
     const box=await input.boundingBox();
+    const form=page.locator(".chat-form");
+    const workspace=await page.locator(".workspace").boundingBox();
+    const centered=await form.boundingBox();
+    assert(Math.abs(centered.x+centered.width/2-workspace.x-workspace.width/2)<2);
+    const recent=page.getByRole("button",{name:"Recent chats",exact:true});
+    await recent.click();
+    assert.deepEqual(await form.boundingBox(),centered);
+    await page.keyboard.press("Escape");
+    assert.equal(await recent.getAttribute("aria-expanded"),"false");
     assert(box.y>300 && box.y<600,JSON.stringify(box));
     assert.equal(await input.evaluate(el=>getComputedStyle(el).resize),"none");
     await input.fill("First line");
@@ -54,7 +63,7 @@ try {
     await page.getByRole("button",{name:"New chat"}).click();
     assert.equal(await answer.count(),0);
     await page.reload();
-    if(width<800)await page.getByRole("button",{name:"Recent chats",exact:true}).click();
+    await recent.click();
     await page.getByRole("complementary",{name:"Recent chats"}).getByRole("button",{name:/How is the detachment/}).click();
     await answer.getByRole("cell",{name:"98%"}).waitFor();
     assert.equal(paidCalls,1);

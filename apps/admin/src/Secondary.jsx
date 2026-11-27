@@ -120,6 +120,24 @@ function AssistantWorkspace({ meta }) {
   const input=useRef(null), inFlight=useRef(false);
   const [active,setActive]=useState(null), [chats,setChats]=useState([]), [showChats,setShowChats]=useState(false);
   const [opening,setOpening]=useState(false), [query,setQuery]=useState("");
+  const historyMenu=useRef(null), historyToggle=useRef(null);
+  useEffect(()=>{
+    if(!showChats)return;
+    function dismissOutside(event){
+      if(!historyMenu.current?.contains(event.target))setShowChats(false);
+    }
+    function escape(event){
+      if(event.key==="Escape"){setShowChats(false);historyToggle.current?.focus();}
+    }
+    document.addEventListener("pointerdown",dismissOutside);
+    document.addEventListener("focusin",dismissOutside);
+    document.addEventListener("keydown",escape);
+    return ()=>{
+      document.removeEventListener("pointerdown",dismissOutside);
+      document.removeEventListener("focusin",dismissOutside);
+      document.removeEventListener("keydown",escape);
+    };
+  },[showChats]);
   const threads=useRef(new Map());
   const hosted=meta.hosted && meta.assistantAvailable;
   useEffect(()=>{
@@ -175,20 +193,22 @@ function AssistantWorkspace({ meta }) {
   return <section className="assistant-page">
     <Heading title="Assistant">
       <div className="chat-actions">
-        <button className="chat-history-toggle" aria-expanded={showChats} onClick={()=>setShowChats(!showChats)}><MessagesSquare size={16}/>Recent chats</button>
+        <div ref={historyMenu} className="chat-history-menu">
+          <button ref={historyToggle} aria-controls="assistant-history" aria-expanded={showChats} onClick={()=>setShowChats(!showChats)}><MessagesSquare size={16}/>Recent chats</button>
+          <aside aria-label="Recent chats" id="assistant-history" className="chat-library" hidden={!showChats}>
+            {chats.length>1 && <input type="search" aria-label="Search chat titles" placeholder="Search chats" value={query} onChange={e=>setQuery(e.target.value)}/>}
+            {!chats.length && <small>No conversations yet.</small>}
+            {chats.filter(row=>row.title.toLowerCase().includes(query.trim().toLowerCase())).map(row=>
+              <button key={row.id} className="chat-link" aria-current={active?.id===row.id ? "true" : undefined} disabled={busy || opening} onClick={()=>openChat(row)}>
+                <span>{row.title}</span><time dateTime={new Date(row.at).toISOString()}>{new Date(row.at).toLocaleDateString(undefined,{month:"short",day:"numeric"})}</time>
+              </button>)}
+          </aside>
+        </div>
         <button disabled={busy || opening} onClick={newChat}><SquarePen size={16}/>New chat</button>
       </div>
     </Heading>
     <div className="chat-workspace">
-    <aside aria-label="Recent chats" className={"chat-library"+(showChats ? " expanded" : "")}>
-      <h2>Recent chats</h2>
-      {chats.length>1 && <input type="search" aria-label="Search chat titles" placeholder="Search chats" value={query} onChange={e=>setQuery(e.target.value)}/>}
-      {!chats.length && <small>No conversations yet.</small>}
-      {chats.filter(row=>row.title.toLowerCase().includes(query.trim().toLowerCase())).map(row=>
-        <button key={row.id} className="chat-link" aria-current={active?.id===row.id ? "true" : undefined} disabled={busy || opening} onClick={()=>openChat(row)}>
-          <span>{row.title}</span><time dateTime={new Date(row.at).toISOString()}>{new Date(row.at).toLocaleDateString(undefined,{month:"short",day:"numeric"})}</time>
-        </button>)}
-    </aside>
+
     <div className={"chat-main"+(messages.length ? "" : " empty-chat")} aria-busy={opening}>
     {opening && <p role="status">Opening conversation…</p>}
     <div ref={log} className="conversation" role="log" aria-label="Conversation">

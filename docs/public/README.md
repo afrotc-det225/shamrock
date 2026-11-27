@@ -360,4 +360,4 @@ The maintainer Assistant chooses its context from the question. Ask about Wing p
 
 On **Assistant**, type a question in the centered message box. During a conversation, the message box stays below the scrolling replies. Enter sends and Shift+Enter inserts a new line. Replies support headings, lists, tables and code blocks.
 
-In Assistant, select **New chat** to start a separate conversation or **Recent chats** to reopen one. The hosted panel retains completed exchanges for 90 days for the authorized account. Conversations from before history was enabled are unavailable.
+In Assistant, select **New chat** to start a separate conversation or open **Recent chats** in the page header to revisit one. The hosted panel retains completed exchanges for 90 days for the authorized account. Conversations from before history was enabled are unavailable.
