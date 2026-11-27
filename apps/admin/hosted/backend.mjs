@@ -172,7 +172,9 @@ export class HostedBackend {
     if (!response.ok) {
       const error = new PanelError(
         result.error?.code || "BACKEND_ERROR",
-        result.error?.message || "The operation could not be completed.",
+        result.error?.code === "PERMISSION_FENCE_REQUIRED" && input.operation === "directory.upsert"
+          ? "This cadet has a linked access policy. Apply this change through the protected Directory sheet so SHAMROCK can verify Google access."
+          : result.error?.message || "The operation could not be completed.",
         response.status,
       );
       const retryAfter = response.headers.get("retry-after");

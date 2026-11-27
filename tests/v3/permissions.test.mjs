@@ -57,6 +57,40 @@ test('benign profile and contact changes atomically retain authority; role revoc
  c=admin('revoke-role',2,{...p,role:''});assert.equal((await f.send(c)).body.error.code,'PERMISSION_FENCE_REQUIRED');await f.fence(c,2);assert.equal((await f.send(c)).status,200);assert.deepEqual(await f.grants(),[]);
  assert.equal((await f.db.prepare('SELECT COUNT(*) AS n FROM permission_policy_audit').first()).n,3);
 });
+test('dropping an unbound cadet updates roster and audit without a Google fence; bound access still needs verification',async t=>{
+ const f=await fixture(t);
+ const row={...admin('seed-unbound'),payload:{...admin().payload,personId:'unbound',profile:{...profile(),email:'unbound@example.invalid',role:''}}};
+ assert.equal((await f.send(row)).status,200);
+ await f.enable();
+ const drop={...row,commandId:'drop-unbound',source:{...row.source,submissionId:'drop-unbound'},
+   payload:{...row.payload,expectedVersion:1,profile:{...row.payload.profile,flightPathStatus:'Dropped'}}};
+ const unauthorized={...drop,actor:{...drop.actor,principalId:'cadet'}};
+ assert.equal((await f.send(unauthorized)).status,403);
+ const saved=await f.send(drop);
+ assert.equal(saved.status,200);
+ assert.deepEqual((await f.send(drop)).body,saved.body);
+ assert.equal((await f.db.prepare("SELECT active FROM memberships WHERE person_id='unbound'").first()).active,0);
+ assert.equal((await f.db.prepare("SELECT flight_path_status FROM term_roster_snapshots WHERE person_id='unbound'").first()).flight_path_status,'Dropped');
+ assert.equal((await f.db.prepare("SELECT count(*) n FROM admin_audit_events WHERE command_id='drop-unbound'").first()).n,1);
+ const bound=admin('drop-linked',1,{...profile(),flightPathStatus:'Dropped'});
+ assert.equal((await f.send(bound)).body.error.code,'PERMISSION_FENCE_REQUIRED');
+ await f.fence(bound,1);
+ assert.equal((await f.send(bound)).status,200);
+ assert.deepEqual(await f.grants(),[]);
+});
+test('a status-only drop retires an enrolled cadet’s self grant without requesting a Google sharing change',async t=>{
+ const f=await fixture(t);
+ const plain={...profile(),role:''};
+ assert.equal((await f.send(admin('seed',0,plain))).status,200);
+ const bind=f.configure();await f.fence(bind,0,true);
+ assert.equal((await f.send(bind,'/v1/admin/permissions/commands')).status,200);
+ const grants=()=>f.db.prepare(`SELECT count(*) AS n FROM ${effectiveAccessGrants} WHERE principal_id='cadet' AND capability='excusal.submit'`).first();
+ assert.equal((await grants()).n,1);
+ const claim=(await f.send({...envelope('publisher'),workerId:'worker'},'/v1/admin/permissions/claim')).body.job;
+ assert.equal((await f.send({...envelope('publisher'),workerId:'worker',jobId:claim.jobId,claimToken:claim.claimToken},'/v1/admin/permissions/ack')).status,200);
+ assert.equal((await f.send(admin('drop-enrolled',1,{...plain,flightPathStatus:'Dropped'}))).status,200);
+ assert.equal((await grants()).n,0);
+});
 test('ordinary Leadership cannot promote itself or another contact but may edit phone/office fields',async t=>{
  const f=await fixture(t);await f.enable();
  const lead={...admin('link-contact'),operation:'leadership.upsert',payload:{contactId:'linked',personId:'cadet-person',expectedVersion:0,profile:null,active:true,reportsTo:'',officePhone:'',officeLocation:''}};

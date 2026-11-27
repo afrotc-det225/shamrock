@@ -21,7 +21,7 @@ try {
   const row = JSON.parse(browse.tables.people).find(fields => fields[0] === person.personId);
   assert.equal(row.at(-1), photoUrl);
   const people = Array.from({length:55}, (_, i) => ({
-    ...snapshot.people[0], personId:"test-"+i, firstName:"Sample", lastName:"Cadet "+i,
+    ...snapshot.people[0], personId:"test-"+i, firstName:"Sample", lastName:i===49 ? "Cadet-With-A-Long-Hyphenated-Family-Name" : "Cadet "+i,
     afsc:i === 0 ? "14N, Intelligence" : "13N",
     flightPathStatus:"Active 3/4", photoLink:i < 2 ? "https://drive.google.com/open?id=fixture"+i+"&resourcekey=test" : "",
   }));
@@ -79,6 +79,13 @@ try {
       await squadron.selectOption("");
       assert.equal(await page.locator(".cadet-roster tbody tr").count(),55);
       await page.waitForFunction(() => document.querySelector('.directory-avatar img')?.naturalWidth > 0);
+      await page.getByRole("button",{name:"Edit Sample Cadet 0",exact:true}).click();
+      const editor=page.getByRole("dialog",{name:"Cadet profile"});
+      const photo=editor.getByRole("button",{name:"Preview photo of Sample Cadet 0"});
+      assert((await photo.boundingBox()).height>=44);
+      await photo.click();
+      await page.getByRole("dialog",{name:"Photo of Sample Cadet 0"}).getByLabel("Close preview").click();
+      await editor.getByRole("button",{name:"Close editor"}).click();
       const failedRow = page.getByRole("row").filter({has:page.getByRole("button",{name:"Sample Cadet 1",exact:true})});
       await failedRow.locator(".directory-avatar").getByText("SC").waitFor();
       await page.getByRole("button",{name:"Columns",exact:true}).click();
@@ -137,6 +144,10 @@ try {
         await page.getByLabel("Find a cadet",{exact:true}).fill("Sample");
         assert.equal(await page.locator(".search-count").textContent(),"27 matches");
       }
+      assert(await page.locator(".person-cell .text-button").evaluateAll(elements=>elements.every(el=>{
+        const td=el.closest("td").getBoundingClientRect(), box=el.getBoundingClientRect();
+        return box.right<=td.right+1 && el.scrollWidth<=el.clientWidth+1;
+      })));
       const search = await page.locator(".toolbar .search").boundingBox();
       const buttons = page.locator(".toolbar > button, .toolbar-actions > button");
       for (const button of await buttons.all()) {
@@ -159,6 +170,16 @@ try {
   await filters.click();
   assert.equal(await page.locator(".excusal-queue tbody tr").count(),1);
   await page.locator(".excusal-queue").getByText("Gold request").waitFor();
+  for (const width of [320,390,1024,1440]) {
+    await page.setViewportSize({width,height:850});await settle();
+    const more=page.getByLabel("More decisions").first();
+    const moreFits=await more.evaluate(el=>{
+      const box=el.getBoundingClientRect(),cell=el.closest("td").getBoundingClientRect();
+      return {width:box.width, right:box.right-cell.right, left:box.left-cell.left, needed:parseFloat(getComputedStyle(el).fontSize)*4.9};
+    });
+    assert(moreFits.width>=moreFits.needed && moreFits.right<=1 && moreFits.left>=-1, JSON.stringify({width,moreFits}));
+    assert.equal(await page.locator("td.excusal-reason").innerText(),"Gold request");
+  }
   console.log("Desktop header positions, roster widths, mobile overflow, image loading and private-photo fallback passed.");
 } finally {
   await browser.close();

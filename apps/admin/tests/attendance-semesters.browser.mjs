@@ -67,7 +67,7 @@ try {
     }));
     assert(Math.max(...centers)-Math.min(...centers)<2,"Semester, search and Filters share one row");
     const sizes = await current.locator("thead th").evaluateAll(headers=>headers.map(h=>h.getBoundingClientRect().width));
-    assert(sizes[0]<=110 && sizes[1]>=48 && sizes[1]<=50 && sizes[2]===sizes[1]);
+    assert(sizes[0]>=125 && sizes[0]<=160 && sizes[1]>=48 && sizes[1]<=50 && sizes[2]===sizes[1]);
     assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
   }
   const beforeFocus = await toolbar.boundingBox();

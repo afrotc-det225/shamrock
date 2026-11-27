@@ -1,39 +1,78 @@
 import React, {useContext, useEffect, useRef, useState} from "react";
-import {Menu, X} from "lucide-react";
+import {Menu, Sparkles, UserRound, X} from "lucide-react";
 import Brand from "./Brand";
 import {usePhone} from "./use-phone";
 import {EditorSuspended} from "./components";
 
-import {pageHref} from "./page-url";
+import {api} from "./api";
+import {leadershipPages, personalPages} from "./site-navigation";
+import {ViewAsSelector} from "./ViewAs";
+import {pageHref,writePageUrl} from "./page-url";
 
 export function PageLink({workspace, title, navigate, children, className="", ...props}) {
   return <a {...props} className={`workspace-page-link ${className}`} href={pageHref(workspace,title)} onClick={event => {
-    if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+    if (!navigate || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
     event.preventDefault();
     navigate(title);
   }}>{children}</a>;
 }
 
-export default function WorkspaceShell({ workspace="leadership", pages, page, navigate, account, children, drawer, mobileContext }) {
+export default function WorkspaceShell({ workspace="leadership", pages, page, navigate, account, children, drawer, mobileContext, session, preview }) {
   const mobile = usePhone();
   const menu = useRef(null);
   const [open, setOpen] = useState(false);
+  const [accountError,setAccountError] = useState("");
   const suspended = useContext(EditorSuspended);
   useEffect(() => {
     if (!mobile) setOpen(false);
     if (suspended && menu.current?.open) menu.current.close();
   }, [mobile, suspended]);
+  const include = workspace === "cadet" ? "leadership" : "personal";
+  const dual = session && !session.schoolLogin && (preview ? preview.status === "ready" && session.hosted : session.cadetWorkspace);
+  const key = dual ? include + "/" + (preview?.entryAuditId || "self") : null;
+  const [result, setResult] = useState(null), [retry, setRetry] = useState(0);
+  useEffect(() => {
+    if (!key) return;
+    const controller = new AbortController();
+    api("/navigation?include="+include, undefined, {signal:controller.signal})
+      .then(value => { if (!controller.signal.aborted) setResult({key,value}); })
+      .catch(() => { if (!controller.signal.aborted) setResult({key,error:true}); });
+    return () => controller.abort();
+  }, [key,include,retry]);
+  const navigation = key && result?.key === key ? result : null;
+  const other = navigation?.value;
+  const personal = workspace === "cadet" ? pages : other?.personal?.registration
+    ? [["My profile",UserRound]] : personalPages(other?.personal);
+  const leadership = workspace === "leadership" ? pages : other?.leadership ? leadershipPages(other.leadership.full,preview) : [];
+  const openPage = (source,title) => {
+    writePageUrl(source,title);
+    window.dispatchEvent(new PopStateEvent("popstate"));
+  };
   const links = <>
     <nav aria-label="Main navigation">
-      {pages.map(([title, Icon]) => (
-        <PageLink workspace={workspace} title={title} navigate={navigate} key={title} className={page === title ? "selected" : ""}
+      {[
+        ...leadership.map(([title,Icon]) => [title,Icon,"leadership"]),
+        ...personal.filter(([title]) => !leadership.some(([name]) => name===title)).map(([title,Icon]) => [title,Icon,"cadet"]),
+      ].map(([title, Icon, source]) => (
+        <PageLink workspace={source} title={title} navigate={source===workspace ? navigate : name=>openPage(source,name)} key={title} className={page === title ? "selected" : ""}
           aria-current={page === title ? "page" : undefined}>
           <Icon size={19} aria-hidden="true" />
           {title}
         </PageLink>
       ))}
     </nav>
-    <div className="sidebar-bottom">{account}</div>
+    <div className="sidebar-bottom">
+      {navigation?.error && <button onClick={()=>setRetry(v=>v+1)}>Retry loading menu</button>}
+      {other?.leadership?.canViewAs && <ViewAsSelector onSelect={async person=>{
+        try {
+          const result=await api("/view-as",{personId:person.personId});
+          location.assign(result.directoryWorkspace ? "/me/profile" : "/attendance");
+        } catch { setAccountError("Could not open View as. Reload to check your session."); }
+      }}/>}
+      {other?.leadership?.full && !preview && <PageLink workspace="leadership" title="Assistant" navigate={name=>openPage("leadership",name)}><Sparkles size={20}/>Assistant</PageLink>}
+      {accountError && <p role="alert">{accountError}</p>}
+      {account}
+    </div>
   </>;
   return (
     <div className="app">

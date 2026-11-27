@@ -243,21 +243,33 @@ try {
       .firstName,
     "Alexis",
   );
+  const editCadet=page.getByRole("button",{name:"Edit Alexis Morgan",exact:true});
+  await editCadet.click();
+  const statusBox=page.getByLabel("Flight Path",{exact:true}), originalStatus=await statusBox.inputValue();
+  await statusBox.selectOption("Dropped");
+  await apply();
+  await editCadet.waitFor({state:"detached"});
+  assert.equal((await local.db.prepare("SELECT active FROM memberships WHERE person_id='cadet-1'").first()).active,0);
+  await page.getByLabel("Roster status").selectOption("Dropped");
+  await editCadet.click();
+  await statusBox.selectOption(originalStatus);
+  await apply();
   await navigate("Excusals");
   await page.locator(".excusal-status").getByText("Submitted",{exact:true}).waitFor();
   const deny = page.getByRole("button", {name:"Deny",exact:true});
   await deny.click();
-  const review = page.getByRole("dialog",{name:"Review change"});
-  await review.getByText("Denied",{exact:true}).waitFor();
+  const review = page.getByRole("dialog",{name:"Deny excusal?"});
+  await review.getByLabel("Decision reason (optional)").waitFor();
   assert.equal((await service.snapshot()).requests[0].status,"Submitted");
-  await review.getByRole("button",{name:"Cancel change"}).click();
+  await review.getByRole("button",{name:"Cancel",exact:true}).click();
   await review.waitFor({state:"detached"});
   await deny.click();
-  await review.getByRole("button",{name:"Apply change"}).click();
+  await review.getByLabel("Decision reason (optional)").fill("Schedule reviewed");
+  await review.getByRole("button",{name:"Confirm decision"}).click();
   await review.waitFor({state:"detached"});
   const decided = (await service.snapshot()).requests[0];
   assert.equal(decided.status, "Denied");
-  assert.equal(decided.decisionReason,"Denied in the Excusals queue.");
+  assert.equal(decided.decisionReason,"Schedule reviewed");
   await page.getByRole("link", { name: "Attendance", exact: true }).click();
   const keyTool=page.getByRole("button",{name:"Attendance code key"});
   const matrixTop=await tableTop();

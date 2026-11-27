@@ -56,7 +56,7 @@ establish hosted authentication, Google publication, or production readiness.
   cadet's identity and role are edited under Cadets. Changing a title does not
   grant system access.
 - **Attendance:** filter the current matrix by flight, event type, or training week. Select an eligible cell to review a correction, enter a reason, and confirm the change.
-- **Excusals:** review the pending queue for your scope. Search by cadet or event, or filter by flight and decision status. Authorized reviewers can open a request and record a decision.
+- **Excusals:** review the pending queue for your scope. Search by cadet or event, or filter by flight and decision status. The table shows the event, full request reason, submission date, and status separately. Authorized reviewers choose a decision on the row, optionally enter a decision reason, and confirm. The request reason is preserved.
 - **Semester planning:** name the next semester, choose the first training-week Sunday and
   weekly schedule, explicitly review cadet changes, and prepare the plan. Cadets
   retain their status unless explicitly changed. Preparation does not activate
@@ -258,9 +258,11 @@ failure/retry, System's saved-change retry and Semester's preparation history.
 
 Use Google sign-in with the school address in the Directory. Google-managed accounts at the five partner schools can start registration. Registration collects Directory and academic details and creates an active cadet when submissions are open. An existing Directory record retains its assignments when connected. A recognized Gmail or Google Workspace address already used in the Directory can also sign in. For a campus Google cannot verify as its mail host, a custodian must confirm the account holder independently and associate the Google subject with the existing Directory principal. A matching address alone cannot claim that record. The Google consent audience must permit the account.
 
+The same navigation menu includes personal pages and the operational pages available to the signed-in person. View as uses the selected person’s access. Bookmarks to personal and operational pages continue to work.
+
 **My requests** lists each event, requested code, excusal reason, status and decision reason above the submission form. **Excusals** gives flight commanders and deputies read-only access to their flight’s requests. Blue and Gold squadron commanders can decide requests assigned to their squadron at submission. **My Flight** gives commanders and deputies their eligible Flight attendance roster, flags awaiting review and Flight duty assignments. A duty is a roster label and grants no access. Resolving a flag records the review. Attendance corrections use the existing attendance workflow.
 
-Blue and Gold commanders land in **Excusals**, filtered to requests awaiting a decision, oldest first. Choose **All decisions** to inspect past decisions. The request keeps the Squadron captured at submission when the cadet changes Flight. Submissions and decisions share the existing processing and spreadsheet publication paths. While staging submissions are paused, users can read their records and administrators can preview both queues.
+Blue and Gold commanders land in **Excusals**, filtered to requests awaiting a decision, oldest first. Choose **All decisions** to inspect past decisions. The default sort uses submission time. Use **Sort by** to order requests by event date, earliest or latest first. Unscheduled events appear last in either direction. The request keeps the Squadron captured at submission when the cadet changes Flight. Submissions and decisions share the existing processing and spreadsheet publication paths. While staging submissions are paused, users can read their records and administrators can preview both queues.
 
 ### View as
 

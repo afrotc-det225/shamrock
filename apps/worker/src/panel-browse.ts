@@ -117,7 +117,7 @@ export async function browsePanel(env:Env, identity:{environment:string;generati
     table('flights',q.flights,'flightId,label,squadronId');
     table('terms',q.terms,'termId,label,sortOrder,isCurrent');
     table('people',people,personRef+',personId,lastName,firstName,asYear,flightId,flightPathStatus');
-    table('events',q.events,eventRef+',eventId,termId,label,columnLabel,eventType,status,trainingWeek,displayOrder,hasRoster,version');
+    table('events',q.events,eventRef+',eventId,termId,label,columnLabel,eventType,status,trainingWeek,displayOrder,hasRoster,version'+(profile==='excusals'?',startAt':''));
     if(profile==='excusals') {
       table('requests',q.requests,"requestId,personId,eventId,flightId,status,requestedOutcome,reason,version,"+
         (wing?'NULL,1':'personDisplayName,canDecide')+',submittedAt,capturedSquadronLabel,capturedFlightLabel,decisionReason','WHERE '+activeEvents);
