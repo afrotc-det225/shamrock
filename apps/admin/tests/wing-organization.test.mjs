@@ -47,3 +47,18 @@ test("cadre supervisors can be populated after their staff, and vacancies retain
   const circular=buildWingOrganization({...roster,leadership:[cadre("Office A","Office B"),cadre("Office B","Office A")]});
   assert.equal(circular.root.children.length,3);
 });
+
+test("linked cadets use Directory contact details even when an old appointment disagrees",()=>{
+  const cadet={personId:"one",firstName:"Current",lastName:"Cadet",rank:"C/Capt",role:"",email:"directory@example.invalid",phone:"",flightId:"alpha"};
+  const appointment={personId:"one",contactId:"linked",version:4,firstName:"Former",lastName:"Name",rank:"C/Maj",role:"Wing Commander",email:"old@example.invalid",cellPhone:"old cell",officePhone:"office extension",reportsTo:"Operations"};
+  const cadre={contactId:"cadre",firstName:"Current",lastName:"Instructor",role:"Operations Officer",cellPhone:"staff cell"};
+  const roster={people:[cadet],leadership:[appointment,cadre],flights:[{flightId:"alpha",label:"Alpha"}],squadrons:[]};
+  const {records,wing}=buildWingOrganization(roster);
+  const linked=records.get("one");
+  for(const key of Object.keys(cadet))assert.equal(linked[key],cadet[key]);
+  assert.equal(linked.cellPhone,undefined);
+  assert.equal(linked.officePhone,appointment.officePhone);
+  assert.equal(linked.contactVersion,4);
+  assert.equal(records.get("cadre").cellPhone,cadre.cellPhone);
+  assert.deepEqual(wing.assigned,[]);
+});

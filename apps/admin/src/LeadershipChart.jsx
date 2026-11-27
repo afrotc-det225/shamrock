@@ -15,7 +15,7 @@ function Occupants({people}) {
   </button>);
 }
 
-function Office({node,onFocus}) {
+function Office({node,onFocus,focused=false}) {
   const deputy=node.deputy;
   return <div className="command-office" data-tone={node.tone} data-office={node.id}>
     <div className="command-primary">
@@ -31,7 +31,7 @@ function Office({node,onFocus}) {
       {!deputy.assigned.length && <span className="office-unassigned">No assignment recorded</span>}
       {deputy.code && <small className="office-symbol">{deputy.code}</small>}
     </div>}
-    {node.flight && node.team.length>0 ? <details className="flight-members" key={!!node.filtered} open={node.filtered || undefined}>
+    {focused && node.flight ? null : node.flight && node.team.length>0 ? <details className="flight-members" key={!!node.filtered} open={node.filtered || undefined}>
       <summary>Cadets ({node.team.length})</summary><Occupants people={node.team}/>
     </details> : node.team.length>0 && <div className="command-team"><Occupants people={node.team}/></div>}
   </div>;
@@ -39,18 +39,23 @@ function Office({node,onFocus}) {
 
 // The first two tiers fan out horizontally. Lower offices and flights share a
 // vertical reporting rail, keeping sibling deputies together at every tier.
-function Branches({nodes,depth=1,onFocus}) {
-  if(!nodes?.length) return null;
+function Branches({nodes=[],depth=1,onFocus,flightRoster=[]}) {
+  if(!nodes.length && !flightRoster.length) return null;
   return <ul className={depth<3 ? "org-fork" : "org-rail"} data-tier={depth}
     style={depth===1 ? {"--branches":nodes.map(n=>`minmax(0,${Math.max(1,n.children?.length || 0)}fr)`).join(" ")} : undefined}>
     {nodes.map(n=><li key={n.id} data-branch={n.id}>
-      <div className="org-post"><Office node={n} onFocus={depth===1 && n.children?.length && onFocus ? ()=>onFocus(n.id) : undefined}/></div>
-      <Branches nodes={n.children} depth={depth+1}/>
+      <div className="org-post"><Office node={n} onFocus={onFocus(n)}/></div>
+      <Branches nodes={n.children} depth={depth+1} onFocus={onFocus}/>
     </li>)}
+    {!!flightRoster.length && <li className="org-roster-branch">
+      <div className="command-office"><div className="command-primary"><strong>Flight roster</strong></div>
+        <div className="command-team"><Occupants people={flightRoster}/></div>
+      </div>
+    </li>}
   </ul>;
 }
 
-function CadreCommand({commander,ops,hasWing}) {
+function CadreCommand({commander,ops,hasWing,onFocus}) {
   const staff=commander.children?.filter(n=>n.id!=="cadre-operations") || [];
   const middle=Math.ceil(staff.length/2);
   const offices=ops ? [...staff.slice(0,middle),ops,...staff.slice(middle)] : staff;
@@ -61,8 +66,8 @@ function CadreCommand({commander,ops,hasWing}) {
       if(!node) return <li key="spacer" className="cadre-spacer" aria-hidden="true"/>;
       const main=node===ops;
       return <li key={node.id} className={main && hasWing ? "cadre-main" : undefined}>
-        <div className="org-post"><Office node={node}/></div>
-        <div className="cadre-reports"><Branches nodes={node.children?.filter(n=>n.id!=="wing")} depth={3}/></div>
+        <div className="org-post"><Office node={node} onFocus={onFocus(node)}/></div>
+        <div className="cadre-reports"><Branches nodes={node.children?.filter(n=>n.id!=="wing")} depth={3} onFocus={onFocus}/></div>
       </li>;
     })}</ul>}
   </>;
@@ -70,6 +75,17 @@ function CadreCommand({commander,ops,hasWing}) {
 
 export default function LeadershipChart({roster,query="",onEdit}) {
   const {root,wing,records}=useMemo(()=>buildWingOrganization(roster),[roster]);
+  const branches=useMemo(()=>{
+    const index=new Map();
+    function visit(node,parent) {
+      if (node.flight || node.children?.length || node.deputy || node.team.length) {
+        index.set(node.id,{node,parent});
+        node.children?.forEach(child=>visit(child,node));
+      }
+    }
+    visit(root,null);
+    return index;
+  },[root]);
   const [branch,setBranch]=useState(""), [contactKey,selectContact]=useState(null);
   const contact=records.get(contactKey);
   const branchPicker=useRef(null);
@@ -79,27 +95,32 @@ export default function LeadershipChart({roster,query="",onEdit}) {
     branchPicker.current?.scrollIntoView({block:"nearest"});
   }
   const needle=query.trim().toLowerCase();
-  const selected=wing.children.find(n=>n.id===branch);
+  const selected=branches.get(branch)?.node;
+  const parent=branches.get(branch)?.parent;
+  const onFocus=node=>node.id!==selected?.id && node.id!==root.id && branches.has(node.id) ? ()=>focusBranch(node.id) : undefined;
   const tree=filterWingOrganization(selected || root,needle);
   const ops=tree?.children?.find(n=>n.id==="cadre-operations");
   const wingTree=selected ? tree : ops?.children?.find(n=>n.id==="wing");
   const contactFields=contact && [
     ["Appointment",contact.role],["Flight",roster.flights.find(f=>f.flightId===contact.flightId)?.label],
-    ["Email",contact.email,"mailto:"],["Cell phone",contact.cellPhone || contact.phone,"tel:"],
+    ["Email",contact.email,"mailto:"],["Cell phone",contact.personId ? contact.phone : contact.cellPhone,"tel:"],
     ["Office phone",contact.officePhone,"tel:"],["Office",contact.officeLocation],["Reports to",contact.reportsTo],
   ].filter(([,value])=>value);
   return <SelectContact.Provider value={selectContact}><section className="wing-organization" aria-label="Cadet Wing organization">
     <header className="org-heading">
       <div><small>Detachment 225</small><h2>Cadet Wing Organization</h2></div>
-      <select ref={branchPicker} aria-label="Organization branch" value={branch} onChange={e=>setBranch(e.target.value)}>
+      <div className="org-navigation">
+      {parent && <button type="button" className="office-parent" onClick={()=>focusBranch(parent===root ? "" : parent.id)} aria-label={"Back to "+(parent===root ? "Entire Wing" : parent.title)}>← Back</button>}
+      <select ref={branchPicker} aria-label="Organization branch" value={selected?.id || ""} onChange={e=>setBranch(e.target.value)}>
         <option value="">Entire Wing</option>
-        {wing.children.map(n=><option key={n.id} value={n.id}>{n.title}</option>)}
+        {Array.from(branches.values(),({node,parent})=>parent && <option key={node.id} value={node.id}>{node.title}</option>)}
       </select>
+      </div>
     </header>
     {tree ? <div className="org-canvas" style={{"--operations-columns":(wing.children.find(n=>n.id==="operations").children.length || 1)+"fr"}} data-full={!selected && !needle} aria-label={selected?.title || "Wing chain of command"}>
-      {!selected && <CadreCommand commander={tree} ops={ops} hasWing={!!wingTree}/>}
-      {wingTree && <><div className="org-root"><Office node={wingTree}/></div>
-        <Branches nodes={wingTree.children} depth={selected ? 2 : 1} onFocus={focusBranch}/></>}
+      {!selected && <CadreCommand commander={tree} ops={ops} hasWing={!!wingTree} onFocus={onFocus}/>}
+      {wingTree && <><div className="org-root"><Office node={wingTree} onFocus={selected ? undefined : onFocus(wingTree)} focused={!!selected}/></div>
+        <Branches nodes={wingTree.children} depth={selected ? 2 : 1} onFocus={onFocus} flightRoster={selected?.flight ? wingTree.team : undefined}/></>}
     </div> : <p role="status">No matching people or offices.</p>}
   </section>
     {contact && <Drawer title={name(contact)} onClose={()=>selectContact(null)}>

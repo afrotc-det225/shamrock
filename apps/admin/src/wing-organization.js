@@ -103,12 +103,15 @@ export function buildWingOrganization(roster) {
     if(person.active!==false && !["Inactive","Dropped","Commissioned"].includes(person.flightPathStatus)) records.set(person.personId,person);
   }
   for(const contact of roster.leadership) {
-    if(contact.active===false) continue;
+    if(contact.active===false || contact.active===0) continue;
     const person=records.get(contact.personId);
     if(contact.personId && !person) continue;
-    records.set(contact.personId || contact.contactId,{...person,...contact,
-      flightId:person?.flightId,role:person?.role || contact.role || "",
-    });
+    // Cadet identity, personal contact details and appointments belong to the Directory.
+    // The linked contact supplies only office details and its edit version.
+    records.set(contact.personId || contact.contactId, person ? {
+      ...person, contactId:contact.contactId, contactVersion:contact.contactVersion ?? contact.version,
+      officePhone:contact.officePhone, officeLocation:contact.officeLocation, reportsTo:contact.reportsTo,
+    } : contact);
   }
   const staff=[];
   const operations=wing.children.find(n=>n.id==="operations"), support=wing.children.find(n=>n.id==="mss");

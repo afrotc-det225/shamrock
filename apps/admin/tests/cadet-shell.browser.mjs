@@ -58,7 +58,7 @@ try {
             ]}});
         }
         return route.fulfill({ json: {
-          section,leadership:[],eventsForFlight:[{eventId:"other",label:"Earlier Mando"}],directory:[{personId:"peer",rank:"C/AB",phone:"202-555-0199",role:"Alpha Flight Commander",photoLink:"https://example.org/fictional-photo",firstName:"Directory",lastName:"Peer",asYear:"AS100",flight:"Alpha",squadron:"Blue",flightPathStatus:"Active 3/4",afsc:"13N",university:"Notre Dame"},
+          section,leadership:[{contactId:"linked-peer",personId:"peer",firstName:"Stale",lastName:"Contact",cellPhone:"obsolete"}],eventsForFlight:[{eventId:"other",label:"Earlier Mando"}],directory:[{personId:"peer",rank:"C/AB",phone:"202-555-0199",role:"Alpha Flight Commander",photoLink:"https://example.org/fictional-photo",firstName:"Directory",lastName:"Peer",asYear:"AS100",flight:"Alpha",squadron:"Blue",flightPathStatus:"Active 3/4",afsc:"13N",university:"Notre Dame"},
             {personId:"senior",rank:"C/Capt",firstName:"Senior",lastName:"Sample",asYear:"AS400",flight:"Delta",squadron:"Gold",afsc:"17S",flightPathStatus:"Ready 4/4"}],attendance:section==="attendance"?[{eventId:"llab",label:"TW-1 LLAB",eventType:"llab",version:1,baseVersion:0,code:"A"},{eventId:"lab2",label:"TW-2 LLAB",eventType:"llab",version:2,baseVersion:0,code:"A"}]:[],
           linked: true, writable: true, readOnly:false, registration: role === "Registration",
           profile: role === "Registration" ? null : {personId:"one", firstName:"Sample", lastName:"Cadet", flightId:"alpha",afsc:"13N – Nuclear and Missile Operations ".repeat(6).trim(),photoLink:"https://drive.google.com/file/d/fictional-photo/view"},
@@ -311,7 +311,14 @@ try {
         assert.equal(await page.getByRole("button",{name:"Add cadet"}).count(),0);
         await openNavigation(page);
         await nav.getByRole("link",{name:"Leadership",exact:true}).click();
-        await page.getByLabel("Organization branch").selectOption("operations");
+        await page.getByRole("button",{name:"Focus on Operations Group",exact:true}).click();
+        await page.getByRole("button",{name:"Focus on Blue Squadron",exact:true}).click();
+        await page.getByRole("button",{name:"Focus on Alpha Flight",exact:true}).click();
+        const chart=page.locator(".org-canvas");
+        await chart.locator(".org-root").getByText("Alpha Flight",{exact:true}).waitFor();
+        assert.equal(await chart.getByText("Gold Squadron",{exact:true}).count(),0);
+        await page.getByRole("button",{name:"Back to Blue Squadron"}).click();
+        await chart.locator(".org-root").getByText("Blue Squadron",{exact:true}).waitFor();
         await page.getByRole("button",{name:"Contact details for Directory Peer",exact:true}).click();
         await page.getByRole("link",{name:"202-555-0199",exact:true}).waitFor();
         assert.equal(await page.getByRole("button",{name:"Add contact",exact:true}).count(),0);

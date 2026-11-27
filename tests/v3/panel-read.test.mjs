@@ -478,7 +478,12 @@ test('a cold Wing viewer uses private storage and replays a correction; a Flight
     assert.equal(kv.size,2);
     await f.db.prepare("INSERT INTO admin_grants VALUES('outsider','frontend.read','wing','*')").run();
     bookmark='second-wing-authorized';
+    const cadet=await f.db.prepare("SELECT person_id FROM directory_profiles ORDER BY person_id LIMIT 1").first();
+    await f.db.prepare("UPDATE directory_profiles SET phone=? WHERE person_id=?").bind("2025550100",cadet.person_id).run();
+    await f.db.prepare("INSERT INTO directory_contact_emails(person_id,email) VALUES(?,?)").bind(cadet.person_id,"preferred@example.invalid").run();
     const leadership=await browse('owner','leadership');
+    const linkedRow=JSON.parse(leadership.tables.people).find(row=>row[0]===cadet.person_id);
+    assert.equal(linkedRow[8],"preferred@example.invalid");assert.equal(linkedRow[10],"2025550100");
     assert.deepEqual((await browse('outsider','leadership')).tables,leadership.tables);
     assert.equal(hits.at(-1),'wing-stored');
     const wingOnlyReads=gets;

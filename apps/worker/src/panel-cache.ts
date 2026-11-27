@@ -28,7 +28,7 @@ export async function cachedPanelRead(env: ReadEnv, url: URL, body: string, load
   const parts=[env.ENVIRONMENT,env.GENERATION,env.BRIDGE_KEY_ID,url.pathname,body,version];
   if (url.pathname==='/v1/admin/panel/access') parts.push('wing-administrator-tools-v1');
   if (url.pathname==='/v1/admin/panel/browse' && input.profile==='overview') parts.push('roster-counts-v1');
-  if (url.pathname==='/v1/admin/panel/browse' && input.profile==='leadership') parts.push('contact-phones-v1');
+  if (url.pathname==='/v1/admin/panel/browse' && input.profile==='leadership') parts.push('directory-contact-v2');
   if (url.pathname==='/v1/admin/panel/browse' && input.profile==='cadets') parts.push('directory-photos-v1');
   const address = await cacheAddress(url.origin,'/_private/read/',parts);
   let edge: Cache;
@@ -81,7 +81,7 @@ export function wingAttendanceCache(env: ReadEnv, url: URL, bookmark: string, on
       // Catalogs are identical for verified full-Wing callers. Share only the
       // table payload. The enclosing signed read checks the bookmark again.
       const key=await cacheAddress(url.origin,'/_private/wing-catalog-v1/',[
-        env.ENVIRONMENT,env.GENERATION,env.BRIDGE_KEY_ID,bookmark,context.termId,context.profile]);
+        env.ENVIRONMENT,env.GENERATION,env.BRIDGE_KEY_ID,bookmark,context.termId,context.profile==='leadership' ? 'leadership-directory-contact-v2' : context.profile]);
       let edge:Cache|undefined;
       try {
         edge=await caches.open('shamrock-wing-catalog-v1');

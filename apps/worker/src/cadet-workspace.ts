@@ -225,7 +225,12 @@ export async function readCadetWorkspace(
       const checked=result.slice(queries.length);
       if (JSON.stringify(first)!==JSON.stringify(checked.map(r=>r.results)))
         throw new HttpError(409,"SNAPSHOT_CHANGED","Your assignment changed. Reload the Directory.");
-      rosterData={directory:result[0].results,...(section==="leadership" ? {leadership:result[1].results} : {})};
+      const contacts=section==="leadership" ? result[1].results.map(contact=>{
+        if (!contact.personId) return contact;
+        const {personId,contactId,version,active,officePhone,officeLocation,reportsTo}=contact;
+        return {personId,contactId,version,active,officePhone,officeLocation,reportsTo};
+      }) : undefined;
+      rosterData={directory:result[0].results,...(contacts ? {leadership:contacts} : {})};
     }
     let flightHome;
     if(flightSection(section)){
