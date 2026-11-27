@@ -173,7 +173,26 @@ export async function readCadetWorkspace(
       String(owner.flight).toLowerCase() + " flight commander",
       String(owner.flight).toLowerCase() + " deputy flight commander",
     ].includes(title || "");
-  if(personal){
+  const requests = (
+    predicate: string,
+  ) => `SELECT r.request_id AS requestId,r.person_id AS personId,r.unit_id AS flightId,r.event_id AS eventId,
+    e.label AS event,p.display_name AS personDisplayName,r.status,r.requested_outcome AS requestedOutcome,r.reason,
+    COALESCE((SELECT audit_id FROM audit_events WHERE command_id=r.last_command_id),0) AS 'order',(r.origin='legacy' AND r.last_command_id IS NULL) AS legacyStateOnly,r.version,r.submitted_at AS submittedAt,r.decision_reason AS decisionReason,sc.flight_label AS capturedFlightLabel,sc.squadron_label AS capturedSquadronLabel
+    FROM excusal_records r JOIN event_details d ON d.event_id=r.event_id JOIN events e ON e.event_id=r.event_id
+    JOIN people p ON p.person_id=r.person_id LEFT JOIN excusal_request_scopes sc ON sc.request_id=r.request_id
+    WHERE ${predicate} AND ${current} AND ${adopted} ORDER BY r.submitted_at,r.request_id`;
+  if (section === "excusals" && !squadronCommander && !flightCommander) throw denied();
+  if(personal || section === "excusals"){
+    let queue: Row[] = [];
+    if (section === "excusals") {
+      const query = squadronCommander
+        ? db.prepare(requests("sc.squadron_id=?")).bind(owner.squadron_id)
+        : db.prepare(requests("r.unit_id=? AND sc.flight_id=r.unit_id")).bind(profile.flightId);
+      const [rows, ...checked] = await db.batch<Row>([query, ...fence]);
+      if (JSON.stringify(first) !== JSON.stringify(checked.map(result => result.results)))
+        throw new HttpError(409, "SNAPSHOT_CHANGED", "Your assignment changed. Reload SHAMROCK.");
+      queue = rows.results;
+    }
     let flightHome;
     if(section==="flight"){
       if(!flightCommander || !profile.flightId)throw denied();
@@ -190,16 +209,8 @@ export async function readCadetWorkspace(
     const personalData=section==="attendance" ? personalAttendance(profile.personId,capture.slice(fence.length).map(r=>r.results)) : {attendance:[],flags:[]};
     return {registration:false,profile,flights:flightList,writable,linked:accounts.length===1 && accounts[0].principal_id===actor && accounts[0].email===email,
       flightCommander:!!flightCommander,squadron:squadronCommander ? String(owner.squadron) : null,squadronId:squadronCommander ? owner.squadron_id : null,
-      section,...flightHome,attendance:personalData.attendance,actions:personalData.flags.map(workspaceAction),reportEvents:[],reportRoster:[],ownFlightCount:null,roster:[],requests:[],events:[],queue:[]};
+      section,...flightHome,attendance:personalData.attendance,actions:personalData.flags.map(workspaceAction),reportEvents:[],reportRoster:[],ownFlightCount:null,roster:[],requests:[],events:[],queue};
   }
-  const requests = (
-    predicate: string,
-  ) => `SELECT r.request_id AS requestId,r.person_id AS personId,r.unit_id AS flightId,r.event_id AS eventId,
-    e.label AS event,p.display_name AS personDisplayName,r.status,r.requested_outcome AS requestedOutcome,r.reason,
-    COALESCE((SELECT audit_id FROM audit_events WHERE command_id=r.last_command_id),0) AS 'order',(r.origin='legacy' AND r.last_command_id IS NULL) AS legacyStateOnly,r.version,r.submitted_at AS submittedAt,r.decision_reason AS decisionReason,sc.flight_label AS capturedFlightLabel,sc.squadron_label AS capturedSquadronLabel
-    FROM excusal_records r JOIN event_details d ON d.event_id=r.event_id JOIN events e ON e.event_id=r.event_id
-    JOIN people p ON p.person_id=r.person_id LEFT JOIN excusal_request_scopes sc ON sc.request_id=r.request_id
-    WHERE ${predicate} AND ${current} AND ${adopted} ORDER BY r.submitted_at,r.request_id`;
   const reporting=section==="report" || reportSection(section);
   const data = reporting ? [] : [
     db.prepare(requests("r.person_id=?")).bind(profile.personId),
@@ -340,7 +351,7 @@ export async function cadetRoute(
       )
     : null;
   const section=object(a) ? (a.kind==="report" && object(a.fields) ? "report:"+a.fields.eventId : undefined) : input.section;
-  if(section!=null && !reportSection(section) && !["profile","attendance","report","flight"].includes(String(section))) throw bad();
+  if(section!=null && !reportSection(section) && !["profile","attendance","report","flight","excusals"].includes(String(section))) throw bad();
   const state = await readCadetWorkspace(env, input.email, input.principalId, section);
   if (
     !state.linked &&
