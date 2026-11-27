@@ -1593,7 +1593,7 @@ main:has(.matrix-scroll) { padding-bottom: 8px; }
 
 @media (max-width:640px) {
   .mobile-bar,.mobile-menu header {display:flex;align-items:center;justify-content:space-between;gap:.65rem}
-  :root {background:var(--navy);scrollbar-gutter:auto}
+  :root {scrollbar-gutter:auto}
   body {background:white;min-height:100dvh}
   .mobile-bar,.mobile-menu header {padding:calc(env(safe-area-inset-top) + .2rem) max(.75rem,env(safe-area-inset-right)) .2rem max(.75rem,env(safe-area-inset-left));background:var(--navy);color:white}
   .mobile-menu header {position:sticky;top:0;z-index:1;flex:none}
@@ -1685,7 +1685,6 @@ main:has(.matrix-scroll) { padding-bottom: 8px; }
   .mobile-page {flex:1;min-width:0;text-align:center;line-height:1.2}
   .mobile-page strong,.mobile-page small {display:block}
   .mobile-page strong {font-size:1rem}
-  body:has(.app) {background:var(--navy)}
   .app,.workspace {background:white}
 }
 
