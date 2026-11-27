@@ -11,7 +11,7 @@ export function ProfileField({field, label, value, original, broadArea, original
   useLayoutEffect(() => { input.current.setCustomValidity(issue); }, [issue]);
   const type = ({phone:"tel", cellPhone:"tel", officePhone:"tel", email:"email", dateOfBirth:"date", photoLink:"url"})[field] || "text";
   return <Field label={label}>
-    <input ref={input} aria-label={label} type={type} required={required} list={choices ? id : undefined}
+    <input ref={input} name={field} aria-label={label} type={type} required={required} list={choices ? id : undefined}
       value={value ?? ""} maxLength={field === "photoLink" ? 2048 : field === "classYear" ? 4 : field === "email" ? 254 : 240}
       inputMode={field === "classYear" ? "numeric" : undefined}
       placeholder={choices ? "Type to find an option" : field === "cipCode" ? "00.0000" : undefined}

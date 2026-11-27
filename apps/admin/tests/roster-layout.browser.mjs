@@ -102,6 +102,21 @@ try {
       await tools.locator("summary").click();
       await editor.getByLabel("Photo link",{exact:true}).waitFor();
       await page.keyboard.press("Escape");
+      const row=page.getByRole("row").filter({has:page.getByRole("button",{name:"Edit Sample Cadet 0",exact:true})});
+      for(const [column,field] of [["squadron","flight"],["flightPathStatus","flightPathStatus"],["afsc","afsc"]]) {
+        const cell=row.locator(`td[data-column="${column}"]`);
+        await cell.click();
+        await editor.waitFor();
+        const control=editor.locator(`[name="${field}"]`);
+        await control.waitFor();
+        assert(await control.evaluate(input=>{
+          const field=input.closest("label"),drawer=input.closest("dialog"),rect=field.getBoundingClientRect();
+          return document.activeElement===field && rect.top>=drawer.querySelector("header").getBoundingClientRect().bottom-1 &&
+            rect.bottom<=drawer.querySelector("footer").getBoundingClientRect().top+1;
+        }),column+" should open at the editable field at "+width);
+        assert.equal(await editor.locator('input[name="lastName"]').inputValue(),"Cadet 0");
+        await page.keyboard.press("Escape");
+      }
     }
     await page.evaluate(() => document.fonts.ready);
     for (const width of [1280,1440,1600]) {
@@ -161,6 +176,7 @@ try {
       assert.equal(await failedRow.getByRole("link").count(),0);
       await page.route("https://drive.google.com/file/d/fixture1/preview?*",route => route.fulfill({contentType:"text/html",body:"Image preview"}));
       await failedRow.locator(".directory-avatar").click();
+      assert.equal(await editor.count(),0);
       const preview=page.getByRole("dialog",{name:"Photo of Sample Cadet 1"});
       assert.equal(await preview.getByRole("link",{name:"Open original photo"}).getAttribute("href"),people[1].photoLink);
       await preview.frameLocator("iframe").getByText("Image preview").waitFor();
@@ -178,6 +194,21 @@ try {
       await page.keyboard.press("Escape");
       await page.getByLabel("Find a cadet",{exact:true}).fill("Sample Cadet 0");
       assert.equal(await table.locator("tbody tr").count(),1);
+      const specialty=table.locator('tbody td[data-column="afsc"]');
+      await specialty.click();
+      await editor.getByLabel("AFSC",{exact:true}).waitFor();
+      assert.equal(await editor.getByLabel("AFSC",{exact:true}).inputValue(),"14N, Intelligence");
+      await page.keyboard.press("Escape");
+      await specialty.evaluate(cell=>{
+        const range=document.createRange();
+        range.selectNodeContents(cell);
+        const selection=window.getSelection();
+        selection.removeAllRanges();
+        selection.addRange(range);
+        cell.dispatchEvent(new MouseEvent("click",{bubbles:true}));
+        selection.removeAllRanges();
+      });
+      assert.equal(await editor.count(),0);
       await columns.click();
       await page.context().grantPermissions(["clipboard-read","clipboard-write"]);
       await picker.getByRole("button",{name:"Copy table"}).click();

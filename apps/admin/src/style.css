@@ -1779,6 +1779,8 @@ main:has(.matrix-scroll) { padding-bottom: 8px; }
 @keyframes chat-loading {to {transform:rotate(1turn)}}
 
 .cadet-profile-tools {position:relative}
+.editable-cadet {cursor:pointer}
+.drawer .field[tabindex="-1"]:focus > span {color:var(--navy);text-decoration:underline;text-underline-offset:.2em}
 .cadet-profile-tools details {border:0;padding:0}
 .cadet-profile-tools summary {display:list-item;align-content:center;min-height:44px;padding:0}
 .cadet-profile-tools:has(.photo-trigger) summary {padding-right:7.5rem}

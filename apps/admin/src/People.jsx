@@ -1,6 +1,6 @@
 import {useTableZoom} from "./TableZoom";
 import { ToolbarFilters } from "./ToolbarFilters";
-import React, { useState,useEffect } from "react";
+import React, { useState,useEffect,useRef } from "react";
 import { Plus, Pencil, Columns3 } from "lucide-react";
 import {
   Heading,
@@ -74,19 +74,56 @@ export default function People({
     profile = (k, v) =>
       setEdit({ ...edit, profile: { ...edit.profile, [k]: v } });
   const [original,setOriginal] = useState(null);
+  const toolsRef = useRef(null);
+  const latestOpen = useRef(0);
+  const [destination,setDestination] = useState(null);
   const complete = snapshot || browse?.profile === "cadet-details";
-  const open = (row) => {
-    if (!row || complete || leadership) return openRecord(row);
+  const open = (row, field) => {
+    if (readOnly || member) return;
+    const request = ++latestOpen.current;
+    const show = person => {
+      if (request !== latestOpen.current) return;
+      setDestination({field});
+      openRecord(person);
+    };
+    if (!row || complete || leadership) return show(row);
     const detailed = extended?.binding===binding && extended.people.find(p=>p.personId===row.personId);
-    if (detailed) return openRecord(detailed);
+    if (detailed) return show(detailed);
     return run(async () => {
       const view=await api("/cadets/editor?id="+encodeURIComponent(row.personId));
       const [values]=JSON.parse(view.tables.people);
       if (!values || values[0]!==row.personId || values.length!==DIRECTORY_FIELDS.length+3)
         throw Error("This record changed. Reload the page.");
-      openRecord(Object.fromEntries(["personId","version","flightId",...DIRECTORY_FIELDS].map((key,i)=>[key,values[i]])));
+      show(Object.fromEntries(["personId","version","flightId",...DIRECTORY_FIELDS].map((key,i)=>[key,values[i]])));
     });
   };
+  useEffect(()=>{
+    if (!destination || !toolsRef.current) return;
+    if (!destination.field) {
+      toolsRef.current.querySelector("details").open = false;
+      toolsRef.current.closest("dialog").scrollTop = 0;
+      return;
+    }
+    const control = toolsRef.current.closest("form").elements.namedItem(destination.field);
+    if (!control) return;
+    const details = control.closest("details");
+    if (details) details.open = true;
+    const field = control.closest("label");
+    // Focus the label so opening the editor on a phone leaves the keyboard closed.
+    field.tabIndex = -1;
+    field.focus({preventScroll:true});
+    field.scrollIntoView({block:"center",inline:"nearest",behavior:"instant"});
+  },[destination]);
+  function openRow(event, person) {
+    const row = event.currentTarget;
+    const cell = event.target.closest("td");
+    if (!cell || !row.contains(cell) || event.target.closest("button,a,input,select,textarea,label")) return;
+    const selection = window.getSelection();
+    if (selection && !selection.isCollapsed && row.contains(selection.anchorNode)) return;
+    row.querySelector(".edit-cadet")?.focus({preventScroll:true});
+    const column = event.target.closest("[data-column]")?.dataset.column;
+    open(person,column === "cadet" ? "firstName" : column === "squadron" ? "flight" : column);
+  }
   const openRecord = (p) => {
     setOriginal(p);
     if (leadership)
@@ -235,6 +272,7 @@ export default function People({
     return k === "asYear" || k === "flightPathStatus" ? (
       <Select
         key={k}
+        name={k}
         label={label(k)}
         value={edit.profile[k]}
         onChange={(v) => profile(k, v)}
@@ -303,17 +341,18 @@ export default function People({
         className={hasCadet ? "cadet-roster with-cadet" : "cadet-roster"}
         headers={[...columns.map(k=>header(k,columnLabel(k))), ...(hasCadet && !member ? [""] : [])]}>
         {rows.map((p) => {
-          const editButton = <button className="icon" disabled={readOnly} aria-label={`Edit ${name(p)}`} onClick={() => open(p)}><Pencil size={16}/></button>;
+          const canEdit = !member && !readOnly;
+          const editButton = <button className="icon edit-cadet" disabled={!canEdit} aria-label={`Edit ${name(p)}`} onClick={() => open(p)}><Pencil size={16}/></button>;
           return (
-          <tr key={p.contactId || p.personId}>
-            {hasCadet && <td>
+          <tr key={p.contactId || p.personId} className={canEdit ? "editable-cadet" : undefined} onClick={canEdit ? event=>openRow(event,p) : undefined}>
+            {hasCadet && <td data-column="cadet">
               <div className="person-cell">
                 <DirectoryPhoto avatar member={member} value={p.photoLink} person={p} />
                 <span>
-                  {member ? <strong className="member-name" title={name(p)}>{name(p)}</strong> : <button className="text-button" disabled={readOnly} title={name(p)} onClick={() => open(p)}>
+                  {member ? <strong className="member-name" title={name(p)}>{name(p)}</strong> : <button className="text-button" disabled={readOnly} title={name(p)} onClick={() => open(p,"firstName")}>
                     {name(p)}
                   </button>}
-                  <small>{p.rank}</small>
+                  <small data-column="rank">{p.rank}</small>
                 </span>
               </div>
             </td>}
@@ -322,11 +361,11 @@ export default function People({
                 const formation=key==="flight" || key==="asYear";
                 const style=key==="flight" ? cellStyle(flightColors(value,squadronOf(flightOf(p)))) :
                   key==="asYear" ? cellStyle(yearColors(value)) : undefined;
-                return <td key={key} title={key === "photoLink" ? undefined : String(value || "")} className={formation ? "formation" : undefined} style={style}>
+                return <td key={key} data-column={key} title={key === "photoLink" ? undefined : String(value || "")} className={formation ? "formation" : undefined} style={style}>
                   <span className="roster-value">{formation ? value || (key==="flight" ? "Unassigned" : "—") :
                     key==="flightPathStatus" ? <span className="status" style={cellStyle(flightPathColors(value))}>{value || "—"}</span> :
                     <DirectoryValue member={member} field={key} value={value} person={p}/>}</span>
-                  {key===columns[0] && !readOnly && editButton}
+                  {key===columns[0] && canEdit && editButton}
                 </td>;
               })}
             {!member && hasCadet && <td>{editButton}</td>}
@@ -338,7 +377,7 @@ export default function People({
         <Editor
           title={leadership ? "Leadership contact" : "Cadet profile"}
           busy={busy}
-          onClose={() => setEdit(null)}
+          onClose={() => {latestOpen.current++;setEdit(null);}}
           onSubmit={() =>
             propose(
               leadership ? "leadership.upsert" : "directory.upsert",
@@ -358,6 +397,7 @@ export default function People({
           {!leadership && (
             <>
               <Select
+                name="flight"
                 label="Flight"
                 value={edit.flightId}
                 onChange={(v) => set("flightId", v || null)}
@@ -369,7 +409,7 @@ export default function People({
                   })),
                 ]}
               />
-              <div className="cadet-profile-tools">
+              <div className="cadet-profile-tools" ref={toolsRef}>
                 <DirectoryPhoto value={edit.profile.photoLink} person={edit.profile} personId={edit.personId} />
                 <details><summary>Academic, personal &amp; photo details</summary>
                   {profileFields.filter((k) => !basic.includes(k)).map(input)}

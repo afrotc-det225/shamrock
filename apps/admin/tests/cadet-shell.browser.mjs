@@ -290,6 +290,8 @@ try {
         const directory=page.locator(".cadet-roster");
         await directory.getByText("Directory Peer",{exact:true}).waitFor();
         const names=directory.locator(".member-name");
+        await names.first().click();
+        assert.equal(await page.getByRole("dialog",{name:"Cadet profile"}).count(),0);
         assert.deepEqual(await names.allTextContents(),["Senior Sample","Directory Peer"]);
         if (width===390) await page.getByRole("button",{name:"Filters",exact:true}).click();
         await page.getByRole("combobox",{name:"Squadron",exact:true}).selectOption("Blue");
