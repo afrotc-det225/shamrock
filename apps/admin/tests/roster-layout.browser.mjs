@@ -22,10 +22,12 @@ try {
   assert.equal(row.at(-1), photoUrl);
   const people = Array.from({length:55}, (_, i) => ({
     ...snapshot.people[0], personId:"test-"+i, firstName:"Sample", lastName:i===49 ? "Cadet-With-A-Long-Hyphenated-Family-Name" : "Cadet "+i,
+    role:i>=40 ? "MSS - "+(i===49 ? "ExtendedOperationalCoordinationAssignment" : "Support office "+i) : snapshot.people[0].role,
     afsc:i === 0 ? "14N, Intelligence" : "13N",
     flightPathStatus:"Active 3/4", photoLink:i < 2 ? "https://drive.google.com/open?id=fixture"+i+"&resourcekey=test" : "",
   }));
   const leadership = people.map(p => ({...snapshot.leadership[0], ...p, contactId:"contact-"+p.personId}));
+  for(let i=0;i<9;i++) leadership.push({contactId:"staff-"+i,role:"Instructor "+i,lastName:"Example",reportsTo:"Commander",active:true});
   await page.route("**/api/state*", route => route.fulfill({json:{
     snapshot:{...snapshot, people:people.map((p,i)=>({...p,flightId:i%2 ? "blue-flight" : "gold-flight"})), leadership,
       flights:[{flightId:"blue-flight",label:"Alpha",squadronId:"blue"},{flightId:"gold-flight",label:"Delta",squadronId:"gold"}],
@@ -48,6 +50,30 @@ try {
     await page.goto(`http://127.0.0.1:${server.address().port}/${path}`);
     if(path==="leadership") {
       await page.getByRole("heading",{name:"Cadet Wing Organization"}).waitFor();
+      const region=page.getByRole("region",{name:"Cadet Wing organization"});
+      async function assertChartFits(){
+        await settle();
+        const layout=await region.evaluate(el=>{
+          const cards=[...el.querySelectorAll(".command-office")].map(n=>n.getBoundingClientRect()).filter(r=>r.width && r.height);
+          const overlap=cards.some((a,i)=>cards.slice(i+1).some(b=>
+            Math.min(a.right,b.right)-Math.max(a.left,b.left)>1 && Math.min(a.bottom,b.bottom)-Math.max(a.top,b.top)>1));
+          const truncated=[...el.querySelectorAll(".command-office button,.command-office strong")].some(n=>
+            n.clientWidth && n.scrollWidth>n.clientWidth+1);
+          return {overlap,truncated,pageOverflow:document.documentElement.scrollWidth>innerWidth};
+        });
+        assert.deepEqual(layout,{overlap:false,truncated:false,pageOverflow:false});
+      }
+      for(const width of [320,390,1024,1280,1440,1920]){
+        await page.setViewportSize({width,height:850});
+        await assertChartFits();
+        const title=region.getByRole("button",{name:"Focus on Mission Support Squadron",exact:true});
+        assert.equal(await title.locator("svg").count(),0);
+        await title.focus();
+        await page.keyboard.press("Enter");
+        await region.getByText("ExtendedOperationalCoordinationAssignment",{exact:true}).waitFor();
+        await assertChartFits();
+        await page.getByLabel("Organization branch").selectOption("");
+      }
       for (const width of [320,390,1024,1440]) {
         await page.setViewportSize({width,height:850});
         await page.getByLabel("Find a person or office").fill("Sample Cadet 0");

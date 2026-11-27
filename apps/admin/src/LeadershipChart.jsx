@@ -1,5 +1,4 @@
-import React, {createContext, useContext, useMemo, useRef, useState} from "react";
-import {Focus} from "lucide-react";
+import React, {createContext, useContext, useLayoutEffect, useMemo, useRef, useState} from "react";
 import {buildWingOrganization, filterWingOrganization} from "./wing-organization";
 import {name} from "./api";
 import {Drawer} from "./components";
@@ -21,7 +20,7 @@ function Office({node,onFocus,focused=false}) {
     <div className="command-primary">
       {node.code && <small className="office-symbol">{node.code}</small>}
       {onFocus ? <button className="office-focus" onClick={onFocus} aria-label={"Focus on "+node.title}>
-        {node.title} <Focus aria-hidden="true" size={13}/>
+        {node.title}
       </button> : <strong>{node.title}</strong>}
       <Occupants people={node.assigned}/>
       {!node.assigned.length && !node.contextOnly && <span className="office-unassigned">No assignment recorded</span>}
@@ -37,44 +36,82 @@ function Office({node,onFocus,focused=false}) {
   </div>;
 }
 
-// The first two tiers fan out horizontally. Lower offices and flights share a
-// vertical reporting rail, keeping sibling deputies together at every tier.
+// A fork can use one column per office while each label has room. Larger
+// sibling sets share reporting rails, with the same order and parentage.
+function OfficeFork({depth, weights, children}) {
+  const ref=useRef(null);
+  const [capacity,setCapacity]=useState(children.length);
+  useLayoutEffect(()=>{
+    const list=ref.current;
+    const measure=()=>{
+      const rem=parseFloat(getComputedStyle(document.documentElement).fontSize);
+      // On phones CSS already draws a single vertical reporting rail.
+      const stacked=getComputedStyle(list).display==="block";
+      setCapacity(stacked ? Infinity : Math.max(1,Math.floor(list.clientWidth/(9*rem))));
+    };
+    measure();
+    const observer=new ResizeObserver(measure);
+    observer.observe(list);
+    return ()=>observer.disconnect();
+  },[]);
+  const columns=Math.min(capacity,children.length);
+  const grouped=columns<children.length;
+  const tracks=grouped ? `repeat(${columns},minmax(0,1fr))` :
+    weights.map(weight=>`minmax(min(9rem,100%),${weight}fr)`).join(" ");
+  return <ul ref={ref} className="org-fork" data-tier={depth} style={{"--branches":tracks}}>
+    {grouped ? Array.from({length:columns},(_,i)=>{
+      const start=Math.floor(i*children.length/columns);
+      const end=Math.floor((i+1)*children.length/columns);
+      return <li key={children[start].key} className="org-column">
+        <ul className="org-rail sibling-rail">{children.slice(start,end)}</ul>
+      </li>;
+    }) : children}
+  </ul>;
+}
+
 function Branches({nodes=[],depth=1,onFocus,flightRoster=[]}) {
   if(!nodes.length && !flightRoster.length) return null;
-  return <ul className={depth<3 ? "org-fork" : "org-rail"} data-tier={depth}
-    style={depth===1 ? {"--branches":nodes.map(n=>`minmax(0,${Math.max(1,n.children?.length || 0)}fr)`).join(" ")} : undefined}>
-    {nodes.map(n=><li key={n.id} data-branch={n.id}>
-      <div className="org-post"><Office node={n} onFocus={onFocus(n)}/></div>
-      <Branches nodes={n.children} depth={depth+1} onFocus={onFocus}/>
-    </li>)}
-    {!!flightRoster.length && <li className="org-roster-branch">
-      <div className="command-office"><div className="command-primary"><strong>Flight roster</strong></div>
-        <div className="command-team"><Occupants people={flightRoster}/></div>
-      </div>
-    </li>}
-  </ul>;
+  const offices=nodes.map(n=><li key={n.id} data-branch={n.id}>
+    <div className="org-post"><Office node={n} onFocus={onFocus(n)}/></div>
+    <Branches nodes={n.children} depth={depth+1} onFocus={onFocus}/>
+  </li>);
+  if(flightRoster.length) offices.push(<li key=":roster" className="org-roster-branch">
+    <div className="command-office"><div className="command-primary"><strong>Flight roster</strong></div>
+      <div className="command-team"><Occupants people={flightRoster}/></div>
+    </div>
+  </li>);
+  if(depth>2) return <ul className="org-rail" data-tier={depth}>{offices}</ul>;
+  const weights=nodes.map(n=>depth===1 ? Math.max(1,n.children?.length || 0) : 1);
+  if(flightRoster.length) weights.push(1);
+  return <OfficeFork depth={depth} weights={weights}>{offices}</OfficeFork>;
 }
 
 function CadreCommand({commander,ops,hasWing,onFocus}) {
   const staff=commander.children?.filter(n=>n.id!=="cadre-operations") || [];
   const middle=Math.ceil(staff.length/2);
-  const offices=ops ? [...staff.slice(0,middle),ops,...staff.slice(middle)] : staff;
-  if(ops && staff.length%2) offices.push(null);
+  function cadreOffice(node) {
+    return <li key={node.id} className={node===ops && hasWing ? "cadre-main" : undefined}>
+      <div className="org-post"><Office node={node} onFocus={onFocus(node)}/></div>
+      <div className="cadre-reports"><Branches nodes={node.children?.filter(n=>n.id!=="wing")} depth={3} onFocus={onFocus}/></div>
+    </li>;
+  }
+  function staffColumn(nodes) {
+    if(nodes.length===1) return cadreOffice(nodes[0]);
+    if(!nodes.length) return <li className="cadre-spacer" aria-hidden="true"/>;
+    return <li className="org-column"><ul className="org-rail sibling-rail">{nodes.map(cadreOffice)}</ul></li>;
+  }
   return <>
     <div className="org-root"><Office node={commander}/></div>
-    {!!offices.length && <ul className="org-fork cadre-fork">{offices.map(node=>{
-      if(!node) return <li key="spacer" className="cadre-spacer" aria-hidden="true"/>;
-      const main=node===ops;
-      return <li key={node.id} className={main && hasWing ? "cadre-main" : undefined}>
-        <div className="org-post"><Office node={node} onFocus={onFocus(node)}/></div>
-        <div className="cadre-reports"><Branches nodes={node.children?.filter(n=>n.id!=="wing")} depth={3} onFocus={onFocus}/></div>
-      </li>;
-    })}</ul>}
+    {(ops || staff.length>0) && <ul className="org-fork cadre-fork">
+      {staff.length>0 && staffColumn(staff.slice(0,middle))}
+      {ops && cadreOffice(ops)}
+      {staff.length>0 && (ops || staff.length>1) && staffColumn(staff.slice(middle))}
+    </ul>}
   </>;
 }
 
 export default function LeadershipChart({roster,query="",onEdit}) {
-  const {root,wing,records}=useMemo(()=>buildWingOrganization(roster),[roster]);
+  const {root,records}=useMemo(()=>buildWingOrganization(roster),[roster]);
   const branches=useMemo(()=>{
     const index=new Map();
     function visit(node,parent) {
@@ -117,7 +154,7 @@ export default function LeadershipChart({roster,query="",onEdit}) {
       </select>
       </div>
     </header>
-    {tree ? <div className="org-canvas" style={{"--operations-columns":(wing.children.find(n=>n.id==="operations").children.length || 1)+"fr"}} data-full={!selected && !needle} aria-label={selected?.title || "Wing chain of command"}>
+    {tree ? <div className="org-canvas" data-full={!selected && !needle} aria-label={selected?.title || "Wing chain of command"}>
       {!selected && <CadreCommand commander={tree} ops={ops} hasWing={!!wingTree} onFocus={onFocus}/>}
       {wingTree && <><div className="org-root"><Office node={wingTree} onFocus={selected ? undefined : onFocus(wingTree)} focused={!!selected}/></div>
         <Branches nodes={wingTree.children} depth={selected ? 2 : 1} onFocus={onFocus} flightRoster={selected?.flight ? wingTree.team : undefined}/></>}

@@ -6,14 +6,14 @@
 .org-navigation {display:flex;align-items:center;gap:.4rem;min-width:0;max-width:55%}
 .org-heading select {scroll-margin-top:8rem;width:auto;min-width:0;max-width:100%}
 .org-navigation .office-parent {flex:none;background:transparent;border:0;color:var(--navy);padding:.35rem}
-.org-root .command-primary .office-focus,.org-root .office-focus svg {color:inherit}
+.org-root .command-primary .office-focus {color:inherit}
 .org-canvas {--line:#526f88;--stem:1.15rem;--accent:#31536e;--wash:#edf3f7;padding:1.35rem 0;color:#17334b}
 .command-office {width:calc(100% - .55rem);max-width:14rem;margin-inline:auto;line-height:1.24;background:white;border:1px solid #aabcc9;border-top:3px solid var(--accent);border-radius:3px;text-align:center;overflow-wrap:anywhere}
 .command-office strong,.office-focus {display:block;font-size:.9rem;line-height:1.2;font-weight:700;color:var(--navy)}
 .command-primary,.command-deputy,.command-team {padding:.45rem .32rem}
 .command-primary > .office-symbol {display:block;margin-bottom:.24rem}
 .org-canvas .command-occupant {display:block;border:0;background:transparent;color:inherit;padding:.15rem .2rem;margin-inline:auto;min-height:0;max-width:100%;white-space:normal;text-align:inherit;font-family:inherit;font-weight:500;margin-top:.25rem;font-size:.82rem;line-height:1.32}
-.command-occupant > span {white-space:nowrap;color:#4b5f70}
+.command-occupant > span {white-space:normal;color:#4b5f70}
 .command-occupant:hover,.command-occupant:focus-visible {text-decoration:underline;text-underline-offset:.16em}
 .command-deputy,.command-team {border-top:1px solid #ccd7df;background:#f8fafb}
 .command-deputy b,.office-unassigned {font-size:.78rem}
@@ -34,9 +34,9 @@
 .org-fork > li::after {left:50%;border-left:1.5px solid var(--line)}
 .org-fork > li:first-child::before,.org-fork > li:last-child::after {border-top:0}
 .org-fork[data-tier="1"] > li > .org-post > .command-office {background:var(--wash)}
-.org-canvas .office-focus {border:0;background:none;border-radius:0;min-height:0;margin:0 auto;padding:0;white-space:normal;font-family:inherit}
-.office-focus svg {vertical-align:middle;color:#4e6c84}
-.office-focus:hover {text-decoration:underline}
+.org-canvas .office-focus {max-width:100%;overflow-wrap:anywhere;border:0;background:none;border-radius:0;min-height:0;margin:0 auto;padding:0;white-space:normal;font-family:inherit}
+.office-focus:hover,.office-focus:focus-visible {text-decoration:underline;text-underline-offset:.14em}
+.office-focus:focus-visible {outline:2px solid currentColor;outline-offset:2px}
 .command-office[data-tone="blue"] {--accent:#326a9a;background:#edf5fc}
 .command-office[data-tone="gold"] {--accent:#956a1a;background:#faf4e4}
 .org-canvas .org-rail {width:calc(100% - .55rem);max-width:14rem;margin-inline:auto;padding-top:.4rem}
@@ -47,13 +47,25 @@
 .org-rail > li > .org-post > .command-office {margin-left:0;width:calc(100% - .2rem)}
 .org-fork > li:has(> .org-rail) > .org-post > .command-office {position:relative}
 .org-fork > li:has(> .org-rail) > .org-post > .command-office::after {content:"";position:absolute;left:0;top:100%;height:.46rem;border-left:1.5px solid var(--line)}
+.org-canvas .sibling-rail {width:calc(100% - .6rem);max-width:none;margin-left:.3rem;padding-top:0}
+.org-column > .sibling-rail > li:first-child::before {top:0}
+.org-column > .sibling-rail > li > .org-post > .command-office {max-width:none}
+/* Join the office itself even when its reports make the list item taller. */
+.sibling-rail > li:has(> .org-post)::before {top:0;bottom:0;width:0;border-bottom:0}
+.sibling-rail > li:has(> .org-post):last-child::before {bottom:auto;height:.42rem}
+.sibling-rail > li:has(> .org-post)::after {display:none}
+.sibling-rail > li > .org-post {position:relative}
+.sibling-rail > li > .org-post::before {content:"";position:absolute;left:-.55rem;top:0;height:50%;width:.55rem;border-left:1.5px solid var(--line);border-bottom:1.5px solid var(--line);pointer-events:none}
+.org-fork > .org-column::before {width:.3rem}
+.org-fork > .org-column::after {left:.3rem;width:calc(100% - .3rem)}
+.org-fork > .org-column:only-child::after {left:.3rem;width:calc(50% - .3rem);border-top:1.5px solid var(--line);pointer-events:none}
 .org-canvas .cadre-fork {max-width:58rem;margin:0 auto}
 .cadre-fork > li {display:flex;flex-direction:column}
 .cadre-fork > .cadre-spacer {visibility:hidden}
 .cadre-fork > li:has(+ .cadre-spacer)::after {border-top:0}
 .cadre-main .cadre-reports {position:relative;flex:1;padding:.35rem 0 var(--stem)}
 .cadre-main .cadre-reports::before {content:"";position:absolute;left:50%;inset-block:0;border-left:1.5px solid var(--line)}
-.cadre-main .cadre-reports .org-rail {position:relative;width:50%;margin-left:50%}
+.cadre-main > .cadre-reports > .org-rail {position:relative;width:50%;margin-left:50%}
 .cadre-main .cadre-reports .command-office {max-width:none}
 .flight-members {border-top:1px solid #ccd7df;padding:.2rem .4rem}
 .flight-members summary {padding:.3rem 0;font-size:.8rem}
@@ -63,11 +75,7 @@
 .org-contact a {color:var(--navy);text-underline-offset:.15em}
 @container (min-width:65rem) {
   .org-canvas .org-fork[data-tier="1"] {display:grid;grid-template-columns:var(--branches)}
-  /* The advisor and Evaluations have no child offices. Mission Support's five
-     offices use the third-tier space below both, as in the detachment chart. */
-  .org-canvas[data-full="true"] > .org-fork[data-tier="1"] {grid-template-columns:1.5fr 2fr 1.5fr minmax(0,var(--operations-columns)) 2fr}
-  .org-canvas[data-full="true"] > .org-fork > [data-branch="mss"] > .org-fork {width:250%;justify-self:center}
-  .org-fork[data-tier="1"] > li {display:grid;grid-row:span 2;grid-template-rows:subgrid}
+  .org-fork[data-tier="1"]:not(:has(> .org-column)) > li {display:grid;grid-row:span 2;grid-template-rows:subgrid}
   .org-fork[data-tier="1"] > li > .org-post {display:flex;flex-direction:column}
   .org-fork[data-tier="1"] > li:has(> ul) > .org-post::after {content:"";flex:1;align-self:center;border-left:1.5px solid var(--line)}
 }
@@ -78,12 +86,12 @@
   .org-canvas .cadre-fork {display:flex;flex-direction:column}
   .cadre-fork > .cadre-spacer {display:none}
   .cadre-fork > .cadre-main {order:1}
-  .cadre-main .cadre-reports .org-rail {width:auto;margin-left:.5rem}
+  .cadre-main > .cadre-reports > .org-rail {width:auto;margin-left:.5rem}
   .cadre-main .cadre-reports::before {left:0}
   .org-canvas .command-occupant {margin-inline:0;min-height:32px;text-align:left}
   .org-heading {align-items:end}
   .org-heading h2 {font-size:1.15rem}
-  .org-heading select {font-size:1rem;width:44%}
+  .org-heading select {font-size:1rem;width:100%}
   .org-canvas .org-fork {display:block;padding:.65rem 0 0 1.3rem}
   .org-fork::before {display:none}
   .org-fork > li {padding:.35rem 0 .35rem 1rem}
