@@ -279,9 +279,9 @@ export default function People({
                 </div>
               </ToolbarPopover>
             )}
-            <button className="primary" disabled={readOnly} onClick={() => open()}>
+            <button className="primary" aria-label={leadership ? "Add contact" : "Add cadet"} title={leadership ? "Add contact" : "Add cadet"} disabled={readOnly} onClick={() => open()}>
               <Plus size={17} />
-              {leadership ? "Add contact" : "Add cadet"}
+              <span>{leadership ? "Add contact" : "Add cadet"}</span>
             </button>
           </div>
         </div>

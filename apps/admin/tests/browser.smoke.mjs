@@ -345,7 +345,12 @@ try {
   await page.getByRole("button",{name:"Add "+fullName+" ·",exact:false}).click();
   await personYear.selectOption("AS500");
   await page.getByLabel("New semester name").fill("Spring 2027");
-  await page.getByLabel("First training-week Sunday").fill("2027-01-10");
+  await page.setViewportSize({width:390,height:844});
+  const firstSunday = page.getByLabel("First training-week Sunday");
+  await firstSunday.fill("2027-01-10");
+  assert.equal(await firstSunday.inputValue(),"2027-01-10");
+  assert(await firstSunday.evaluate(el=>el.offsetWidth<=160 && el.scrollWidth<=el.clientWidth));
+  await page.setViewportSize({width:1488,height:1056});
   await page.getByLabel("Training weeks", { exact: true }).fill("2");
   await page.getByRole("button", { name: "Review semester plan" }).click();
   await page.getByRole("button", { name: "Apply change", exact: true }).click();
@@ -432,7 +437,10 @@ try {
   await eventFilters.waitFor();
   const eventSearch = await page.locator(".event-toolbar .search").boundingBox();
   const filterBox = await eventFilters.boundingBox();
-  assert(filterBox.y >= eventSearch.y + eventSearch.height && Math.abs(filterBox.x - eventSearch.x) < 1,JSON.stringify({filterBox,eventSearch}));
+  for (const box of [filterBox,await page.getByRole("button",{name:"Add event",exact:true}).boundingBox(),
+    await page.getByRole("button",{name:"Change schedule",exact:true}).boundingBox()]) {
+    assert(Math.abs(box.y-eventSearch.y)<1 && box.x>=eventSearch.x+eventSearch.width && box.width>=44);
+  }
   await eventFilters.click();
   const selects = await page.getByRole("region",{name:"Filters"}).getByRole("combobox").all();
   const boxes = await Promise.all(selects.map(select=>select.boundingBox()));
@@ -444,7 +452,7 @@ try {
   await page.getByRole("button", {name:"Review change", exact:true}).waitFor();
   await page.locator("dialog:modal").waitFor();
   for (const input of await page.locator('dialog input[type="datetime-local"]').all()) {
-    assert(await input.evaluate(el => el.clientWidth <= 256 && el.scrollWidth <= el.clientWidth));
+    assert(await input.evaluate(el => el.clientWidth <= 224 && el.scrollWidth <= el.clientWidth));
   }
   await page.getByRole("button", { name: "Close editor" }).click();
   // Ordinary scoped Flight reader: no private/admin navigation or decision controls.

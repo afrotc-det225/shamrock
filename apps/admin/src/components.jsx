@@ -42,7 +42,7 @@ export function SearchBox({ value, onChange, placeholder, resultCount }) {
         value={value}
         onChange={(e) => onChange(e.target.value)}
       />
-      {resultCount != null && <small className="search-count" role="status">{resultCount} {resultCount===1 ? "match" : "matches"}</small>}
+      {resultCount != null && <small className="search-count" role="status">{resultCount}<span> {resultCount===1 ? "match" : "matches"}</span></small>}
     </label>
   );
 }

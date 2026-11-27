@@ -1,6 +1,6 @@
 import { ToolbarFilters } from "./ToolbarFilters";
 import React, { useState } from "react";
-import { Plus, Pencil } from "lucide-react";
+import { CalendarClock, Plus, Pencil } from "lucide-react";
 import {
   Heading,
   Field,
@@ -143,12 +143,13 @@ export default function Events({ snapshot, eventsList, propose, busy, refresh, r
               options={[{value:"default", label:"Default"}, {value:"type", label:"Type"}]} />
           </ToolbarFilters>
           <div className="toolbar-actions">
-            <button disabled={readOnly || !term || busy} onClick={() => withEditor(() => setBulk(true))}>
-              Change schedule
+            <button aria-label="Change schedule" title="Change schedule" disabled={readOnly || !term || busy} onClick={() => withEditor(() => setBulk(true))}>
+              <CalendarClock className="phone-action-icon" size={18} aria-hidden="true" />
+              <span>Change schedule</span>
             </button>
-            <button className="primary" disabled={readOnly || busy} onClick={() => open()}>
+            <button className="primary" aria-label="Add event" title="Add event" disabled={readOnly || busy} onClick={() => open()}>
               <Plus size={17} />
-              Add event
+              <span>Add event</span>
             </button>
           </div>
         </div>
@@ -223,14 +224,12 @@ export default function Events({ snapshot, eventsList, propose, busy, refresh, r
           />
           <Field
             label={`Starts (${zoneLabel(edit.startAt)})`}
-            className="event-date-time"
             type="datetime-local"
             value={toEastern(edit.startAt)}
             onChange={(e) => setTime("startAt", e.target.value)}
           />
           <Field
             label={`Ends (${zoneLabel(edit.endAt)})`}
-            className="event-date-time"
             type="datetime-local"
             value={toEastern(edit.endAt)}
             onChange={(e) => setTime("endAt", e.target.value)}

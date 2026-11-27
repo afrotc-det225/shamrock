@@ -126,8 +126,25 @@ try {
       assert.deepEqual(await table.locator("thead th").allTextContents(),["Cadet","Rank","AFSC",""]);
 
     }
-    await page.setViewportSize({width:390,height:844});await settle();
-    assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
+    for (const width of [320,390,430]) {
+      await page.setViewportSize({width,height:844});
+      const filters = page.getByRole("button",{name:"Filters",exact:true});
+      await filters.waitFor();
+      if (path==="cadets" && width===320) {
+        await filters.click();
+        await page.getByRole("combobox",{name:"Squadron",exact:true}).selectOption("blue");
+        await filters.click();
+        await page.getByLabel("Find a cadet",{exact:true}).fill("Sample");
+        assert.equal(await page.locator(".search-count").textContent(),"27 matches");
+      }
+      const search = await page.locator(".toolbar .search").boundingBox();
+      const buttons = page.locator(".toolbar > button, .toolbar-actions > button");
+      for (const button of await buttons.all()) {
+        const box = await button.boundingBox();
+        assert(Math.abs(box.y-search.y)<1 && box.width>=44 && box.x+box.width<=width);
+      }
+      assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
+    }
   }
   await page.route("**/api/state*", async route => {
     const request = snapshot.requests[0];
