@@ -55,7 +55,9 @@ export async function repositoryJob(storage,input,now){
       await tx.put(prefix+id,job);return id;
     }
     if(operation==="claim"){
-      const job=jobs.find(j=>["running","publishing"].includes(j.state) && j.run===run) ?? jobs.find(j=>["queued","approved"].includes(j.state));
+      const publishing=jobs.some(j=>j.state==="publishing");
+      const job=jobs.find(j=>["running","publishing"].includes(j.state) && j.run===run)
+        ?? jobs.find(j=>j.state==="queued" || (j.state==="approved" && !publishing));
       if(!job)return null;
       if(["queued","approved"].includes(job.state)){
         Object.assign(job,{run,state:job.state==="approved"?"publishing":"running",started:now});await tx.put(prefix+job.id,job);
