@@ -1,4 +1,5 @@
 import {storeEnvironment} from "./site.mjs";
+import {repositoryJob} from "./repository-jobs.mjs";
 import { reserve } from "./openai-assistant.mjs";
 import { DurableObject } from "cloudflare:workers";
 import { createHash } from "node:crypto";
@@ -119,6 +120,7 @@ export class StagingPanelStore extends DurableObject {
     });
   }
 
+  repositoryJob(input) { return repositoryJob(this.ctx.storage,input,Date.now()); }
   reserveAssistant(weight) { return reserve(this.ctx.storage, Date.now(), weight, true); }
 
   status() { return this.ready; }

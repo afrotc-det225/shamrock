@@ -1,4 +1,5 @@
 import React, {useEffect, useRef, useState} from "react";
+import {api} from "./api";
 import runnerUrl from "./assistant-sandbox.js?worker&url";
 import { runnable } from "../hosted/maintenance.mjs";
 
@@ -21,12 +22,20 @@ export function MaintenanceProposal({proposal:p,autoTest=false}) {
     if(autoTest && Object.hasOwn(runnable,p.area))run();
     return ()=>active.current?.();
   },[autoTest,p]);
-  const downloadJob = () => {
-    const {area,path,commit,before,after}=p;
-    const url=URL.createObjectURL(new Blob([JSON.stringify({area,path,commit,before,after})],{type:"application/json"}));
-    const link=document.createElement("a");link.href=url;link.download="shamrock-codex-job.json";link.click();
-    setTimeout(()=>URL.revokeObjectURL(url),1000);
-  };
+  const [testState,setTestState]=useState("queued");
+  useEffect(()=>{
+    if(!p.jobId)return;
+    let stopped=false,timer;
+    async function refresh(){
+      let state;
+      try{({state}=await api("/chat/repository-test?id="+encodeURIComponent(p.jobId)));}
+      catch{state="unavailable";}
+      if(stopped)return;
+      setTestState(state);
+      if(["queued","running","unavailable"].includes(state))timer=setTimeout(refresh,30000);
+    }
+    refresh();return ()=>{stopped=true;clearTimeout(timer);};
+  },[p.jobId]);
   const download = () => {
     const url = URL.createObjectURL(new Blob([p.source.replace(p.before,()=>p.after)],{type:"text/plain"}));
     const a = document.createElement("a"); a.href=url; a.download=p.path.split("/").pop(); a.click();
@@ -35,9 +44,10 @@ export function MaintenanceProposal({proposal:p,autoTest=false}) {
   return <section><strong>{p.path} · {p.commit.slice(0,12)}</strong>
     <details><summary>Review proposed edit</summary>{p.routing && <p>Routed by {p.routing} · GPT-5.3-Codex</p>}<p>Current</p><pre>{p.before}</pre><p>Proposed</p><pre>{p.after || "(remove)"}</pre></details>
     <button onClick={download}>Download proposed file</button>
-    <button onClick={downloadJob}>Download repository test job</button>
+    {p.jobId && <p role="status">Repository tests · {testState}</p>}
+    {p.jobId===null && <p>The daily repository test allowance has been used.</p>}
     {Object.hasOwn(runnable,p.area) ? <button disabled={status==="Running…"} onClick={run}>Test with fictional data</button>
-      : <p>Requires repository integration tests.</p>}
+      : null}
     {Object.hasOwn(runnable,p.area) && !p.example && <p>The model supplied no runnable example for the requested behavior. Only regression cases are available.</p>}
     {status && <p role="status">{status}</p>}
     {results && <table><thead><tr><th>Check</th><th>Released code</th><th>Proposal</th></tr></thead>

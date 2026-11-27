@@ -1,6 +1,7 @@
 import { directoryPortrait,profileWithPortrait } from "./directory-photo.mjs";
 import {isWorkspacePath} from "../src/page-url.js";
 import {isUnifiedSite} from "./site.mjs";
+import {runnerOperation,wakeRunner} from "./repository-jobs.mjs";
 import { checkChatId, readChats, saveTurn } from "./chat-history.mjs";
 import { available, answer, model } from "./openai-assistant.mjs";
 import { authRoute, session, csrfCheck, sha } from "./auth.mjs";
@@ -53,6 +54,11 @@ export default {
         const response = secure(asset);
         response.headers.set("Content-Security-Policy", "default-src 'none'; script-src 'wasm-unsafe-eval'; connect-src 'none'");
         return response;
+      }
+      const runnerRoute=/^\/api\/repository-runner\/(claim|finish)$/.exec(url.pathname);
+      if(isUnifiedSite(env) && runnerRoute && request.method==="POST"){
+        const input=await runnerOperation(request,runnerRoute[1]);
+        return secure(json(await env.PANEL_DB.repositoryJob(input)));
       }
       const auth = await authRoute(request, env);
       if (auth) return secure(auth);
@@ -261,9 +267,14 @@ export default {
         );
       }
       const chatHistory=request.method==="GET" && url.pathname==="/api/chat/history";
-      if (chatHistory || (request.method==="POST" && url.pathname==="/api/chat")) {
+      const testJob=request.method==="GET" && url.pathname==="/api/chat/repository-test";
+      if (testJob || chatHistory || (request.method==="POST" && url.pathname==="/api/chat")) {
         if (!available(env,user,preview) || !(await backend.panelAuthority()).access.capabilities.fullSnapshot)
           throw new PanelError("FORBIDDEN","Assistant access is restricted.",403);
+        if(testJob){
+          const id=checkChatId(url.searchParams.get("id"));
+          return secure(json(await env.PANEL_DB.repositoryJob({operation:"status",id}) ?? {state:"expired"}));
+        }
         const prefix="assistant/chat/v1/"+env.GENERATION+"/"+await sha(user.google_sub)+"/";
         if(chatHistory){
           if(!env.HISTORY_FILES)throw new PanelError("UNAVAILABLE","Saved chats are unavailable.",503);
@@ -273,6 +284,11 @@ export default {
         }
         const id=checkChatId(body?.chatId ?? crypto.randomUUID());
         const reply=await answer(env,body,env.operatorGuide,fetch,()=>wingCharts(backend));
+        if(isUnifiedSite(env) && reply.proposal){
+          const {area,path,commit,before,after}=reply.proposal;
+          reply.proposal.jobId=await env.PANEL_DB.repositoryJob({operation:"create",id:crypto.randomUUID(),patch:{area,path,commit,before,after}});
+          if(reply.proposal.jobId)await wakeRunner(env);
+        }
         let saved=false;
         try {
           const title=typeof body.chatTitle==="string" && body.chatTitle.trim() ? body.chatTitle : body.messages[0].content;
