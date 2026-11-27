@@ -74,7 +74,7 @@ export async function browsePanel(env:Env, identity:{environment:string;generati
     table('terms',q.terms,'termId,label,sortOrder,isCurrent');
     table('events',q.events,'eventId,termId,eventType,displayOrder,label,status,startAt,endAt,location,notes');
   } else if(profile==='event-editor'){
-    table('people',people,'personId,lastName,firstName');
+    table('people',people,'personId,lastName,firstName,asYear,classYear,flightId,flightPathStatus','WHERE '+activePeople);
     table('flights',q.flights,'flightId,label');
     table('terms',q.terms,'termId,label,sortOrder,isCurrent');
     table('events',q.events,'eventId,version,termId,eventType,trainingWeek,displayOrder,label,columnLabel,expectedGroup,status,startAt,endAt,location,notes,hasRoster');

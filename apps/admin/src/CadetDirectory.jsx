@@ -2,7 +2,7 @@ import React, {useState} from "react";
 import {compareCadetsForDisplay} from "../../../packages/domain/src/cadet-display-order";
 import {Empty, Heading, SearchBox, Select, Table} from "./components";
 import {ToolbarFilters} from "./ToolbarFilters";
-import {cellStyle, flightColors, yearColors} from "./roster-colors";
+import {cellStyle, flightColors, yearColors, profileColorStyle, flightPathColors} from "./roster-colors";
 import {useTableZoom} from "./TableZoom";
 
 const directoryFields = [["role","Role"],["university","University"],["email","School email"],["classYear","Graduation year"],
@@ -27,7 +27,7 @@ export default function CadetDirectory({rows}) {
       {roster.map(row => <tr key={row.personId}><td>{row.rank} {row.firstName} {row.lastName}</td>
         <td style={cellStyle(yearColors(row.asYear))}>{row.asYear}</td>
         <td style={cellStyle(flightColors(row.flight,row.squadron))}>{row.flight}</td>
-        <td>{row.squadron}</td>{directoryFields.map(([key])=><td key={key}>{row[key] || "—"}</td>)}</tr>)}
+        <td style={profileColorStyle("squadron",row.squadron)}>{row.squadron}</td>{directoryFields.map(([key])=><td key={key} style={row[key] ? (key === "flightPathStatus" ? cellStyle(flightPathColors(row[key])) : profileColorStyle(key,row[key])) : undefined}>{row[key] || "—"}</td>)}</tr>)}
     </Table> : <Empty>No matching cadets.</Empty>}
   </>;
 }

@@ -93,6 +93,12 @@ try {
         assert.equal(await page.getByRole("button",{name:"Refresh",exact:true}).count(),0);
         await page.getByLabel("Flight attendance event").selectOption("other");
         await page.getByRole("cell",{name:"Present",exact:true}).waitFor();
+        const mark=page.locator('.flight-roll [data-mark="P"]');
+        const fill=()=>mark.evaluate(cell=>getComputedStyle(cell).backgroundColor);
+        const initialFill=await fill();
+        assert.equal(initialFill,"rgb(193, 225, 205)");
+        await mark.hover();
+        assert.equal(await fill(),initialFill);
         assert.equal(await page.getByRole("button",{name:"Flight roles"}).count(),0);
         await page.getByRole("heading",{name:"Flagged attendance"}).waitFor();
       }
@@ -103,6 +109,13 @@ try {
       if (role==="Flight" || squadron) {
         await page.locator(".excusal-queue tbody tr").first().waitFor();
         if(width===390) await page.getByRole("button",{name:"Filters"}).click();
+        if (width===390) {
+          const row=page.locator(".excusal-queue tbody tr").first();
+          const fits=await row.evaluate(tr=>Array.from(tr.children).every(td =>
+            td.getBoundingClientRect().right<=tr.getBoundingClientRect().right+1));
+          assert(fits,"the full request and decision controls fit on a phone");
+          assert.equal(await row.locator(".excusal-reason").evaluate(td=>getComputedStyle(td).gridArea.split(" /")[0]),"reason");
+        }
         const sort=page.getByLabel("Sort by",{exact:true});
         assert.equal(await sort.inputValue(),"submission");
         const beforeSort=calls.length;

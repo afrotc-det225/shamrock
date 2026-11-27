@@ -127,6 +127,21 @@ try {
   await page
     .getByLabel("Event name", { exact: true })
     .fill("Veterans Day ceremony");
+  const rosterDetails = page.getByText("Attendance roster & schedule details", {exact:true});
+  await rosterDetails.click();
+  const expected = page.getByRole("group",{name:"Expected cadets",exact:true});
+  const activePeople = beforeEdit.people.filter(p=>p.active);
+  assert.equal(await expected.getByRole("checkbox").count(), activePeople.length);
+  const firstYear = activePeople[0].asYear;
+  const cohort = expected.getByRole("button",{name:firstYear,exact:true});
+  const original = await expected.getByRole("checkbox").evaluateAll(inputs=>inputs.map(input=>input.checked));
+  if (await cohort.getAttribute("aria-pressed")==="true") await cohort.click();
+  await cohort.click();
+  assert.equal(await cohort.getAttribute("aria-pressed"),"true");
+  await cohort.click();
+  assert.equal(await cohort.getAttribute("aria-pressed"),"false");
+  for (const [index,checked] of original.entries()) await expected.getByRole("checkbox").nth(index).setChecked(checked);
+  await rosterDetails.click();
   assert.equal(pageReads,initialPageReads,"opening an event editor fetches no record pages");
   const readsWhileEditing = stateReads;
   await page.clock.fastForward(61000);

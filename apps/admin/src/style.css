@@ -246,9 +246,6 @@ td {
   border-top: 1px solid var(--border);
   line-height: 1.35;
 }
-tr:hover td {
-  background: #f6faf8;
-}
 td small {
   display: block;
   color: var(--muted);
@@ -968,8 +965,8 @@ td {
 tbody tr:first-child td {
   border-top: 0;
 }
-tr:hover td {
-  background: #f3f6fa;
+@media (hover:hover) {
+  :where(tbody tr:hover) td:not([data-mark]) {background-color:#f3f6fa}
 }
 .table-scroll th:first-child {
   left: 0;
@@ -1255,6 +1252,7 @@ html:has(dialog:modal) {
 .mark-cell button,.mark-cell>span {display:block;box-sizing:border-box;width:100%;min-height:1.85rem;padding:.23rem;border:0;border-radius:0;background:transparent;color:inherit;font:inherit;text-align:center}
 .mark-cell button:hover,.mark-cell button:focus-visible {outline:2px solid currentColor;outline-offset:-3px;background:transparent}
 .attendance-matrix .mark-cell[data-review="true"] {box-shadow:inset 0 0 0 1px currentColor}
+[data-mark="N/A"] {--mark-bg:#e4e8ec;--mark-ink:#455262}
 [data-mark="P"] {--mark-bg:#c1e1cd;--mark-ink:#164a32}
 [data-mark="T"] {--mark-bg:#f3cf86;--mark-ink:#553500}
 [data-mark="R"] {--mark-bg:#eec17b;--mark-ink:#503009}
@@ -1413,12 +1411,12 @@ h1.page-title {position:absolute;width:1px;height:1px;margin:0;padding:0;overflo
 .flight-sections [aria-pressed="true"] {background:var(--navy);color:white}
 .profile-resources a {display:inline-flex;align-items:center;gap:.5rem;border:1px solid var(--border,#cad4df);border-radius:.35rem;padding:.45rem .65rem;color:var(--navy);font-weight:600;text-decoration:none}
 .profile-resources a:hover,.profile-resources a:focus-visible {text-decoration:underline}
-.personal-credit {gap:2rem;margin:0 0 1rem}.personal-credit dt {font-size:.85rem}.personal-credit dd {margin:0;font-size:1.5rem;font-weight:700}
+.personal-credit {gap:2rem;margin:0 0 1rem}.personal-credit dt {font-size:.85rem}.personal-credit dd {border-radius:.25rem;padding:.08rem .35rem;margin:.2rem 0 0;font-size:1.5rem;font-weight:700}
 .personal-events {width:100%;max-width:44rem;min-width:0;border-collapse:collapse}
 .personal-events th,.personal-events td {text-align:left;padding:.45rem .65rem;border-bottom:1px solid var(--border,#cad4df)}
 .personal-events td {padding:0;width:48%}
 .personal-events th[scope="row"] {background:transparent;white-space:normal;text-transform:none;letter-spacing:normal;font-size:inherit;color:inherit}
-.personal-mark,.personal-mark button {background:var(--mark-bg,#eef2f6);color:var(--mark-ink,#243951)}
+.personal-mark[data-mark],.personal-mark[data-mark] button,.code-label {background:var(--mark-bg,#eef2f6);color:var(--mark-ink,#243951)}
 .personal-mark button {width:100%;text-align:left;border:0;border-radius:0;padding:.6rem .75rem}
 .personal-mark button[aria-pressed="true"] {outline:2px solid currentColor;outline-offset:-2px}
 .personal-mark button:disabled {opacity:1}
@@ -1559,8 +1557,8 @@ main:has(.matrix-scroll) { padding-bottom: 8px; }
 .excusal-queue .excusal-code {background-color:var(--mark-bg,#f0f1f2);color:var(--mark-ink,#424a51)}
 .excusal-reason {white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.45}
 .excusal-submitted time {display:block;color:#526479;font-size:.76rem;line-height:1.35;white-space:normal}
-.excusal-status[data-status="Withdrawn"] .status {background:#f4e5bc;color:#5b4115}
-.excusal-status[data-status="Superseded"] .status {background:#e6dff1;color:#493366}
+.status[data-status="Withdrawn"] {background:#f4e5bc;color:#5b4115}
+.status[data-status="Superseded"] {background:#e6dff1;color:#493366}
 .excusal-actions {display:flex;align-items:center;flex-wrap:wrap;gap:.3rem}
 .excusal-actions :is(button,select) {min-width:0;min-height:2.2rem;width:auto;padding:.29rem .45rem;font-size:.81rem;font-weight:600;border-radius:.35rem}
 .excusal-actions select {width:5.5em;flex:none;background-color:white;color:#415468}
@@ -1571,16 +1569,25 @@ main:has(.matrix-scroll) { padding-bottom: 8px; }
 @container (max-width:61rem) {
   .excusal-queue thead {position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%)}
   .excusal-queue :is(table,tbody) {display:block}
-  .excusal-queue tbody tr {display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;
-    gap:.55rem .5rem;padding:.85rem;border-bottom:1px solid var(--border)}
+  .excusal-queue tbody tr {
+    display:grid;grid-template-columns:minmax(0,1fr) auto;
+    grid-template-areas:"cadet status" "event code" "reason reason" "submitted submitted";
+    gap:.35rem .75rem;align-items:baseline;padding:.85rem 1rem;border-bottom:1px solid var(--border)
+  }
   .excusal-queue tbody tr:last-child {border-bottom:0}
-  .excusal-queue tbody td {position:static;background:transparent;border:0;padding:0}
-  .excusal-queue .excusal-cadet {padding:.25rem .55rem;border-radius:.25rem}
-  .excusal-queue td.excusal-code {padding:.25rem .55rem;border-radius:.25rem;background:var(--mark-bg,#f0f1f2)}
-  .excusal-queue :is(.excusal-event,.excusal-reason,.excusal-controls) {grid-column:1/-1}
-  .excusal-submitted {align-self:center}
-  .excusal-status {justify-self:end;min-width:0;max-width:100%}
+  .excusal-queue tbody td {position:static;border:0;padding:0;min-width:0;background-color:transparent}
+  .excusal-queue td.excusal-cadet {grid-area:cadet;justify-self:start;max-width:100%;padding:.2rem .45rem;border-radius:.25rem}
+  .excusal-queue td.excusal-code {grid-area:code;justify-self:end;padding:.15rem .45rem;border-radius:.25rem;background:var(--mark-bg,#eef2f6)}
+  .excusal-event {grid-area:event}
+  .excusal-reason {grid-area:reason}
+  .excusal-submitted {grid-area:submitted}
+  .excusal-submitted time::before {content:"Submitted · "}
+  .excusal-status {grid-area:status;justify-self:end}
+  .excusal-controls {grid-column:1/-1}
+  .excusal-controls:empty {display:none}
+  .excusal-actions {margin-top:.3rem}
   .excusal-actions :is(button,select) {min-height:44px}
+
 }
 
 @media (max-width:640px) {
@@ -1799,3 +1806,29 @@ main:has(.matrix-scroll) { padding-bottom: 8px; }
 .excusal-request-reason h3 {margin:0 0 .35rem;font-size:.85rem}
 .excusal-request-reason p {margin:0;white-space:pre-wrap;overflow-wrap:anywhere}
 .drawer:has(.excusal-summary) > header h2 {font-size:1.35rem}
+
+.roster-shortcuts {display:grid;gap:.4rem;margin:.4rem 0 .75rem}
+.roster-shortcuts > div {display:flex;gap:.3rem;flex-wrap:wrap}
+.roster-shortcuts > div:empty {display:none}
+.roster-shortcuts button {min-height:2rem;padding:.25rem .55rem;font-size:.82rem}
+.roster-shortcuts button[aria-pressed="true"] {background:var(--navy);color:white}
+.roster-shortcuts button[aria-pressed="mixed"] {border-style:dashed;border-color:var(--navy)}
+.report-checklist legend {padding:.15rem .4rem;border-radius:.2rem}
+.code-label {display:inline-block;border-radius:.2rem;padding:.05rem .3rem;font-weight:650}
+@media (max-width:640px) {
+  .personal-excusals thead {position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%)}
+  .personal-excusals :is(table,tbody) {display:block}
+  .personal-excusals tbody tr {
+    display:grid;grid-template-columns:minmax(0,1fr) auto;grid-template-areas:"event code" "reason reason" "status status";
+    align-items:baseline;gap:.4rem .65rem;padding:.8rem;border-bottom:1px solid var(--border)
+  }
+  .personal-excusals tbody tr:last-child {border-bottom:0}
+  .personal-excusals tbody td {min-width:0;position:static;padding:0;border:0;overflow-wrap:anywhere}
+  .personal-excusals td:first-child {grid-area:event;font-weight:700}
+  .personal-excusals td:nth-child(2) {grid-area:code;justify-self:end;border-radius:.25rem;padding:.1rem .4rem}
+  .personal-excusals td:nth-child(3) {grid-area:reason}
+  .personal-excusals td:nth-child(4) {grid-area:status;justify-self:start}
+  .personal-excusals .personal-decision {grid-column:1/-1;color:var(--muted)}
+  .personal-excusals .personal-decision::before {content:"Decision · ";font-weight:600}
+  .personal-excusals .empty-decision {display:none}
+}

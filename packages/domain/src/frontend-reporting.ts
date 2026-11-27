@@ -7,8 +7,8 @@ export const REPORTING_POLICY_VERSION = 'legacy-shamrock-credit-v1' as const;
 export const MAX_REPORTING_CELLS = 100_000;
 const CREDIT = new Set<AttendanceCode>(['P', 'T', 'E', 'ES', 'MED']);
 const COUNTED = new Set<AttendanceCode>(['P', 'T', 'A', 'U', 'E', 'ES', 'MED']);
-const GMC = ['AS100', 'AS150', 'AS200', 'AS250', 'AS500'];
-const POC = ['AS300', 'AS400', 'AS700', 'AS800', 'AS900'];
+export const GMC = ['AS100', 'AS150', 'AS200', 'AS250', 'AS500'];
+export const POC = ['AS300', 'AS400', 'AS700', 'AS800', 'AS900'];
 /** Overview uses the same AS cohorts as attendance reporting. Far crosstowns
  * are a subset of the four partner schools, and unknown schools count in neither. */
 export function overviewRoster(groups: Iterable<readonly [string, string, number]>) {

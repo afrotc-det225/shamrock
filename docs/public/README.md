@@ -334,6 +334,10 @@ When a feature changes, update only the sections that help an operator use, vali
 
 ### Cadet navigation on the SHAMROCK site
 
+In **Events → Edit event → Attendance roster & schedule details**, Expected cadets lists the active Directory roster. Select a Flight, AS year, graduation class, GMC, or POC to add its members. Select a fully checked group again to remove its members. Individual checkboxes allow exceptions. Editing an event preserves previously recorded eligibility for cadets who have since left the roster.
+
+On phones, **Excusals** keeps each cadet, event, code, reason, submission time and decision status together. **My excusals** shows the cadet's request and any decision reason in the same entry.
+
 After sign-in, cadets use the same navigation layout as leadership. My excusals shows submitted requests and their decisions, and My profile opens the Directory record. Flight commanders also have My Flight, and squadron commanders have their Excusals queue. New cadets start with profile registration. On phones, **Menu** opens the available pages and account controls.
 
 Every active cadet can open **Overview**. It opens with the active roster, GMC, POC, crosstown and far crosstown counts. Crosstowns includes Saint Mary’s, Holy Cross, Trine and Valparaiso. Far crosstowns counts Trine and Valparaiso within that total. Wing attendance shows Overall and LLAB attendance with the percentage-point change from the previous semester when available. Wing birthdays lists cadets celebrating this week, or the next birthdays when the week is quiet. Each entry shows the cadet’s surname followed by the month and day in parentheses. Underlined dates have birthdays in the selected flight. Select anywhere on a numbered week row to see its full Sunday–Saturday list, including days across a month boundary. The week containing January 1 is calendar week 1. Use the reset beside the month arrows to return to the default agenda with your flight filter.

@@ -16,6 +16,9 @@ import { toEastern, fromEastern, zoneLabel } from "./time";
 import { eventEditorData } from "./browse";
 import { api } from "./api";
 import {existingEventPayload} from "../event-editor.mjs";
+import { operationallyActive } from "../../../packages/domain/src/admin";
+import { compareCadetsForDisplay } from "../../../packages/domain/src/cadet-display-order";
+import { GMC, POC } from "../../../packages/domain/src/frontend-reporting";
 import BulkSchedule from "./BulkSchedule";
 export default function Events({ snapshot, eventsList, propose, busy, refresh, readOnly = false, run }) {
   const [details,setDetails] = useState(null), [loading,setLoading] = useState(false);
@@ -293,25 +296,8 @@ export default function Events({ snapshot, eventsList, propose, busy, refresh, r
                   here until its roster is reviewed.
                 </p>
               ) : (
-                s.people.map((p) => (
-                  <label className="check" key={p.personId}>
-                    <input
-                      type="checkbox"
-                      checked={edit.eligiblePersonIds.includes(p.personId)}
-                      onChange={(e) =>
-                        set(
-                          "eligiblePersonIds",
-                          e.target.checked
-                            ? [...edit.eligiblePersonIds, p.personId]
-                            : edit.eligiblePersonIds.filter(
-                                (v) => v !== p.personId,
-                              ),
-                        )
-                      }
-                    />
-                    {name(p)}
-                  </label>
-                ))
+                <ExpectedCadets people={s.people} flights={s.flights} selected={edit.eligiblePersonIds}
+                  onChange={ids => set("eligiblePersonIds", ids)} />
               )}
             </fieldset>
           </details>
@@ -319,4 +305,41 @@ export default function Events({ snapshot, eventsList, propose, busy, refresh, r
       )}
     </>
   );
+}
+
+function ExpectedCadets({ people, flights, selected, onChange }) {
+  const roster = people.filter(p => p.flightPathStatus && operationallyActive(p)).sort(compareCadetsForDisplay);
+  const selectedIds = new Set(selected);
+  function toggle(ids, include) {
+    const next = new Set(selected);
+    for (const id of ids) {
+      if (include) next.add(id);
+      else next.delete(id);
+    }
+    onChange([...next]);
+  }
+  function group(label, members) {
+    if (!members.length) return null;
+    const ids = members.map(p => p.personId);
+    const all = ids.every(id => selectedIds.has(id));
+    const state = all || (ids.some(id => selectedIds.has(id)) ? "mixed" : false);
+    return <button key={label} type="button" aria-pressed={state}
+      onClick={() => toggle(ids, !all)}>{label}</button>;
+  }
+  const classes = [...new Set(roster.map(p => p.classYear).filter(Boolean))].sort();
+  return <>
+    <div className="roster-shortcuts" role="group" aria-label="Select expected cadets by group">
+      <div>{group("GMC", roster.filter(p => GMC.includes(p.asYear)))}
+        {group("POC", roster.filter(p => POC.includes(p.asYear)))}</div>
+      <div>{[...new Set(roster.map(p => p.asYear))].map(year =>
+        group(year, roster.filter(p => p.asYear === year)))}</div>
+      <div>{classes.map(year => group("Class of " + year, roster.filter(p => p.classYear === year)))}</div>
+      <div>{flights.map(f => group(f.label + " Flight", roster.filter(p => p.flightId === f.flightId)))}</div>
+    </div>
+    {roster.map(p => <label className="check" key={p.personId}>
+      <input type="checkbox" checked={selectedIds.has(p.personId)}
+        onChange={e => toggle([p.personId], e.target.checked)} />
+      {name(p)}
+    </label>)}
+  </>;
 }

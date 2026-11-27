@@ -4,7 +4,7 @@ export function eventEditorData({tables}) {
   const byId=new Map(events.map(e=>[e.eventId,e]));
   for(const event of events) event.eligiblePersonIds=event.hasRoster ? [] : null;
   for(const [event,person] of JSON.parse(tables.eligible)) byId.get(event).eligiblePersonIds.push(person);
-  return {events,people:rows("people","personId lastName firstName"),flights:rows("flights","flightId label"),
+  return {events,people:rows("people","personId lastName firstName asYear classYear flightId flightPathStatus"),flights:rows("flights","flightId label"),
     terms:rows("terms","termId label sortOrder isCurrent"),eventFlights:rows("eventFlights","eventId flightId")};
 }
 

@@ -92,7 +92,7 @@ export function Status({ children }) {
           ? Clock3
           : Minus;
   return (
-    <span className={`status ${tone}`}>
+    <span className={`status ${tone}`} data-status={text}>
       <Icon size={12} aria-hidden="true" />
       {children}
     </span>

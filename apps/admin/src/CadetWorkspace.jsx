@@ -14,6 +14,7 @@ import { attendanceMeanings } from "./AttendanceMatrix";
 import {loadReportDraft, restoreSelections, rosterSignature} from "./report-draft";
 import {Overview} from "./Secondary";
 import CadetDirectory from "./CadetDirectory";
+import { cellStyle, yearColors, rateStyle } from "./roster-colors";
 import { FlightHome } from "./FlightHome";
 import { calculateAttendanceCredit } from "../../../packages/domain/src/frontend-reporting";
 import { ATTENDANCE_CODES } from "../../../packages/domain/src/index";
@@ -248,7 +249,7 @@ function PersonalAttendance({state, flags, save, disabled}) {
   const cells=events.map(e=>({effectiveCode:e.code,eligible:true}));
   function credit(list){
     const value=calculateAttendanceCredit(list);
-    return value.noCountedAttendance ? "—" : (value.percentage*100).toFixed(1)+"%";
+    return <dd style={rateStyle(value.noCountedAttendance ? null : value.percentage)}>{value.noCountedAttendance ? "—" : (value.percentage*100).toFixed(1)+"%"}</dd>;
   }
   function select(event,index,click){
     if(click.shiftKey && anchor.current!==null){
@@ -259,8 +260,8 @@ function PersonalAttendance({state, flags, save, disabled}) {
   }
   return <section>
     {events.length ? <>
-      <dl className="personal-credit"><div><dt>Overall</dt><dd>{credit(cells)}</dd></div>
-        <div><dt>LLAB</dt><dd>{credit(cells.filter((_,i)=>events[i].eventType==="llab"))}</dd></div></dl>
+      <dl className="personal-credit"><div><dt>Overall</dt>{credit(cells)}</div>
+        <div><dt>LLAB</dt>{credit(cells.filter((_,i)=>events[i].eventType==="llab"))}</div></dl>
       <table className="personal-events" aria-label="Attendance"><thead><tr><th>Event</th><th>Attendance</th></tr></thead>
       <tbody>{events.map((event,i)=><tr key={event.eventId}><th scope="row">{event.label}</th><td className="personal-mark" data-mark={event.code || ""}>
         <button type="button" data-event={event.eventId} disabled={disabled} aria-pressed={selected.includes(event)}
@@ -286,14 +287,14 @@ function PersonalAttendance({state, flags, save, disabled}) {
     }}><h2>{selected.map(event=>event.label).join(", ")}</h2>
       <Field label="Requested code"><select name="code" required defaultValue=""><option value="" disabled>Choose a code</option>{ATTENDANCE_CODES.filter(code=>selected.some(event=>event.code!==code)).map(c=><option key={c}>{c}</option>)}</select></Field>
       <Field label="Reason"><textarea name="reason" required maxLength={500}/></Field><button className="primary" disabled={disabled}>Send for Squadron review</button></form></Drawer>}
-    {flags.length>0 && <section><h2>My correction requests</h2>{flags.map(a=><p key={a.actionId}><strong>{a.event}</strong> · {a.change?.code} {a.detail} · {a.resolution || (a.change?"Awaiting Squadron review":"Awaiting Flight review")}</p>)}</section>}
+    {flags.length>0 && <section><h2>My correction requests</h2>{flags.map(a=><p key={a.actionId}><strong>{a.event}</strong> · {a.change && <span className="code-label" data-mark={a.change.code}>{a.change.code}</span>} {a.detail} · {a.resolution || (a.change?"Awaiting Squadron review":"Awaiting Flight review")}</p>)}</section>}
   </section>;
 }
 
 function AttendanceReviews({state,save,disabled}) {
   const queue=state.actions.filter(a=>a.change && a.change.squadronId===state.squadronId && !a.resolution);
   return queue.length ? queue.map(a=><section className="form-section" key={a.actionId}><h2>{a.person}</h2>
-    <p>{a.event} · Requested code: <strong>{a.change.code}</strong></p><p>{a.detail}</p>
+    <p>{a.event} · Requested code: <strong className="code-label" data-mark={a.change.code}>{a.change.code}</strong></p><p>{a.detail}</p>
     {["Approved","Denied"].map(decision=><button key={decision} disabled={disabled} onClick={()=>save("reviewFlag",{parentId:a.actionId,decision})}>{decision==="Approved"?"Approve correction":"Deny request"}</button>)}</section>) : <Empty>No attendance corrections awaiting Squadron review.</Empty>;
 }
 function FlightReport({ state, save, disabled, previewId }) {
@@ -388,7 +389,7 @@ function FlightReport({ state, save, disabled, previewId }) {
       <h2>{type==="secondary"?"All Flights":type==="mando" && campus ? campus+" · All Flights" : flight+" Flight"}</h2>
       <Field label="Find a cadet"><input type="search" value={search} onChange={e=>setSearch(e.target.value)}/></Field>
       {!groups.size && <Empty>No matching cadets.</Empty>}
-      {Array.from(groups,([year,people])=><fieldset className="report-checklist" key={year}><legend>{year}</legend>{people.map(r=><label key={r.personId}>
+      {Array.from(groups,([year,people])=><fieldset className="report-checklist" key={year}><legend style={cellStyle(yearColors(year))}>{year}</legend>{people.map(r=><label key={r.personId}>
         <input type="checkbox" checked={present.includes(r.personId)} onChange={e=>{
           const checked=e.currentTarget.checked;
           setPresent(ids=>checked ? [...new Set([...ids,r.personId])] : ids.filter(id=>id!==r.personId));
@@ -429,7 +430,7 @@ function Flight({ state, save, disabled }) {
               {a.person} · {a.event}
             </strong>
             <p>{a.detail}</p>
-            {a.change ? <p>Requested {a.change.code} · Awaiting Squadron review</p> : <>
+            {a.change ? <p>Requested <span className="code-label" data-mark={a.change.code}>{a.change.code}</span> · Awaiting Squadron review</p> : <>
             <Field label="Resolution">
               <input name="resolution" required maxLength={500} />
             </Field>
@@ -630,12 +631,12 @@ export default function CadetWorkspace({ session }) {
                 {state.requests.map((r) => (
                   <tr key={r.requestId}>
                     <td>{r.event}</td>
-                    <td>{r.requestedOutcome}</td>
+                    <td className="excusal-code personal-mark" data-mark={r.requestedOutcome}>{r.requestedOutcome}</td>
                     <td>{r.reason || "—"}</td>
                     <td>
                       <Status>{r.status}</Status>
                     </td>
-                    <td>{r.decisionReason || "—"}</td>
+                    <td className={r.decisionReason ? "personal-decision" : "empty-decision"}>{r.decisionReason || "—"}</td>
                   </tr>
                 ))}
               </Table>

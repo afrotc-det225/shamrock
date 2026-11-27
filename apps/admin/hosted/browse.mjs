@@ -2,10 +2,11 @@ import { createHash } from "node:crypto";
 import { PanelError } from "../errors.mjs";
 export const browseProfiles = ["cadets","cadet-details","leadership","attendance","excusals","overview","semester"];
 const cache = new Map();
+const cacheProfiles = {excusals:"excusals-with-event-dates", "event-editor":"event-editor-active-cohorts"};
 // Each entry is private to the current actor, preview entry, effective scope and data revisions.
 export async function browseState(backend, authority, requested, recordId) {
   const profile = authority.access.capabilities.fullSnapshot || requested === "excusals" ? requested : "attendance";
-  const binding = a => JSON.stringify([backend.binding,profile === "excusals" ? "excusals-with-event-dates" : profile,recordId,a.scope,a.access,a.revision,backend.viewRevision]);
+  const binding = a => JSON.stringify([backend.binding,cacheProfiles[profile] ?? profile,recordId,a.scope,a.access,a.revision,backend.viewRevision]);
   const key = binding(authority), cached = cache.get(key);
   if (cached && cached.until > Date.now()) {
     backend.browseSource = 'memory';
