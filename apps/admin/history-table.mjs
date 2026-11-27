@@ -5,7 +5,7 @@ export function compactReport(report) {
   }, rows: report.rows.map(row => {
     const codes = new Map(row.cells.map(cell => [cell.eventId, cell.code]));
     if (codes.size !== headers.length || headers.some(id => !codes.has(id))) throw Error('Incomplete report row');
-    return { rowId:row.rowId, firstName:row.firstName, lastName:row.lastName, asYear:row.asYear, flight:row.flight,
+    return { rowId:row.rowId, firstName:row.firstName, lastName:row.lastName, asYear:row.asYear, flight:row.flight, squadron:row.squadron,
       identityStatus:row.identityStatus, overall:row.overall.stored, llab:row.llab.stored,
       codes:headers.map(id => codes.get(id)) };
   }) };

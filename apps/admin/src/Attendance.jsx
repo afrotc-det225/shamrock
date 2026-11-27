@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import { Heading, Select, Field, Editor, Empty, SearchBox } from "./components";
-import { AttendanceMatrix, AttendanceKey } from "./AttendanceMatrix";
+import { AttendanceMatrix, AttendanceKey, AttendanceRateKey } from "./AttendanceMatrix";
 import { compareCadetsForDisplay } from "../../../packages/domain/src/cadet-display-order";
 import { alphabetic, textOrder } from "./RosterViews";
 import { name, eventTypes } from "./api";
@@ -127,6 +127,7 @@ export default function Attendance({
         onEdit={correction}
         readOnly={readOnly || busy}
       />
+      {rows.length > 0 && <AttendanceRateKey />}
       {(!rows.length || !columns.length) && (
         <Empty>No attendance matches these filters.</Empty>
       )}

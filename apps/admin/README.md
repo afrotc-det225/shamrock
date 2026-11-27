@@ -2,6 +2,10 @@
 
 Cadets and staff use Google sign-in at [SHAMROCK](https://shamrock.det225.workers.dev/). One Worker serves the web panel and the signed records API. D1 holds cadet records, and the existing SQLite Durable Object holds sessions and proposals. The local development fixture uses fictional cadets and events. See the [site release guide](hosted/README.md) for configuration and verification.
 
+The Cadets roster uses slate for AS-year progression and matched blue and gold shades for flights. Flight path statuses use blue, teal, and green, with dark green for Commissioned. Under **More fields**, CIP codes and broad areas share the color of their academic family, and officer AFSCs use the color of their career group. The exact names and codes remain visible. Empty and undecided values are gray.
+
+Attendance and History share the Overall and LLAB color scale from coral at 80% or below through amber to green at 100%. Blank and N/A marks are gray, Present is green, and Unexcused is white on deep red. The Attendance code key shows the rest of the marks.
+
 ## Try the panel
 
 From the repository root, with the root dependencies already installed:

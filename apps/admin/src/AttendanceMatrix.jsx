@@ -1,7 +1,7 @@
 import React, { useRef } from "react";
 import { List } from "lucide-react";
 import { ToolbarPopover } from "./ToolbarPopover";
-import { cellStyle, flightColors, rateStyle } from "./roster-colors";
+import { cellStyle, flightColors, rateGradient, rateStyle } from "./roster-colors";
 
 const meanings = {
   P: "Present",
@@ -15,6 +15,18 @@ const meanings = {
   MED: "Medical",
   "N/A": "Not applicable",
 };
+const rateLabels = ["80% or below", "85%", "90%", "95%", "100%"];
+export function AttendanceRateKey() {
+  return (
+    <div className="attendance-rate-key" aria-label="Overall and LLAB attendance scale">
+      <span>Overall and LLAB</span>
+      <div className="attendance-rate-bar" style={{ background: rateGradient }} aria-hidden="true" />
+      <div className="attendance-rate-ticks">
+        {rateLabels.map((label) => <span key={label}>{label}</span>)}
+      </div>
+    </div>
+  );
+}
 export function AttendanceKey() {
   return (
     <ToolbarPopover
@@ -170,12 +182,7 @@ export function AttendanceMatrix({
                   ]
                     .filter(Boolean)
                     .join(", ");
-                  const content = (
-                    <>
-                      {code || (c?.eligible === true ? "·" : "—")}
-                      {c?.needsReview && <sup aria-label="Needs review">!</sup>}
-                    </>
-                  );
+                  const content = code || (c?.eligible === true ? "·" : "—");
                   const tabStop = first && editable;
                   if (editable) first = false;
                   return (
@@ -185,6 +192,7 @@ export function AttendanceMatrix({
                       data-mark={
                         code || (c?.eligible === true ? "blank" : "excluded")
                       }
+                      data-review={c?.needsReview ? "true" : undefined}
                       title={description}
                     >
                       {editable ? (

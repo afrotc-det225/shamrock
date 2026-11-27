@@ -1395,6 +1395,10 @@ html:has(dialog:modal) {
   display:inline-block; padding:.23rem .55rem; border-radius:4px;
   background:#edf0f3; color:#344657; font-size:.8rem; font-weight:650; white-space:nowrap;
 }
+.profile-tag {
+  display:inline-block; padding:.23rem .45rem; border-radius:3px;
+  font-weight:650; overflow-wrap:anywhere;
+}
 .search-count {white-space:nowrap;font-variant-numeric:tabular-nums}
 .matrix-scroll {overflow:auto;max-height:70vh;border:1px solid var(--border);border-radius:6px;isolation:isolate}
 .attendance-matrix {border-spacing:0;border-collapse:separate;width:max-content;min-width:100%;font-variant-numeric:tabular-nums}
@@ -1406,22 +1410,25 @@ html:has(dialog:modal) {
 .attendance-matrix .mark-cell {padding:0;border:1px solid white;border-width:1px 1px 0 0;min-width:3.5rem;background:#f8f9fa;font-weight:700}
 .mark-cell button,.mark-cell>span {display:block;box-sizing:border-box;width:100%;min-height:1.85rem;padding:.23rem;border:0;border-radius:0;background:transparent;color:inherit;font:inherit;text-align:center}
 .mark-cell button:hover,.mark-cell button:focus-visible {outline:2px solid currentColor;outline-offset:-3px;background:transparent}
-.mark-cell sup {margin-left:.15rem}
-/* Keep routine presence quiet so unresolved and pending marks stand out in a full semester. */
-[data-mark="P"] {--mark-bg:#edf5f1;color:#31584b}
-[data-mark="T"] {--mark-bg:#f4e8d8;color:#694219}
-[data-mark="R"] {--mark-bg:#ffd180;color:#563305}
-[data-mark="A"] {--mark-bg:#ffc6aa;color:#602910}
-[data-mark="U"] {--mark-bg:#823c50;color:#ffffff}
-[data-mark="D"] {--mark-bg:#efd4de;color:#692d48}
-[data-mark="E"] {--mark-bg:#dcebf9;color:#214766}
-[data-mark="ES"] {--mark-bg:#d8efef;color:#165659}
-[data-mark="MED"] {--mark-bg:#e9e0f2;color:#56386a}
-[data-mark="excluded"],[data-mark="N/A"] {--mark-bg:#edf0f3;color:#505f6b}
-.attendance-matrix .mark-cell[data-mark],.history-code[data-mark] {background-color:var(--mark-bg, #fafbfc)}
+.attendance-matrix .mark-cell[data-review="true"] {box-shadow:inset 0 0 0 1px currentColor}
+[data-mark="P"] {--mark-bg:#c1e1cd;--mark-ink:#164a32}
+[data-mark="T"] {--mark-bg:#f3cf86;--mark-ink:#553500}
+[data-mark="R"] {--mark-bg:#eec17b;--mark-ink:#503009}
+[data-mark="A"] {--mark-bg:#f3adb7;--mark-ink:#641525}
+[data-mark="U"] {--mark-bg:#a51f32;--mark-ink:#ffffff}
+[data-mark="D"] {--mark-bg:#e8bfd0;--mark-ink:#61273f}
+[data-mark="E"] {--mark-bg:#afd1ec;--mark-ink:#133d5d}
+[data-mark="ES"] {--mark-bg:#b8dbdc;--mark-ink:#164c50}
+[data-mark="MED"] {--mark-bg:#d8cbed;--mark-ink:#392552}
+.attendance-matrix .mark-cell[data-mark],.history-code[data-mark] {
+  background-color:var(--mark-bg,#f0f1f2); color:var(--mark-ink,#424a51); font-weight:750;
+}
+.attendance-rate-key {padding:.55rem 0 .3rem;color:#344963;font-size:.8rem}
+.attendance-rate-bar {height:.5rem;border-radius:2px;margin:.25rem 0}
+.attendance-rate-ticks {display:flex;justify-content:space-between;gap:.35rem;font-variant-numeric:tabular-nums}
 .code-key {display:grid;gap:.45rem;margin:0;font-size:.85rem}
 .code-key div {display:flex;align-items:center;gap:.4rem}
-.code-key dt {background:var(--mark-bg);border-radius:3px;padding:.2rem .4rem;min-width:2.2em;text-align:center;font-weight:700}
+.code-key dt {background:var(--mark-bg,#f0f1f2);color:var(--mark-ink,#424a51);border-radius:3px;padding:.2rem .4rem;min-width:2.2em;text-align:center;font-weight:700}
 .code-key dd {margin:0}
 .insights-grid,.org-branches {display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:1rem;margin:1rem 0}
 .insight,.org-layout section {padding:1rem 1.15rem;border:1px solid var(--border);border-radius:7px;background:#fff}

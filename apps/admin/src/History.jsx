@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react";
-import { rateStyle, yearColors, cellStyle } from "./roster-colors";
+import { rateStyle, yearColors, flightColors, cellStyle } from "./roster-colors";
+import { AttendanceRateKey } from "./AttendanceMatrix";
 import { Heading, Select, SearchBox, Table, Empty } from "./components";
 import { api } from "./api";
 import { loadHistory } from "../history-client";
@@ -64,11 +65,14 @@ export default function History() {
         {rows.map(row => <tr key={row.rowId}>
           <td>{[row.firstName, row.lastName].filter(Boolean).join(" ")}
             {row.identityStatus === "unresolved" && <small className="history-unlinked">Historical record</small>}</td>
-          <td style={cellStyle(yearColors(row.asYear))}>{row.asYear}</td><td>{row.flight || "—"}</td>
-          <td style={rateStyle(row.overall)}>{percentage(row.overall)}</td><td style={rateStyle(row.llab)}>{percentage(row.llab)}</td>
-          {row.codes.map((code, index) => <td className="history-code" data-mark={code} key={index}>{String(code ?? "")}</td>)}
+          <td className="formation" style={cellStyle(yearColors(row.asYear))}>{row.asYear || "—"}</td>
+          <td className="formation" style={cellStyle(flightColors(row.flight, row.squadron))}>{row.flight || "—"}</td>
+          <td className="formation" style={rateStyle(row.overall)}>{percentage(row.overall)}</td>
+          <td className="formation" style={rateStyle(row.llab)}>{percentage(row.llab)}</td>
+          {row.codes.map((code, index) => <td className="history-code" data-mark={String(code ?? "").trim().toUpperCase() || "blank"} key={index}>{String(code ?? "")}</td>)}
         </tr>)}
       </Table>
+      {rows.length > 0 && <AttendanceRateKey />}
       {!rows.length && <Empty>No matching cadets.</Empty>}
     </>}
   </>;
