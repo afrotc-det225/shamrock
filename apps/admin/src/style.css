@@ -1349,21 +1349,22 @@ html:has(dialog:modal) {
 .birthdays header select {width:auto;max-width:100%}
 .birthday-body {display:grid;grid-template-columns:minmax(0,1.2fr) minmax(0,1fr);gap:1.5rem;margin-top:1rem}
 .calendar-month,.calendar-tools {display:flex;align-items:center}
-.calendar-month {justify-content:space-between;gap:.4rem;color:var(--navy);font-size:1.05rem}
+.calendar-month {min-block-size:2lh;justify-content:space-between;gap:.4rem;color:var(--navy);font-size:1.05rem}
 .calendar-tools button {display:grid;place-items:center;min-width:32px;min-height:32px;border:0;background:transparent;color:var(--navy);padding:0 .25rem}
 .calendar-tools button:first-child {font-size:.85rem;padding:0 .45rem}
-.calendar-tools button:disabled {visibility:hidden}
+.calendar-tools button:disabled {cursor:default}
 .calendar-head,.calendar-week {display:grid;grid-template-columns:1.15fr repeat(7,1fr);align-items:center;text-align:center}
 .calendar-head {margin-top:.45rem;font-size:.8rem;font-weight:600;color:var(--muted)}
 .calendar-head span,.calendar-week span {padding:.15rem 0}
-button.calendar-week {width:100%;min-height:38px;margin:2px 0;padding:0;border:0;border-radius:5px;background:transparent;color:#364a60;font-size:1rem;font-weight:400;font-variant-numeric:tabular-nums}
+.calendar-weeks {display:grid;grid-template-rows:repeat(6,minmax(var(--week-height,38px),auto));gap:4px;margin-top:2px}
+button.calendar-week {width:100%;margin:0;padding:0;border:0;border-radius:5px;background:transparent;color:#364a60;font-size:1rem;font-weight:400;font-variant-numeric:tabular-nums}
 .calendar-week .week-number {font-weight:700;color:#405675;border-right:1px solid #cbd4de}
 .calendar-week [data-outside="true"] {color:#69788a}
 .calendar-week [data-birthday="true"] {font-weight:750;color:var(--navy);text-decoration:underline .15em #9b742a;text-underline-offset:.23em}
 button.calendar-week[aria-pressed="true"] {background:#e8eff5;color:var(--navy)}
 .calendar-week[aria-pressed="true"] .week-number {color:var(--navy)}
 @media(hover:hover) {.calendar-week:not([aria-pressed="true"]):hover {background:#f4f6f8}}
-.birthday-names {min-width:0;padding-left:1.25rem;border-left:1px solid var(--border)}
+.birthday-names {contain:size;overflow-y:auto;min-width:0;padding-left:1.25rem;border-left:1px solid var(--border)}
 .birthday-names h4 {margin:.35rem 0 .8rem;color:var(--navy);font-size:1.05rem}
 .birthday-group + .birthday-group {margin-top:.8rem}
 .birthday-group time {font-size:.9rem;font-weight:550;color:#52657b}
@@ -1372,9 +1373,9 @@ button.calendar-week[aria-pressed="true"] {background:#e8eff5;color:var(--navy)}
 .birthday-names p {color:var(--muted)}
 @container (max-width:32rem) {
   .birthday-body {grid-template-columns:minmax(0,1fr);gap:1rem}
-  .birthday-names {padding:.8rem 0 0;border:0;border-top:1px solid var(--border)}
+  .birthday-names {block-size:10rem;padding:.8rem 0 0;border:0;border-top:1px solid var(--border)}
   .birthday-names h4 {margin-top:0}
-  button.calendar-week {min-height:44px}
+  .calendar-weeks {--week-height:44px}
 }
 
 @media(max-width:640px) {

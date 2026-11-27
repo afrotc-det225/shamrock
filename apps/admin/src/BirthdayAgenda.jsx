@@ -48,21 +48,23 @@ export default function BirthdayAgenda({calendar, flights, squadrons, now}) {
         <div className="calendar-month">
           <strong aria-live="polite">{monthTitle.format(first)}</strong>
           <div className="calendar-tools">
-            <button aria-label="Reset calendar" disabled={!month} onClick={() => {setMonth(null); setWeekStart(null);}}>Reset</button>
-            <button aria-label="Previous month" onClick={() => moveMonth(-1)}><ChevronLeft size={18}/></button>
-            <button aria-label="Next month" onClick={() => moveMonth(1)}><ChevronRight size={18}/></button>
+            <button type="button" aria-label="Reset calendar" disabled={!month} onClick={() => {setMonth(null); setWeekStart(null);}}>Reset</button>
+            <button type="button" aria-label="Previous month" onClick={() => moveMonth(-1)}><ChevronLeft size={18}/></button>
+            <button type="button" aria-label="Next month" onClick={() => moveMonth(1)}><ChevronRight size={18}/></button>
           </div>
         </div>
         <div className="calendar-head" aria-hidden="true">
           {["Wk","Su","Mo","Tu","We","Th","Fr","Sa"].map(label => <span key={label}>{label}</span>)}
         </div>
-        {weeks.map(({number,days}) => <button key={days[0]} className="calendar-week" type="button"
-          aria-label={`Week ${number}, ${shortDate.formatRange(midnight(days[0]), midnight(days[6]))}`}
-          aria-pressed={selected?.days[0] === days[0]} onClick={() => {setMonth(showing); setWeekStart(days[0]);}}>
-          <span className="week-number">{number}</span>
-          {days.map(date => <span key={date} data-outside={!date.startsWith(showing)} data-birthday={marked.has(date)}
-            aria-current={date === today ? "date" : undefined}>{Number(date.slice(-2))}</span>)}
-        </button>)}
+        <div className="calendar-weeks">
+          {weeks.map(({number,days}) => <button key={days[0]} className="calendar-week" type="button"
+            aria-label={`Week ${number}, ${shortDate.formatRange(midnight(days[0]), midnight(days[6]))}`}
+            aria-pressed={selected?.days[0] === days[0]} onClick={() => {setMonth(showing); setWeekStart(days[0]);}}>
+            <span className="week-number">{number}</span>
+            {days.map(date => <span key={date} data-outside={!date.startsWith(showing)} data-birthday={marked.has(date)}
+              aria-current={date === today ? "date" : undefined}>{Number(date.slice(-2))}</span>)}
+          </button>)}
+        </div>
       </div>
       <section className="birthday-names" aria-live="polite">
         <h4>{heading}</h4>

@@ -404,9 +404,20 @@ try {
   await birthdays.getByRole("heading",{name:/^Week [0-9]/}).waitFor();
   assert.deepEqual(await page.locator(".overview-roster dt").allTextContents(),["Active cadets","GMC","POC","Crosstowns","Far crosstowns"]);
   assert.ok((await page.locator(".overview-roster dd").allTextContents()).every(v => /^\d+$/.test(v)));
-  await birthdays.getByRole("button",{name:"Next month"}).click();
-  assert.notEqual(await month.innerText(),originalMonth);
-  await birthdays.getByRole("button",{name:"Reset calendar"}).click();
+  const originalHeight = (await birthdays.boundingBox()).height;
+  const weekRows = birthdays.locator(".calendar-week");
+  const originalWeeks = await weekRows.count();
+  // Exercise an actual change in the number of displayed weeks.
+  for (let step = 0; step < 12 && await weekRows.count() === originalWeeks; step++) {
+    await birthdays.getByRole("button",{name:"Next month"}).click();
+    assert.equal((await birthdays.boundingBox()).height, originalHeight);
+  }
+  assert.notEqual(await weekRows.count(), originalWeeks);
+  const resetCalendar = birthdays.getByRole("button",{name:"Reset calendar"});
+  await resetCalendar.click();
+  assert.ok(await resetCalendar.isVisible());
+  assert.ok(await resetCalendar.isDisabled());
+  assert.equal(await resetCalendar.evaluate(el => getComputedStyle(el).cursor), "default");
   assert.equal(await month.innerText(),originalMonth);
   assert.deepEqual(overviewRequests, ["overview", "charts"]);
   testOverview = false;
