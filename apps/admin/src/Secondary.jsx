@@ -124,6 +124,20 @@ function AdministratorList({lookup,cohort}){
     <strong>Staging panel</strong>
   <ul>{rows.administrators.map((r,i)=><li key={i}>{r.name} · {r.managesAccess ? "Manages permissions" : "Wing panel access"}</li>)}</ul></div>;
 }
+function WingGrantApproval({action}){
+  const [status,setStatus]=useState("ready"),[error,setError]=useState("");
+  async function approve(){
+    setStatus("saving");setError("");
+    try{
+      await api("/chat/wing-access",{id:action.id,approved:true});
+      setStatus("complete");
+    }catch(e){setError(e.message);setStatus("ready");}
+  }
+  return status==="complete" ? <p role="status">Wing access granted.</p> : <div>
+    <button disabled={status==="saving"} onClick={approve}>{status==="saving" ? "Granting access…" : "Approve Wing access"}</button>
+    {error && <p role="alert">{error}</p>}
+  </div>;
+}
 function PlainReply({text}){
   return <div className="assistant-answer plain-reply">{text}</div>;
 }
@@ -221,10 +235,10 @@ function AssistantWorkspace({ meta }) {
         api("/chat",{
           ...(hosted ? {chatId:chat.id,chatTitle:chat.title} : {}),
           previousCohort:messages.at(-1)?.cohort?.ids,
-          messages:next.slice(-15).map(({role,content})=>({role,content})),
+          messages:next.slice(-15).map(({role,content,wingGrant})=>({role,content:wingGrant ? "Prepared a staging Wing access grant for the named cadet. Awaiting owner review." : content})),
         }),
       ]);
-      const transcript=[...next,{role:"assistant",content:reply.content,proposal:reply.proposal,eventAction:reply.eventAction,cohort:reply.cohort,adminDirectory:reply.adminDirectory,rosterLookup:reply.rosterLookup,autoTest:true}];
+      const transcript=[...next,{role:"assistant",content:reply.content,proposal:reply.proposal,wingGrant:reply.wingGrant,eventAction:reply.eventAction,cohort:reply.cohort,adminDirectory:reply.adminDirectory,rosterLookup:reply.rosterLookup,autoTest:true}];
       setReply(()=>renderer);setMessages(transcript);setActive(chat);
       threads.current.set(chat.id,transcript);
       setChats(rows=>[{...chat,at:Date.now()},...rows.filter(row=>row.id!==chat.id)]);
@@ -276,6 +290,7 @@ function AssistantWorkspace({ meta }) {
           <Reply text={m.content}/>
         </ReplyBoundary>}
         {(m.cohort?.names || m.rosterLookup || m.adminDirectory) && <AdministratorList lookup={m.rosterLookup} cohort={m.cohort}/>}
+        {m.wingGrant && <WingGrantApproval action={m.wingGrant}/>}
         {m.eventAction && <EventApproval action={m.eventAction}/>}
         {m.proposal && <ReplyBoundary fallback={<p role="status">The saved proposal could not be displayed.</p>}><MaintenanceProposal proposal={m.proposal} autoTest={m.autoTest}/></ReplyBoundary>}
       </article>)}

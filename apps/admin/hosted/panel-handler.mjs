@@ -15,6 +15,7 @@ import { previewFromSession, previewResponse, changePreview } from "./view-as.mj
 import { browseState, browseProfiles } from "./browse.mjs";
 import {rosterDataset,cohortNames} from "./roster-query.mjs";
 import {rosterQuestion,rosterRows} from "./roster-questions.mjs";
+import {prepareWingGrant,applyWingGrant} from "./wing-access.mjs";
 import {currentAdministrators} from "./admin-directory.mjs";
 import {reportTotals} from "./operational-reports.mjs";
 import {eventCancellationReply} from "./event-action.mjs";
@@ -130,7 +131,7 @@ export default {
             return secure(json({personal:{registration, flightCommander:!!flightCommander, squadron:!!squadron}}));
           }
           if (include === "leadership") {
-            if (user.principal_id.startsWith("school.")) return secure(json({}));
+            if (user.principal_id.startsWith("school.") && !user.wingAccess) return secure(json({}));
             const {access} = await backend.panelAuthority();
             return secure(json({leadership:{full:access.capabilities.fullSnapshot,
               canViewAs:!preview && env.VIEW_AS_ENABLED==="1" && access.capabilities.canViewAs===true}}));
@@ -153,7 +154,7 @@ export default {
         }
         return secure(json(section==="profile" && request.method==="GET" ? await profileWithPortrait(env,workspace) : workspace));
       }
-      if (user.principal_id.startsWith("school.")) throw new PanelError("CADET_WORKSPACE","Open your cadet workspace.",403);
+      if (user.principal_id.startsWith("school.") && !user.wingAccess) throw new PanelError("CADET_WORKSPACE","Open your cadet workspace.",403);
       if (request.method === "POST" && url.pathname === "/api/view-as")
         return secure(json(await changePreview(env, user,
           new HostedBackend(env, user.principal_id), body)));
@@ -297,12 +298,17 @@ export default {
       }
       const chatHistory=request.method==="GET" && url.pathname==="/api/chat/history";
       const testJob=["GET","POST"].includes(request.method) && url.pathname==="/api/chat/repository-test";
+      const approveWing=request.method==="POST" && url.pathname==="/api/chat/wing-access";
       const adminDirectory=request.method==="GET" && url.pathname==="/api/chat/administrators";
       const rosterLookup=request.method==="GET" && url.pathname==="/api/chat/roster";
       const names=request.method==="POST" && url.pathname==="/api/chat/cohort-names";
-      if (names || rosterLookup || adminDirectory || testJob || chatHistory || (request.method==="POST" && url.pathname==="/api/chat")) {
+      if (approveWing || names || rosterLookup || adminDirectory || testJob || chatHistory || (request.method==="POST" && url.pathname==="/api/chat")) {
         if (!available(env,user,preview) || !(await backend.panelAuthority()).access.capabilities.fullSnapshot)
           throw new PanelError("FORBIDDEN","Assistant access is restricted.",403);
+        if(approveWing){
+          if(body?.approved!==true)throw new PanelError("INVALID_REQUEST","Review and approve the named account.");
+          return secure(json(await applyWingGrant(env,user.principal_id,checkChatId(body.id))));
+        }
         const readRoster=async(withExcusals=false)=>{
           const authority=await backend.panelAuthority();
           const directory=await browseState(backend,authority,"cadets");
@@ -344,7 +350,7 @@ export default {
         const reply=rosterQuestion(body?.messages) ?? await eventCancellationReply(body?.messages?.at(-1),backend,service) ?? await answer(env,body,env.operatorGuide,fetch,()=>wingCharts(backend),async profile=>{
           const view=await browseState(backend,await backend.panelAuthority(),profile==="careers"?"cadets":profile);
           return reportTotals(profile,view.tables);
-        },readRoster,readAccessDirectory);
+        },readRoster,readAccessDirectory,personId=>prepareWingGrant(env,user.principal_id,personId,sha));
         if(isUnifiedSite(env) && reply.proposal){
           const {area,path,commit,before,after,edits}=reply.proposal;
           reply.proposal.jobId=await env.PANEL_DB.repositoryJob({operation:"create",id:crypto.randomUUID(),patch:{area,path,commit,before,after,edits}});

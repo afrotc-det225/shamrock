@@ -15,7 +15,7 @@ export async function directoryPortrait(env, backend, user, preview, params, own
     personId = profile.personId;
     link = profile.photoLink;
   } else {
-    if (!personId || personId.length > 200 || user.principal_id.startsWith("school.")) throw forbidden();
+    if (!personId || personId.length > 200 || (user.principal_id.startsWith("school.") && !user.wingAccess)) throw forbidden();
     if (!(await backend.panelAuthority()).access?.capabilities?.fullSnapshot) throw forbidden();
     const lookup = await env.DB.prepare("SELECT photo_link FROM directory_profiles WHERE person_id=?").bind(personId).all();
     link = lookup.results[0]?.photo_link;

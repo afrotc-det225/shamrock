@@ -1,4 +1,6 @@
 import { createRemoteJWKSet, jwtVerify } from "jose";
+import {schoolWingAccess} from "./wing-access.mjs";
+import {isUnifiedSite} from "./site.mjs";
 import { HostedBackend } from "./backend.mjs";
 import { schoolForEmail, sealSchoolEmail, readSchoolEmail } from "./school-account.mjs";
 import { PanelError } from "../errors.mjs";
@@ -114,6 +116,11 @@ export async function session(request, env) {
   row.schoolEmail = await readSchoolEmail(cookie(request,"__Host-shamrock-school"),env,row.token_hash);
   if (row.principal_id.startsWith("school.") && (!row.schoolEmail || row.principal_id !== "school." + await sha(row.schoolEmail)))
     throw new PanelError("SIGN_IN_REQUIRED","Sign in again with your school account.",401);
+  if(row.principal_id.startsWith("school.") && isUnifiedSite(env)){
+    const path=new URL(request.url).pathname;
+    if(!["/api/cadet","/auth/logout"].includes(path))
+      row.wingAccess=await schoolWingAccess(env.DB,row.principal_id,row.schoolEmail).catch(()=>false);
+  }
   return row;
 }
 export async function csrfCheck(request, env, bodySession) {
@@ -325,7 +332,7 @@ export async function authRoute(
   if (url.pathname === "/api/session" && request.method === "POST") {
     originCheck(request, env.APP_ORIGIN);
     const current = await session(request, env);
-    return json({ authenticated: true, hosted: true, cadetWorkspace:!!current.schoolEmail, schoolLogin:current.principal_id.startsWith("school."), csrf: current.csrf, viewAs: previewResponse(previewFromSession(current)) });
+    return json({ authenticated: true, hosted: true, cadetWorkspace:!!current.schoolEmail, schoolLogin:current.principal_id.startsWith("school.") && !current.wingAccess, csrf: current.csrf, viewAs: previewResponse(previewFromSession(current)) });
   }
   if (url.pathname === "/auth/logout" && request.method === "POST") {
     const current = await session(request, env);
