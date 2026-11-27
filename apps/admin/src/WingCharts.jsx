@@ -295,7 +295,7 @@ export function WingCharts({
         series={byYear}
       />
       <Plot
-        title="Attendance by semester"
+        title="Wing attendance by semester"
         labels={trend.map((t) => t.label)}
         series={[
           {
