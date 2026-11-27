@@ -64,9 +64,27 @@ try{
    await gate;
    await route.fulfill({json:await host.post('/v1/admin/panel/browse',{...host.identity(),profile:'event-editor'})});
  });
+ const eventTable=page.getByRole('table');
+ assert.deepEqual(await eventTable.getByRole('columnheader').allTextContents(),['Event','Date & time','Status','']);
+ const scheduled=await eventTable.locator('tbody tr td:first-child button').allTextContents();
+ const filter=page.getByLabel('Type',{exact:true});
+ const groups=[];
+ for(const option of await filter.locator('option').evaluateAll(options=>options.slice(1).map(o=>({value:o.value,label:o.label})))) {
+   await filter.selectOption(option.value);
+   groups.push({label:option.label,names:await eventTable.locator('tbody tr td:first-child button').allTextContents()});
+ }
+ await filter.selectOption('');
+ await page.getByLabel('Sort by').selectOption('type');
+ assert.deepEqual(await eventTable.locator('tbody tr td:first-child button').allTextContents(),groups.sort((a,b)=>a.label.localeCompare(b.label)).flatMap(g=>g.names));
+ await page.getByLabel('Sort by').selectOption({label:'Default'});
+ assert.deepEqual(await eventTable.locator('tbody tr td:first-child button').allTextContents(),scheduled);
+ assert.equal(await page.locator('nav [aria-current="page"]').evaluate(link=>getComputedStyle(link).boxShadow),'none');
+ const editButton=page.getByRole('button',{name:'Edit Veterans Day',exact:true});
+ const position=await editButton.boundingBox();
  hold('event-editor');await page.getByRole('button',{name:'Edit Veterans Day',exact:true}).click();
  await page.getByText('Loading event details…',{exact:true}).waitFor();
- assert(await page.getByRole('button',{name:'Edit Veterans Day',exact:true}).isDisabled());
+ assert(await editButton.isDisabled());
+ assert.deepEqual(await editButton.boundingBox(),position,'loading event details keeps the edit target stationary');
  await page.screenshot({path:'/tmp/shamrock-editor-loading-desktop.png'});
  await page.setViewportSize({width:390,height:844});await page.screenshot({path:'/tmp/shamrock-editor-loading-mobile.png'});
  assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
@@ -146,6 +164,31 @@ try{
  assert.equal(await page.getByLabel('Status for Sample Senior').inputValue(),'Active 3/4');
  await Promise.all([page.waitForResponse(response=>response.url().endsWith('/api/proposals')),page.getByRole('button',{name:'Review semester plan'}).click()]);
  assert.deepEqual(proposals[1].people,[]);
+ let finishDirectory;
+ const directoryGate=new Promise(resolve=>{finishDirectory=resolve;});
+ for(const profile of ['cadets','cadet-details']) {
+   await page.route('**/api/state?profile='+profile,async route=>{
+     if(profile==='cadet-details') await directoryGate;
+     const browse=await host.post('/v1/admin/panel/browse',{...host.identity(),profile});
+     await route.fulfill({json:{manifest:await host.panelAuthority(),browse,captureKey:host.binding,viewAsRevision:null,
+       transport:'paged-v1',reportingTime:Date.now(),history:[],meta:{hosted:true}}});
+   });
+ }
+ await page.getByRole('navigation').getByRole('link',{name:'Cadets',exact:true}).click();
+ await page.getByRole('button',{name:'Add cadet'}).waitFor();
+ assert.equal(await page.getByLabel('Sort by').locator('option:checked').innerText(),'Default');
+ const roster=page.locator('.cadet-roster tbody tr td:first-child button');
+ const names=await roster.allTextContents();
+ assert(names.length>0);
+ await page.getByRole('button',{name:'More fields'}).click();
+ await page.getByLabel('Show field').selectOption('phone');
+ await page.getByText('Loading directory fields…',{exact:true}).waitFor();
+ assert.deepEqual(await roster.allTextContents(),names);
+ assert(await page.getByRole('textbox',{name:/Filter by/}).isDisabled());
+ finishDirectory();
+ await page.waitForFunction(()=>!document.body.textContent.includes('Loading directory fields…'));
+ assert.deepEqual(await roster.allTextContents(),names);
+ assert(await page.getByRole('textbox',{name:/Filter by/}).isEnabled());
  assert.deepEqual(errors,[]);
  console.log(`PASS: throttled desktop/mobile skeletons and editor status, rapid Cadets/Leadership navigation, late-result rejection, History cancels editor capture, delayed session bootstrap blocks all reads, unchanged refresh reloads no record pages, maximum concurrent page requests=${maximum}.`);
 }finally{await browser.close();await new Promise(resolve=>server.close(resolve));service.close();await local.dispose();}

@@ -27,7 +27,7 @@ export function useReceipts({ history, receiptsDeferred, reportingTime, captureK
 }
 
 export function ReceiptStatus({ receipt }) {
-  if (receipt.loading) return <p role="status">Loading saved changes…</p>;
+  if (receipt.loading) return <span className="page-transfer" role="status">Loading saved changes…</span>;
   if (receipt.error) return <div className="error" role="alert">
     {receipt.error} <button onClick={receipt.retry}>Retry loading changes</button>
   </div>;

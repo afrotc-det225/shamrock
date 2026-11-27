@@ -112,12 +112,13 @@ export default function People({
     }).catch(e=>{if(!controller.signal.aborted)setFieldError(e.message);});
     return ()=>controller.abort();
   },[extra,binding,extended?.binding,retry]);
-  const directory=extra ? extended?.binding===binding ? extended.people : [] : s.people;
+  const waitingForField = extra && extended?.binding !== binding;
+  const directory = extra && !waitingForField ? extended.people : s.people;
   const rows = (leadership ? s.leadership : directory).filter(p=>{
     if (!leadership && (flight && p.flightId!==flight || year && p.asYear!==year ||
       status==="current" && ["Dropped","Commissioned"].includes(p.flightPathStatus) ||
       !["current","all"].includes(status) && p.flightPathStatus!==status ||
-      field && match && !String(p[field] ?? "").toLowerCase().includes(match.toLowerCase()))) return false;
+      field && match && !waitingForField && !String(p[field] ?? "").toLowerCase().includes(match.toLowerCase()))) return false;
     return [name(p),p.email,p.role,p.rank].join(" ").toLowerCase().includes(query.toLowerCase());
   }).sort(leadership ? compareLeadershipForDisplay : (a,b)=>{
     if (sort==="name") return alphabetic(a,b);
@@ -174,7 +175,7 @@ export default function People({
                     {value:"",label:"Choose a field"},
                     ...profileFields.filter(k=>!["firstName","lastName","asYear","flightPathStatus"].includes(k)).map(k=>({value:k,label:label(k)})),
                   ]}/>
-                  {field && <Field label={"Filter by "+label(field)} value={match} onChange={e=>setMatch(e.target.value)}/>}
+                  {field && <Field label={"Filter by "+label(field)} disabled={waitingForField} value={match} onChange={e=>setMatch(e.target.value)}/>}
                 </div>
               </ToolbarPopover>
             )}
@@ -195,12 +196,14 @@ export default function People({
             <Select label="Flight" value={flight} onChange={setFlight} options={[{value:"",label:"All flights"},...s.flights.map(f=>({value:f.flightId,label:f.label})).sort((a,b)=>textOrder(a.label,b.label))]}/>
             <Select label="AS year" value={year} onChange={setYear} options={[{value:"",label:"All AS years"},...years]}/>
             <Select label="Roster status" value={status} onChange={setStatus} options={[{value:"current",label:"Current roster"},{value:"all",label:"All statuses"},...statuses]}/>
-            <Select label="Sort by" value={sort} onChange={setSort} options={[{value:"seniority",label:"AS year, then name"},{value:"flight",label:"Flight, then AS year"},{value:"name",label:"Last name"}]}/>
+            <Select label="Sort by" value={sort} onChange={setSort} options={[{value:"seniority",label:"Default"},{value:"flight",label:"Flight, then AS year"},{value:"name",label:"Last name"}]}/>
           </>}
         </div>
 
       </section>
-      {extra && extended?.binding!==binding && <p role="status">{fieldError || "Loading directory fields…"} {fieldError && <button onClick={()=>setRetry(retry+1)}>Retry</button>}</p>}
+      {waitingForField && (fieldError
+        ? <p role="alert">{fieldError} <button onClick={()=>setRetry(retry+1)}>Retry</button></p>
+        : <span className="page-transfer" role="status">Loading directory fields…</span>)}
       {leadership && view==="Organization" ? <LeadershipChart records={rows} roster={s}/> : <Table
         className={leadership ? "leadership-roster" : "cadet-roster"}
         headers={
@@ -241,7 +244,7 @@ export default function People({
                 </td>
               </>
             )}
-            {visibleField && <td><DirectoryValue field={field} value={p[field]} person={p} /></td>}
+            {visibleField && <td>{waitingForField ? "—" : <DirectoryValue field={field} value={p[field]} person={p} />}</td>}
             <td>
               <button
                 className="icon"
