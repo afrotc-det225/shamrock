@@ -326,7 +326,7 @@ The first Sunday remains an explicit calendar choice; the system does not invent
 Notre Dame academic dates. Preparing a semester records an automatic audit label,
 not an additional OPLAN notes field.
 
-The Events list follows schedule order by default. Use Type to filter events or Sort by → Type to group them alphabetically by type, retaining schedule order within each group. On Cadets, Attendance and History, Default sorts by AS year and then name.
+The Events list keeps its columns aligned when filtered. On narrow screens, status appears beneath each event name. The list follows schedule order by default. Use Type to filter events or Sort by → Type to group them alphabetically by type, retaining schedule order within each group. On Cadets, Attendance and History, Default sorts by AS year and then name.
 
 Events → Change schedule selects active events by semester, type and effective
 date. Each preview shows the original and proposed Eastern date/time; moves stay
