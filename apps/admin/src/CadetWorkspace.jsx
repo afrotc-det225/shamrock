@@ -4,6 +4,7 @@ import { api, logout, eventTypes } from "./api";
 import { Drawer, Empty, Field, Heading, Select, Status, Table } from "./components";
 import Excusals from "./Excusals";
 import {pageFromUrl, writePageUrl} from "./page-url";
+import { ProfileField } from "./ProfileField";
 import { DirectoryPhoto } from "./DirectoryPhoto";
 import WorkspaceShell from "./WorkspaceShell";
 import { ViewAsAccount } from "./ViewAs";
@@ -71,7 +72,7 @@ function Profile({ state, save, disabled }) {
     const changes = Object.fromEntries(
       fields
         .map(([k]) => [k, form[k]?.trim() || (k === "dateOfBirth" ? null : "")])
-        .filter(([k, v]) => register || state.profile[k] !== v),
+        .filter(([k, v]) => register || (state.profile[k] ?? (k === "dateOfBirth" ? null : "")) !== v),
     );
     if (!register && !Object.keys(changes).length) return;
     save(
@@ -94,13 +95,7 @@ function Profile({ state, save, disabled }) {
         <div className="cadet-fields">
           {register && step === 0 && (
             <>
-              <Field label="University">
-                <input
-                  required
-                  value={form.university}
-                  onChange={(e) => pick("university", e.target.value)}
-                />
-              </Field>
+              <ProfileField field="university" label="University" required value={form.university} onChange={v=>pick("university",v)}/>
               <Select
                 label="AS year"
                 required
@@ -127,29 +122,11 @@ function Profile({ state, save, disabled }) {
         {groups.map(([title, keys]) => {
           const members = visible.filter(([key]) => keys.includes(key));
           return members.length > 0 && <section key={title} className="profile-section"><h3>{title}</h3><div className="cadet-fields">
-          {members.map(([key, label, type]) => key === "afsc" ? (
-            <div className="profile-wide" key={key}><Field label="Air Force Specialty Code (AFSC)">
-              <textarea value={form.afsc || ""} maxLength={240} rows={4}
-                onChange={e => pick(key,e.target.value)} />
-            </Field></div>
-          ) : (
-            <Field key={key} label={label}>
-              <input
-                type={type || "text"}
-                maxLength={key === "classYear" ? 4 : key === "photoLink" ? 2048 : 240}
-                pattern={
-                  key === "classYear"
-                    ? "[0-9]{4}"
-                    : key === "cipCode"
-                      ? "[0-9]{2}[.][0-9]{4}"
-                      : undefined
-                }
-                required={required.has(key)}
-                value={form[key] || ""}
-                onChange={(e) => pick(key, e.target.value)}
-              />
-            </Field>
-          ))}
+          {members.map(([key,label]) => <ProfileField key={key} field={key}
+            label={key === "afsc" ? "Air Force Specialty Code (AFSC)" : label}
+            broadArea={key === "cipCode" ? form.cipBroadArea : undefined} originalBroadArea={key === "cipCode" ? state.profile?.cipBroadArea : undefined}
+            original={state.profile?.[key]} required={required.has(key) && (register || !!state.profile?.[key])}
+            value={form[key] || ""} onChange={value=>pick(key,value)}/>)}
         </div></section>;
         })}
       </fieldset>
@@ -518,7 +495,7 @@ export default function CadetWorkspace({ session }) {
     access: { capabilities: { fullSnapshot: false } },
   };
   return (
-    <WorkspaceShell mobileContext={preview && ((state?.readOnly === false ? "Acting as " : "Viewing as ") + (name || "selected cadet"))} workspace="cadet" pages={pages} page={page} navigate={navigate} account={<>
+    <WorkspaceShell mobileContext={preview && ((state?.readOnly === false ? "Acting as " : "Viewing as ") + (name || "selected cadet"))} workspace="cadet" pages={pages} page={state?.registration ? "Create profile" : page} navigate={navigate} account={<>
       {state && !state.writable && <small role="status" className="submission-status">Submissions are paused.</small>}
       {preview && <ViewAsAccount acting={state?.readOnly === false} label={name || "selected cadet"} busy={busy} onExit={async () => {
         try {

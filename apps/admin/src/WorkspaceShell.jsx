@@ -39,7 +39,7 @@ export default function WorkspaceShell({ workspace="leadership", pages, page, na
     <div className="app">
       {mobile ? <>
         <header className="mobile-bar">
-          <Brand/>{mobileContext && <small>{mobileContext}</small>}
+          <Brand/><div className="mobile-page"><strong>{page}</strong>{mobileContext && <small>{mobileContext}</small>}</div>
           <button aria-label="Open navigation" aria-expanded={open} aria-controls="mobile-navigation"
             onClick={() => {menu.current.showModal(); setOpen(true);}}><Menu size={19}/> Menu</button>
         </header>
@@ -50,11 +50,13 @@ export default function WorkspaceShell({ workspace="leadership", pages, page, na
             const rect = menu.current.getBoundingClientRect();
             if (e.clientX > rect.right || e.clientX < rect.left) menu.current.close();
           }}>
+          <div className="mobile-menu-screen">
           <header><Brand/><button aria-label="Close navigation" onClick={() => menu.current.close()}><X size={20}/></button></header>
           <div className="menu-links" onClickCapture={e => {
             if (menu.current.contains(e.target) && e.target.closest("button,a") &&
                 !e.metaKey && !e.ctrlKey && !e.shiftKey && !e.altKey) menu.current.close();
           }}>{links}</div>
+          </div>
         </dialog>
       </> : <aside className="sidebar"><Brand/>{links}</aside>}
       <div className="workspace"><main>{children}</main></div>

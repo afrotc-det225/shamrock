@@ -6,6 +6,8 @@ This document records the canonical option sets used for Google Sheets data vali
 - Scope: values only (no implementation details).
 - Policy: these lists are *authoritative*. The Data Legend sheet in each workbook should reflect these lists via stable named ranges.
 
+The web Directory uses the same residence, school, home state, CIP broad area and AFSC options. After changing those arrays in `src/utils/arrays.ts`, run `node scripts/sync-profile-choices.mjs` and commit the regenerated catalog. The panel build checks it against the canonical lists.
+
 ## Representation Rules
 - Each option set should be stored as a single-column range (one value per row).
 - Each option set should be exposed as a named range (name is stable; range coordinates may change).

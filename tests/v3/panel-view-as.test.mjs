@@ -236,7 +236,7 @@ test('a linked cadet permits an audited profile edit through View as, with the s
   assert.equal(entry.body.directoryWorkspace,true);
   const target={...base,targetPersonId:'cadet',entryAuditId:'entry'};
   assert.equal((await f.send(target,path)).body.readOnly,false);
-  const action={id:crypto.randomUUID(),kind:'profile',fields:{changes:{dorm:'Fictional Hall'},version:1}};
+  const action={id:crypto.randomUUID(),kind:'profile',fields:{changes:{dorm:'Off-Campus'},version:1}};
   const input={...target,action};
   assert.equal((await f.send(input,path)).body.error.code,'WRITES_PAUSED');
   await f.db.prepare('UPDATE system_control SET accepting_commands=1').run();
@@ -244,7 +244,7 @@ test('a linked cadet permits an audited profile edit through View as, with the s
   assert.equal(saved.status,200,JSON.stringify(saved));
   assert.equal(saved.body.commandId,'portal.entry.'+action.id);
   assert.equal((await f.send(input,path)).status,200);
-  assert.equal(await f.db.prepare("SELECT dorm FROM directory_profiles WHERE person_id='cadet'").first('dorm'),'Fictional Hall');
+  assert.equal(await f.db.prepare("SELECT dorm FROM directory_profiles WHERE person_id='cadet'").first('dorm'),'Off-Campus');
   assert.equal((await f.send({...input,action:{...action,kind:'link'}},path)).status,403);
   assert.equal((await f.send({...input,targetPersonId:'lead'},path)).status,403);
   assert.equal((await f.send({...base,action:'exit',auditId:'exit',entryAuditId:'entry'})).status,200);
@@ -262,7 +262,7 @@ test('a Wing panel edit uses the target grants and the entry-linked command in t
   const path='/v1/admin/panel/view-as/action';
   const payload={contractVersion:1,environment:'local',generation:1,commandId:'edit',actor:{principalId:'owner',evidence:'authenticated-confirmation'},
     source:{kind:'test',resourceKey:'admin-staging-web',submissionId:'edit',revision:1},operation:'directory.selfUpdate',
-    payload:{personId:'administrator',expectedVersion:1,changes:{dorm:'New Hall'}}};
+    payload:{personId:'administrator',expectedVersion:1,changes:{dorm:'Sorin Hall'}}};
   const input={...base,targetPersonId:'administrator',entryAuditId:'entry',path:'/v1/admin/commands',payload};
   const saved=await f.send(input,path);assert.equal(saved.status,200,JSON.stringify(saved));
   assert.equal(saved.body.commandId,'view.entry.edit');

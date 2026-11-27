@@ -317,3 +317,20 @@ test("lost write response retries the saved command without duplicate mutation",
   assert.equal(updated.version, 2);
   assert.equal(updated.label, "Reviewed rename");
 });
+
+test("Directory web writes validate changed fields and retain existing historical choices", async (t) => {
+  const f = await fixture(t);
+  await f.db.prepare("UPDATE directory_profiles SET dorm='Former residence' WHERE person_id='cadet-1'").run();
+  const {personId, version, flightId, active, ...profile} = (await f.s.snapshot()).people.find(p=>p.personId==="cadet-1");
+  const save = async fields => {
+    const proposal = await f.s.propose("directory.upsert", {personId,expectedVersion:version,flightId,profile:{...profile,...fields}});
+    return f.s.apply(proposal.id,true);
+  };
+  for (const fields of [{phone:"555-fake"},{dorm:"Sorrin"},{afsc:"Pilto"},{cipBroadArea:"Enginering"},
+    {cipCode:"1.2"},{cipCode:"14.0000"},{email:"bad@@example.invalid"},{dateOfBirth:"2999-01-01"}]) await assert.rejects(save(fields));
+  await save({phone:"+1 (202) 555-0101",afsc:"11X - Pilot"});
+  const saved = (await f.s.snapshot()).people.find(p=>p.personId===personId);
+  assert.equal(saved.dorm,"Former residence");
+  assert.equal(saved.afsc,"11X - Pilot");
+  assert.equal(saved.version,version+1);
+});

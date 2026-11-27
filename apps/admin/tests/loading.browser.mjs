@@ -189,6 +189,7 @@ try{
  assert.equal(await page.getByLabel('Status for Sample Senior').inputValue(),'Active 3/4');
  await Promise.all([page.waitForResponse(response=>response.url().endsWith('/api/proposals')),page.getByRole('button',{name:'Review semester plan'}).click()]);
  assert.deepEqual(proposals[1].people,[]);
+ await page.evaluate(()=>localStorage.setItem("shamrock.cadets.columns.v2",JSON.stringify(["cadet","asYear","flight"])));
  let finishDirectory;
  const directoryGate=new Promise(resolve=>{finishDirectory=resolve;});
  for(const profile of ['cadets','cadet-details']) {

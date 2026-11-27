@@ -346,14 +346,6 @@ export async function cadetRoute(
     throw bad();
   const f = a.fields,
     commandId = (a.kind==="flag" && Object.hasOwn(a.fields,"code") ? "cell." : "portal.") + (viewEntry ? viewEntry+"." : "") + a.id;
-  const cip =
-    a.kind === "register"
-      ? f.cipCode
-      : a.kind === "profile" && object(f.changes)
-        ? f.changes.cipCode
-        : null;
-  if (cip && (typeof cip !== "string" || !/^\d{2}\.\d{4}$/.test(cip)))
-    throw bad();
   const envelope = {
     contractVersion: 1,
     generation: input.generation,
@@ -481,6 +473,9 @@ export async function cadetRoute(
     return receipts[0];
   }
   if (a.kind === "profile") {
+    const changes = f.changes;
+    if (object(changes) && (["phone","classYear","homeTown","homeState","dateOfBirth"] as const).some(key =>
+      Object.hasOwn(changes,key) && !changes[key] && p[key])) throw new HttpError(400,"INVALID_PROFILE_FIELD","A required profile field cannot be cleared.");
     return acceptAdminCommand(env, {
       ...envelope,
       operation: "directory.selfUpdate",

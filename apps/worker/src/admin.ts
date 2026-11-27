@@ -6,6 +6,7 @@ import { preparePermissionMutation, permissionManagerSql } from './permissions.j
 import { effectiveAdminGrants } from './permission-grants.js';
 import { attendanceVersionsSql, baselineRevisionSql, correctionReceipt } from './corrections.js';
 import { adminIdentifier, DIRECTORY_FIELDS, directoryLeadershipRole, operationallyActive, parseAdminCommand, type AdminCommand, type DirectoryRecord, type FrontendSnapshot, type LeadershipRecord, } from '../../../packages/domain/src/admin.js';
+import {profileFieldIssue} from "../../../packages/domain/src/profile-fields.js";
 import { HttpError } from './http-error.js';
 interface AdminEnv {
   DB: D1Database;
@@ -103,6 +104,16 @@ export async function acceptAdminCommand(env: AdminEnv, input: unknown): Promise
   const previous = await priorReceipt(env, c, hash);
   if (previous)
     return previous;
+  function validateWebFields(fields: object, original: object = {}) {
+    if (c.source.resourceKey !== "admin-staging-web" && !(env.ENVIRONMENT === "local" && c.source.resourceKey === "admin-panel")) return;
+    const saved = original as Record<string, unknown>;
+    const broadArea = (fields as Partial<DirectoryRecord>).cipBroadArea;
+    for (const [key,value] of Object.entries(fields)) {
+      if (value === saved[key] && !(key === "cipCode" && broadArea !== saved.cipBroadArea)) continue;
+      const issue = profileFieldIssue(key,value,broadArea);
+      if (issue) throw new HttpError(400,"INVALID_PROFILE_FIELD",issue);
+    }
+  }
   const now = new Date().toISOString();
   const writes: D1PreparedStatement[] = [], identityWrites: D1PreparedStatement[] = [];
   let rosterFlights:string[]=[];
@@ -135,6 +146,7 @@ export async function acceptAdminCommand(env: AdminEnv, input: unknown): Promise
       AND (SELECT COUNT(*) FROM principals WHERE principal_id=?)=?`;
     conditionValues = [targetId, existing?.version ?? 0, p.verifiedEmail, matches.length, scopes[0], c.actor.principalId, principal ? 1 : 0];
     if (!existing) {
+      validateWebFields(p.profile);
       rosterFlights=[p.flightId];
       identityWrites.push(stmt(env.DB, 'INSERT INTO people(person_id,display_name) VALUES(?,?) ON CONFLICT(person_id) DO UPDATE SET display_name=excluded.display_name', targetId, `${p.profile.lastName}, ${p.profile.firstName}`));
       const columns = ['person_id','version','flight_id',...profileColumns,'updated_at'];
@@ -158,6 +170,7 @@ export async function acceptAdminCommand(env: AdminEnv, input: unknown): Promise
     const existing = rows[0].results[0] as unknown as DirectoryRecord | undefined;
     if (c.operation === 'directory.selfUpdate' && !existing) throw new HttpError(409, 'ENROLLMENT_REQUIRED', 'A Directory manager must review this enrollment first.');
     const p = c.operation === 'directory.upsert' ? c.payload : { personId: target.personId, expectedVersion: target.expectedVersion, flightId: existing!.flightId, profile: { ...existing!, ...c.payload.changes } };
+    validateWebFields(p.profile, existing);
     if(!existing||existing.flightId!==p.flightId||(['lastName','firstName','asYear','flightPathStatus','dateOfBirth'] as const).some(key=>existing[key]!==p.profile[key]))rosterFlights=[existing?.flightId,p.flightId].filter((id):id is string=>!!id);
     const memberships = rows[1].results as {
       flightId: string;
@@ -200,6 +213,9 @@ export async function acceptAdminCommand(env: AdminEnv, input: unknown): Promise
    NOT EXISTS(SELECT 1 FROM leadership_contacts WHERE contact_id=? AND person_id IS NOT ?) AND
    (? IS NULL OR EXISTS(SELECT 1 FROM directory_profiles WHERE person_id=?))`;
     conditionValues = [p.contactId, p.expectedVersion, p.contactId, p.personId, p.personId, p.personId];
+    const previousContact = before as {cell_phone: string; office_phone: string; email: string} | null;
+    validateWebFields({officePhone:p.officePhone, cellPhone:p.profile?.cellPhone, email:p.profile?.email},
+      {officePhone:previousContact?.office_phone, cellPhone:previousContact?.cell_phone, email:previousContact?.email});
     const profile = p.profile ?? { lastName: '', firstName: '', rank: '', role: '', email: '', cellPhone: '' };
     writes.push(stmt(env.DB, `INSERT INTO leadership_contacts VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)
    ON CONFLICT(contact_id) DO UPDATE SET version=excluded.version,last_name=excluded.last_name,first_name=excluded.first_name,

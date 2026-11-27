@@ -47,11 +47,15 @@ try {
     return [x,y,width,height];
   });
   await page.evaluate(() => document.fonts.ready);
+  assert.equal(await page.locator(".mobile-page strong").innerText(),"Attendance");
+  assert.equal(await page.locator(".mobile-bar").evaluate(el=>getComputedStyle(el).position),"sticky");
+  assert.equal(await page.evaluate(()=>getComputedStyle(document.documentElement).backgroundColor),"rgb(12, 35, 64)");
   const before = await page.locator(".mobile-bar .brand").evaluate(markPositions);
   assert.equal(await page.locator('meta[name="theme-color"]').getAttribute("content"),"#0c2340");
   assert.match(await page.locator('meta[name="viewport"]').getAttribute("content"),/viewport-fit=cover/);
   assert.equal(await page.locator(".mobile-bar").evaluate(el=>getComputedStyle(el).backgroundColor),"rgb(12, 35, 64)");
   await page.getByRole("button",{name:"Open navigation"}).click();
+  assert(await page.locator(".mobile-menu").evaluate(el=>el.getBoundingClientRect().bottom >= visualViewport.height));
   assert.deepEqual(await page.locator(".mobile-menu .brand").evaluate(markPositions),before);
   assert.equal(await page.locator("nav a[aria-current=page]").innerText(),"Attendance");
   await page.getByRole("button",{name:"Close navigation"}).click();

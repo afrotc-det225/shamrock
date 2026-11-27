@@ -7,9 +7,8 @@ import { ArrowUp, SquarePen, MessagesSquare } from "lucide-react";
 import { Heading, Table, Status, Empty } from "./components";
 import {readUsage} from "./read-usage";
 import { api } from "./api";
-import { currentExcusalRequests } from "./attendance-events.mjs";
 import { useReceipts, ReceiptStatus } from "./receipts";
-export function Overview({ snapshot: s, overview, reporting, history, receiptsDeferred, reportingTime, captureKey, navigate, readOnly = false, ...details }) {
+export function Overview({ snapshot: s, overview, reporting, history, receiptsDeferred, reportingTime, captureKey, readOnly = false, ...details }) {
   const roster = overview || overviewRoster(s.people.filter(operationallyActive).map(p => [p.asYear,p.university,1]));
   const receipt = useReceipts({ history, receiptsDeferred, reportingTime, captureKey, enabled: !readOnly });
   return (
@@ -19,9 +18,7 @@ export function Overview({ snapshot: s, overview, reporting, history, receiptsDe
         {Object.entries({activeCadets:"Active cadets",gmcCadets:"GMC",pocCadets:"POC",crosstowns:"Crosstowns",farCrosstowns:"Far crosstowns"}).map(([key,label]) =>
           <div key={key}><dt>{label}</dt><dd>{roster[key] ?? "—"}</dd></div>)}
       </dl>
-      <OverviewInsights {...details} overview={overview} snapshot={s} reporting={reporting} reportingTime={reportingTime} captureKey={captureKey}
-        pending={overview?.pending ?? currentExcusalRequests(s).filter(r => r.status === "Submitted").length}
-        navigate={navigate}/>
+      <OverviewInsights {...details} overview={overview} snapshot={s} reporting={reporting} reportingTime={reportingTime} captureKey={captureKey}/>
       {!readOnly && <section className="form-section">
         <h2>Recent changes</h2>
         <ReceiptStatus receipt={receipt} />

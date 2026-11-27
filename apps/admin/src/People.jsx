@@ -12,6 +12,7 @@ import {
 
 } from "./components";
 import { rosterText } from "./roster-export.mjs";
+import { ProfileField } from "./ProfileField";
 import { DirectoryPhoto } from "./DirectoryPhoto";
 import { ToolbarPopover } from "./ToolbarPopover";
 import { cellStyle, flightColors, flightPathColors, profileColorStyle, residenceCategory, yearColors } from "./roster-colors";
@@ -20,9 +21,10 @@ import { api,name, label, years, statuses, profileFields } from "./api";
 import { DIRECTORY_FIELDS } from "../../../packages/domain/src/admin";
 import { compareAsYearsForDisplay, compareCadetsForDisplay, compareLeadershipForDisplay } from "../../../packages/domain/src/cadet-display-order";
 
-const defaultColumns = ["cadet","asYear","flight","squadron","flightPathStatus"];
+const coreColumns = ["cadet","asYear","flight","squadron","flightPathStatus"];
 const columnKeys = ["cadet","lastName","firstName","rank","asYear","flight","squadron","flightPathStatus",
-  ...profileFields.filter(k => !["lastName","firstName","rank",...defaultColumns].includes(k))];
+  ...profileFields.filter(k => !["lastName","firstName","rank",...coreColumns].includes(k))];
+const defaultColumns = columnKeys.filter(key => !["lastName","firstName","rank"].includes(key));
 const columnLabel = k=>({cadet:"Cadet",lastName:"Last name",firstName:"First name",flight:"Flight",squadron:"Squadron",flightPathStatus:"Status",classYear:"Graduation year"}[k] || label(k));
 const detailFields = new Set(["phone","dorm","homeTown","homeState","dateOfBirth"]);
 const preferenceKey = "shamrock.cadets.columns.v2";
@@ -38,6 +40,10 @@ function initialColumns(){
   return defaultColumns;
 }
 
+export function cadetBrowseProfile() {
+  return initialColumns().some(key => detailFields.has(key)) ? "cadet-details" : "cadets";
+}
+
 function DirectoryValue({ field, value, person }) {
   if (field === "photoLink") return value ? <DirectoryPhoto value={value} person={person} /> : "—";
   const style = profileColorStyle(field, value);
@@ -46,7 +52,7 @@ function DirectoryValue({ field, value, person }) {
 }
 
 export default function People({
-  snapshot, list, run, captureKey, manifest, viewAsRevision,
+  snapshot, list, browse, run, captureKey, manifest, viewAsRevision,
   propose,
   busy,
   leadership = false,
@@ -59,8 +65,10 @@ export default function People({
   const set = (k, v) => setEdit({ ...edit, [k]: v }),
     profile = (k, v) =>
       setEdit({ ...edit, profile: { ...edit.profile, [k]: v } });
+  const [original,setOriginal] = useState(null);
+  const complete = snapshot || browse?.profile === "cadet-details";
   const open = (row) => {
-    if (!row || snapshot || leadership) return openRecord(row);
+    if (!row || complete || leadership) return openRecord(row);
     const detailed = extended?.binding===binding && extended.people.find(p=>p.personId===row.personId);
     if (detailed) return openRecord(detailed);
     return run(async () => {
@@ -72,6 +80,7 @@ export default function People({
     });
   };
   const openRecord = (p) => {
+    setOriginal(p);
     if (leadership)
       setEdit({
         contactId: p?.contactId || crypto.randomUUID(),
@@ -147,7 +156,7 @@ export default function People({
     </button>;
   }
   const [extended,setExtended]=useState(null),[fieldError,setFieldError]=useState(""),[retry,setRetry]=useState(0);
-  const extra = !leadership && !snapshot && [...columns,sort,field].some(k=>detailFields.has(k));
+  const extra = !leadership && !complete && [...columns,sort,field].some(k=>detailFields.has(k));
   const binding=JSON.stringify([captureKey,manifest?.revision,viewAsRevision]);
   useEffect(()=>{
     if(!extra || extended?.binding===binding)return;
@@ -216,19 +225,10 @@ export default function People({
         options={k === "asYear" ? years : statuses}
       />
     ) : (
-      <Field
-        key={k}
-        label={label(k)}
-        required={["firstName", "lastName"].includes(k)}
-        type={k === "email" ? "email" : k === "dateOfBirth" ? "date" : "text"}
-        value={edit.profile[k] ?? ""}
-        onChange={(e) =>
-          profile(
-            k,
-            k === "dateOfBirth" && !e.target.value ? null : e.target.value,
-          )
-        }
-      />
+      <ProfileField key={k} field={k} label={label(k)} original={original?.[k]}
+        broadArea={k === "cipCode" ? edit.profile.cipBroadArea : undefined} originalBroadArea={k === "cipCode" ? original?.cipBroadArea : undefined}
+        required={["firstName","lastName"].includes(k)} value={edit.profile[k] ?? ""}
+        onChange={value => profile(k,k === "dateOfBirth" && !value ? null : value)}/>
     );
   }
   const dataColumns = columns.filter(key => key !== "cadet");
@@ -379,11 +379,11 @@ export default function People({
           {leadership && (
             <>
               {["reportsTo", "officePhone", "officeLocation"].map((k) => (
-                <Field
+                <ProfileField field={k} original={original?.[k]}
                   key={k}
                   label={label(k)}
                   value={edit[k]}
-                  onChange={(e) => set(k, e.target.value)}
+                  onChange={value => set(k, value)}
                 />
               ))}
               <label className="check">

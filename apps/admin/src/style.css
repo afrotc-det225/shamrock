@@ -1334,7 +1334,7 @@ html:has(dialog:modal) {
 .roster-bars li>div {border-left:1px solid #b7c2d0;background:#f4f6f8}
 .attendance-summary,.birthdays {min-width:0;container-type:inline-size}
 .attendance-summary h3,.birthdays h3 {color:#22344f;margin:0}
-.overview-roster {display:grid;grid-template-columns:repeat(5,minmax(0,1fr));margin:1rem 0;padding:.8rem 0;border-block:1px solid var(--border)}
+.overview-roster {display:grid;grid-template-columns:repeat(5,minmax(0,1fr));margin:0 0 1rem;padding:0 0 .8rem;border-bottom:1px solid var(--border)}
 .overview-roster > div {padding-inline:clamp(.55rem,2vw,1.6rem);border-left:1px solid var(--border)}
 .overview-roster > div:first-child {padding-left:0;border:0}
 .overview-roster dt {color:#4b5f75;font-size:.85rem}
@@ -1350,10 +1350,6 @@ html:has(dialog:modal) {
 .comparison-change {display:inline-block;border-radius:3px;padding:.15rem .3rem;background:#eef1f4;color:#47576b;font-weight:650;white-space:nowrap}
 .comparison-change[data-direction="1"] {background:#e5f2e9;color:#216544}
 .comparison-change[data-direction="-1"] {background:#faebe4;color:#873e2c}
-.wing-roster-context {display:flex;gap:.65rem 1.6rem;flex-wrap:wrap;justify-content:space-between;align-items:baseline;padding:.65rem 0 0;border-top:1px solid var(--border);font-size:.82rem;color:#364a60}
-.wing-roster-context strong {color:#172d47;font-size:1rem}
-.wing-roster-context small {display:block;color:#566479;margin-top:.2rem}
-.overview-queue {display:inline-block;color:#264f73;font-size:.82rem;text-underline-offset:.2em}
 .birthdays header {flex-wrap:wrap}
 .birthdays header select {width:auto;max-width:100%;min-height:2rem;font-size:.8rem}
 .birthday-body {display:grid;grid-template-columns:minmax(12rem,15rem) minmax(0,1fr);gap:clamp(.85rem,5cqi,2rem);margin-top:.55rem}
@@ -1477,6 +1473,7 @@ h1.page-title {position:absolute;width:1px;height:1px;margin:0;padding:0;overflo
 /* The sticky box starts at its pinned position; the inset belongs inside it. */
 @media (min-width: 641px) {
   .workspace main:has(.page-controls) {padding-top:0}
+  .workspace main:has(.cadet-roster[data-horizontal="true"]) {padding-bottom:0}
   .page-controls {margin-top:0;padding-top:clamp(23px,2.1vw,36px)}
   .table-scroll[data-horizontal="true"] {max-height:calc(100dvh - var(--topbar-height) - var(--controls-height, 0px))}
 }
@@ -1593,24 +1590,24 @@ main:has(.matrix-scroll) { padding-bottom: 8px; }
 
 @media (max-width:640px) {
   .mobile-bar,.mobile-menu header {display:flex;align-items:center;justify-content:space-between;gap:.65rem}
-  html {background:var(--navy)}
+  :root {background:var(--navy);scrollbar-gutter:auto}
   body {background:white;min-height:100dvh}
   .mobile-bar,.mobile-menu header {padding:calc(env(safe-area-inset-top) + .2rem) max(.75rem,env(safe-area-inset-right)) .2rem max(.75rem,env(safe-area-inset-left));background:var(--navy);color:white}
   .mobile-menu header {position:sticky;top:0;z-index:1;flex:none}
-  .mobile-bar::before {content:"";position:fixed;inset:0 0 auto;height:env(safe-area-inset-top);background:var(--navy);z-index:50;pointer-events:none}
   .mobile-bar .brand,.mobile-menu .brand {margin:0;padding:0;flex:none;align-items:center;font-size:1.3rem;gap:.45rem}
   .mobile-bar .brand-mark,.mobile-menu .brand-mark {height:1.55rem}
   .mobile-bar small {min-width:0;overflow-wrap:anywhere;font-size:.72rem}
   .mobile-bar button,.mobile-menu header button {display:inline-flex;align-items:center;justify-content:center;flex:none;gap:.4rem;min-height:44px;min-width:44px;width:auto;margin:0;padding:.4rem .55rem;color:white;background:transparent;border:0}
   .mobile-menu.sidebar {position:fixed;inset:0 auto 0 0;margin:0;width:min(87vw,21rem);max-width:none;
-    height:100dvh;max-height:none;padding:0 0 max(.8rem,env(safe-area-inset-bottom));border:0;overflow:auto;overscroll-behavior:contain}
+    height:100lvh;max-height:none;padding:0;border:0;overflow:hidden;overscroll-behavior:contain}
   .mobile-menu:not([open]) {display:none}
-  .mobile-menu[open],.mobile-menu .menu-links,.mobile-menu nav,.mobile-menu .sidebar-bottom {display:flex;flex-direction:column;align-items:stretch}
+  .mobile-menu[open],.mobile-menu-screen,.mobile-menu .menu-links,.mobile-menu nav,.mobile-menu .sidebar-bottom {display:flex;flex-direction:column;align-items:stretch}
   .mobile-menu::backdrop {background:rgb(12 30 51 / .5)}
   body:has(.mobile-menu[open]) {overflow:hidden}
   .mobile-menu.sidebar header button {width:44px;min-height:44px;margin:0;padding:0;justify-content:center}
   .mobile-menu header {box-shadow:0 1px #435772}
-  .mobile-menu .menu-links {flex:1;gap:1rem;padding:0 .75rem}
+  .mobile-menu-screen {height:100dvh;min-height:0}
+  .mobile-menu .menu-links {flex:1;min-height:0;overflow:auto;gap:1rem;padding:0 .75rem max(1rem,env(safe-area-inset-bottom))}
   .mobile-menu nav {gap:0;padding:0;overflow:visible}
   .mobile-menu nav a,.mobile-menu .sidebar-bottom :is(a,button) {min-height:44px;width:100%;padding:.65rem .75rem;font-size:.94rem}
   .mobile-menu nav a svg {width:19px}
@@ -1671,4 +1668,21 @@ main:has(.matrix-scroll) { padding-bottom: 8px; }
   .page-controls .toolbar > .toolbar-tool {min-height:39px;border:1px solid var(--border)}
   .page-controls .toolbar-actions {gap:.25rem}
   .page-controls .toolbar-actions button {min-height:39px}
+}
+
+.workspace main:has(.overview-roster) {padding-top:1rem}
+.portrait-preview {background:#edf1f5;border:0;border-radius:12px;box-shadow:0 12px 54px #091a3580}
+.portrait-preview header {justify-content:flex-start;gap:.4rem;background:var(--navy);color:white}
+.portrait-preview header strong {flex:1}
+.portrait-preview header :is(button,a) {color:inherit;display:grid;place-items:center;width:40px;height:40px;border-radius:6px}
+.portrait-preview header :is(button,a):hover {background:#294360}
+.directory-photo.photo-trigger {display:inline-flex;align-items:center;gap:.4rem;white-space:nowrap;color:#244c68}
+.cadet-fields .field,.cadet-fields .field input {min-width:0;max-width:100%}
+@media(max-width:640px) {
+  .mobile-bar {position:sticky;top:0;z-index:40}
+  .mobile-page {flex:1;min-width:0;text-align:center;line-height:1.2}
+  .mobile-page strong,.mobile-page small {display:block}
+  .mobile-page strong {font-size:1rem}
+  body:has(.app) {background:var(--navy)}
+  .app,.workspace {background:white}
 }

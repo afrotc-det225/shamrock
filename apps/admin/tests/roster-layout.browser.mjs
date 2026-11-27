@@ -52,9 +52,13 @@ try {
         const rect = s => document.querySelector(s).getBoundingClientRect();
         return [rect(".page-controls").top,rect(".toolbar-actions").top,rect("thead th").top,rect("thead th").width];
       });
-      await page.evaluate(() => scrollTo(0,0));await settle();const start = await measure();
-      await page.evaluate(() => scrollTo(0,300));await settle();const end = await measure();
-      assert(await page.evaluate(() => scrollY > 0));
+      const scroll = top => page.evaluate(y => {
+        const roster = document.querySelector('.table-scroll[data-horizontal="true"]');
+        if (roster) roster.scrollTo(0,y); else scrollTo(0,y);
+      }, top);
+      await scroll(0);await settle();const start = await measure();
+      await scroll(300);await settle();const end = await measure();
+      assert(await page.evaluate(() => scrollY > 0 || document.querySelector(".table-scroll")?.scrollTop > 0));
       assert.equal(start[0],0);
       assert(start[3] <= 240);
       start.forEach((value,i) => assert(Math.abs(value-end[i]) < 1,`${path} at ${width}px, metric ${i}`));
@@ -65,7 +69,8 @@ try {
       const failedRow = page.getByRole("row").filter({has:page.getByRole("button",{name:"Sample Cadet 1",exact:true})});
       await failedRow.locator(".directory-avatar").getByText("SC").waitFor();
       await page.getByRole("button",{name:"Columns",exact:true}).click();
-      await page.getByRole("checkbox",{name:"Photo link",exact:true}).check();
+      const selected = page.getByRole("region",{name:"Columns"}).getByRole("checkbox",{checked:true});
+      assert.deepEqual(await selected.evaluateAll(boxes=>boxes.map(box=>box.parentElement.textContent)),["Cadet","AS year","Flight","Squadron","Status","Role","University","Email","Phone","Dorm","CIP broad area","CIP code","AFSC","Home Town","Home State","Graduation year","Date of birth","Photo link"]);
       await page.keyboard.press("Escape");
       assert.equal(await failedRow.getByRole("link").count(),0);
       await page.route("https://drive.google.com/file/d/fixture1/preview?*",route => route.fulfill({contentType:"text/html",body:"Image preview"}));
@@ -80,8 +85,8 @@ try {
       await columns.click();
       const picker=page.getByRole("region",{name:"Columns"});
       for(const field of ["Last name","AFSC"])await picker.getByRole("checkbox",{name:field,exact:true}).check();
-      for(const field of ["Cadet","AS year","Flight","Squadron","Status","Photo link"])
-        await picker.getByRole("checkbox",{name:field,exact:true}).uncheck();
+      for (const box of await picker.getByRole("checkbox").all())
+        if (!["Last name","AFSC"].includes((await box.locator("..").innerText()).trim())) await box.uncheck();
       const table=page.locator(".cadet-roster");
       assert.deepEqual(await table.locator("thead th").allTextContents(),["Last name","AFSC"]);
       await page.keyboard.press("Escape");

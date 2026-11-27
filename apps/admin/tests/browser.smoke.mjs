@@ -209,6 +209,7 @@ try {
   await afscSort.click();
   assert.deepEqual(await afscValues(),[...values].reverse());
   await page.getByRole("button",{name:"Columns",exact:true}).click();
+  await page.getByLabel("Filter column").selectOption("afsc");
   await page.getByLabel("Filter by AFSC", {exact:true}).fill("no-such-field-value");
   assert.equal(await page.getByRole("button", {name:"Edit Alex Morgan", exact:true}).count(), 0);
   await page.getByLabel("Filter by AFSC", {exact:true}).fill("");
@@ -386,7 +387,8 @@ try {
   await page.keyboard.press("Escape");
   const attendanceSummary = page.getByRole("region", {name:"Wing attendance"});
   assert.deepEqual(await attendanceSummary.locator("dt").allTextContents(), ["Overall", "LLAB"]);
-  assert.equal(await attendanceSummary.getByRole("link",{name:/pending excusal/}).getAttribute("href"),"/excusals");
+  assert.equal(await attendanceSummary.getByRole("link",{name:/pending excusal/}).count(),0);
+  assert.equal(await attendanceSummary.getByText(/below 80% overall/).count(),0);
   const birthdays = page.getByRole("region",{name:"Wing birthdays"});
   assert.equal(await birthdays.locator(".birthday-names li i").count(),0);
   const month = birthdays.locator(".calendar-month strong");
