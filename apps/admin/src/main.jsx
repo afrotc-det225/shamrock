@@ -415,7 +415,7 @@ function App() {
               >
                 <Sparkles size={20} />
                 <span>
-                  Assistant<small>Optional</small>
+                  Assistant
                 </span>
               </PageLink>
             )}

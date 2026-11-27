@@ -16,6 +16,7 @@ export function available(env, user, preview) {
 // One shared ledger across both panel hostnames and all sessions. The reservation
 // survives failed responses and disconnects because their cost can be unknown.
 const day = 86_400_000;
+const dailyMessages = 96;
 const monthlyCents = 1000;
 const slotCents = 5;
 const slots = monthlyCents / slotCents;
@@ -29,7 +30,7 @@ export async function reserve(storage, now, weight = 1, detailed = false) {
     if (entries.some(e => !e || !Number.isSafeInteger(e.at) || e.at > now || e.at < 0 || ![1,3].includes(e.weight))) return false;
     const active = entries.filter(e => e.at > now - 32 * day);
     if (active.reduce((sum,e)=>sum+e.weight,weight) > slots) return detailed ? "monthly" : false;
-    if (active.filter(e=>e.at > now-day).length >= 32) return detailed ? "daily" : false;
+    if (active.filter(e=>e.at > now-day).length >= dailyMessages) return detailed ? "daily" : false;
     await tx.put(key, [...active, {at:now,weight}]);
     return true;
   });
@@ -118,7 +119,7 @@ export async function answer(env, body, guide, send = fetch, readCharts, readOpe
   if(messages.length===1 && /^how (is|are) (our|the) (detachment|wing) doing[?!. ]*$/i.test(question))route={type:"report"};
   if(messages.length===1 && /^(?:about )?how many (?:cadets |officers )?(?:will|do|are|can|did|have)\b[^?!]*\bcommission(?:ed|ing)?\b/i.test(question))route={type:"report"};
   const allowance=await env.PANEL_DB.reserveAssistant(route ? 1 : 3);
-  if(allowance!==true)throw new PanelError("ASSISTANT_LIMIT",allowance==="daily" ? "The 32-message rolling daily allowance is used. Messages become available as earlier requests age out." :
+  if(allowance!==true)throw new PanelError("ASSISTANT_LIMIT",allowance==="daily" ? `The ${dailyMessages}-message rolling daily allowance is used. Messages become available as earlier requests age out.` :
     allowance==="monthly" ? "The shared 32-day Assistant budget is used. Capacity returns as earlier reservations expire." : "The Assistant could not verify its spending allowance.",429);
   route ??= await classify(env,history,send);
   const request={model,reasoning:{effort:"none"},max_output_tokens:700,input:JSON.stringify(history)};

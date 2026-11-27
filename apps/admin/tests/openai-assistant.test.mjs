@@ -16,7 +16,8 @@ test("shared budget serializes dispatches and rolls over only expired reservatio
   assert.deepEqual(await Promise.all([reserve(last, now), reserve(last, now)]), [true, false]);
   assert.equal(await reserve(last, now + day), false);
   assert.equal(await reserve(last, now + 32 * day), true);
-  assert.equal(await reserve(ledger(Array(32).fill(now - 31_000)), now), false);
+  assert.equal(await reserve(ledger(Array(32).fill(now - 31_000)), now), true);
+  assert.equal(await reserve(ledger(Array(96).fill(now - 31_000)), now), false);
   assert.equal(await reserve(ledger([now + 1]), now), false);
 });
 const env = {ENVIRONMENT:"staging", STAGING_DATASET:"real", GENERATION:"1", BACKEND_SERVICE_NAME:"shamrock-real-parity",

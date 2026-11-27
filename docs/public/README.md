@@ -385,3 +385,5 @@ For named roster questions, ask “Whose birthdays are in May?” or “Who is i
 For career and major questions, the Assistant can select the Directory as a reporting source. It receives counts of active cadets by desired AFSC and academic field. Unknown entries and missing responses are counted separately. The two distributions do not show which particular cadets chose both.
 
 Directory questions can combine AS year, flight, squadron, school, class year, academic field and desired AFSC. Ask for a count, breakdown or names, then narrow the previous result in the same chat. SHAMROCK saves the matched record IDs in that owner’s conversation. Names are resolved inside the panel from currently authorized active records; the model receives field choices and the conversation, without the result IDs or names.
+
+In the Assistant, the sidebar button beside the title opens recent conversations. Search the list or select **New chat** at the top. Closing the drawer returns to the same conversation.

@@ -35,16 +35,19 @@ try {
     await page.goto((process.env.SHAMROCK_TEST_ORIGIN || "http://127.0.0.1:"+server.address().port)+"/assistant");
     const heading=page.getByRole("heading",{name:"Assistant",exact:true}), input=page.getByLabel("Ask SHAMROCK");
     await input.waitFor();
+    const recent=page.getByRole("button",{name:"Recent chats",exact:true});
+    const drawer=page.getByRole("dialog",{name:"Recent chats"});
     if(width===390){
+      await recent.click();
       await page.getByRole("button",{name:"Retry loading recent chats"}).click();
-      await page.getByRole("region",{name:"Recent conversations"}).getByText("No conversations yet.").waitFor();
+      await drawer.getByText("No conversations yet.").waitFor();
+      await page.keyboard.press("Escape");
     }
     const box=await input.boundingBox();
     const form=page.locator(".chat-form");
     const workspace=await page.locator(".workspace").boundingBox();
     const centered=await form.boundingBox();
     assert(Math.abs(centered.x+centered.width/2-workspace.x-workspace.width/2)<2);
-    const recent=page.getByRole("button",{name:"Recent chats",exact:true});
     await recent.click();
     assert.deepEqual(await form.boundingBox(),centered);
     await page.keyboard.press("Escape");
@@ -65,7 +68,8 @@ try {
     assert.equal(await answer.getByRole("cell",{name:"98%"}).count(),1);
     assert.equal(await answer.locator("pre code").textContent(),"const rate = 0.98;\n");
     assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
-    await page.getByRole("button",{name:"New chat"}).click();
+    await recent.click();
+    await drawer.getByRole("button",{name:"New chat"}).click();
     assert.equal(await answer.count(),0);
     let releaseRenderer;
     if(width===390){
@@ -75,7 +79,8 @@ try {
     await page.reload();
     if(width===390){
       const composerBefore=await form.boundingBox();
-      await page.getByRole("region",{name:"Recent conversations"}).getByRole("button",{name:/How is the detachment/}).click();
+      await recent.click();
+      await drawer.getByRole("button",{name:/How is the detachment/}).click();
       const indicator=page.getByRole("status",{name:"Loading chat"});
       await indicator.waitFor();
       assert.equal(await answer.count(),0);
@@ -89,15 +94,17 @@ try {
       await page.waitForFunction(()=>{const r=document.querySelector(".chat-form textarea").getBoundingClientRect();return r.top>=0 && r.bottom<=460;},null,{timeout:4000});
     }
     await recent.click();
-    await page.getByRole("complementary",{name:"Recent chats"}).getByRole("button",{name:/How is the detachment/}).click();
+    await drawer.getByRole("button",{name:/How is the detachment/}).click();
     await answer.getByRole("cell",{name:"98%"}).waitFor();
     if(width===390){
       await page.route("**/assets/AssistantResponse-*.js",route=>route.abort());
       await page.reload();
+      await recent.click();
       await Promise.all([page.waitForEvent("requestfailed",r=>r.url().includes("AssistantResponse")),
-        page.getByRole("region",{name:"Recent conversations"}).getByRole("button",{name:/How is the detachment/}).click()]);
+        drawer.getByRole("button",{name:/How is the detachment/}).click()]);
       await page.locator(".plain-reply").filter({hasText:"Compared with prior terms"}).waitFor();
-      await page.getByRole("button",{name:"New chat"}).click();
+      await recent.click();
+    await drawer.getByRole("button",{name:"New chat"}).click();
       await input.fill("Another question");
       assert(await page.getByRole("button",{name:"Send question"}).isEnabled());
     }

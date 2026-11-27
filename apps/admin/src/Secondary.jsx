@@ -4,7 +4,7 @@ import React, { useLayoutEffect, useEffect, useRef, useState } from "react";
 import {overviewRoster} from "../../../packages/domain/src/frontend-reporting";
 import {operationallyActive} from "../../../packages/domain/src/admin";
 import OverviewInsights from "./OverviewInsights";
-import { ArrowUp, SquarePen, MessagesSquare } from "lucide-react";
+import { ArrowUp, SquarePen, PanelLeft, X } from "lucide-react";
 import { Heading, Table, Status, Empty } from "./components";
 import {readUsage} from "./read-usage";
 import { api, displayDate } from "./api";
@@ -141,22 +141,10 @@ function AssistantWorkspace({ meta }) {
   const [historyState,setHistoryState]=useState("loading"), [historyAttempt,retryHistory]=useState(0);
   const page=useRef(null);
   const historyMenu=useRef(null), historyToggle=useRef(null);
-  useEffect(()=>{
-    if(!showChats)return;
-    function dismissOutside(event){
-      if(!historyMenu.current?.contains(event.target))setShowChats(false);
-    }
-    function escape(event){
-      if(event.key==="Escape"){setShowChats(false);historyToggle.current?.focus();}
-    }
-    document.addEventListener("pointerdown",dismissOutside);
-    document.addEventListener("focusin",dismissOutside);
-    document.addEventListener("keydown",escape);
-    return ()=>{
-      document.removeEventListener("pointerdown",dismissOutside);
-      document.removeEventListener("focusin",dismissOutside);
-      document.removeEventListener("keydown",escape);
-    };
+  useLayoutEffect(()=>{
+    const drawer=historyMenu.current;
+    if(showChats && !drawer.open)drawer.showModal();
+    if(!showChats && drawer.open)drawer.close();
   },[showChats]);
   const hosted=meta.hosted && meta.assistantAvailable;
   const threads=useRef(new Map()), lastHistoryRead=useRef(0);
@@ -254,27 +242,24 @@ function AssistantWorkspace({ meta }) {
     </button>;
   }
   return <section ref={page} className="assistant-page">
-    <Heading title="Assistant" />
-      <div className="chat-actions">
-        <div ref={historyMenu} className="chat-history-menu">
-          <button ref={historyToggle} aria-controls="assistant-history" aria-expanded={showChats} onClick={()=>{if(!showChats && hosted)refreshStaleHistory();setShowChats(!showChats);}}><MessagesSquare size={16}/>Recent chats</button>
-          <aside aria-label="Recent chats" id="assistant-history" className="chat-library" hidden={!showChats}>
-            {chats.length>1 && <input type="search" aria-label="Search chat titles" placeholder="Search chats" value={query} onChange={e=>setQuery(e.target.value)}/>}
-            {historyNotice}
-            {chats.filter(row=>row.title.toLowerCase().includes(query.trim().toLowerCase())).map(chatLink)}
-          </aside>
-        </div>
-        <button disabled={busy || !!opening} onClick={newChat}><SquarePen size={16}/>New chat</button>
+    <div className="assistant-toolbar">
+      <button className="icon" ref={historyToggle} aria-label="Recent chats" title="Recent chats" aria-expanded={showChats} aria-controls="assistant-history" onClick={()=>{if(hosted)refreshStaleHistory();setShowChats(true);}}><PanelLeft size={20}/></button>
+      <Heading title="Assistant"/>
+    </div>
+    <dialog ref={historyMenu} id="assistant-history" aria-label="Recent chats" className="history-drawer" onCancel={()=>setShowChats(false)} onClick={e=>{if(e.target===e.currentTarget){const r=e.currentTarget.getBoundingClientRect();if(e.clientX>r.right || e.clientX<r.left)setShowChats(false);}}}>
+      <header><h2>Recent chats</h2><button className="icon" aria-label="Close recent chats" onClick={()=>setShowChats(false)}><X size={18}/></button></header>
+      <button className="history-new" disabled={busy || !!opening} onClick={()=>{newChat();requestAnimationFrame(()=>input.current?.focus());}}><SquarePen size={17}/>New chat</button>
+      {chats.length>1 && <input type="search" aria-label="Search chat titles" placeholder="Search chats" value={query} onChange={e=>setQuery(e.target.value)}/>}
+      <div className="history-entries">{historyNotice}
+        {chats.filter(row=>row.title.toLowerCase().includes(query.trim().toLowerCase())).map(chatLink)}
+        {!!chats.length && !chats.some(row=>row.title.toLowerCase().includes(query.trim().toLowerCase())) && <small>No matching chats.</small>}
       </div>
+    </dialog>
     <div className="chat-workspace">
 
     <div className={"chat-main"+(messages.length ? "" : " empty-chat")} aria-busy={!!opening}>
-    {hosted && !messages.length && !showChats && <section className="mobile-recent" aria-label="Recent conversations">
-      <h2>Recent chats</h2>{historyNotice}{chats.slice(0,3).map(chatLink)}
-    </section>}
     <div ref={log} className="conversation" role="log" aria-label="Conversation">
-      {messages.map((m,i)=><article key={(active?.id || "draft")+":"+i} className={"message "+m.role}>
-        <span className="message-author">{m.role==="user" ? "You" : "SHAMROCK assistant"}</span>
+      {messages.map((m,i)=><article key={(active?.id || "draft")+":"+i} aria-label={m.role==="user" ? "Your message" : "Assistant response"} className={"message "+m.role}>
         {m.role==="user" ? <p>{m.content}</p> : <ReplyBoundary fallback={<PlainReply text={m.content}/>}>
           <Reply text={m.content}/>
         </ReplyBoundary>}

@@ -282,7 +282,7 @@ test("sessions share the daily allowance and allow immediate follow-ups", async 
   const f = await fixture(t);
   const results = await Promise.all([f.request({reserve:true}), f.request({reserve:true})]);
   assert.deepEqual(await Promise.all(results.map(r => r.json())), [true,true]);
-  for(let i=2;i<32;i++)assert.equal(await (await f.request({reserve:true})).json(),true);
+  for(let i=2;i<96;i++)assert.equal(await (await f.request({reserve:true})).json(),true);
   assert.equal(await (await f.request({reserve:true})).json(),"daily");
   assert.equal((await (await f.request({status:true})).json()).ready,true);
 });
