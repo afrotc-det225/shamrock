@@ -78,6 +78,8 @@ async function classify(env,history,send){
     headers:{Authorization:"Bearer "+env.ASSISTANT_KEY,"Content-Type":"application/json"},
     signal:AbortSignal.timeout(20000),body});
   if([403,404].includes(response.status)){
+    const denial=await response.json().catch(()=>null);
+    const providerCode=String(denial?.error?.code ?? "denied");
     const fallback = {model,reasoning:{effort:"none"},max_output_tokens:120,input:request.input,
       instructions:"Classify the latest request and choose its most relevant source area. "+JSON.stringify(types),
       text:{format:{type:"json_schema",name:"route",strict:true,schema:{type:"object",additionalProperties:false,
@@ -85,7 +87,7 @@ async function classify(env,history,send){
     const result=JSON.parse(await dispatch(env,fallback,send,9000,20000));
     if(!Object.hasOwn(types,result.type) || !(result.area==="none" || names.includes(result.area)))
       throw new PanelError("ASSISTANT_ROUTE","Could not determine the task.",503);
-    return {router:"Responses fallback",type:result.type,areas:result.area==="none" ? [] : [result.area]};
+    return {router:"Responses fallback ("+response.status+" "+(/^[a-z_]{1,48}$/.test(providerCode)?providerCode:"denied")+")",type:result.type,areas:result.area==="none" ? [] : [result.area]};
   }
   if(!response.ok)throw new PanelError("ASSISTANT_ROUTE","OpenAI Decisions is unavailable for this project ("+response.status+").",503);
   const {answers} = await response.json();
