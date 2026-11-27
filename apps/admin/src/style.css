@@ -98,7 +98,7 @@ summary:focus-visible {
   margin-top: 6px;
   letter-spacing: 0;
 }
-.sidebar button {
+.sidebar :is(button, .workspace-page-link) {
   width: 100%;
   justify-content: flex-start;
   background: none;
@@ -113,10 +113,10 @@ summary:focus-visible {
   white-space: nowrap;
   font-size: 14px;
 }
-.sidebar button:hover {
+.sidebar :is(button, .workspace-page-link):hover {
   background: #223b50;
 }
-.sidebar button.selected {
+.sidebar :is(button, .workspace-page-link).selected {
   background: #3d5b59;
   box-shadow: inset 4px 0 var(--gold);
   font-weight: 650;
@@ -623,7 +623,7 @@ blockquote {
     margin-left: 6px;
     margin-right: 6px;
   }
-  .sidebar button {
+  .sidebar :is(button, .workspace-page-link) {
     font-size: 12px;
     gap: 9px;
     padding: 12px 10px;
@@ -677,7 +677,7 @@ blockquote {
     padding-bottom: 5px;
     gap: 6px;
   }
-  .sidebar nav button {
+  .sidebar nav a {
     width: auto;
     flex: none;
     padding: 10px;
@@ -685,7 +685,7 @@ blockquote {
     min-height: 36px;
     gap: 6px;
   }
-  .sidebar nav button svg {
+  .sidebar nav a svg {
     width: 15px;
   }
   .sidebar-bottom {
@@ -825,10 +825,10 @@ h1 {
 .primary:hover {
   background: #143865;
 }
-.sidebar button.selected {
+.sidebar :is(button, .workspace-page-link).selected {
   background: #203b59;
 }
-.sidebar button:hover {
+.sidebar :is(button, .workspace-page-link):hover {
   background: #193552;
 }
 .brand {
@@ -1008,25 +1008,25 @@ h1 {
 .sidebar {
   z-index: 40;
 }
-.sidebar nav button {
+.sidebar nav a {
   position: relative;
   color: #becbdd;
   border-radius: 0;
 }
-.sidebar nav button:hover {
+.sidebar nav a:hover {
   background: transparent;
   color: #fff;
 }
-.sidebar nav button.selected {
+.sidebar nav a.selected {
   background: transparent;
   box-shadow: none;
   color: #fff;
   font-weight: 650;
 }
-.sidebar nav button.selected svg {
+.sidebar nav a.selected svg {
   color: #d3b968;
 }
-.sidebar nav button::after {
+.sidebar nav a::after {
   content: "";
   position: absolute;
   left: 47px;
@@ -1035,7 +1035,7 @@ h1 {
   height: 2px;
   background: #c2a357;
 }
-.sidebar nav button.selected::after {
+.sidebar nav a.selected::after {
   width: 28px;
 }
 .page-controls {
@@ -1203,7 +1203,7 @@ tr:hover td {
       border-color 140ms ease,
       box-shadow 140ms ease;
   }
-  .sidebar nav button::after {
+  .sidebar nav a::after {
     transition: width 180ms ease;
   }
   .drawer[open] {
@@ -1252,7 +1252,7 @@ tr:hover td {
   .sidebar {
     z-index: auto;
   }
-  .sidebar nav button::after {
+  .sidebar nav a::after {
     left: 10px;
     bottom: 0;
   }
@@ -1557,3 +1557,5 @@ html:has(dialog:modal) {
   animation: reveal-transfer .18s step-end;
 }
 @keyframes reveal-transfer { from { opacity: 0; } to { opacity: 1; } }
+
+.sidebar .workspace-page-link { display: inline-flex; align-items: center; text-decoration: none; }

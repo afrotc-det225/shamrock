@@ -30,7 +30,7 @@ try {
     if (failReceipt) return route.fulfill({ status: 503, json: { error: { message: "Saved changes are temporarily unavailable." } } });
     return route.fulfill({ json: { contractVersion: "admin-receipts-v1", receipts: await service.history() } });
   });
-  const navigate = title => page.getByRole("navigation").getByRole("button", { name: title, exact: true }).click();
+  const navigate = title => page.getByRole("navigation").getByRole("link", { name: title, exact: true }).click();
   await page.goto(`http://127.0.0.1:${server.address().port}`);
   await page.getByRole("button", { name: "Edit Veterans Day", exact: true }).waitFor();
   assert.equal(receiptCalls, 0, "Events does not fetch saved changes");

@@ -28,7 +28,8 @@ import "@fontsource/libre-franklin/latin-600.css";
 import "@fontsource/libre-franklin/latin-700.css";
 import "@fontsource/barlow-condensed/latin-600.css";
 import Brand from "./Brand";
-import WorkspaceShell from "./WorkspaceShell";
+import {pageFromUrl, writePageUrl, rememberSignInPage, restoreSignInPage} from "./page-url";
+import WorkspaceShell, {PageLink} from "./WorkspaceShell";
 import { ViewAsSelector, ViewAsBanner, viewAsStatus } from "./ViewAs";
 import "./style.css";
 const pages = [
@@ -48,7 +49,7 @@ const profileFor = page => ({
   History:"access", Assistant:"access", System:"access",
 }[page] || "full");
 function App() {
-  const [page, setPage] = useState("Events"),
+  const [page, setPage] = useState(() => pageFromUrl("leadership") || "Events"),
     [data, setData] = useState(null),
     [error, setError] = useState(""),
     [errorSource, setErrorSource] = useState("read"),
@@ -133,9 +134,15 @@ function App() {
       if (
         (value.snapshot?.access || value.manifest?.access) &&
         !(value.snapshot?.access || value.manifest.access).capabilities.fullSnapshot
-      )
-        setPage(profile === "excusals" ? "Excusals" : "Attendance");
-      else if (nextPage) setPage(nextPage);
+      ) {
+        const allowed = profile === "excusals" ? "Excusals" : "Attendance";
+        setPage(allowed);
+        writePageUrl("leadership", allowed, true);
+      } else {
+        const resolved = nextPage || live.current.page;
+        if (nextPage) setPage(nextPage);
+        writePageUrl("leadership", resolved, true);
+      }
       lastRead.current = Date.now();
       setSync("");
       return value;
@@ -265,7 +272,8 @@ function App() {
       setProposal(null);
       await reload(true);
     });
-  const navigate = (value) => {
+  const navigate = (value, fromHistory = false) => {
+    if (!fromHistory) writePageUrl("leadership", value);
     readIntent.current++;
     if (pendingAbort.current) { pendingAbort.current.superseded = true; pendingAbort.current.abort(); }
     setError("");
@@ -283,6 +291,15 @@ function App() {
       setPage(value);
     }
   };
+  useEffect(() => {
+    const restore = () => {
+      if (sessionInfo && (new URLSearchParams(location.search).get("workspace") === "cadet" ||
+          (!preview && sessionInfo.schoolLogin))) return;
+      navigate(pageFromUrl("leadership") || "Events", true);
+    };
+    window.addEventListener("popstate", restore);
+    return () => window.removeEventListener("popstate", restore);
+  });
   const cancelRead = () => {
     readIntent.current++;
     pendingAbort.current?.abort();
@@ -340,7 +357,7 @@ function App() {
               {message}
             </div>
           )}
-          <a className="google-sign-in" href="/auth/login">
+          <a className="google-sign-in" onClick={rememberSignInPage} href="/auth/login">
             Sign in with Google
           </a>
           <small>
@@ -390,15 +407,14 @@ function App() {
             {!preview && !scoped && data?.meta.viewAsEnabled &&
               <ViewAsSelector people={data.snapshot?.people ?? (["cadets","leadership","cadet-details","semester"].includes(data.browse?.profile) ? data.list.people : null)} onSelect={viewAs} busy={busy} />}
             {!preview && !scoped && (
-              <button
+              <PageLink workspace="leadership" title="Assistant" navigate={navigate}
                 className={page === "Assistant" ? "selected" : ""}
-                onClick={() => navigate("Assistant")}
               >
                 <Sparkles size={20} />
                 <span>
                   Assistant<small>Optional</small>
                 </span>
-              </button>
+              </PageLink>
             )}
             <p>
               {scoped ? "Flight / Squadron access" : "Administrator"}
@@ -580,4 +596,5 @@ function displayValue(value, s, key) {
     );
   return String(value);
 }
+restoreSignInPage();
 createRoot(document.getElementById("root")).render(<App />);

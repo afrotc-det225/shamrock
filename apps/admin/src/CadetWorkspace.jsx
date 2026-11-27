@@ -2,6 +2,7 @@ import React, { useEffect, useState, useRef } from "react";
 import { api, logout } from "./api";
 import { Empty, Field, Heading, Select, Status, Table } from "./components";
 import Excusals from "./Excusals";
+import {pageFromUrl, writePageUrl} from "./page-url";
 import WorkspaceShell from "./WorkspaceShell";
 import { ViewAsBanner } from "./ViewAs";
 import { ClipboardList, FileCheck2, Users, UserRound } from "lucide-react";
@@ -408,7 +409,7 @@ function Flight({ state, save, disabled }) {
 }
 export default function CadetWorkspace({ session }) {
   const [state, setState] = useState(null),
-    [tab, setTab] = useState(""),
+    [tab, setTab] = useState(() => pageFromUrl("cadet")),
     [error, setError] = useState(""),
     [notice, setNotice] = useState(""),
     [busy, setBusy] = useState(false);
@@ -458,6 +459,18 @@ export default function CadetWorkspace({ session }) {
         ]
       : [];
   const page = pages.find(([title]) => title === tab)?.[0] || pages[0]?.[0];
+  useEffect(() => {
+    const restore = () => setTab(pageFromUrl("cadet"));
+    window.addEventListener("popstate", restore);
+    return () => window.removeEventListener("popstate", restore);
+  }, []);
+  useEffect(() => {
+    if (page) writePageUrl("cadet",page,true);
+  }, [page, tab]);
+  const navigate = title => {
+    writePageUrl("cadet",title);
+    setTab(title);
+  };
   const name = [state?.profile?.firstName, state?.profile?.lastName].filter(Boolean).join(" ");
   const role = state?.squadron ? `${state.squadron} Squadron Commander`
     : state?.flightCommander && flight ? `${flight} Flight Commander` : "Cadet";
@@ -489,7 +502,7 @@ export default function CadetWorkspace({ session }) {
     access: { capabilities: { fullSnapshot: false } },
   };
   return (
-    <WorkspaceShell pages={pages} page={page} navigate={setTab} account={<>
+    <WorkspaceShell workspace="cadet" pages={pages} page={page} navigate={navigate} account={<>
       {!preview && !session.schoolLogin && <a className="workspace-switch" href="/?workspace=leadership">Leadership workspace</a>}
       <p>
         {name && <strong className="account-name">{name}</strong>}
