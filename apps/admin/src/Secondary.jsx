@@ -14,10 +14,7 @@ export function Overview({ snapshot: s, overview, reporting, history, receiptsDe
   const receipt = useReceipts({ history, receiptsDeferred, reportingTime, captureKey, enabled: !readOnly });
   return (
     <>
-      <Heading
-        title="Overview"
-        description={`${overview?.term || s?.terms.find((t) => t.isCurrent)?.label || "Semester not configured"} · Detachment 225`}
-      />
+      <Heading title="Overview" />
       <dl className="overview-roster" aria-label="Active Wing roster">
         {Object.entries({activeCadets:"Active cadets",gmcCadets:"GMC",pocCadets:"POC",crosstowns:"Crosstowns",farCrosstowns:"Far crosstowns"}).map(([key,label]) =>
           <div key={key}><dt>{label}</dt><dd>{roster[key] ?? "—"}</dd></div>)}
@@ -173,12 +170,11 @@ function AssistantWorkspace({ meta }) {
     }finally{inFlight.current=false;setBusy(false);}
   }
   return <section className="assistant-page">
-    <Heading title="Assistant">
+    <Heading title="Assistant" />
       <div className="chat-actions">
         <button className="chat-history-toggle" aria-expanded={showChats} onClick={()=>setShowChats(!showChats)}><MessagesSquare size={16}/>Recent chats</button>
         <button disabled={busy || opening} onClick={newChat}><SquarePen size={16}/>New chat</button>
       </div>
-    </Heading>
     <div className="chat-workspace">
     <aside aria-label="Recent chats" className={"chat-library"+(showChats ? " expanded" : "")}>
       <h2>Recent chats</h2>

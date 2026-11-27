@@ -51,16 +51,8 @@ export function LoadingRows({ label, rows = 3 }) {
     {Array.from({length:rows}, (_, index) => <div key={index} aria-hidden="true"><i/><i/><i/></div>)}
   </div>;
 }
-export function Heading({ title, description, children }) {
-  return (
-    <div className="heading">
-      <div>
-        <h1>{title}</h1>
-        {description && <p>{description}</p>}
-      </div>
-      {children}
-    </div>
-  );
+export function Heading({ title }) {
+  return <h1 className="page-title">{title}</h1>;
 }
 export function Empty({ children }) {
   return <p className="empty">{children}</p>;

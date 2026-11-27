@@ -50,11 +50,12 @@ export default function History() {
   const events = (current?.headers || []).map((label, eventId) => ({eventId, label}));
   return <>
     <section className="page-controls">
-      <Heading title="History"><AttendanceKey /></Heading>
+      <Heading title="History" />
       {catalog?.length !== 0 && <div className="toolbar">
         <Select label="Semester" value={selected} onChange={setSelected} disabled={!catalog} options={catalog || [{value:"", label:"Semester"}]} />
         <SearchBox placeholder="Find a cadet" value={query} onChange={setQuery} />
         <MatrixRosterFilters rows={roster} value={filters} onChange={setFilters} />
+        <div className="toolbar-actions"><AttendanceKey /></div>
       </div>}
     </section>
     {error && <div className="error" role="alert">{error} <button onClick={() => { setError(""); if (selected) setReportAttempt(value => value + 1); else setAttempt(value => value + 1); }}>Retry</button></div>}

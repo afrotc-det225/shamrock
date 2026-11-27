@@ -109,17 +109,7 @@ export default function Events({ snapshot, eventsList, propose, busy, refresh, r
   return (
     <>
       <section className="page-controls">
-        <Heading title="Events">
-          <div className="actions">
-            <button disabled={readOnly || !term || busy} onClick={() => withEditor(() => setBulk(true))}>
-              Change schedule
-            </button>
-            <button className="primary" disabled={readOnly || busy} onClick={() => open()}>
-              <Plus size={17} />
-              Add event
-            </button>
-          </div>
-        </Heading>
+        <Heading title="Events" />
         <div className="toolbar">
           <SearchBox
             value={query}
@@ -149,6 +139,15 @@ export default function Events({ snapshot, eventsList, propose, busy, refresh, r
           />
           <Select label="Sort by" value={sort} onChange={setSort}
             options={[{value:"default", label:"Default"}, {value:"type", label:"Type"}]} />
+          <div className="toolbar-actions">
+            <button disabled={readOnly || !term || busy} onClick={() => withEditor(() => setBulk(true))}>
+              Change schedule
+            </button>
+            <button className="primary" disabled={readOnly || busy} onClick={() => open()}>
+              <Plus size={17} />
+              Add event
+            </button>
+          </div>
         </div>
       </section>
       {loading && <span className="page-transfer" role="status">Loading event details…</span>}

@@ -352,7 +352,7 @@ On Attendance and My attendance, hover or focus a mark to highlight the cadet an
 
 Selecting eligible attendance cells opens the correction panel. The panel follows the selection until it is closed. Shift selects a range and Command or Ctrl toggles individual cells. Cadets can send several events for Squadron review with one code and reason. Authorized leadership can review and apply corrections to several eligible cells together. Each correction retains its own receipt.
 
-On **Cadets**, use **Columns** to show or hide Directory fields. The browser remembers your column choices. Select a column heading to sort by it and select it again to reverse the order. **Sort by → Default** restores AS seniority followed by last and first name.
+On **Cadets**, the default columns are Cadet, AS year, Flight, Squadron and Status. Cadet combines the portrait, name and rank. Under **Columns**, you can hide Cadet and choose individual fields such as Last name and AFSC. **Copy table** pastes the selected columns into a spreadsheet. **Download CSV** exports the same headers and rows in the current filter and sort order. The browser remembers your column choices. Select a column heading to sort by it and select it again to reverse the order. **Sort by → Default** restores AS seniority followed by last and first name.
 
 Squadron and university labels have distinct colors. Residence colors identify men’s halls, women’s halls, and other housing. Select a Directory portrait or its initials to preview it. **Open original photo** is available inside the preview.
 

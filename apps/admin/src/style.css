@@ -174,13 +174,6 @@ main {
   max-width: 1600px;
   margin: auto;
 }
-.heading {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 24px;
-  margin: 0 0 29px;
-}
 h1 {
   font-size: 31px;
   line-height: 1.2;
@@ -198,11 +191,6 @@ h3 {
 }
 p {
   line-height: 1.55;
-}
-.heading p {
-  margin: 0;
-  color: #546171;
-  font-size: 15px;
 }
 .toolbar {
   display: flex;
@@ -542,7 +530,6 @@ summary {
   padding-left: 12px;
 }
 .assistant-page {max-width:52rem;margin-inline:auto}
-.assistant-page .heading {margin-bottom:1rem}
 .conversation {min-width:0}
 .message {margin:0 0 1rem;line-height:1.55;overflow-wrap:anywhere}
 .message-author {display:block;font-size:.8rem;font-weight:650;color:var(--green)}
@@ -604,9 +591,6 @@ blockquote {
   .toolbar .search {
     flex-basis: 100%;
     max-width: none;
-  }
-  .heading {
-    align-items: flex-start;
   }
   h1 {
     font-size: 27px;
@@ -690,21 +674,6 @@ blockquote {
   }
   main {
     padding: 23px 16px;
-  }
-  .heading {
-    gap: 12px;
-    margin-bottom: 23px;
-  }
-  .heading p {
-    font-size: 13px;
-  }
-  .heading button {
-    font-size: 12px;
-    white-space: nowrap;
-    padding: 9px;
-  }
-  .heading h1 {
-    font-size: 25px;
   }
   .toolbar {
     gap: 10px;
@@ -998,12 +967,6 @@ h1 {
   margin-top: -14px;
   padding-bottom: 1px;
 }
-.page-controls .heading {
-  margin-bottom: 18px;
-}
-.page-controls .heading h1 {
-  margin-bottom: 0;
-}
 .page-controls .toolbar {
   margin-bottom: 16px;
 }
@@ -1183,14 +1146,6 @@ tr:hover td {
     left: 10px;
     bottom: 0;
   }
-  .page-controls .heading {
-    flex-wrap: wrap;
-    gap: 12px;
-  }
-  .page-controls .heading .actions {
-    width: 100%;
-    justify-content: flex-start;
-  }
   .page-controls .toolbar {
     gap: 8px;
   }
@@ -1249,7 +1204,6 @@ html:has(dialog:modal) {
   }
 }
 
-/* The page heading supplies context; there is no duplicate breadcrumb bar. */
 .sync-status {
   display: block;
   color: var(--muted);
@@ -1446,7 +1400,15 @@ html:has(dialog:modal) {
   .cell-editor footer {padding:.5rem 1rem}
 }
 
-.heading-tools {display:flex;align-items:center;gap:.5rem}
+h1.page-title {position:absolute;width:1px;height:1px;margin:0;padding:0;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
+.page-controls .toolbar {flex-wrap:wrap;gap:.7rem}
+.page-controls .toolbar > .field {min-width:0}
+.toolbar-actions {display:flex;align-items:center;justify-content:flex-end;gap:.5rem;margin-left:auto;max-width:100%;flex-wrap:wrap}
+.toolbar-actions > button {white-space:nowrap}
+@media(min-width:951px){
+  .page-controls .toolbar .search {min-width:10rem}
+  .page-controls .toolbar > .field select {width:auto;max-width:14rem}
+}
 .toolbar-tool,.tabs .toolbar-tool,.chart-panel header .toolbar-tool {
   display:inline-flex;align-items:center;justify-content:center;gap:.35rem;width:auto;
   min-height:32px;padding:.3rem .55rem;color:#3d526b;border:1px solid transparent;border-radius:4px;background:transparent;
@@ -1464,8 +1426,9 @@ html:has(dialog:modal) {
 .toolbar-popover table {min-width:0;width:100%;font-size:.82rem}
 .toolbar-popover th,.toolbar-popover td {position:static;padding:.45rem}
 @media(max-width:640px) {
-  .heading-tools .toolbar-tool span,.tabs .toolbar-tool span {display:none}
-  .heading-tools .toolbar-tool,.tabs .toolbar-tool {min-width:36px;min-height:36px}
+  .page-controls .toolbar > .field {flex:1 1 calc(50% - .7rem)}
+  .toolbar-actions .toolbar-tool span,.tabs .toolbar-tool span {display:none}
+  .toolbar-actions .toolbar-tool,.tabs .toolbar-tool {min-width:36px;min-height:36px}
 }
 .chart-panel {position:relative}
 .chart-target {fill:transparent;cursor:crosshair}
@@ -1524,7 +1487,7 @@ html:has(dialog:modal) {
 
 .cadet-roster, .leadership-roster {width:fit-content;max-width:100%}
 .cadet-roster table, .leadership-roster table {width:max-content}
-.cadet-roster :is(th,td):first-child, .leadership-roster :is(th,td):first-child {
+.cadet-roster.with-cadet :is(th,td):first-child, .leadership-roster :is(th,td):first-child {
   width:clamp(12rem,16vw,15rem);max-width:15rem;white-space:normal;
 }
 .person-cell > span:last-child {min-width:0}
@@ -1663,7 +1626,7 @@ main:has(.matrix-scroll) { padding-bottom: 8px; }
 }
 
 .assistant-page {max-width:none;margin:0}
-.chat-actions {display:flex;align-items:center;gap:.5rem}
+.chat-actions {display:flex;align-items:center;justify-content:flex-end;gap:.5rem;margin-bottom:.75rem}
 .chat-actions button {display:inline-flex;align-items:center;gap:.4rem}
 .chat-actions .chat-history-toggle {display:none}
 .chat-workspace {display:grid;grid-template-columns:minmax(10rem,14rem) minmax(0,50rem);gap:clamp(1rem,3vw,3rem);align-items:start}
@@ -1696,5 +1659,8 @@ main:has(.matrix-scroll) { padding-bottom: 8px; }
   .chat-actions .chat-history-toggle {display:inline-flex}
   .chat-library {display:none}
   .chat-library.expanded {display:grid;margin-bottom:1rem}
-  .assistant-page .heading {gap:.5rem;flex-wrap:wrap}
 }
+
+.roster-transfer {display:flex;gap:.5rem;border-top:1px solid var(--border);padding-top:.65rem}
+.cadet-roster:not(.with-cadet) td:first-child {max-width:22rem;overflow-wrap:anywhere}
+.cadet-roster:not(.with-cadet) td:first-child .icon {margin-left:.5rem;vertical-align:middle}

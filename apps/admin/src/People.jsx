@@ -10,6 +10,7 @@ import {
   Empty,
 
 } from "./components";
+import { rosterText } from "./roster-export.mjs";
 import { DirectoryPhoto } from "./DirectoryPhoto";
 import { ToolbarPopover } from "./ToolbarPopover";
 import { cellStyle, flightColors, flightPathColors, profileColorStyle, residenceCategory, yearColors } from "./roster-colors";
@@ -18,15 +19,20 @@ import { api,name, label, years, statuses, profileFields } from "./api";
 import { DIRECTORY_FIELDS } from "../../../packages/domain/src/admin";
 import { compareAsYearsForDisplay, compareCadetsForDisplay, compareLeadershipForDisplay } from "../../../packages/domain/src/cadet-display-order";
 
-const defaultColumns = ["asYear","flight","flightPathStatus"];
-const columnKeys = [...defaultColumns,"squadron",...profileFields.filter(k=>!defaultColumns.includes(k) && !["firstName","lastName"].includes(k))];
-const columnLabel = k=>({flight:"Flight",squadron:"Squadron",flightPathStatus:"Status",classYear:"Graduation year"}[k] || label(k));
+const defaultColumns = ["cadet","asYear","flight","squadron","flightPathStatus"];
+const columnKeys = ["cadet","lastName","firstName","rank","asYear","flight","squadron","flightPathStatus",
+  ...profileFields.filter(k => !["lastName","firstName","rank",...defaultColumns].includes(k))];
+const columnLabel = k=>({cadet:"Cadet",lastName:"Last name",firstName:"First name",flight:"Flight",squadron:"Squadron",flightPathStatus:"Status",classYear:"Graduation year"}[k] || label(k));
 const detailFields = new Set(["phone","dorm","homeTown","homeState","dateOfBirth"]);
-const preferenceKey = "shamrock.cadets.columns.v1";
+const preferenceKey = "shamrock.cadets.columns.v2";
 function initialColumns(){
   try {
-    const keys=JSON.parse(localStorage.getItem(preferenceKey));
-    if(Array.isArray(keys))return columnKeys.filter(k=>keys.includes(k));
+    const saved=localStorage.getItem(preferenceKey);
+    const keys=JSON.parse(saved ?? localStorage.getItem("shamrock.cadets.columns.v1"));
+    if(Array.isArray(keys)) {
+      const selected=columnKeys.filter(k=>keys.includes(k) || (!saved && k==="cadet"));
+      if(selected.length)return selected;
+    }
   } catch {}
   return defaultColumns;
 }
@@ -112,13 +118,23 @@ export default function People({
   const flightOf = p => s.flights.find(f=>f.flightId===p.flightId);
   const squadronOf = f => s.squadrons?.find(q=>q.squadronId===f?.squadronId)?.label;
   const [columns,setColumns]=useState(initialColumns), [descending,setDescending]=useState(false);
-  const valueOf=(p,k)=>k==="flight" ? flightOf(p)?.label : k==="squadron" ? squadronOf(flightOf(p)) : p[k];
+  const [transferMessage,setTransferMessage]=useState("");
+  const hasCadet = columns.includes("cadet");
+  function valueOf(person, key) {
+    if (key === "cadet") return [person.rank, name(person)].filter(Boolean).join(" ");
+    if (key === "flight") return flightOf(person)?.label;
+    if (key === "squadron") return squadronOf(flightOf(person));
+    return person[key];
+  }
   function toggleColumn(key){
     const shown=columns.includes(key);
     const next=columnKeys.filter(k=>k===key ? !shown : columns.includes(k));
+    if (!next.length) return;
+    setTransferMessage("");
     setColumns(next);
     try{localStorage.setItem(preferenceKey,JSON.stringify(next));}catch{}
-    if(!shown || field===key)selectField(shown ? "" : key);
+    if (shown && field === key) selectField("");
+    if (!shown && !match) selectField(key);
   }
   function headerSort(key){
     setDescending(sort===key && !descending);
@@ -153,12 +169,29 @@ export default function People({
   }).sort(leadership ? compareLeadershipForDisplay : (a,b)=>{
     if(sort==="seniority")return compareCadetsForDisplay(a,b);
     const direction=descending ? -1 : 1;
-    if(sort==="name")return direction*alphabetic(a,b);
+    if(sort==="cadet")return direction*alphabetic(a,b);
     const left=valueOf(a,sort),right=valueOf(b,sort);
     if(!left || !right)return Number(!left)-Number(!right) || alphabetic(a,b);
     const order=sort==="asYear" ? compareAsYearsForDisplay(left,right) : textOrder(left,right);
     return direction*order || (sort==="flight" ? compareCadetsForDisplay(a,b) : alphabetic(a,b));
   });
+  async function transferRoster(format) {
+    const copy = format === "clipboard";
+    const text=rosterText(columns.map(columnLabel), rows.map(p=>columns.map(k=>valueOf(p,k))),copy ? "\t" : ",");
+    if (copy) {
+      try {
+        await navigator.clipboard.writeText(text);
+        setTransferMessage("Copied to clipboard.");
+      } catch { setTransferMessage("Clipboard access is unavailable. Use Download CSV."); }
+      return;
+    }
+    const url=URL.createObjectURL(new Blob([text], {type:"text/csv;charset=utf-8"}));
+    const link=document.createElement("a");
+    link.href=url;
+    link.download="shamrock-cadets.csv";
+    link.click();
+    setTimeout(()=>URL.revokeObjectURL(url),1000);
+  }
   const selectField = key => {setField(key);setMatch("");};
   const basic = leadership
     ? ["firstName", "lastName", "rank", "role", "email", "cellPhone"]
@@ -197,30 +230,11 @@ export default function People({
       />
     );
   }
+  const dataColumns = columns.filter(key => key !== "cadet");
   return (
     <>
       <section className="page-controls">
-        <Heading title={leadership ? "Leadership" : "Cadets"}>
-          <div className="heading-tools">
-            {!leadership && (
-              <ToolbarPopover label="Columns" icon={Columns3}>
-                <div className="field-options">
-                  <div className="directory-columns">{columnKeys.map(key=><label key={key}>
-                    <input type="checkbox" checked={columns.includes(key)} onChange={()=>toggleColumn(key)}/>{columnLabel(key)}
-                  </label>)}</div>
-                  <Select label="Filter column" value={field} onChange={selectField} options={[
-                    {value:"",label:"Choose a column"}, ...columns.map(k=>({value:k,label:columnLabel(k)}))
-                  ]}/>
-                  {field && <Field label={"Filter by "+columnLabel(field)} disabled={waitingForField} value={match} onChange={e=>setMatch(e.target.value)}/>}
-                </div>
-              </ToolbarPopover>
-            )}
-            <button className="primary" disabled={readOnly} onClick={() => open()}>
-              <Plus size={17} />
-              {leadership ? "Add contact" : "Add cadet"}
-            </button>
-          </div>
-        </Heading>
+        <Heading title={leadership ? "Leadership" : "Cadets"} />
         <div className="toolbar">
           <SearchBox
             placeholder={leadership ? "Find a leader" : "Find a cadet"}
@@ -232,8 +246,32 @@ export default function People({
             <Select label="Flight" value={flight} onChange={setFlight} options={[{value:"",label:"All flights"},...s.flights.map(f=>({value:f.flightId,label:f.label})).sort((a,b)=>textOrder(a.label,b.label))]}/>
             <Select label="AS year" value={year} onChange={setYear} options={[{value:"",label:"All AS years"},...years]}/>
             <Select label="Roster status" value={status} onChange={setStatus} options={[{value:"current",label:"Current roster"},{value:"all",label:"All statuses"},...statuses]}/>
-            <Select label="Sort by" value={sort} onChange={key=>{setSort(key);setDescending(false);}} options={[{value:"seniority",label:"Default"},{value:"name",label:"Last name"},...columnKeys.map(k=>({value:k,label:columnLabel(k)}))]}/>
+            <Select label="Sort by" value={sort} onChange={key=>{setSort(key);setDescending(false);}} options={[{value:"seniority",label:"Default"},...columnKeys.map(k=>({value:k,label:columnLabel(k)}))]}/>
           </>}
+          <div className="toolbar-actions">
+            {!leadership && (
+              <ToolbarPopover label="Columns" icon={Columns3}>
+                <div className="field-options">
+                  <div className="directory-columns">{columnKeys.map(key=><label key={key}>
+                    <input type="checkbox" checked={columns.includes(key)} disabled={columns.length===1 && columns[0]===key} onChange={()=>toggleColumn(key)}/>{columnLabel(key)}
+                  </label>)}</div>
+                  <Select label="Filter column" value={field} onChange={selectField} options={[
+                    {value:"",label:"Choose a column"}, ...columns.map(k=>({value:k,label:columnLabel(k)}))
+                  ]}/>
+                  {field && <Field label={"Filter by "+columnLabel(field)} disabled={waitingForField} value={match} onChange={e=>setMatch(e.target.value)}/>}
+                  <div className="roster-transfer">
+                    <button disabled={waitingForField} onClick={()=>transferRoster("clipboard")}>Copy table</button>
+                    <button disabled={waitingForField} onClick={()=>transferRoster("csv")}>Download CSV</button>
+                  </div>
+                  {transferMessage && <small role="status">{transferMessage}</small>}
+                </div>
+              </ToolbarPopover>
+            )}
+            <button className="primary" disabled={readOnly} onClick={() => open()}>
+              <Plus size={17} />
+              {leadership ? "Add contact" : "Add cadet"}
+            </button>
+          </div>
         </div>
 
       </section>
@@ -241,16 +279,18 @@ export default function People({
         ? <p role="alert">{fieldError} <button onClick={()=>setRetry(retry+1)}>Retry</button></p>
         : <span className="page-transfer" role="status">Loading directory fields…</span>)}
       {leadership && view==="Organization" ? <LeadershipChart records={rows} roster={s}/> : <Table
-        className={leadership ? "leadership-roster" : "cadet-roster"}
+        className={leadership ? "leadership-roster" : hasCadet ? "cadet-roster with-cadet" : "cadet-roster"}
         headers={
           leadership
             ? ["Name", "Role", "Email", "Office", ""]
-            : [header("name","Name"), ...columns.map(k=>header(k,columnLabel(k))), ""]
+            : [...columns.map(k=>header(k,columnLabel(k))), ...(hasCadet ? [""] : [])]
         }
       >
-        {rows.map((p) => (
+        {rows.map((p) => {
+          const editButton = <button className="icon" disabled={readOnly} aria-label={`Edit ${name(p)}`} onClick={() => open(p)}><Pencil size={16}/></button>;
+          return (
           <tr key={p.contactId || p.personId}>
-            <td>
+            {(leadership || hasCadet) && <td>
               <div className="person-cell">
                 <DirectoryPhoto avatar value={p.photoLink} person={p} />
                 <span>
@@ -260,7 +300,7 @@ export default function People({
                   <small>{p.rank}</small>
                 </span>
               </div>
-            </td>
+            </td>}
             {leadership ? (
               <>
                 <td>{p.role}</td>
@@ -268,25 +308,22 @@ export default function People({
                 <td>{p.officeLocation || "—"}</td>
               </>
             ) : (
-              columns.map(key=>{
+              dataColumns.map(key=>{
                 const value=valueOf(p,key);
-                if(key==="flight" || key==="asYear")return <td key={key} className="formation" style={cellStyle(key==="flight" ? flightColors(value,squadronOf(flightOf(p))) : yearColors(value))}>{value || (key==="flight" ? "Unassigned" : "—")}</td>;
-                if(key==="flightPathStatus")return <td key={key}><span className="status" style={cellStyle(flightPathColors(value))}>{value || "—"}</span></td>;
-                return <td key={key}><DirectoryValue field={key} value={value} person={p}/></td>;
+                const formation=key==="flight" || key==="asYear";
+                const style=key==="flight" ? cellStyle(flightColors(value,squadronOf(flightOf(p)))) :
+                  key==="asYear" ? cellStyle(yearColors(value)) : undefined;
+                return <td key={key} className={formation ? "formation" : undefined} style={style}>
+                  {formation ? value || (key==="flight" ? "Unassigned" : "—") :
+                    key==="flightPathStatus" ? <span className="status" style={cellStyle(flightPathColors(value))}>{value || "—"}</span> :
+                    <DirectoryValue field={key} value={value} person={p}/>}
+                  {key===columns[0] && !readOnly && editButton}
+                </td>;
               })
             )}
-            <td>
-              <button
-                className="icon"
-                disabled={readOnly}
-                aria-label={`Edit ${name(p)}`}
-                onClick={() => open(p)}
-              >
-                <Pencil size={16} />
-              </button>
-            </td>
+            {(leadership || hasCadet) && <td>{editButton}</td>}
           </tr>
-        ))}
+        );})}
       </Table>}
       {!rows.length && <Empty>No records match your search.</Empty>}
       {edit && (

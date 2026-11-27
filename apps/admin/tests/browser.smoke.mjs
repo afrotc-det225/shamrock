@@ -212,6 +212,7 @@ try {
   await page.getByLabel("Filter by AFSC", {exact:true}).fill("no-such-field-value");
   assert.equal(await page.getByRole("button", {name:"Edit Alex Morgan", exact:true}).count(), 0);
   await page.getByLabel("Filter by AFSC", {exact:true}).fill("");
+  await page.keyboard.press("Escape");
   await page
     .getByRole("button", { name: "Edit Alex Morgan", exact: true })
     .click();
