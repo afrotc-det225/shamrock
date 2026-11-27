@@ -100,13 +100,21 @@ export function parseTransitionPlan(value: unknown): TransitionPlan {
         schedule: { firstSunday, firstTrainingWeek: integer(s.firstTrainingWeek, 'firstTrainingWeek', 1, 99), weeks: integer(s.weeks, 'weeks', 1, 20), mando: meeting(s.mando, 'mando'), llab: meeting(s.llab, 'llab') } };
 }
 /** Preserve inactive/exceptional records. These suggestions have no mutation path until reviewed. */
-export function suggestAcademicProgression(person: DirectoryRecord): {
+export type SemesterProgression = 'fall-spring' | 'spring-fall' | 'hold';
+export function semesterAsYear(year: DirectoryRecord['asYear'], progression: SemesterProgression): DirectoryRecord['asYear'] {
+    if (progression === 'hold') return year;
+    if (year === 'AS100' || year === 'AS150') return progression === 'fall-spring' ? 'AS100' : 'AS200';
+    if (year === 'AS200' || year === 'AS250') return progression === 'fall-spring' ? 'AS200' : 'AS300';
+    if (year === 'AS300' && progression === 'spring-fall') return 'AS400';
+    return year;
+}
+
+export function suggestAcademicProgression(person: DirectoryRecord, progression: SemesterProgression = 'spring-fall'): {
     asYear: DirectoryRecord['asYear'];
     rank: string;
     requiresReview: true;
 } {
-    const next: Partial<Record<DirectoryRecord['asYear'], DirectoryRecord['asYear']>> = { AS100: 'AS200', AS150: 'AS250', AS200: 'AS300', AS250: 'AS300', AS300: 'AS400' };
-    const asYear = operationallyActive(person) ? next[person.asYear] ?? person.asYear : person.asYear;
+    const asYear = operationallyActive(person) ? semesterAsYear(person.asYear, progression) : person.asYear;
     const ranks: Record<string, string> = { AS100: 'C/4C', AS150: 'C/4C', AS200: 'C/3C', AS250: 'C/3C', AS500: 'C/3C', AS300: 'C/2d Lt', AS400: 'C/2d Lt' };
     return { asYear, rank: operationallyActive(person) ? ranks[asYear] ?? person.rank : person.rank, requiresReview: true };
 }

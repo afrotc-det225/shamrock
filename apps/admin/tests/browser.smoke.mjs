@@ -256,6 +256,21 @@ try {
   await apply();
   assert.equal((await service.snapshot()).corrections[0].code, "P");
   await navigate("Semester planning");
+  const example = (await service.snapshot()).people.find(person => person.flightId && person.active);
+  const fullName = example.firstName+" "+example.lastName;
+  const cohortYear = page.getByLabel("Next AS year for "+example.asYear,{exact:true});
+  await cohortYear.selectOption("AS400");
+  const personYear = page.getByLabel("AS year for "+fullName,{exact:true});
+  assert.equal(await personYear.count(),0);
+  await page.getByLabel("Find a cadet").fill(fullName);
+  await page.getByRole("button",{name:"Add "+fullName+" ·",exact:false}).click();
+  assert.equal(await personYear.inputValue(),example.asYear);
+  await personYear.selectOption("AS500");
+  await page.getByRole("button",{name:"Remove exception"}).click();
+  assert.equal(await personYear.count(),0);
+  await page.getByLabel("Find a cadet").fill(fullName);
+  await page.getByRole("button",{name:"Add "+fullName+" ·",exact:false}).click();
+  await personYear.selectOption("AS500");
   await page.getByLabel("New semester name").fill("Spring 2027");
   await page.getByLabel("First training-week Sunday").fill("2027-01-10");
   await page.getByLabel("Training weeks", { exact: true }).fill("2");
@@ -266,10 +281,16 @@ try {
     (await service.snapshot()).terms.find((t) => t.isCurrent).termId,
     "fall-2026",
   );
+  const statusResponse = page.waitForResponse(response => response.url().includes("/api/transition?id="));
   await page
     .getByRole("button", { name: "Spring 2027 · Check progress" })
     .click();
   await page.getByText("Status: proposed. Archive: pending.").waitFor();
+  const {plan:prepared} = await (await statusResponse).json();
+  const exception = prepared.people.find(p => p.personId === example.personId);
+  assert.equal(exception.asYear,"AS500");
+  assert.equal(exception.flightId,example.flightId);
+  assert.equal(exception.rank,example.rank);
   testOverview = true;
   // A fresh browser load starts with the Events list and no retained full snapshot.
   await page.reload();

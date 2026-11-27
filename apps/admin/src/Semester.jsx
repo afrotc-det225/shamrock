@@ -2,6 +2,8 @@ import { zoneLabel } from "./time";
 import React, { useState } from "react";
 import { Heading, Field, Select, Table } from "./components";
 import { name, years, statuses, api } from "./api";
+import { semesterAsYear } from "../../../packages/domain/src/transitions";
+import { operationallyActive } from "../../../packages/domain/src/admin";
 import { semesterDefaults } from './schedule.mjs';
 import { useReceipts, ReceiptStatus } from './receipts';
 export default function Semester({
@@ -40,22 +42,28 @@ export default function Semester({
       r.summary.transitionId &&
       r.state === "complete",
   );
-  const change = (p, k, v) =>
-    setChanges({
-      ...changes,
-      [p.personId]: {
-        ...(changes[p.personId] || {
-          personId: p.personId,
-          expectedVersion: p.version,
-          asYear: p.asYear,
-          rank: p.rank,
-          role: p.role,
-          flightId: p.flightId,
-          flightPathStatus: p.flightPathStatus,
-        }),
-        [k]: v,
-      },
-    });
+  const [groupRules, setGroupRules] = useState({});
+  const [search, setSearch] = useState("");
+  const currentSeason = current?.label.match(/\b(fall|spring)\b/i)?.[1].toLowerCase();
+  const nextSeason = title.match(/\b(fall|spring)\b/i)?.[1].toLowerCase();
+  const direction = currentSeason === "fall" && nextSeason === "spring" ? "fall-spring"
+    : currentSeason === "spring" && nextSeason === "fall" ? "spring-fall" : "hold";
+  const rules = groupRules[direction] || {};
+  const targetYear = year => rules[year] ?? semesterAsYear(year, direction);
+  const activeCounts = new Map();
+  const planned = [];
+  for (const p of s.people) {
+    const active = operationallyActive(p);
+    if (active) activeCounts.set(p.asYear, (activeCounts.get(p.asYear) || 0) + 1);
+    const entry = {personId:p.personId, expectedVersion:p.version, asYear:active ? targetYear(p.asYear) : p.asYear,
+      rank:p.rank, role:p.role, flightId:p.flightId, flightPathStatus:p.flightPathStatus, ...changes[p.personId]};
+    if (["asYear","flightId","flightPathStatus"].some(key => entry[key] !== p[key])) planned.push(entry);
+  }
+  const matches = search.trim() ? s.people.filter(p => !changes[p.personId] &&
+    name(p).toLowerCase().includes(search.trim().toLowerCase())).slice(0, 12) : [];
+  const change = (p, key, value) => setChanges(previous => ({
+    ...previous, [p.personId]: {...previous[p.personId], [key]:value},
+  }));
   const submit = (e) => {
     e.preventDefault();
     propose("transition.prepare", {
@@ -70,7 +78,7 @@ export default function Semester({
         },
         policyVersion: meta.transitionPolicy,
         reviewReason: `Prepare ${title}`,
-        people: Object.values(changes),
+        people: planned,
         schedule: {
           firstSunday: first,
           firstTrainingWeek: 1,
@@ -252,10 +260,28 @@ export default function Semester({
           </div>
         </section>
         <section className="form-section">
-          <h2>Cadets</h2>
+          <h2>AS year progression</h2>
+          <p>{current?.label} → {title || "New semester"} · {planned.length} cadet records will change.</p>
+          <Table headers={["Current AS year", "Active cadets", "Next AS year"]}>
+            {years.filter(year => activeCounts.has(year)).map(year =>
+              <tr key={year}><td>{year}</td><td>{activeCounts.get(year)}</td><td>
+                <Select label={`Next AS year for ${year}`} value={targetYear(year)} options={years}
+                  onChange={value => setGroupRules({...groupRules, [direction]:{...rules, [year]:value}})} />
+              </td></tr>)}
+          </Table>
+        </section>
+        <section className="form-section">
+          <h2>Individual exceptions</h2>
+          <p>Add a cadet to keep their current AS year or assign a different outcome.</p>
+          <Field label="Find a cadet" type="search" value={search} onChange={e => setSearch(e.target.value)} />
+          {search.trim() && !matches.length && <p>No matching cadets to add.</p>}
+          {matches.map(p => <button key={p.personId} type="button" onClick={() => {
+            change(p, "asYear", p.asYear); setSearch(""); setDirty(true);
+          }}>Add {name(p)} · {p.asYear} · {s.flights.find(f => f.flightId === p.flightId)?.label || "Unassigned"}</button>)}
+          {Object.keys(changes).length > 0 && (
           <Table headers={["Cadet", "AS year", "Flight Path", "Flight", ""]}>
-            {s.people.map((p) => {
-              const draft = changes[p.personId] || p;
+            {s.people.filter(p => changes[p.personId]).map((p) => {
+              const draft = {...p, ...changes[p.personId]};
               return (
                 <tr key={p.personId}>
                   <td>{name(p)}</td>
@@ -299,14 +325,14 @@ export default function Semester({
                           setChanges(next);
                         }}
                       >
-                        Reset
+                        Remove exception
                       </button>
                     )}
                   </td>
                 </tr>
               );
             })}
-          </Table>
+          </Table>)}
         </section>
         <section className="form-section">
           <button className="primary" disabled={busy || !current}>
