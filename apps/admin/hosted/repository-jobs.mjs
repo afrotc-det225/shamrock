@@ -75,7 +75,7 @@ export async function wakeRunner(env){
   if(!env.STAGING_RUNNER_DISPATCH)return "scheduled";
   try{
     const response=await fetch("https://api.github.com/repos/"+repo+"/actions/workflows/check.yml/dispatches",{
-      method:"POST",redirect:"error",signal:AbortSignal.timeout(5000),headers:{
+      method:"POST",redirect:"manual",signal:AbortSignal.timeout(10000),headers:{
         authorization:"Bearer "+env.STAGING_RUNNER_DISPATCH,"user-agent":"SHAMROCK-staging",
         "content-type":"application/json"},body:JSON.stringify({ref:"main"})});
     return response.ok ? "dispatched" : "scheduled (GitHub "+response.status+")";
