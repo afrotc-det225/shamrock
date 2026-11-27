@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   REPORTING_POLICY_VERSION, ReportingInputError, buildFrontendReporting,
-  buildBirthdayView, calculateAttendanceCredit, calculateAttendancePercent,
+  overviewRoster, buildBirthdayView, calculateAttendanceCredit, calculateAttendancePercent,
 } from '../../.build/v3/packages/domain/src/frontend-reporting.js';
 
 const person = (personId, overrides = {}) => ({ personId, lastName: `Sample ${personId}`, firstName: 'Fictional', asYear: 'AS100',
@@ -242,4 +242,10 @@ test('untrusted IDs, invalid states, duplicate entities and excessive matrix siz
   const large = fixture(); large.people = Array.from({ length: 500 }, (_, i) => person(`cadet-${i}`));
   large.events = Array.from({ length: 201 }, (_, i) => event(`event-${i}`, { eligiblePersonIds: null }));
   assert.throws(() => buildFrontendReporting(large), error => error instanceof ReportingInputError && error.path === 'matrix.capacity');
+});
+
+test('Wing roster counts keep far crosstowns in the crosstown total and count each cadet once', () => {
+  const groups = [['AS 500','Holy Cross College',2],['AS250',"Saint Mary’s College",3],
+    ['AS400','Valparaiso',4],['AS300','Trine University',1],['AF Civ','Notre Dame',1],['AS100','',1]];
+  assert.deepEqual(overviewRoster(groups), {activeCadets:12,gmcCadets:6,pocCadets:5,crosstowns:10,farCrosstowns:5});
 });

@@ -9,6 +9,25 @@ const CREDIT = new Set<AttendanceCode>(['P', 'T', 'E', 'ES', 'MED']);
 const COUNTED = new Set<AttendanceCode>(['P', 'T', 'A', 'U', 'E', 'ES', 'MED']);
 const GMC = ['AS100', 'AS150', 'AS200', 'AS250', 'AS500'];
 const POC = ['AS300', 'AS400', 'AS700', 'AS800', 'AS900'];
+/** Overview uses the same AS cohorts as attendance reporting. Far crosstowns
+ * are a subset of the four partner schools, and unknown schools count in neither. */
+export function overviewRoster(groups: Iterable<readonly [string, string, number]>) {
+  const totals = {activeCadets:0, gmcCadets:0, pocCadets:0, crosstowns:0, farCrosstowns:0};
+  for (const [asYear, university, count] of groups) {
+    totals.activeCadets += count;
+    const year = normalizedYear(asYear || '');
+    if (GMC.includes(year)) totals.gmcCadets += count;
+    if (POC.includes(year)) totals.pocCadets += count;
+    const school = (university || '').toLowerCase().replace(/[.’']/g, '').trim();
+    if (/^(trine|valparaiso|valpo)(?: university)?$/.test(school)) {
+      totals.farCrosstowns += count;
+      totals.crosstowns += count;
+    } else if (/^(?:st|saint) marys(?: college)?$/.test(school) || /^(?:college of the )?holy cross(?: college)?$/.test(school)) {
+      totals.crosstowns += count;
+    }
+  }
+  return totals;
+}
 const INACTIVE = new Set(['inactive', 'commissioned', 'dropped']);
 const TYPES = ['mando', 'secondary', 'llab', 'other', 'third-hour'] as const;
 

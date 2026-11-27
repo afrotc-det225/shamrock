@@ -34,3 +34,18 @@ export function birthdayAgenda(calendar, flight, today) {
   nextYear.setUTCDate(nextYear.getUTCDate() - 1);
   return {title:"Up next", groups:birthdayGroups(calendar, flight, today, iso(nextYear)).slice(0, 4)};
 }
+
+// US calendar weeks begin on Sunday. The week containing January 1 is week 1.
+export function calendarWeeks(month) {
+  const first = new Date(month + "-01T00:00Z");
+  const dayMs = 86_400_000;
+  const end = Date.UTC(first.getUTCFullYear(), first.getUTCMonth() + 1, 1);
+  const weeks = [];
+  for (let sun = first.getTime() - first.getUTCDay() * dayMs; sun < end; sun += 7 * dayMs) {
+    const days = Array.from({length:7}, (_, i) => new Date(sun + i * dayMs).toISOString().slice(0, 10));
+    const sat = new Date(sun + 6 * dayMs);
+    const number = 1 + Math.floor((sat.getTime() - Date.UTC(sat.getUTCFullYear(), 0, 1)) / (7 * dayMs));
+    weeks.push({number, days});
+  }
+  return weeks;
+}

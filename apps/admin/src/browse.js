@@ -16,7 +16,7 @@ export async function decodeBrowse(data) {
     terms:columns("terms","termId label sortOrder isCurrent"),events:columns("events","eventId termId eventType displayOrder label status startAt endAt location notes"),
   }};
   if(profile==="overview") return {...data,birthdayFlights:t.flights ? columns("flights","flightId label squadronId") : [], birthdaySquadrons:t.squadrons ? columns("squadrons","squadronId label") : [],birthdayCalendar:JSON.parse(t.birthdays || "[]"),overview:{term:JSON.parse(t.terms)[0]?.[1],
-    activeCadets:t.activeCadets,activeEvents:t.activeEvents,pending:t.pending}};
+    activeCadets:t.activeCadets,gmcCadets:t.gmcCadets,pocCadets:t.pocCadets,crosstowns:t.crosstowns,farCrosstowns:t.farCrosstowns,activeEvents:t.activeEvents,pending:t.pending}};
   if(profile==='semester') return {...data,list:{
     terms:columns('terms','termId label sortOrder isCurrent').map(t=>({...t,isCurrent:!!t.isCurrent})),
     people:columns('people','personId version firstName lastName rank asYear role flightId flightPathStatus'),

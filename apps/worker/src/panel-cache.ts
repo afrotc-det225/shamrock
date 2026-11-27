@@ -26,6 +26,7 @@ export async function cachedPanelRead(env: ReadEnv, url: URL, body: string, load
   if (!version) return load();
   const input=env.WING_MATRICES || url.pathname==='/v1/admin/panel/browse' ? JSON.parse(body) : {};
   const parts=[env.ENVIRONMENT,env.GENERATION,env.BRIDGE_KEY_ID,url.pathname,body,version];
+  if (url.pathname==='/v1/admin/panel/browse' && input.profile==='overview') parts.push('roster-counts-v1');
   if (url.pathname==='/v1/admin/panel/browse' && input.profile==='leadership') parts.push('contact-phones-v1');
   if (url.pathname==='/v1/admin/panel/browse' && input.profile==='cadets') parts.push('directory-photos-v1');
   const address = await cacheAddress(url.origin,'/_private/read/',parts);
