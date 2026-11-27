@@ -381,6 +381,16 @@ try {
   await mark.focus();
   await page.getByRole("tooltip").waitFor();
   await page.keyboard.press("Escape");
+  const attendanceSummary = page.getByRole("region", {name:"Wing attendance"});
+  assert.deepEqual(await attendanceSummary.locator("dt").allTextContents(), ["Overall", "LLAB"]);
+  assert.equal(await attendanceSummary.getByRole("link",{name:/pending excusal/}).getAttribute("href"),"/excusals");
+  const birthdays = page.getByRole("region",{name:"Wing birthdays"});
+  const month = birthdays.locator(".calendar-month strong");
+  const originalMonth = await month.innerText();
+  await birthdays.getByRole("button",{name:"Next month"}).click();
+  assert.notEqual(await month.innerText(),originalMonth);
+  await birthdays.getByRole("button",{name:"Reset calendar"}).click();
+  assert.equal(await month.innerText(),originalMonth);
   assert.deepEqual(overviewRequests, ["overview", "charts"]);
   testOverview = false;
   await navigate("Leadership");

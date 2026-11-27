@@ -17,27 +17,10 @@ export function Overview({ snapshot: s, overview, reporting, history, receiptsDe
         title="Overview"
         description={`${overview?.term || s?.terms.find((t) => t.isCurrent)?.label || "Semester not configured"} · Detachment 225`}
       />
-      <div className="metrics">
-        <div>
-          <strong>
-            {overview?.activeCadets ?? d?.totalCadets ?? s.people.filter((p) => p.active).length}
-          </strong>
-          <span>Active cadets</span>
-        </div>
-        <div>
-          <strong>
-            {overview?.activeEvents ?? s.events.filter((e) => e.status === "active").length}
-          </strong>
-          <span>Active events</span>
-        </div>
-        <div>
-          <strong>
-            {overview?.pending ?? currentExcusalRequests(s).filter(r => r.status === "Submitted").length}
-          </strong>
-          <span>Pending excusals</span>
-        </div>
-      </div>
-      <OverviewInsights {...details} overview={overview} snapshot={s} reporting={reporting} reportingTime={reportingTime} captureKey={captureKey}/>
+      <OverviewInsights {...details} overview={overview} snapshot={s} reporting={reporting} reportingTime={reportingTime} captureKey={captureKey}
+        activeCadets={overview?.activeCadets ?? d?.totalCadets ?? s.people.filter(p => p.active).length}
+        pending={overview?.pending ?? currentExcusalRequests(s).filter(r => r.status === "Submitted").length}
+        navigate={navigate}/>
       {!readOnly && <section className="form-section">
         <h2>Recent changes</h2>
         <ReceiptStatus receipt={receipt} />
