@@ -1,10 +1,11 @@
 import React, { useEffect, useState } from "react";
-import { rateStyle, yearColors, flightColors, cellStyle } from "./roster-colors";
-import { AttendanceRateKey } from "./AttendanceMatrix";
-import { Heading, Select, SearchBox, Table, Empty } from "./components";
+import { rateStyle } from "./roster-colors";
+import { AttendanceKey, MatrixTable } from "./AttendanceMatrix";
+import { Heading, Select, SearchBox, Empty } from "./components";
 import { api } from "./api";
 import { loadHistory } from "../history-client";
 
+import { defaultRosterFilters, MatrixRosterFilters, selectRosterRows } from "./MatrixRosterFilters";
 import { compactReport } from "../history-table.mjs";
 
 const percentage = (value) => typeof value === "number" && Number.isFinite(value)
@@ -14,7 +15,7 @@ export default function History() {
   const [catalog, setCatalog] = useState(null), [selected, setSelected] = useState(""),
     [report, setReport] = useState(null), [error, setError] = useState(""),
     [progress, setProgress] = useState(""), [query, setQuery] = useState(""),
-    [flight, setFlight] = useState(""), [attempt, setAttempt] = useState(0);
+    [filters, setFilters] = useState(defaultRosterFilters), [attempt, setAttempt] = useState(0);
   useEffect(() => {
     const controller = new AbortController();
     setReport(null); setCatalog(null); setSelected(""); setProgress("Loading semesters…");
@@ -33,7 +34,7 @@ export default function History() {
     if (!item) return;
     const controller = new AbortController();
     const request = (path, body) => api(path, body, {signal:controller.signal});
-    setReport(null); setError(""); setFlight(""); setQuery(""); setProgress("Loading " + item.label + "…");
+    setReport(null); setError(""); setFilters(defaultRosterFilters); setQuery(""); setProgress("Loading " + item.label + "…");
     const load = item.file ? request("/history/report", {version:selected}) :
       loadHistory(selected, request).then(compactReport);
     load.then(value => {
@@ -41,16 +42,16 @@ export default function History() {
     }).catch(e => { if (!controller.signal.aborted) { setError(e.message); setProgress(""); } });
     return () => controller.abort();
   }, [selected, catalog]);
-  const rows = report?.rows.filter(row => (!flight || row.flight === flight) &&
-    `${row.firstName} ${row.lastName}`.toLowerCase().includes(query.toLowerCase())) || [];
+  const roster = report?.rows || [];
+  const rows = selectRosterRows(roster, query, filters);
+  const events = (report?.headers || []).map((label, eventId) => ({eventId, label}));
   return <>
     <section className="page-controls">
-      <Heading title="History" />
+      <Heading title="History"><AttendanceKey /></Heading>
       {catalog?.length > 0 && <div className="toolbar">
         <Select label="Semester" value={selected} onChange={setSelected} options={catalog} />
         <SearchBox placeholder="Find a cadet" value={query} onChange={setQuery} />
-        <Select label="Flight" value={flight} onChange={setFlight}
-          options={[{value:"",label:"All Flights"}, ...[...new Set(report?.rows.map(row => row.flight).filter(Boolean))].sort()]} />
+        <MatrixRosterFilters rows={roster} value={filters} onChange={setFilters} />
       </div>}
     </section>
     {error && <div className="error" role="alert">{error} <button onClick={() => { setError(""); setAttempt(value => value + 1); }}>Retry</button></div>}
@@ -61,18 +62,15 @@ export default function History() {
         <p className="notice">{report.summary.unresolvedRows > 0 ? `${report.summary.unresolvedRows} historical identities are not linked to the current Directory. ` : ""}
           {report.summary.formulaMismatches > 0 ? `${report.summary.formulaMismatches} saved percentages differ from their recorded formulas. ` : ""}
           Original values are retained.</p>}
-      <Table headers={["Cadet", "AS year", "Flight", "Overall", "LLAB", ...report.headers]}>
+      <MatrixTable label="History" events={events}>
         {rows.map(row => <tr key={row.rowId}>
-          <td>{[row.firstName, row.lastName].filter(Boolean).join(" ")}
-            {row.identityStatus === "unresolved" && <small className="history-unlinked">Historical record</small>}</td>
-          <td className="formation" style={cellStyle(yearColors(row.asYear))}>{row.asYear || "—"}</td>
-          <td className="formation" style={cellStyle(flightColors(row.flight, row.squadron))}>{row.flight || "—"}</td>
+          <th scope="row">{[row.firstName, row.lastName].filter(Boolean).join(" ")}
+            {row.identityStatus === "unresolved" && <small className="history-unlinked">Historical record</small>}</th>
           <td className="formation" style={rateStyle(row.overall)}>{percentage(row.overall)}</td>
           <td className="formation" style={rateStyle(row.llab)}>{percentage(row.llab)}</td>
-          {row.codes.map((code, index) => <td className="history-code" data-mark={String(code ?? "").trim().toUpperCase() || "blank"} key={index}>{String(code ?? "")}</td>)}
+          {row.codes.map((code, index) => <td className="mark-cell history-code" data-mark={String(code ?? "").trim().toUpperCase() || "blank"} key={index}>{String(code ?? "")}</td>)}
         </tr>)}
-      </Table>
-      {rows.length > 0 && <AttendanceRateKey />}
+      </MatrixTable>
       {!rows.length && <Empty>No matching cadets.</Empty>}
     </>}
   </>;

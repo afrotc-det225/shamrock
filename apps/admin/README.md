@@ -4,7 +4,7 @@ Cadets and staff use Google sign-in at [SHAMROCK](https://shamrock.det225.worker
 
 The Cadets roster uses slate for AS-year progression and matched blue and gold shades for flights. Flight path statuses use blue, teal, and green, with dark green for Commissioned. Under **More fields**, CIP codes and broad areas share the color of their academic family, and officer AFSCs use the color of their career group. The exact names and codes remain visible. Empty and undecided values are gray.
 
-Attendance and History share the Overall and LLAB color scale from coral at 80% or below through amber to green at 100%. Blank and N/A marks are gray, Present is green, and Unexcused is white on deep red. The Attendance code key shows the rest of the marks.
+Attendance and History share the Overall and LLAB color scale from coral at 80% or below through amber to green at 100%. Blank and N/A marks are gray, Present is green, and Unexcused is white on deep red. Both matrices show Cadet, Overall, LLAB and event columns. Use the Flight and AS year filters or the Sort by menu to organize the rows. The code key opens from either page heading. Corrections are available on eligible current attendance cells. History displays the saved semester report.
 
 ## Try the panel
 
@@ -357,7 +357,7 @@ color cues alongside text; attendance rates include a small proportional bar
 without introducing new pass/fail thresholds. Editors and feedback use brief
 transitions only when the user has not requested reduced motion.
 
-In the real-data staging panel, **History → Semester** opens the latest saved attendance sheet. Choose an earlier semester to view its roster, saved Overall and LLAB percentages, and event codes. Flight and cadet-name filters apply within the selected semester. The duplicate backend matrix and alternate workbook copies are retained for reconciliation. The [History runbook](../../docs/runbooks/D1_HISTORY_REPORTS.md#semester-reports-in-the-staging-web-panel) covers publication after an import.
+In the real-data staging panel, **History → Semester** opens the latest saved attendance sheet. Choose an earlier semester to view its roster, saved Overall and LLAB percentages, and event codes. Flight, AS year, and cadet-name filters apply within the selected semester. The duplicate backend matrix and alternate workbook copies are retained for reconciliation. The [History runbook](../../docs/runbooks/D1_HISTORY_REPORTS.md#semester-reports-in-the-staging-web-panel) covers publication after an import.
 
 ### Successor maintenance workflow
 
