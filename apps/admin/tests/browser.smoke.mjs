@@ -83,6 +83,8 @@ try {
     if (r.status() >= 400 && r.url().includes("/api/"))
       console.error("Rejected request", r.status(), await r.text());
   });
+  // The fixture server is reachable over loopback even in a network-isolated runner.
+  await page.addInitScript(() => Object.defineProperty(navigator, "onLine", {get: () => true}));
   await page.clock.install();
   await page.goto(`http://127.0.0.1:${server.address().port}`);
   await page
