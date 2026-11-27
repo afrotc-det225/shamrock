@@ -76,6 +76,10 @@ export default function Excusals({
         .toLowerCase()
         .includes(query.trim().toLowerCase()),
   );
+  function openRequest(request) {
+    setReason("");
+    setEdit({requestId:request.requestId,version:request.version});
+  }
   function submissionOrder(a, b) {
     return Number(b.status === "Submitted") - Number(a.status === "Submitted") ||
       (a.status === "Submitted" ? 1 : -1) * ((a.submittedAt || "").localeCompare(b.submittedAt || "")) ||
@@ -144,11 +148,17 @@ export default function Excusals({
       </section>
       <Table className={`excusal-queue${showActions ? " actionable" : ""}`}
         headers={["Cadet", "Code", "Event", "Reason", "Submitted", "Status", ...(showActions ? ["Decision"] : [])]}>
-        {visible.map(r => <tr key={r.requestId}>
+        {visible.map(r => <tr key={r.requestId} onClick={event=>{
+          if (event.target.closest("button,select,a,input,textarea,label")) return;
+          const selection = window.getSelection();
+          if (selection && !selection.isCollapsed && event.currentTarget.contains(selection.anchorNode)) return;
+          event.currentTarget.querySelector(".excusal-cadet button")?.focus({preventScroll:true});
+          openRequest(r);
+        }}>
           <td className="excusal-cadet" style={cellStyle(flightColors(flightName(r), r.capturedSquadronLabel))}><button
             title={flightName(r)} className="text-button"
             aria-label={`Request details for ${who(r)} · ${flightName(r)} · ${events.get(r.eventId)}`}
-            onClick={() => { setReason(""); setEdit({requestId:r.requestId,version:r.version}); }}>
+            onClick={() => openRequest(r)}>
             {who(r)}
           </button></td>
           <td className="excusal-code" data-mark={r.requestedOutcome}>{r.requestedOutcome}</td>

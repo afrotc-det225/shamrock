@@ -9,12 +9,13 @@ import { DirectoryPhoto } from "./DirectoryPhoto";
 import WorkspaceShell from "./WorkspaceShell";
 import { ViewAsAccount } from "./ViewAs";
 import {personalPages} from "./site-navigation";
-import { ExternalLink } from "lucide-react";
+import { ChevronDown, ExternalLink } from "lucide-react";
 import { attendanceMeanings } from "./AttendanceMatrix";
 import {loadReportDraft, restoreSelections, rosterSignature} from "./report-draft";
 import {Overview} from "./Secondary";
 import CadetDirectory from "./CadetDirectory";
 import { cellStyle, yearColors, rateStyle } from "./roster-colors";
+import { ToolbarPopover } from "./ToolbarPopover";
 import { FlightHome } from "./FlightHome";
 import { calculateAttendanceCredit } from "../../../packages/domain/src/frontend-reporting";
 import { ATTENDANCE_CODES } from "../../../packages/domain/src/index";
@@ -364,6 +365,7 @@ function FlightReport({ state, save, disabled, previewId }) {
       setDraft(loadReportDraft(storage,key));setDraftNotice("");
     } catch {setDraftNotice("This browser could not clear the saved draft.");}
   }
+  const savedEvent=events.find(e=>e.eventId===draft?.eventId);
   const savedHere=draft && draft.eventId===eventId;
   const matches=savedHere && details && draft.roster===signature && draft.complete===complete
     && JSON.stringify(draft.present)===JSON.stringify([...present].sort());
@@ -377,11 +379,11 @@ function FlightReport({ state, save, disabled, previewId }) {
       }, matches ? draft.id : undefined);
   }}>
     {draft && !savedHere && <div className="draft-banner">
-      <span>{events.find(e=>e.eventId===draft.eventId)?.label || "Unavailable event"} · Saved draft</span>
-      {events.some(e=>e.eventId===draft.eventId) && <button type="button" onClick={()=>{
-        setType(events.find(e=>e.eventId===draft.eventId).eventType);choose(draft.eventId);
-      }}>Resume draft</button>}
-      <button type="button" onClick={()=>forgetDraft(draft)}>Discard draft</button>
+      <span title={savedEvent?.label}>Draft · {savedEvent?.label || "Unavailable event"}</span>
+      {savedEvent && <button type="button" aria-label="Resume draft" onClick={()=>{
+        setType(savedEvent.eventType);choose(draft.eventId);
+      }}>Resume</button>}
+      <button type="button" aria-label="Discard draft" onClick={()=>forgetDraft(draft)}>Discard</button>
     </div>}
     <EventPicker label="Attendance event" {...{events,type,setType,eventId,choose}}/>
     {event && !details && !error && <p role="status">Loading event roster…</p>}
@@ -396,14 +398,14 @@ function FlightReport({ state, save, disabled, previewId }) {
           setPresent(ids=>checked ? [...new Set([...ids,r.personId])] : ids.filter(id=>id!==r.personId));
         }}/>
         {r.lastName}, {r.firstName}</label>)}</fieldset>)}
-      {!crossFlight && details.ownFlightCount===roster.length && <Field label="Report coverage"><select value={complete?"all":"selected"} onChange={e=>setComplete(e.target.value==="all")}>
-        <option value="selected">Selected cadets only</option><option value="all">Entire Flight accounted for</option></select></Field>}
-      {complete && <p role="status">{present.length} of {roster.length} marked present. Other attendance codes stay as recorded.</p>}
       <div className="cadet-inline-actions">
-        <button className="primary" disabled={disabled || (!present.length && !complete)}>Submit attendance</button>
-        <button type="button" disabled={disabled || matches} onClick={storeDraft}>{draft && !savedHere ? "Replace saved draft" : "Save for later"}</button>
+        <button className="primary" disabled={disabled || (!present.length && !complete)}>{complete ? "Submit full Flight report" : "Submit attendance"}</button>
+        {!crossFlight && details.ownFlightCount===roster.length && <ToolbarPopover label="Submission options" icon={ChevronDown} iconOnly>
+          <label className="report-completion"><input type="checkbox" checked={complete} disabled={disabled}
+            onChange={e=>setComplete(e.target.checked)}/>Entire Flight accounted for</label>
+        </ToolbarPopover>}
+        <button type="button" disabled={disabled || matches} onClick={storeDraft}>{matches ? "Saved" : savedHere ? "Save changes" : draft ? "Replace saved draft" : "Save for later"}</button>
       </div>
-      {savedHere && <small role="status">{matches ? "Draft saved on this device." : "Draft has unsaved changes."}</small>}
     </> : <Empty>No eligible cadets for this event.</Empty>)}
     {draftNotice && <p role="status">{draftNotice}</p>}
   </form></section>;
@@ -463,6 +465,7 @@ export default function CadetWorkspace({ session }) {
   useEffect(() => {
     load().catch((e) => {if(currentSection.current===section)setError(e.message);});
   }, [section]);
+  useEffect(() => { setNotice(""); }, [tab]);
   async function save(kind, fields, done, savedId) {
     if (active.current || !state?.writable || (preview && state?.readOnly !== false)) return;
     active.current = true;
@@ -482,7 +485,7 @@ export default function CadetWorkspace({ session }) {
       await load();
       pending.current = null;
       done?.();
-      setNotice("Saved.");
+      if (currentSection.current === section) setNotice("Saved.");
     } catch (e) {
       setError(batch.next && batch.next<batch.actions.length ? batch.next+" of "+batch.actions.length+" saved. "+e.message : e.message);
     } finally {

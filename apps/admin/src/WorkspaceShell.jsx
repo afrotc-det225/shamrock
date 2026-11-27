@@ -65,6 +65,16 @@ export default function WorkspaceShell({ workspace="leadership", pages, page, ta
     writePageUrl(source,title);
     window.dispatchEvent(new PopStateEvent("popstate"));
   };
+  const home = pages.some(([title]) => title === "My Flight") ? "My Flight"
+    : pages.some(([title]) => title === "Overview") ? "Overview" : pages[0]?.[0];
+  const brand = <Brand href={home ? pageHref(workspace,home) : "/"} onNavigate={home && (() => {
+    if (menu.current?.open) menu.current.close();
+    if (page !== home) navigate(home);
+    else {
+      window.scrollTo(0,0);
+      content.current?.scrollTo(0,0);
+    }
+  })}/>;
   const links = <>
     <nav aria-label="Main navigation">
       {[
@@ -100,7 +110,7 @@ export default function WorkspaceShell({ workspace="leadership", pages, page, ta
     <div className="app">
       {mobile ? <>
         <header className="mobile-bar">
-          <Brand/><div className="mobile-page"><strong>{page}</strong>{mobileContext && <small>{mobileContext}</small>}</div>
+          {brand}<div className="mobile-page"><strong>{page}</strong>{mobileContext && <small>{mobileContext}</small>}</div>
           <button aria-label="Open navigation" aria-expanded={open} aria-controls="mobile-navigation"
             onClick={() => {menu.current.showModal(); setOpen(true);}}><Menu size={19}/> Menu</button>
         </header>
@@ -112,14 +122,14 @@ export default function WorkspaceShell({ workspace="leadership", pages, page, ta
             if (e.clientX > rect.right || e.clientX < rect.left) menu.current.close();
           }}>
           <div className="mobile-menu-screen">
-          <header><Brand/><button aria-label="Close navigation" onClick={() => menu.current.close()}><X size={20}/></button></header>
+          <header>{brand}<button aria-label="Close navigation" onClick={() => menu.current.close()}><X size={20}/></button></header>
           <div className="menu-links" onClickCapture={e => {
             if (menu.current.contains(e.target) && e.target.closest("button,a") &&
                 !e.metaKey && !e.ctrlKey && !e.shiftKey && !e.altKey) menu.current.close();
           }}>{links}</div>
           </div>
         </dialog>
-      </> : <aside className="sidebar"><Brand/>{links}</aside>}
+      </> : <aside className="sidebar">{brand}{links}</aside>}
       <div className="workspace" ref={content}><main>{children}</main></div>
       {drawer}
     </div>

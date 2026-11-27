@@ -136,7 +136,14 @@ try {
       }
       if (role==="Flight") {
         const row=page.locator(".excusal-queue tbody tr");
-        await row.getByText("Test Requester").click();
+        for(const cell of [".excusal-reason",".excusal-code",".excusal-event",".excusal-submitted",".excusal-status"]) {
+          await row.locator(cell).click();
+          await page.getByRole("dialog",{name:"Request details"}).waitFor();
+          await page.keyboard.press("Escape");
+        }
+        await row.getByRole("button",{name:/Request details/}).focus();
+        await page.keyboard.press("Enter");
+        await page.getByRole("dialog",{name:"Request details"}).waitFor();
         assert.equal(await page.getByRole("button",{name:/^(Approve|Deny)$/}).count(),0);
         assert.equal(await page.getByLabel("More decisions").count(),0);
         await page.keyboard.press("Escape");
@@ -258,8 +265,17 @@ try {
           }));
           for(const [x,y,height] of taps){assert(height>=44);await page.touchscreen.tap(x,y);}
         } else {await target.nth(1).click();await target.nth(2).click();}
+        assert.equal(await page.getByLabel("Report coverage").count(),0);
+        const opts=page.getByRole("button",{name:"Submission options"});
+        await opts.click();
+        await page.getByLabel("Entire Flight accounted for").check();
+        await page.keyboard.press("Escape");
+        assert(await page.getByRole("button",{name:"Submit full Flight report"}).isEnabled());
+        await opts.click();
+        await page.getByLabel("Entire Flight accounted for").uncheck();
+        await page.keyboard.press("Escape");
         await page.getByRole("button",{name:"Save for later"}).click();
-        await page.getByText("Draft saved on this device.").waitFor();
+        await page.getByRole("button",{name:"Saved",exact:true}).waitFor();
         await openNavigation(page);
         await nav.getByRole("link",{name:"Cadets",exact:true}).click();
         const directory=page.locator(".cadet-roster");
@@ -291,8 +307,24 @@ try {
 
         await openNavigation(page);
         await nav.getByRole("link",{name:"Submit attendance",exact:true}).click();
-        await page.getByText("Draft saved on this device.").waitFor();
+        await page.getByRole("button",{name:"Saved",exact:true}).waitFor();
         assert.equal(await page.evaluate(()=>window.scrollY),0);
+        await page.getByLabel("Event type",{exact:true}).selectOption("secondary");
+        const banner=page.locator(".draft-banner");
+        const fits=await banner.evaluate(el=>{
+          const [label,resume,discard]=Array.from(el.children,node=>node.getBoundingClientRect());
+          return resume.y===discard.y && label.left<resume.left && resume.right<=discard.left && discard.right<=innerWidth;
+        });
+        assert(fits,"draft actions share one row");
+        if(width===390) {
+          await page.setViewportSize({width:320,height:844});
+          assert(await banner.evaluate(el=>el.scrollWidth<=el.clientWidth && el.querySelectorAll("button")[0].offsetTop===el.querySelectorAll("button")[1].offsetTop));
+          await page.setViewportSize({width,height:844});
+        }
+        assert.equal(await page.locator(".success").count(),0,"earlier page notices do not precede the draft");
+        if(process.env.SHAMROCK_SCREENSHOT_DIR && role==="Cadet")await page.screenshot({path:process.env.SHAMROCK_SCREENSHOT_DIR+"/draft-"+width+".png"});
+        await banner.getByRole("button",{name:"Resume draft"}).click();
+        await page.getByRole("button",{name:"Saved",exact:true}).waitFor();
         assert.equal(await page.locator(".report-checklist input:checked").count(),3);
         await page.getByLabel("Find a cadet").fill("Tom");
         await page.getByRole("button",{name:"Submit attendance",exact:true}).click();
@@ -317,7 +349,7 @@ try {
       });
       assert(layout.fits && (width === 390 ? layout.stacked : layout.alongside), JSON.stringify(layout));
       assert.deepEqual(errors, []);
-      assert.deepEqual(calls, ["POST /api/session", "GET /api/cadet",...(role==="Flight"?["GET /api/cadet?section=flight","GET /api/cadet?section=flight","GET /api/cadet?section=flight:other","GET /api/cadet?section=excusals","GET /api/cadet"]:[]),...(squadron?["GET /api/cadet?section=excusals","POST /api/cadet","GET /api/cadet?section=excusals","GET /api/cadet"]:[]),...(tabs.length?["GET /api/cadet?section=profile","GET /api/cadet","GET /api/cadet?section=profile","GET /api/cadet?section=attendance","POST /api/cadet","POST /api/cadet","GET /api/cadet?section=attendance","GET /api/cadet?section=report","GET /api/cadet?section=report:lab16","GET /api/cadet?section=directory","GET /api/cadet?section=report","GET /api/cadet?section=report:lab16","POST /api/cadet","GET /api/cadet?section=report"]:[])]);
+      assert.deepEqual(calls, ["POST /api/session", "GET /api/cadet",...(role==="Flight"?["GET /api/cadet?section=flight","GET /api/cadet?section=flight","GET /api/cadet?section=flight:other","GET /api/cadet?section=excusals","GET /api/cadet"]:[]),...(squadron?["GET /api/cadet?section=excusals","POST /api/cadet","GET /api/cadet?section=excusals","GET /api/cadet"]:[]),...(tabs.length?["GET /api/cadet?section=profile","GET /api/cadet","GET /api/cadet?section=profile","GET /api/cadet?section=attendance","POST /api/cadet","POST /api/cadet","GET /api/cadet?section=attendance","GET /api/cadet?section=report","GET /api/cadet?section=report:lab16","GET /api/cadet?section=directory","GET /api/cadet?section=report","GET /api/cadet?section=report:lab16","GET /api/cadet?section=report:lab16","POST /api/cadet","GET /api/cadet?section=report"]:[])]);
       await page.close();
     }
   }
@@ -383,9 +415,18 @@ try {
     await page.getByRole("heading",{name:"Overview",level:1}).waitFor();
     assert.equal(new URL(page.url()).pathname,"/overview");
     await openNavigation(page);
+    const homeLink=page.locator(".sidebar").getByRole("link",{name:"SHAMROCK home",exact:true});
     await page.getByRole("button",{name:"View as",exact:true}).waitFor();
+    assert.equal(await homeLink.getAttribute("href"),"/overview");
     await page.getByRole("link",{name:"Assistant",exact:true}).waitFor();
     assert.equal(sessions,2,"switch keeps the same sign-in");
+    await nav.getByRole("link",{name:"My excusals",exact:true}).click();
+    await page.getByRole("heading",{name:"My excusals",level:1}).waitFor();
+    if(width===390)await openNavigation(page);
+    await homeLink.click();
+    await page.waitForURL("**/me/flight");
+    assert.equal(await page.getByRole("dialog",{name:"Navigation"}).count(),0);
+    assert.equal(documents,2,"logo navigation keeps the current document");
     await page.close();
   }
   console.log("Cadet, Flight, Squadron, registration and delegated cadet workspace passed on desktop and phone.");
