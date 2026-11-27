@@ -1558,9 +1558,11 @@ main:has(.matrix-scroll) { padding-bottom: 8px; }
 .excusal-submitted time {display:block;color:#526479;font-size:.76rem;line-height:1.35;white-space:normal}
 .status[data-status="Withdrawn"] {background:#f4e5bc;color:#5b4115}
 .status[data-status="Superseded"] {background:#e6dff1;color:#493366}
-.excusal-actions {display:flex;align-items:center;flex-wrap:wrap;gap:.3rem}
+.excusal-actions {display:var(--decision-layout,flex);grid-template-columns:repeat(var(--decision-columns,4),minmax(0,1fr));align-items:center;flex-wrap:wrap;gap:.3rem}
+.excusal-actions [data-decision="Withdrawn"] {display:var(--secondary-decision,none);color:#5b4115;background:#fff9eb;border-color:#d0bd8c}
+.excusal-actions [data-decision="Superseded"] {display:var(--secondary-decision,none);color:#493366;background:#f7f4fb;border-color:#c9bcd9}
 .excusal-actions :is(button,select) {min-width:0;min-height:2.2rem;width:auto;padding:.29rem .45rem;font-size:.81rem;font-weight:600;border-radius:.35rem}
-.excusal-actions select {width:5.5em;flex:none;background-color:white;color:#415468}
+.excusal-actions select {display:var(--decision-menu,inline-block);width:5.5em;flex:none;background-color:white;color:#415468}
 .excusal-actions [data-decision="Approved"] {color:#175838;background:#e8f4ed;border-color:#a7c9b6}
 .excusal-actions [data-decision="Denied"] {color:#802f39;background:#fff;border-color:#d7bac0}
 .excusal-actions button:hover:enabled {text-decoration:underline}
@@ -1584,11 +1586,18 @@ main:has(.matrix-scroll) { padding-bottom: 8px; }
   .excusal-status {grid-area:status;justify-self:end}
   .excusal-controls {grid-column:1/-1}
   .excusal-controls:empty {display:none}
-  .excusal-actions {margin-top:.3rem}
+  .excusal-actions {--decision-layout:grid;--secondary-decision:inline-block;--decision-menu:none;margin-top:.3rem}
   .excusal-actions :is(button,select) {min-height:44px}
 
 }
 
+@container (max-width:25rem) {
+  .excusal-actions {--decision-columns:2}
+}
+@media (max-width:61rem) {
+  .drawer .excusal-actions {--decision-layout:grid;--decision-columns:2;--secondary-decision:inline-block;--decision-menu:none;width:100%}
+  .drawer .excusal-actions button {min-height:44px}
+}
 @media (max-width:640px) {
   .mobile-bar,.mobile-menu header {display:flex;align-items:center;justify-content:space-between;gap:.65rem}
   :root {scrollbar-gutter:auto}

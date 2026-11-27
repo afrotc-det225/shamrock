@@ -30,8 +30,8 @@ function SubmittedAt({value}) {
 
 function DecisionButtons({request, busy, onPick}) {
   return <div className="excusal-actions">
-    {["Approved","Denied"].map(outcome =>
-      <button key={outcome} data-decision={outcome} disabled={busy || outcome === request.status}
+    {Object.keys(decisions).map(outcome =>
+      <button type="button" key={outcome} data-decision={outcome} disabled={busy || outcome === request.status}
         onClick={() => onPick(outcome)}>{decisions[outcome]}</button>)}
     <select aria-label="More decisions" value="" disabled={busy} onChange={e => onPick(e.target.value)}>
       <option value="" disabled>More</option>

@@ -189,11 +189,24 @@ try {
   for (const width of [320,390,1024,1440]) {
     await page.setViewportSize({width,height:850});await settle();
     const more=page.getByLabel("More decisions").first();
-    const moreFits=await more.evaluate(el=>{
-      const box=el.getBoundingClientRect(),cell=el.closest("td").getBoundingClientRect();
-      return {width:box.width, right:box.right-cell.right, left:box.left-cell.left, needed:parseFloat(getComputedStyle(el).fontSize)*4.9};
-    });
-    assert(moreFits.width>=moreFits.needed && moreFits.right<=1 && moreFits.left>=-1, JSON.stringify({width,moreFits}));
+    const compact=width<=1024;
+    assert.equal(await more.isVisible(),!compact);
+    if(compact) {
+      const buttons=page.locator(".excusal-controls").getByRole("button");
+      assert.deepEqual(await buttons.allTextContents(),["Approve","Deny","Withdraw","Supersede"]);
+      for(const button of await buttons.all()){
+        assert(await button.evaluate(el=>{
+          const box=el.getBoundingClientRect(),cell=el.closest("td").getBoundingClientRect();
+          return box.height>=44 && el.scrollWidth<=el.clientWidth+1 && box.right<=cell.right+1 && box.left>=cell.left-1;
+        }));
+      }
+    } else {
+      const moreFits=await more.evaluate(el=>{
+        const box=el.getBoundingClientRect(),cell=el.closest("td").getBoundingClientRect();
+        return {width:box.width, right:box.right-cell.right, left:box.left-cell.left, needed:parseFloat(getComputedStyle(el).fontSize)*4.9};
+      });
+      assert(moreFits.width>=moreFits.needed && moreFits.right<=1 && moreFits.left>=-1, JSON.stringify({width,moreFits}));
+    }
     assert.equal(await page.locator("td.excusal-reason").innerText(),"Gold request");
   }
   console.log("Desktop header positions, roster widths, mobile overflow, image loading and private-photo fallback passed.");

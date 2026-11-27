@@ -158,9 +158,17 @@ try {
           return {right:box.right-pill.right,left:pill.left-box.left};
         });
         assert(bounds.right>=5 && bounds.left>=0);
+        if(width===390) {
+          assert.equal(await row.getByRole("combobox",{name:"More decisions"}).count(),0);
+          await row.locator(".excusal-event").click();
+          const details=page.getByRole("dialog",{name:"Request details"});
+          await details.getByRole("button",{name:"Supersede",exact:true}).click();
+          await page.getByRole("dialog",{name:"Supersede excusal?"}).getByRole("button",{name:"Cancel"}).click();
+          assert.equal(decision,undefined);
+        }
         const actions = row.getByRole("button");
         for (const verb of ["Approve","Deny","Withdraw","Supersede"]) {
-          if (verb === "Withdraw" || verb === "Supersede") await row.getByLabel("More decisions").selectOption({label:verb});
+          if (width > 390 && (verb === "Withdraw" || verb === "Supersede")) await row.getByLabel("More decisions").selectOption({label:verb});
           else await actions.filter({hasText:new RegExp("^"+verb+"$")}).click();
           const confirm = page.getByRole("dialog",{name:verb+" excusal?"});
           await confirm.getByText("Test Requester",{exact:true}).waitFor();
