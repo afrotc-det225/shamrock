@@ -51,16 +51,16 @@ export async function viewAsPeople(env: Env, input: unknown) {
   if(people.length>2000 || packed.length>900000)return fail(409,'BROWSE_TOO_LARGE');
   return {tables:{people:packed}};
 }
-interface Binding { directoryEmail: string | null; raw: string; targetPrincipalId: string | null; status: PanelViewAsStatus; fullSnapshot: boolean }
+interface Binding { schoolEmail: string | null; schoolCadetPrincipal: string | null; directoryEmail: string | null; raw: string; targetPrincipalId: string | null; status: PanelViewAsStatus; fullSnapshot: boolean }
 /** Small private capture repeated inside every data batch. Email evidence stays in the capture, never the response. */
 function bindingQuery(env: Env, actor: string, person: string, entry: string | null) {
   const sql = `WITH actor AS (SELECT ? AS id), target AS (
     SELECT p.principal_id AS id,a.email,a.evidence FROM principals p LEFT JOIN principal_accounts a ON a.principal_id=p.principal_id
-    WHERE p.person_id=? AND p.active=1 ORDER BY p.principal_id LIMIT 2)
+    WHERE p.person_id=? AND p.active=1 ORDER BY (p.principal_id LIKE 'school.%') DESC,p.principal_id LIMIT 3)
     SELECT json_array(
       EXISTS(SELECT 1 FROM system_control WHERE singleton=1 AND environment=? AND generation=?),
       (${full('(SELECT id FROM actor)')} AND EXISTS(SELECT 1 FROM permission_managers pm WHERE pm.principal_id=(SELECT id FROM actor) AND pm.active=1)),EXISTS(SELECT 1 FROM people WHERE person_id=?),
-      json((SELECT json_group_array(json_array(id,email,evidence)) FROM target)),${full('(SELECT id FROM target LIMIT 1)')},
+      json((SELECT json_group_array(json_array(id,email,evidence)) FROM target)),${full("(SELECT id FROM target ORDER BY (id LIKE 'school.%') DESC,id LIMIT 1)")},
       json((SELECT json_array(audit_id,actor_id,target_person_id,target_principal_id,status,
         EXISTS(SELECT 1 FROM panel_view_as_audit x WHERE x.entry_audit_id=a.audit_id AND x.action='exit'))
         FROM panel_view_as_audit a WHERE a.audit_id=? AND a.action='enter' AND a.environment=? AND a.generation=?)),
@@ -72,17 +72,28 @@ function bindingQuery(env: Env, actor: string, person: string, entry: string | n
   const values = [actor, person, env.ENVIRONMENT, Number(env.GENERATION), person, entry, env.ENVIRONMENT, Number(env.GENERATION),person];
   return { sql, values, statement: () => env.DB.prepare(sql).bind(...values) };
 }
-function decodeBinding(raw: unknown, actor: string, person: string, entry: string | null): Binding {
+async function decodeBinding(raw: unknown, actor: string, person: string, entry: string | null): Promise<Binding> {
   if (typeof raw !== 'string') return fail(409, 'VIEW_AS_CHANGED');
   const [valid, actorFull, exists, targets, targetFull, saved, email] = JSON.parse(raw);
   if (valid !== 1 || actorFull !== 1) fail(403, 'NOT_AUTHORIZED');
   if (exists !== 1) fail(404, 'NOT_FOUND');
-  const targetPrincipalId = targets.length === 1 ? String(targets[0][0]) : null;
-  const directoryEmail = typeof email==='string' && !targetFull && (targets.length===0 || targets.length===1 && targets[0][1]===email) ? email : null;
-  const status: PanelViewAsStatus = directoryEmail ? 'ready' : targets.length === 0 ? 'no-active-principal' : targets.length !== 1 ? 'ambiguous-principal'
-    : typeof targets[0][1] !== 'string' || !targets[0][1].trim() || !['google-form', 'authenticated-confirmation'].includes(targets[0][2]) ? 'no-verified-login' : 'ready';
+  const school = targets.find((row:unknown[])=>String(row[0]).startsWith('school.'));
+  let sameSchoolIdentity = false, schoolCadetPrincipal:string|null=null;
+  if (school && typeof email === 'string' && (!school[1] || school[1]===email)) {
+    const hash = await crypto.subtle.digest('SHA-256',new TextEncoder().encode(email.trim().toLowerCase()));
+    const suffix=Array.from(new Uint8Array(hash),b=>b.toString(16).padStart(2,'0')).join('');
+    const cadet=targets.find((row:unknown[])=>row[0]==='google.'+suffix && row[1]===email
+      && ['authenticated-confirmation','google-form'].includes(String(row[2])));
+    sameSchoolIdentity=school[0]==='school.'+suffix && (targets.length===1 || targets.length===2 && !!cadet);
+    if(sameSchoolIdentity && cadet)schoolCadetPrincipal=String(cadet[0]);
+  }
+  const schoolWing = sameSchoolIdentity && targetFull===1;
+  const targetPrincipalId = schoolWing ? String(school[0]) : sameSchoolIdentity ? schoolCadetPrincipal : targets.length===1 ? String(targets[0][0]) : null;
+  const directoryEmail = typeof email==='string' && !targetFull && (sameSchoolIdentity || targets.length===0 || targets.length===1 && targets[0][1]===email) ? email : null;
+  const status: PanelViewAsStatus = directoryEmail || schoolWing ? 'ready' : targets.length === 0 ? 'no-active-principal' : targets.length !== 1 ? 'ambiguous-principal'
+    : school || typeof targets[0][1] !== 'string' || !targets[0][1].trim() || !['google-form', 'authenticated-confirmation'].includes(targets[0][2]) ? 'no-verified-login' : 'ready';
   if (entry && (!saved || saved[0] !== entry || saved[1] !== actor || saved[2] !== person || saved[3] !== targetPrincipalId || saved[4] !== 'ready' || saved[5] !== 0 || status !== 'ready')) fail(403, 'VIEW_AS_UNAVAILABLE');
-  return { raw, directoryEmail, targetPrincipalId, status, fullSnapshot: targetFull === 1 };
+  return { raw, schoolEmail:schoolWing ? email : null, schoolCadetPrincipal, directoryEmail, targetPrincipalId, status, fullSnapshot: targetFull === 1 };
 }
 function guardedEnvironment(env: Env, query: ReturnType<typeof bindingQuery>, expected: string): Env {
   // Only existing read implementations receive this wrapper. Authority/mapping and data are one D1 snapshot.
@@ -95,7 +106,7 @@ function guardedEnvironment(env: Env, query: ReturnType<typeof bindingQuery>, ex
 }
 async function readBinding(env: Env, actor: string, person: string, entry: string | null) {
   const query = bindingQuery(env, actor, person, entry), result = await env.DB.batch<Row>([query.statement()]);
-  return { query, binding: decodeBinding(result[0].results[0]?.binding, actor, person, entry) };
+  return { query, binding: await decodeBinding(result[0].results[0]?.binding, actor, person, entry) };
 }
 const auditSelect = `SELECT audit_id,entry_audit_id,action,environment,generation,actor_id,target_person_id,target_principal_id,status,request_hash,
   EXISTS(SELECT 1 FROM panel_view_as_audit x WHERE x.entry_audit_id=a.audit_id AND x.action='exit') AS closed FROM panel_view_as_audit a WHERE audit_id=?`;
@@ -242,26 +253,30 @@ export async function previewCadetWorkspace<E extends Env>(env:E, input:unknown,
       WHERE a.audit_id=? AND a.actor_id=? AND a.target_person_id=? AND a.action='enter'`)
       .bind(req.entryAuditId,req.principalId,req.targetPersonId)]);
     const email=String(hint.results[0]?.email ?? ''),principal=hint.results[0]?.principal as string|null ?? null;
-    const person=req.targetPersonId,entry=req.entryAuditId,actor=req.principalId;
-    const query=bindingQuery(env,actor,person,entry);
-    const db={prepare:(sql:string)=>env.DB.prepare(sql),async batch<T>(statements:D1PreparedStatement[]) {
-      const results=await env.DB.batch<T|Row>([query.statement(),...statements]);
-      const binding=decodeBinding((results[0].results[0] as Row)?.binding,actor,person,entry);
-      if(!binding.directoryEmail || binding.directoryEmail!==email || binding.targetPrincipalId!==principal)fail(403,'VIEW_AS_UNAVAILABLE');
-      return results.slice(1) as D1Result<T>[];
-    }} as D1Database;
-    return {...await readCadetWorkspace({...env,DB:db},email,principal ?? undefined,req.section),readOnly:!principal};
+    if(!principal?.startsWith("school.")){
+      const person=req.targetPersonId,entry=req.entryAuditId,actor=req.principalId;
+      const query=bindingQuery(env,actor,person,entry);
+      const db={prepare:(sql:string)=>env.DB.prepare(sql),async batch<T>(statements:D1PreparedStatement[]) {
+        const results=await env.DB.batch<T|Row>([query.statement(),...statements]);
+        const binding=await decodeBinding((results[0].results[0] as Row)?.binding,actor,person,entry);
+        if(!binding.directoryEmail || binding.directoryEmail!==email || binding.targetPrincipalId!==principal)fail(403,'VIEW_AS_UNAVAILABLE');
+        return results.slice(1) as D1Result<T>[];
+      }} as D1Database;
+      return {...await readCadetWorkspace({...env,DB:db},email,principal ?? undefined,req.section),readOnly:!principal};
+    }
   }
   const {query,binding}=await readBinding(env,req.principalId,req.targetPersonId,req.entryAuditId);
-  if(!binding.directoryEmail) return fail(403,'VIEW_AS_UNAVAILABLE');
-  if(!action) return {...await readCadetWorkspace(guardedEnvironment(env,query,binding.raw),binding.directoryEmail,binding.targetPrincipalId ?? undefined,req.section),readOnly:!binding.targetPrincipalId};
+  const email=binding.schoolEmail ?? binding.directoryEmail;
+  const principal=binding.schoolEmail ? binding.schoolCadetPrincipal : binding.targetPrincipalId;
+  if(!email) return fail(403,'VIEW_AS_UNAVAILABLE');
+  if(!action) return {...await readCadetWorkspace(guardedEnvironment(env,query,binding.raw),email,principal ?? undefined,req.section),readOnly:!principal};
   if(!object(req.action) || !object(req.action.fields) || !id(req.action.id)) return fail(400,'INVALID_VIEW_AS_REQUEST');
   // Only the owner of a school account can establish its verified sign-in link.
-  if(!binding.targetPrincipalId || ['register','link'].includes(String(req.action.kind))) return fail(403,'VIEW_AS_UNAVAILABLE');
+  if(!principal || ['register','link'].includes(String(req.action.kind))) return fail(403,'VIEW_AS_UNAVAILABLE');
   const entry=req.entryAuditId;
   const guarded=writeEnvironment(env,query,binding.raw);
-  return cadetRoute(guarded,{environment:req.environment,generation:req.generation,principalId:binding.targetPrincipalId,
-    email:binding.directoryEmail,action:req.action},(c,g)=>submit(guarded,c,g),entry);
+  return cadetRoute(guarded,{environment:req.environment,generation:req.generation,principalId:principal,
+    email:email,action:req.action},(c,g)=>submit(guarded,c,g),entry);
 }
 
 function writeEnvironment<E extends Env>(env:E,query:ReturnType<typeof bindingQuery>,expected:string):E {

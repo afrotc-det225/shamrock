@@ -143,3 +143,5 @@ release separately, verify BFF session binding and all mutation/alternate-route
 denials, rehearse real named-account target/actor revocation, and measure hosted
 CPU on representative scoped/full/historical pages. Leave ordinary automation
 gates, schema data and production bindings unchanged during staging rehearsal.
+
+A school-account Wing grant can open the Wing workspace in View as when its principal matches the normalized Directory email hash and the target has active Wing access. When both the school and personal Google identity point to the same person and verified address, the Wing workspace uses the school grants and the personal workspace uses the Google account. Unrelated extra identities block the preview. The preview rechecks this mapping when reading the workspace. Exit a previously denied preview before selecting the person again.

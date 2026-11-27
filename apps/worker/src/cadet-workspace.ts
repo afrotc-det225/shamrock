@@ -126,7 +126,13 @@ export async function readCadetWorkspace(
   const fence = [lookup,bindings,personal ? flights.bind(email) : flights,leadership,control];
   const capture = await db.batch<Row>(section==="attendance" ? [...fence,...personalAttendanceQueries(db,email)] : fence);
   const first = capture.slice(0,fence.length).map(r=>r.results);
-  const [people, accounts, flightList, leaders, controls] = first;
+  const [people, linkedAccounts, flightList, leaders, controls] = first;
+  // Wing grants use the same verified address as the personal Google login.
+  // Strip only its exact, active school alias from the personal workspace check.
+  const schoolAlias = 'school.' + principal.slice('google.'.length);
+  const accounts = linkedAccounts.filter(account => !(actor===principal && account.principal_id===schoolAlias
+    && account.active===1 && people.length===1 && account.person_id===people[0].personId
+    && (!account.email || account.email===email)));
   if (
     controls.length !== 1 ||
     people.length > 1 ||

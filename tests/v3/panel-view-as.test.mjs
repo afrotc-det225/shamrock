@@ -326,3 +326,39 @@ test('school and View as queues honor captured flight and squadron ownership, in
   assert.equal(approved.status,200,JSON.stringify(approved));
   assert.deepEqual((await db.prepare("SELECT status FROM excusal_records ORDER BY request_id").all()).results.map(r=>r.status),['Submitted','Approved']);
 });
+
+test('Wing grants using school login identity support entry and scoped reads, and reject a changed email',async t=>{
+  const f=await fixture(t),email='fixture-wing@nd.edu';
+  const account='school.'+createHash('sha256').update(email).digest('hex');
+  await f.db.batch([
+    f.db.prepare("INSERT INTO directory_profiles SELECT 'unmapped',1,'alpha',last_name,first_name,as_year,rank,role,university,?,phone,dorm,cip_broad_area,cip_code,afsc,home_town,home_state,class_year,date_of_birth,flight_path_status,photo_link,updated_at FROM directory_profiles WHERE person_id='lead'").bind(email),
+    f.db.prepare("INSERT INTO memberships VALUES('unmapped','alpha',1)"),
+    f.db.prepare("INSERT INTO principals VALUES(?,'unmapped',1)").bind(account),
+    f.db.prepare("INSERT INTO admin_grants VALUES(?,'frontend.read','wing','*')").bind(account),
+  ]);
+  const entry=await f.send(enter('unmapped'));
+  assert.equal(entry.body.status,'ready');assert.equal(entry.body.directoryWorkspace,false);
+  const request={...base,entryAuditId:'entry',targetPersonId:'unmapped'};
+  const path='/v1/admin/panel/view-as/access';
+  const access=await f.send(request,path);
+  assert.equal(access.status,200);assert.equal(access.body.access.capabilities.fullSnapshot,true);
+  const personal='google.'+account.slice('school.'.length);
+  await f.db.batch([
+    f.db.prepare("INSERT INTO principals VALUES(?,'unmapped',1)").bind(personal),
+    f.db.prepare("INSERT INTO principal_accounts VALUES(?,?,'authenticated-confirmation','binding')").bind(personal,email),
+  ]);
+  const paired=await f.send(enter('unmapped','paired'));
+  assert.equal(paired.body.status,'ready');assert.equal(paired.body.targetPrincipalId,account);
+  const target={...request,entryAuditId:'paired'};
+  assert.equal((await f.send(target,path)).body.access.capabilities.fullSnapshot,true);
+  const profile=await f.send({...target,section:'profile'},'/v1/cadet/preview');
+  assert.equal(profile.status,200);assert.equal(profile.body.readOnly,false);
+  await f.db.prepare("INSERT INTO principals VALUES('unrelated','unmapped',1)").run();
+  assert.equal((await f.send(enter('unmapped','third'))).body.status,'ambiguous-principal');
+  assert.equal((await f.send(target,path)).status,403);
+  await f.db.prepare("DELETE FROM principal_accounts WHERE principal_id=?").bind(personal).run();
+  await f.db.prepare("DELETE FROM principals WHERE principal_id IN ('unrelated',?)").bind(personal).run();
+  await f.db.prepare("UPDATE directory_profiles SET email='changed@nd.edu' WHERE person_id='unmapped'").run();
+  assert.equal((await f.send(request,path)).status,403);
+  assert.equal((await f.send(enter('unmapped','changed'))).body.status,'no-verified-login');
+});

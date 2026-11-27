@@ -319,6 +319,9 @@ function App() {
       throw error;
     }
     if(result.directoryWorkspace){location.assign("/me/profile");return;}
+    if(person && result.viewAs?.status==="ready" && ["Assistant","System","Semester planning"].includes(page)){
+      location.assign("/attendance");return;
+    }
     setPreview(result.viewAs); if (!person) setPreviewName("");
     setProposal(null); setData(null); setNotice("");
     await reload(true);
