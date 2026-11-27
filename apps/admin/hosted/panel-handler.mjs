@@ -1,6 +1,7 @@
 import { directoryPortrait } from "./directory-photo.mjs";
 import {isWorkspacePath} from "../src/page-url.js";
 import {isUnifiedSite} from "./site.mjs";
+import { checkChatId, readChats, saveTurn } from "./chat-history.mjs";
 import { available, answer, model } from "./openai-assistant.mjs";
 import { authRoute, session, csrfCheck, sha } from "./auth.mjs";
 import { HostedBackend } from "./backend.mjs";
@@ -254,10 +255,26 @@ export default {
           json(await service.transition(url.searchParams.get("id"))),
         );
       }
-      if (request.method === "POST" && url.pathname === "/api/chat") {
-        if (!available(env, user, preview) || !(await backend.panelAuthority()).access.capabilities.fullSnapshot)
-          throw new PanelError("FORBIDDEN", "Assistant access is restricted.", 403);
-        return secure(json(await answer(env, body, env.operatorGuide, fetch, ()=>wingCharts(backend))));
+      const chatHistory=request.method==="GET" && url.pathname==="/api/chat/history";
+      if (chatHistory || (request.method==="POST" && url.pathname==="/api/chat")) {
+        if (!available(env,user,preview) || !(await backend.panelAuthority()).access.capabilities.fullSnapshot)
+          throw new PanelError("FORBIDDEN","Assistant access is restricted.",403);
+        const prefix="assistant/chat/v1/"+env.GENERATION+"/"+await sha(user.google_sub)+"/";
+        if(chatHistory){
+          if(!env.HISTORY_FILES)throw new PanelError("UNAVAILABLE","Saved chats are unavailable.",503);
+          const history=await readChats(env.HISTORY_FILES,prefix,url.searchParams.get("id"));
+          if(!(await backend.panelAuthority()).access.capabilities.fullSnapshot)throw new PanelError("FORBIDDEN","Assistant access is restricted.",403);
+          return secure(json(history));
+        }
+        const id=checkChatId(body?.chatId ?? crypto.randomUUID());
+        const reply=await answer(env,body,env.operatorGuide,fetch,()=>wingCharts(backend));
+        let saved=false;
+        try {
+          const title=typeof body.chatTitle==="string" && body.chatTitle.trim() ? body.chatTitle : body.messages[0].content;
+          await saveTurn(env.HISTORY_FILES,prefix,id,title,body.messages.at(-1).content,reply);
+          saved=true;
+        }catch{ /* Return the paid reply even if history storage is unavailable. */ }
+        return secure(json({...reply,saved,chatId:id}));
       }
       throw new PanelError("NOT_FOUND", "This action is unavailable.", 404);
     } catch (error) {

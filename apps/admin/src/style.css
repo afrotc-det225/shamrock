@@ -1637,3 +1637,25 @@ main:has(.matrix-scroll) { padding-bottom: 8px; }
   .excusal-queue .excusal-actions {grid-template-columns:repeat(4,minmax(0,1fr))}
   .excusal-queue .excusal-actions button {min-height:44px}
 }
+
+.assistant-page {max-width:none;margin:0}
+.chat-actions {display:flex;align-items:center;gap:.5rem}
+.chat-actions button {display:inline-flex;align-items:center;gap:.4rem}
+.chat-actions .chat-history-toggle {display:none}
+.chat-workspace {display:grid;grid-template-columns:minmax(10rem,14rem) minmax(0,50rem);gap:clamp(1rem,3vw,3rem);align-items:start}
+.chat-library {display:grid;gap:.35rem;min-width:0;border-top:2px solid var(--green);padding-top:.7rem}
+.chat-library h2 {font:inherit;font-weight:700;margin:0 0 .4rem}
+.chat-library small,.chat-link time {color:var(--muted)}
+.chat-library input {min-width:0;width:100%;margin-bottom:.35rem}
+.chat-link {display:grid;text-align:left;gap:.2rem;padding:.55rem .65rem;border:0;border-radius:.25rem;background:transparent;overflow-wrap:anywhere}
+.chat-link[aria-current=true],.chat-link:hover {background:#edf3f1}
+.chat-link time {font-size:.72rem}
+.chat-main {min-width:0}
+.chat-main .chat-form,.chat-main .message.user,.assistant-prompts button {border-radius:.35rem}
+@media(max-width:800px){
+  .chat-workspace {display:block}
+  .chat-actions .chat-history-toggle {display:inline-flex}
+  .chat-library {display:none}
+  .chat-library.expanded {display:grid;margin-bottom:1rem}
+  .assistant-page .heading {gap:.5rem;flex-wrap:wrap}
+}

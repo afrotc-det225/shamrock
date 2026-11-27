@@ -3,7 +3,7 @@ import React, { lazy, Suspense, useEffect, useRef, useState } from "react";
 import {overviewRoster} from "../../../packages/domain/src/frontend-reporting";
 import {operationallyActive} from "../../../packages/domain/src/admin";
 import OverviewInsights from "./OverviewInsights";
-import { Send } from "lucide-react";
+import { Send, SquarePen, MessagesSquare } from "lucide-react";
 import { Heading, Table, Status, Empty } from "./components";
 import {readUsage} from "./read-usage";
 import { api } from "./api";
@@ -110,26 +110,76 @@ export function System({ snapshot, meta, history, receiptsDeferred, reportingTim
   );
 }
 const AssistantResponse = lazy(()=>import("./AssistantResponse"));
-export function Assistant({ meta }) {
+export function Assistant({meta}){
+  if(!meta.assistantAvailable)return <section><Heading title="Assistant"/><p role="status">The assistant is currently unavailable.</p></section>;
+  return <AssistantWorkspace meta={meta}/>;
+}
+function AssistantWorkspace({ meta }) {
   const [messages,setMessages]=useState([]), [text,setText]=useState(""),
     [busy,setBusy]=useState(false), [error,setError]=useState("");
   const input=useRef(null), inFlight=useRef(false);
+  const [active,setActive]=useState(null), [chats,setChats]=useState([]), [showChats,setShowChats]=useState(false);
+  const [opening,setOpening]=useState(false), [query,setQuery]=useState("");
+  const threads=useRef(new Map());
+  const hosted=meta.hosted && meta.assistantAvailable;
+  useEffect(()=>{
+    if(!hosted)return;
+    const controller=new AbortController();
+    api("/chat/history",undefined,{signal:controller.signal}).then(({chats:stored})=>{
+      setChats(current=>[...current,...stored.filter(row=>!current.some(chat=>chat.id===row.id))]);
+    }).catch(()=>{if(!controller.signal.aborted)setError("Recent chats could not be loaded.");});
+    return ()=>controller.abort();
+  },[hosted]);
+  function newChat(){
+    setActive(null);setMessages([]);setText("");setError("");setShowChats(false);input.current?.focus();
+  }
+  async function openChat(chat){
+    if(inFlight.current)return;
+    inFlight.current=true;setOpening(true);setError("");
+    try{
+      const saved=threads.current.get(chat.id) || (await api("/chat/history?id="+chat.id)).messages;
+      if(!saved.length)throw new Error("This conversation is unavailable. Try again shortly.");
+      setActive(chat);setMessages(saved);setText("");setShowChats(false);
+    }catch(e){setError(e.message);}
+    finally{inFlight.current=false;setOpening(false);}
+  }
   async function send(event){
     event.preventDefault();
     if(inFlight.current || !meta.assistantAvailable || !text.trim())return;
     inFlight.current=true;
-    const question=text.trim(), next=[...messages,{role:"user",content:question}].slice(-15);
+    const question=text.trim(), next=[...messages,{role:"user",content:question}];
+    const chat=active || {id:crypto.randomUUID(),title:question.slice(0,90)};
     setMessages(next);setText("");setBusy(true);setError("");
     try{
-      const reply=await api("/chat",{messages:next.map(({role,content})=>({role,content}))});
-      setMessages([...next,{role:"assistant",content:reply.content,proposal:reply.proposal}]);
+      const reply=await api("/chat",{...(hosted ? {chatId:chat.id,chatTitle:chat.title} : {}),messages:next.slice(-15).map(({role,content})=>({role,content}))});
+      const transcript=[...next,{role:"assistant",content:reply.content,proposal:reply.proposal}];
+      setMessages(transcript);setActive(chat);
+      threads.current.set(chat.id,transcript);
+      setChats(rows=>[{...chat,at:Date.now()},...rows.filter(row=>row.id!==chat.id)]);
+      if(reply.saved===false)setError("This reply could not be saved to chat history.");
     }catch(e){
       setMessages(messages);setText(draft=>draft || question);setError(e.message);
     }finally{inFlight.current=false;setBusy(false);}
   }
   return <section className="assistant-page">
-    <Heading title="Assistant"/>
-    {!meta.assistantAvailable && <p role="status">The assistant is currently unavailable.</p>}
+    <Heading title="Assistant">
+      <div className="chat-actions">
+        <button className="chat-history-toggle" aria-expanded={showChats} onClick={()=>setShowChats(!showChats)}><MessagesSquare size={16}/>Recent chats</button>
+        <button disabled={busy || opening} onClick={newChat}><SquarePen size={16}/>New chat</button>
+      </div>
+    </Heading>
+    <div className="chat-workspace">
+    <aside aria-label="Recent chats" className={"chat-library"+(showChats ? " expanded" : "")}>
+      <h2>Recent chats</h2>
+      {chats.length>1 && <input type="search" aria-label="Search chat titles" placeholder="Search chats" value={query} onChange={e=>setQuery(e.target.value)}/>}
+      {!chats.length && <small>No conversations yet.</small>}
+      {chats.filter(row=>row.title.toLowerCase().includes(query.trim().toLowerCase())).map(row=>
+        <button key={row.id} className="chat-link" aria-current={active?.id===row.id ? "true" : undefined} disabled={busy || opening} onClick={()=>openChat(row)}>
+          <span>{row.title}</span><time dateTime={new Date(row.at).toISOString()}>{new Date(row.at).toLocaleDateString(undefined,{month:"short",day:"numeric"})}</time>
+        </button>)}
+    </aside>
+    <div className="chat-main" aria-busy={opening}>
+    {opening && <p role="status">Opening conversation…</p>}
     <div className="conversation" role="log" aria-label="Conversation">
       {messages.map((m,i)=><article key={i} className={"message "+m.role}>
         <span className="message-author">{m.role==="user" ? "You" : "SHAMROCK assistant"}</span>
@@ -146,12 +196,13 @@ export function Assistant({ meta }) {
         rows={2} placeholder={messages.length ? "Ask a follow-up…" : "Ask about the wing or SHAMROCK…"}
         maxLength={meta.hosted ? 1000 : 6000} value={text} onChange={e=>setText(e.target.value)}
         onKeyDown={e=>{if(e.key==="Enter" && !e.shiftKey && !e.nativeEvent.isComposing){e.preventDefault();e.currentTarget.form.requestSubmit();}}}
-        disabled={!meta.assistantAvailable}/>
-      <button className="primary" aria-label="Send question" title="Send question" disabled={busy || !meta.assistantAvailable || !text.trim()}><Send size={18}/></button>
+        disabled={opening || !meta.assistantAvailable}/>
+      <button className="primary" aria-label="Send question" title="Send question" disabled={opening || busy || !meta.assistantAvailable || !text.trim()}><Send size={18}/></button>
     </form>
     {!messages.length && meta.assistantAvailable && <div className="assistant-prompts">
       {["How is the detachment doing?","How do corrections work?"].map(prompt=><button type="button" key={prompt} onClick={()=>{setText(prompt);input.current?.focus();}}>{prompt}</button>)}
     </div>}
     <small id="assistant-privacy">{meta.hosted ? "OpenAI may receive your question, relevant code, and Wing totals. Omit personal details and secrets." : "Questions are sent to the CRC. Omit personal details and secrets."}</small>
+    </div></div>
   </section>;
 }

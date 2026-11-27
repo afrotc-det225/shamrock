@@ -372,3 +372,5 @@ The panel keeps the last loaded page visible while opening another page within t
 Workspace navigation uses bookmarkable links, such as `/attendance` and `/me/profile`. Refresh, opening a link in another tab, and browser Back and Forward preserve the requested page. Leadership pages use top-level paths. Personal pages use /me/. Existing query-string bookmarks resolve to the corresponding path. Existing sign-in and role checks still determine what the viewer can open.
 
 History opens with the semester selector and roster filters already in place. The hosted archive returns its semester list and latest published report together. Choosing another semester loads that report on demand.
+
+The hosted Assistant lists recent conversations for the authorized maintainer. Completed exchanges expire individually after 90 days in the existing private history KV namespace. Reopening a conversation reads its transcript without requesting a model response. Follow-ups use the existing bounded context and budget.
