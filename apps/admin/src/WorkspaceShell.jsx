@@ -89,7 +89,6 @@ export default function WorkspaceShell({ workspace="leadership", pages, page, fu
   );
   const links = <>
     <nav aria-label="Main navigation">
-      {mobile && (wingSwitch || personalSwitch)}
       {[
         ...leadership.map(([title,Icon]) => [title,Icon,"leadership"]),
         ...personal.filter(([title]) => !leadership.some(([name]) => name===title)).map(([title,Icon]) => [title,Icon,"cadet"]),
@@ -105,7 +104,7 @@ export default function WorkspaceShell({ workspace="leadership", pages, page, fu
     </nav>
     <div className="sidebar-bottom">
       {key && navigation?.key === key && navigation.failed && <button type="button" data-keep-menu-open onClick={()=>setMenuAttempt(n=>n+1)}>Retry loading menu</button>}
-      {!mobile && (wingSwitch || personalSwitch)}
+      {wingSwitch || personalSwitch}
       {account}
     </div>
   </>;

@@ -438,7 +438,7 @@ try {
     assert.equal(sessions,2,"switch keeps the same sign-in");
     assert.equal(await nav.getByRole("link",{name:"My Flight",exact:true}).count(),0);
     assert.equal(await nav.getByRole("link",{name:"My profile",exact:true}).count(),0);
-    await page.getByRole("link",{name:"Exit view",exact:true}).click();
+    await page.locator(".sidebar-bottom").getByRole("link",{name:"Exit view",exact:true}).click();
     await page.waitForURL("**/me/flight");
     await openNavigation(page);
     await switcher.waitFor();
@@ -452,7 +452,8 @@ try {
     await openNavigation(page);
     await switcher.waitFor();
     if(width===390) {
-      assert.equal(await nav.getByRole("link").first().textContent(),"View as administrator");
+      await page.locator(".sidebar-bottom").getByRole("link",{name:"View as administrator",exact:true}).waitFor();
+      assert.equal(await nav.getByRole("link",{name:"View as administrator",exact:true}).count(),0);
       const bounds=await switcher.boundingBox();
       assert(bounds.y >= 0 && bounds.y + bounds.height <= page.viewportSize().height);
     }
