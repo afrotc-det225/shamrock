@@ -373,3 +373,5 @@ In Assistant, select **New chat** to start a separate conversation or open **Rec
 The Cadets table initially shows the combined Cadet column and all Directory details. **Columns** remembers your selection, including separate last name, first name, and rank when needed for export.
 
 In the staging Assistant, the owner can request “Cancel” followed by an exact current-semester event name. Review the event and semester, then select **Approve cancellation**. The Assistant uses the Events page’s reviewed change and checks the saved status. A missing or ambiguous event does not produce an approval.
+
+The owner can also ask the Assistant for active cadets by campus, active leadership contact coverage, the number of pending excusals for active events, and current-semester event counts by type and status. Attendance reports can include flight and historical semester comparisons. Operational reports send counts to the model and keep contact details and excusal explanations inside SHAMROCK.

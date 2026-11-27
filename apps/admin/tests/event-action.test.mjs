@@ -22,3 +22,14 @@ test("no approval for ambiguous, compound, missing, already cancelled or explana
     assert.ok(!(await f.reply(q))?.eventAction);assert.equal(f.calls.length,0);
   }
 });
+
+import {reportTotals,reportSources} from "../hosted/operational-reports.mjs";
+test("reports select relevant sources and omit names, phones and free text",()=>{
+  assert.deepEqual(reportSources("compare pending excusals and leadership contacts"),["overview","leadership"]);
+  const contacts=[["id",2,"pid","PRIVATE","PRIVATE","rank","role","PRIVATE","office",1,"PRIVATE","PRIVATE","PRIVATE"]];
+  assert.deepEqual(reportTotals("leadership",{contacts:JSON.stringify(contacts)}),{activeLeadershipContacts:1,withOfficePhone:1,withOfficeLocation:1});
+  assert.deepEqual(reportTotals("overview",{pending:3,activeEvents:2}),{activeEvents:2,pendingExcusalsForActiveEvents:3});
+  const person=Array(12).fill("PRIVATE");person[11]="SMC";
+  assert.deepEqual(reportTotals("cadets",{people:JSON.stringify([person])}),{activeCadetsByCampus:{"St. Mary's":1}});
+  assert.deepEqual(reportTotals("event-list",{terms:'[["fall","Fall",1,1]]',events:'[["id","fall","llab",1,"PRIVATE","active"],["old","spring","llab",1,"PRIVATE","active"]]'}),{currentSemesterEventsByTypeAndStatus:{"llab / active":1}});
+});
