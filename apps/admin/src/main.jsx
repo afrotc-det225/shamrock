@@ -1,16 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
-import {
-  Home,
-  Users,
-  ChevronsUp,
-  CalendarDays,
-  ClipboardList,
-  FileCheck2,
-  Layers,
-  Settings,
-  Sparkles,
-} from "lucide-react";
+import {Sparkles} from "lucide-react";
+import {leadershipPages} from "./site-navigation";
 import { api, startSession, label, logout } from "./api";
 import { Drawer, EditorError, EditorSuspended } from "./components";
 import Events from "./Events";
@@ -30,16 +21,6 @@ import {workspaceFromUrl, pageFromUrl, writePageUrl, rememberSignInPage, restore
 import WorkspaceShell, {PageLink} from "./WorkspaceShell";
 import { ViewAsSelector, ViewAsAccount, viewAsStatus } from "./ViewAs";
 import "./style.css";
-const pages = [
-  ["Overview", Home],
-  ["Events", CalendarDays],
-  ["Attendance", ClipboardList],
-  ["Excusals", FileCheck2],
-  ["Cadets", Users],
-  ["Leadership", ChevronsUp],
-  ["Semester planning", Layers],
-  ["System", Settings],
-];
 const profileFor = page => page === "Cadets" ? cadetBrowseProfile() : ({
   Leadership:"leadership", Attendance:"attendance", Excusals:"excusals",
   "Semester planning":"semester", Overview:"overview", Events:"events",
@@ -58,6 +39,7 @@ function App() {
     [sessionInfo, setSessionInfo] = useState(null),
     [readOutage, setReadOutage] = useState(null),
     [sync, setSync] = useState("");
+  const [routeFamily, setRouteFamily] = useState(workspaceFromUrl);
   const [destination, setDestination] = useState(null);
   const [preview, setPreview] = useState(null), [previewName, setPreviewName] = useState("");
   const [readProgress, setReadProgress] = useState({stage: "Checking access"});
@@ -292,8 +274,14 @@ function App() {
   };
   useEffect(() => {
     const restore = () => {
-      if (sessionInfo && (workspaceFromUrl() === "cadet" ||
-          (!preview && sessionInfo.schoolLogin))) return;
+      setRouteFamily(workspaceFromUrl());
+      if (workspaceFromUrl() === "cadet") {
+        readIntent.current++;
+        if (pendingAbort.current) { pendingAbort.current.superseded = true; pendingAbort.current.abort(); }
+        setDestination(null);
+        return;
+      }
+      if (sessionInfo && !preview && sessionInfo.schoolLogin) return;
       navigate(pageFromUrl("leadership") || "Events", true);
     };
     window.addEventListener("popstate", restore);
@@ -326,9 +314,7 @@ function App() {
   const access = data?.snapshot?.access || data?.manifest?.access;
   const scoped = access && !access.capabilities.fullSnapshot;
   const browseReady = page === "Cadets" ? ["cadets","cadet-details"].includes(data?.browse?.profile) : data?.browse?.profile === profileFor(page);
-  const visiblePages = blockedPreview ? [] : scoped
-    ? pages.filter(([title]) => ["Attendance", "Excusals"].includes(title))
-    : pages;
+  const visiblePages = blockedPreview || (sessionInfo?.hosted && !access) ? [] : leadershipPages(!scoped, preview);
   const navigationPage = destination?.page ?? page;
   const common = { ...data, propose, busy, readOnly: !!preview && !data?.meta.delegatedEdits, notify: setNotice, refresh: reload, run };
   if (signIn) {
@@ -369,9 +355,9 @@ function App() {
   }
 
   let outageScreen = null;
-  if(sessionInfo && (workspaceFromUrl()==="cadet" ||
-    !preview && (sessionInfo.schoolLogin || sessionInfo.cadetWorkspace && workspaceFromUrl()!=="leadership")))
-    return <CadetWorkspace session={sessionInfo}/>;
+  if(sessionInfo && (routeFamily==="cadet" ||
+    !preview && (sessionInfo.schoolLogin || sessionInfo.cadetWorkspace && routeFamily!=="leadership")))
+    return <CadetWorkspace session={{...sessionInfo,viewAs:preview}}/>;
   if (sessionInfo && readOutage) {
     const retryTime = new Intl.DateTimeFormat(undefined, {
       hour:"numeric", minute:"2-digit", timeZoneName:"short",
@@ -404,13 +390,12 @@ function App() {
     <div hidden={!!outageScreen} inert={outageScreen ? true : undefined}>
     <EditorSuspended.Provider value={!!outageScreen}>
     <EditorError.Provider value={error}>
-      <WorkspaceShell mobileContext={preview && ((data?.meta.delegatedEdits ? "Acting as " : "Viewing as ") + viewAsLabel)} pages={visiblePages} page={navigationPage === "History" ? "Attendance" : navigationPage} navigate={navigate} account={<>
+      <WorkspaceShell session={sessionInfo} preview={preview} mobileContext={preview && ((data?.meta.delegatedEdits ? "Acting as " : "Viewing as ") + viewAsLabel)} pages={visiblePages} page={navigationPage === "History" ? "Attendance" : navigationPage} navigate={navigate} account={<>
       {preview && <ViewAsAccount acting={data?.meta.delegatedEdits} busy={busy} onExit={() => viewAs(null)}
               label={viewAsLabel} />}
-            {sessionInfo?.cadetWorkspace && !preview && <a href="/me">My cadet workspace</a>}
             {!preview && !scoped && data?.meta.viewAsEnabled &&
               <ViewAsSelector people={data.snapshot?.people ?? (["cadets","leadership","cadet-details","semester"].includes(data.browse?.profile) ? data.list.people : null)} onSelect={viewAs} busy={busy} />}
-            {!preview && !scoped && (
+            {!preview && !scoped && data && (
               <PageLink workspace="leadership" title="Assistant" navigate={navigate}
                 className={page === "Assistant" ? "selected" : ""}
               >

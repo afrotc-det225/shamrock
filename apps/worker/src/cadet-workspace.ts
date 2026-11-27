@@ -176,7 +176,7 @@ export async function readCadetWorkspace(
   const requests = (
     predicate: string,
   ) => `SELECT r.request_id AS requestId,r.person_id AS personId,r.unit_id AS flightId,r.event_id AS eventId,
-    e.label AS event,p.display_name AS personDisplayName,r.status,r.requested_outcome AS requestedOutcome,r.reason,
+    e.label AS event,d.start_at AS eventStartAt,p.display_name AS personDisplayName,r.status,r.requested_outcome AS requestedOutcome,r.reason,
     COALESCE((SELECT audit_id FROM audit_events WHERE command_id=r.last_command_id),0) AS 'order',(r.origin='legacy' AND r.last_command_id IS NULL) AS legacyStateOnly,r.version,r.submitted_at AS submittedAt,r.decision_reason AS decisionReason,sc.flight_label AS capturedFlightLabel,sc.squadron_label AS capturedSquadronLabel
     FROM excusal_records r JOIN event_details d ON d.event_id=r.event_id JOIN events e ON e.event_id=r.event_id
     JOIN people p ON p.person_id=r.person_id LEFT JOIN excusal_request_scopes sc ON sc.request_id=r.request_id

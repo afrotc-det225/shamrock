@@ -35,7 +35,7 @@ export async function decodeBrowse(data) {
   }
   const people=columns("people","wireId personId lastName firstName asYear flightId flightPathStatus")
     .map(p=>({...p,active:operationallyActive(p),dateOfBirth:null}));
-  const events=columns("events","wireId eventId termId label columnLabel eventType status trainingWeek displayOrder hasRoster version");
+  const events=columns("events","wireId eventId termId label columnLabel eventType status trainingWeek displayOrder hasRoster version"+(profile==="excusals"?" startAt":""));
   const terms=columns("terms","termId label sortOrder isCurrent").map(v=>({...v,isCurrent:!!v.isCurrent}));
   const list={people,events,terms,flights,access,scope:data.browse.scope};
   if(profile==="excusals"){

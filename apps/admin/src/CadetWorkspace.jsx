@@ -3,12 +3,13 @@ import { compareCadetsForDisplay } from "../../../packages/domain/src/cadet-disp
 import { api, logout, eventTypes } from "./api";
 import { Drawer, Empty, Field, Heading, Select, Status, Table } from "./components";
 import Excusals from "./Excusals";
-import {pageFromUrl, writePageUrl} from "./page-url";
+import {pageFromUrl, workspaceFromUrl, writePageUrl} from "./page-url";
 import { ProfileField } from "./ProfileField";
 import { DirectoryPhoto } from "./DirectoryPhoto";
 import WorkspaceShell from "./WorkspaceShell";
 import { ViewAsAccount } from "./ViewAs";
-import { ClipboardList, FileCheck2, Users, UserRound, ExternalLink } from "lucide-react";
+import {personalPages} from "./site-navigation";
+import { ExternalLink } from "lucide-react";
 import { attendanceMeanings } from "./AttendanceMatrix";
 import { FlightHome } from "./FlightHome";
 import { calculateAttendanceCredit } from "../../../packages/domain/src/frontend-reporting";
@@ -427,21 +428,12 @@ export default function CadetWorkspace({ session }) {
   const flight = state?.flights.find(
     (f) => f.flightId === state.profile?.flightId,
   )?.label;
-  const pages =
-    state && !state.registration
-      ? [
-          ...(state.flightCommander ? [["My Flight", Users]] : []),
-          ...(state.squadron || state.flightCommander ? [["Excusals", FileCheck2]] : []),
-          ["My requests", ClipboardList],
-          ["My attendance", ClipboardList],
-          ["Submit attendance", ClipboardList],
-          ...(state.squadron ? [["Attendance reviews",FileCheck2]] : []),
-          ["My profile", UserRound],
-        ]
-      : [];
+  const pages = personalPages(state);
   const page = pages.find(([title]) => title === tab)?.[0] || pages[0]?.[0];
   useEffect(() => {
-    const restore = () => setTab(pageFromUrl("cadet"));
+    const restore = () => {
+      if (workspaceFromUrl() !== "leadership") setTab(pageFromUrl("cadet"));
+    };
     window.addEventListener("popstate", restore);
     return () => window.removeEventListener("popstate", restore);
   }, []);
@@ -471,6 +463,7 @@ export default function CadetWorkspace({ session }) {
           {
             eventId: r.eventId,
             label: r.event,
+            startAt: r.eventStartAt,
             termId: "current",
             status: "active",
           },
@@ -483,7 +476,7 @@ export default function CadetWorkspace({ session }) {
     access: { capabilities: { fullSnapshot: false } },
   };
   return (
-    <WorkspaceShell mobileContext={preview && ((state?.readOnly === false ? "Acting as " : "Viewing as ") + (name || "selected cadet"))} workspace="cadet" pages={pages} page={state?.registration ? "Create profile" : page} navigate={navigate} account={<>
+    <WorkspaceShell session={session} preview={session.viewAs} mobileContext={preview && ((state?.readOnly === false ? "Acting as " : "Viewing as ") + (name || "selected cadet"))} workspace="cadet" pages={pages} page={state?.registration ? "Create profile" : page} navigate={navigate} account={<>
       {state && !state.writable && <small role="status" className="submission-status">Submissions are paused.</small>}
       {preview && <ViewAsAccount acting={state?.readOnly === false} label={name || "selected cadet"} busy={busy} onExit={async () => {
         try {
@@ -491,7 +484,6 @@ export default function CadetWorkspace({ session }) {
           location.assign("/");
         } catch (e) { setError(e.message); }
       }} />}
-      {!preview && !session.schoolLogin && <a className="workspace-switch" href="/events">Leadership workspace</a>}
       <p>
         {name && !preview && <strong className="account-name">{name}</strong>}
         {role}

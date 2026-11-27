@@ -126,6 +126,7 @@ test('Flight commander and deputy read only their assigned Flight while existing
 
 test('Blue/Gold decision visibility uses captured Squadron after Flight reparent and equals mutation authorization', async t => {
     const f = await fixture(t); await f.request('cadet', 'before-reparent');
+    await f.db.prepare("UPDATE event_details SET start_at='2026-09-14T13:00:00Z' WHERE event_id='event'").run();
     await f.db.prepare("UPDATE flight_hierarchy SET squadron_id='gold' WHERE unit_id='alpha'").run(); await f.reconcile();
     await f.request('cadet', 'after-reparent');
     for (const [principal, expected] of [['blue', [['before-reparent', true]]], ['gold', [['after-reparent', true]]], ['flight', [['after-reparent', false], ['before-reparent', false]]]]) {
@@ -133,6 +134,7 @@ test('Blue/Gold decision visibility uses captured Squadron after Flight reparent
         assert.deepEqual(rows.map(r => [r.requestId, r.canDecide]), expected);
         const view = await f.send({environment:'local',generation:1,principalId:principal,profile:'excusals'}, '/v1/admin/panel/browse');
         assert.equal(view.status,200);
+        assert.equal(JSON.parse(view.body.tables.events).find(row=>row[1]==="event")?.at(-1),"2026-09-14T13:00:00Z");
         assert.deepEqual(JSON.parse(view.body.tables.requests).map(r=>[r[0],r[9]===1]),expected);
         for (const row of rows) {
             const check = excusalDecisionPermission(principal, row.requestId, row.flightId);

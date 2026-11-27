@@ -60,9 +60,13 @@ try {
           section,attendance:section==="attendance"?[{eventId:"llab",label:"TW-1 LLAB",eventType:"llab",version:1,baseVersion:0,code:"A"},{eventId:"lab2",label:"TW-2 LLAB",eventType:"llab",version:2,baseVersion:0,code:"A"}]:[],
           linked: true, writable: true, readOnly:false, registration: role === "Registration",
           profile: role === "Registration" ? null : {personId:"one", firstName:"Sample", lastName:"Cadet", flightId:"alpha",afsc:"13N – Nuclear and Missile Operations ".repeat(6).trim(),photoLink:"https://drive.google.com/file/d/fictional-photo/view"},
-          flights: [{ flightId:"alpha", label:"Alpha" }], events: [], actions: [], queue: (squadron || role==="Flight") ? [{requestId:"example",version:3,personId:"cadet",eventId:"llab",event:"TW-2 LLAB",
+          flights: [{ flightId:"alpha", label:"Alpha" }], events: [], actions: [], queue: (squadron || role==="Flight") ? [{requestId:"example",version:3,personId:"cadet",eventId:"llab",event:"TW-2 LLAB",eventStartAt:"2026-10-14T14:00:00Z",
             personDisplayName:"Test Requester",requestedOutcome:"E",status:decision?.decision || "Submitted",
-            submittedAt:"2026-10-10T13:20:00Z",reason:"Fixture scheduling conflict",flightId:"test-flight",capturedFlightLabel:flight,capturedSquadronLabel:squadron}] : [],
+            submittedAt:"2026-10-10T13:20:00Z",reason:"Fixture scheduling conflict",flightId:"test-flight",capturedFlightLabel:flight,capturedSquadronLabel:squadron},
+            ...[["earlier","2026-10-12T14:00:00Z"],["undated",null]].map(([id,eventStartAt])=>({
+              requestId:id,version:2,eventId:id,event:id,eventStartAt,personDisplayName:id,
+              requestedOutcome:"E",status:"Approved",submittedAt:"2026-10-11T12:00:00Z",flightId:"test-flight",capturedFlightLabel:flight,capturedSquadronLabel:squadron
+            }))] : [],
           requests: [{requestId:"own",event:"TW-3 LLAB",requestedOutcome:"E",reason:"Conflicting lab",status:"Approved",decisionReason:"Reviewed schedule"}], roster: [{name:"Test Cadet",personId:"member",version:1,role:""}], ownFlightCount:4, reportEvents:[{eventId:"lab16",eventType:"llab",label:"TW-16 LLAB"},{eventId:"sec16",eventType:"secondary",label:"TW-16 Secondary"}],
           reportRoster:section==="report:lab16"?[["AS100","Able","Tom"],["AS400","Zed","Ron"],["AS400","Able","Zoe"],["AS400","Able","Amy"]].map(([asYear,lastName,firstName],i)=>({asYear,lastName,firstName,personId:"fixture"+i,flightId:"alpha",version:1})):[], flightCommander:role === "Flight",
           squadron,
@@ -95,6 +99,26 @@ try {
       if (role === "Flight") {
         await openNavigation(page);
         await nav.getByRole("link", {name:"Excusals",exact:true}).click();
+      }
+      if (role==="Flight" || squadron) {
+        await page.locator(".excusal-queue tbody tr").first().waitFor();
+        if(width===390) await page.getByRole("button",{name:"Filters"}).click();
+        const sort=page.getByLabel("Sort by",{exact:true});
+        assert.equal(await sort.inputValue(),"submission");
+        const beforeSort=calls.length;
+        await page.getByLabel("Decision status").selectOption("");
+        const names=page.locator(".excusal-cadet button");
+        assert.deepEqual(await names.allTextContents(),["Test Requester","earlier","undated"]);
+        await sort.selectOption("event-asc");
+        assert.deepEqual(await names.allTextContents(),["earlier","Test Requester","undated"]);
+        await sort.selectOption("event-desc");
+        assert.deepEqual(await names.allTextContents(),["Test Requester","earlier","undated"]);
+        await sort.selectOption("submission");
+        await page.getByLabel("Decision status").selectOption("Submitted");
+        assert.equal(calls.length,beforeSort);
+        if(width===390) await page.keyboard.press("Escape");
+      }
+      if (role==="Flight") {
         const row=page.locator(".excusal-queue tbody tr");
         await row.getByText("Test Requester").click();
         assert.equal(await page.getByRole("button",{name:/^(Approve|Deny)$/}).count(),0);
@@ -217,6 +241,51 @@ try {
       assert.deepEqual(calls, ["POST /api/session", "GET /api/cadet",...(role==="Flight"?["GET /api/cadet?section=flight","GET /api/cadet?section=flight","POST /api/cadet","GET /api/cadet","GET /api/cadet?section=excusals","GET /api/cadet"]:[]),...(squadron?["POST /api/cadet","GET /api/cadet"]:[]),...(tabs.length?["GET /api/cadet?section=profile","GET /api/cadet","GET /api/cadet?section=profile","GET /api/cadet?section=attendance","POST /api/cadet","POST /api/cadet","GET /api/cadet?section=attendance","GET /api/cadet?section=report","GET /api/cadet?section=report:lab16","POST /api/cadet","GET /api/cadet?section=report"]:[])]);
       await page.close();
     }
+  }
+  // A Directory member with panel permissions can move between both sets of
+  // pages in one menu and session, including via browser history.
+  for (const width of [1440,390]) {
+    const page=await browser.newPage({viewport:{width,height:850}});
+    let sessions=0, documents=0;
+    page.on("request",r=>{if(r.resourceType()==="document") documents++;});
+    await page.route("**/api/**",route=>{
+      const url=new URL(route.request().url());
+      if(url.pathname==="/api/session"){
+        sessions++;
+        return route.fulfill({json:{hosted:true,csrf:"fixture",cadetWorkspace:true,schoolLogin:false}});
+      }
+      if(url.pathname==="/api/navigation")return route.fulfill({json:url.searchParams.get("include")==="personal"
+        ? {personal:{flightCommander:true,squadron:false}} : {leadership:{full:false,canViewAs:false}}});
+      if(url.pathname==="/api/cadet")return route.fulfill({json:{
+        linked:true,writable:true,profile:{personId:"fixture",flightId:"alpha"},flights:[],requests:[],actions:[],events:[],flightCommander:true,
+      }});
+      if(url.pathname==="/api/state")return route.fulfill({json:{
+        meta:{hosted:true},manifest:{access:{capabilities:{fullSnapshot:false}}},browse:{profile:"excusals"},
+        list:{access:{capabilities:{fullSnapshot:false}},people:[],events:[],terms:[],flights:[],requests:[]},
+      }});
+      return route.abort();
+    });
+    await page.goto(origin+"/me/requests");
+    const nav=page.getByRole("navigation",{name:"Main navigation"});
+    const checkMenu=async()=>{
+      await openNavigation(page);
+      await nav.getByRole("link",{name:"My profile",exact:true}).waitFor();
+      await nav.getByRole("link",{name:"Attendance",exact:true}).waitFor();
+      assert.deepEqual(await nav.getByRole("link").allTextContents(),["Attendance","Excusals","My Flight",...requests]);
+    };
+    await page.getByRole("heading",{name:"My excusals",exact:true}).waitFor();
+    await checkMenu();
+    await nav.getByRole("link",{name:"Excusals",exact:true}).click();
+    await page.getByText("No requests match these filters.").waitFor();
+    assert.equal(new URL(page.url()).pathname,"/excusals");
+    await checkMenu();
+    await nav.getByRole("link",{name:"My requests",exact:true}).click();
+    await page.getByRole("heading",{name:"My excusals",exact:true}).waitFor();
+    await page.goBack();
+    await page.getByText("No requests match these filters.").waitFor();
+    assert.equal(sessions,1);
+    assert.equal(documents,1);
+    await page.close();
   }
   console.log("Cadet, Flight, Squadron, registration and delegated cadet workspace passed on desktop and phone.");
 } finally {

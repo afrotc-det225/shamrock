@@ -115,6 +115,27 @@ export default {
         if (request.method==="POST" && (!body || !body.kind)) throw new PanelError("INVALID_REQUEST","Choose a workspace action.");
         return backend.post("/v1/cadet/workspace",{...input,...(section?{section}:{}),...(request.method==="POST"?{action:body}:{})});
       };
+      if (url.pathname === "/api/navigation" && request.method === "GET") {
+        const include = url.searchParams.get("include");
+        if (preview && (preview.status !== "ready" || env.VIEW_AS_ENABLED !== "1")) return secure(json({}));
+        try {
+          if (include === "personal") {
+            if (!user.schoolEmail && !preview) return secure(json({}));
+            const {registration, flightCommander, squadron} = await cadetWorkspace("profile");
+            return secure(json({personal:{registration, flightCommander:!!flightCommander, squadron:!!squadron}}));
+          }
+          if (include === "leadership") {
+            if (user.principal_id.startsWith("school.")) return secure(json({}));
+            const {access} = await backend.panelAuthority();
+            return secure(json({leadership:{full:access.capabilities.fullSnapshot,
+              canViewAs:!preview && env.VIEW_AS_ENABLED==="1" && access.capabilities.canViewAs===true}}));
+          }
+        } catch (error) {
+          if (error.status === 403) return secure(json({}));
+          throw error;
+        }
+        throw new PanelError("INVALID_REQUEST","Unknown navigation request.");
+      }
       if (url.pathname === "/api/directory/photo" && request.method === "GET") {
         return secure(await directoryPortrait(env, backend, user, preview, url.searchParams, () => cadetWorkspace("profile")));
       }

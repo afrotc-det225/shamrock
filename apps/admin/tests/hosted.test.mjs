@@ -769,6 +769,9 @@ test('View as keeps the verified actor, wraps reads, and blocks every mutation e
   const entered=await post('/api/view-as',{personId:'selected-cadet'});assert.equal(entered.status,200);
   const state=await f.mf.dispatchFetch(origin+'/api/state',{headers});assert.equal(state.status,200);
   const data=await state.json();assert.equal(data.viewAs.personId,'selected-cadet');assert.equal(data.manifest.access.capabilities.fullSnapshot,false);assert.equal(data.viewAsRevision,'a'.repeat(64));
+  const menu=await f.mf.dispatchFetch(origin+'/api/navigation?include=leadership',{headers});
+  assert.equal(menu.status,200);
+  assert.deepEqual(await menu.json(),{leadership:{full:false,canViewAs:false}});
   const chartResponse=await f.mf.dispatchFetch(origin+'/api/wing-charts',{headers});
   assert.equal(chartResponse.status,403);
   assert.equal((await chartResponse.json()).error.code,'FORBIDDEN');

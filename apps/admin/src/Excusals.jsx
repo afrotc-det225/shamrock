@@ -54,12 +54,14 @@ export default function Excusals({
   const s = snapshot || list;
   const [query, setQuery] = useState(""),
     [status, setStatus] = useState("Submitted"),
+    [sort, setSort] = useState("submission"),
     [flight, setFlight] = useState(""),
     [squadron, setSquadron] = useState(""),
     [edit, setEdit] = useState(null),
     [reason, setReason] = useState("");
   const queue = currentExcusalRequests(s);
   const events = new Map(s.events.map((e) => [e.eventId, e.label]));
+  const starts = new Map(s.events.map(e => [e.eventId, Date.parse(e.startAt)]));
   const people = new Map(s.people.map((p) => [p.personId, name(p)]));
   const who = (r) =>
     r.personDisplayName || people.get(r.personId) || "Unknown cadet";
@@ -75,9 +77,19 @@ export default function Excusals({
         .toLowerCase()
         .includes(query.trim().toLowerCase()),
   );
-  visible.sort((a,b) => Number(b.status === "Submitted") - Number(a.status === "Submitted") ||
-    (a.status === "Submitted" ? 1 : -1) * ((a.submittedAt || "").localeCompare(b.submittedAt || "")) ||
-    who(a).localeCompare(who(b)));
+  function submissionOrder(a, b) {
+    return Number(b.status === "Submitted") - Number(a.status === "Submitted") ||
+      (a.status === "Submitted" ? 1 : -1) * ((a.submittedAt || "").localeCompare(b.submittedAt || "")) ||
+      who(a).localeCompare(who(b)) || a.requestId.localeCompare(b.requestId);
+  }
+  visible.sort((a, b) => {
+    if (sort === "submission") return submissionOrder(a, b);
+    const left = starts.get(a.eventId), right = starts.get(b.eventId);
+    if (Number.isFinite(left) && Number.isFinite(right) && left !== right)
+      return sort === "event-asc" ? left - right : right - left;
+    if (Number.isFinite(left) !== Number.isFinite(right)) return Number.isFinite(left) ? -1 : 1;
+    return submissionOrder(a, b);
+  });
   const selected = edit && queue.find(r => r.requestId === edit.requestId);
   const scoped = s.access && !s.access.capabilities.fullSnapshot;
   const canDecide = r => !readOnly && (scoped ? r.canDecide === true : r.canDecide !== false);
@@ -104,7 +116,7 @@ export default function Excusals({
             value={query}
             onChange={setQuery}
           />
-          <ToolbarFilters active={Boolean(squadron || flight || status !== "Submitted")}>
+          <ToolbarFilters active={Boolean(squadron || flight || status !== "Submitted" || sort !== "submission")}>
             {squadrons.length > 1 && <Select label="Squadron" value={squadron}
               onChange={value => {setSquadron(value);setFlight("");}}
               options={[{value:"",label:"Entire wing"},...squadrons]}/>}
@@ -127,6 +139,11 @@ export default function Excusals({
                 ...Array.from(new Map(bySquadron.map(r => [r.flightId, flightName(r)])), ([value,label]) => ({value,label})).sort((a,b)=>a.label.localeCompare(b.label)),
               ]}
             />
+            <Select label="Sort by" value={sort} onChange={setSort} options={[
+              {value:"submission",label:"Submission time"},
+              {value:"event-asc",label:"Event date · earliest first"},
+              {value:"event-desc",label:"Event date · latest first"},
+            ]}/>
           </ToolbarFilters>
         </div>
       </section>
@@ -141,6 +158,8 @@ export default function Excusals({
           </button></td>
           <td className="excusal-code" data-mark={r.requestedOutcome}>{r.requestedOutcome}</td>
           <td className="excusal-event">{events.get(r.eventId)}
+            {sort !== "submission" && <small>{Number.isFinite(starts.get(r.eventId))
+              ? <time dateTime={new Date(starts.get(r.eventId)).toISOString()}>{submissionTime.format(starts.get(r.eventId))}</time> : "Date to be determined"}</small>}
             {r.reason && <small>{r.reason}</small>}
           </td>
           <td className="excusal-status" data-status={r.status}><Status>{r.status}</Status><SubmittedAt value={r.submittedAt}/></td>
