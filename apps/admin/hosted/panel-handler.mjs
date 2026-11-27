@@ -134,7 +134,7 @@ export default {
             if (user.principal_id.startsWith("school.") && !user.wingAccess) return secure(json({}));
             const {access} = await backend.panelAuthority();
             return secure(json({leadership:{full:access.capabilities.fullSnapshot,
-              assistantAvailable:access.capabilities.fullSnapshot && available(env,user,preview),
+              assistantAvailable:access.capabilities.fullSnapshot && available(env,user,preview,access.capabilities),
               canViewAs:!preview && env.VIEW_AS_ENABLED==="1" && access.capabilities.canViewAs===true}}));
           }
         } catch (error) {
@@ -235,7 +235,7 @@ export default {
               hosted: true,
               delegatedEdits: !!backend.delegating,
               viewAsEnabled: env.VIEW_AS_ENABLED === "1" && manifest?.access?.capabilities?.canViewAs === true,
-              assistantAvailable: available(env, user, preview) && manifest.access.capabilities.fullSnapshot,
+              assistantAvailable: available(env, user, preview, manifest.access.capabilities) && manifest.access.capabilities.fullSnapshot,
               model,
               transitionPolicy: TRANSITION_POLICY,
             },
@@ -304,8 +304,11 @@ export default {
       const rosterLookup=request.method==="GET" && url.pathname==="/api/chat/roster";
       const names=request.method==="POST" && url.pathname==="/api/chat/cohort-names";
       if (approveWing || names || rosterLookup || adminDirectory || testJob || chatHistory || (request.method==="POST" && url.pathname==="/api/chat")) {
-        if (!available(env,user,preview) || !(await backend.panelAuthority()).access.capabilities.fullSnapshot)
+        const {access}=await backend.panelAuthority();
+        if (!access.capabilities.fullSnapshot || !available(env,user,preview,access.capabilities))
           throw new PanelError("FORBIDDEN","Assistant access is restricted.",403);
+        const releaseOwner=env.ASSISTANT_OWNER_SUB===user.google_sub;
+        if(testJob && !releaseOwner)throw new PanelError("FORBIDDEN","Website tests and releases require the SHAMROCK owner.",403);
         if(approveWing){
           if(body?.approved!==true)throw new PanelError("INVALID_REQUEST","Review and approve the named account.");
           return secure(json(await applyWingGrant(env,user.principal_id,checkChatId(body.id))));
@@ -344,7 +347,8 @@ export default {
         if(chatHistory){
           if(!env.HISTORY_FILES)throw new PanelError("UNAVAILABLE","Saved chats are unavailable.",503);
           const history=await readChats(env.HISTORY_FILES,prefix,url.searchParams.get("id"));
-          if(!(await backend.panelAuthority()).access.capabilities.fullSnapshot)throw new PanelError("FORBIDDEN","Assistant access is restricted.",403);
+          const fresh=(await backend.panelAuthority()).access.capabilities;
+          if(!fresh.fullSnapshot || !available(env,user,preview,fresh))throw new PanelError("FORBIDDEN","Assistant access is restricted.",403);
           return secure(json(history));
         }
         const id=checkChatId(body?.chatId ?? crypto.randomUUID());
@@ -352,7 +356,7 @@ export default {
           const view=await browseState(backend,await backend.panelAuthority(),profile==="careers"?"cadets":profile);
           return reportTotals(profile,view.tables);
         },readRoster,readAccessDirectory,personId=>prepareWingGrant(env,user.principal_id,personId,sha));
-        if(isUnifiedSite(env) && reply.proposal){
+        if(releaseOwner && isUnifiedSite(env) && reply.proposal){
           const {area,path,commit,before,after,edits}=reply.proposal;
           reply.proposal.jobId=await env.PANEL_DB.repositoryJob({operation:"create",id:crypto.randomUUID(),patch:{area,path,commit,before,after,edits}});
           if(reply.proposal.jobId)reply.proposal.dispatch=await wakeRunner(env);

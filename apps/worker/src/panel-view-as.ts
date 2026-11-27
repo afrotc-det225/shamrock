@@ -1,3 +1,4 @@
+import {wingAdministratorGrants} from "../../../packages/domain/src/panel-read.js";
 import {flightSection} from "./cadet-workspace.js";
 import { cadetRoute, reportSection, eligibleSchoolSql, readCadetWorkspace } from "./cadet-workspace.js";
 import type {WingTableCache} from './panel-cache.js';
@@ -28,13 +29,16 @@ const full = (principal: string) => `EXISTS(SELECT 1 FROM principals p WHERE p.p
   EXISTS(SELECT 1 FROM admin_grants g WHERE g.principal_id=p.principal_id AND g.capability='frontend.read' AND g.scope_kind='wing' AND g.scope_key='*')
   OR EXISTS(SELECT 1 FROM permission_managers m JOIN ${effectiveAdminGrants} g ON g.principal_id=m.principal_id
     WHERE m.principal_id=p.principal_id AND m.active=1 AND g.capability='frontend.read' AND g.scope_kind='wing' AND g.scope_key='*')))`;
+const administrator = (principal: string) => `(${full(principal)} AND (
+  EXISTS(SELECT 1 FROM permission_managers WHERE principal_id=${principal} AND active=1) OR
+  (SELECT COUNT(*) FROM admin_grants WHERE principal_id=${principal} AND scope_kind='wing' AND scope_key='*'
+    AND capability IN (${wingAdministratorGrants.map(value=>"'"+value+"'").join(",")}))=${wingAdministratorGrants.length}))`;
 /** The picker needs only the delegation capability and the directory display fields. */
 export async function viewAsPeople(env: Env, input: unknown) {
   const req = identity(env, input);
   if (Object.keys(req).sort().join(',') !== 'environment,generation,principalId') return fail(400,'INVALID_VIEW_AS_REQUEST');
   const [result] = await env.DB.batch<Row>([env.DB.prepare(`WITH actor AS (SELECT ? AS id)
-    SELECT ${full('(SELECT id FROM actor)')} AND EXISTS (
-      SELECT 1 FROM permission_managers WHERE principal_id=(SELECT id FROM actor) AND active=1) AS allowed,
+    SELECT ${administrator('(SELECT id FROM actor)')} AS allowed,
       EXISTS(SELECT 1 FROM system_control WHERE singleton=1 AND environment=? AND generation=?)
       AND (SELECT COUNT(*) FROM terms WHERE is_current=1)=1
       AND NOT EXISTS(SELECT 1 FROM legacy_import_runs WHERE state<>'complete')
@@ -59,7 +63,7 @@ function bindingQuery(env: Env, actor: string, person: string, entry: string | n
     WHERE p.person_id=? AND p.active=1 ORDER BY (p.principal_id LIKE 'school.%') DESC,p.principal_id LIMIT 3)
     SELECT json_array(
       EXISTS(SELECT 1 FROM system_control WHERE singleton=1 AND environment=? AND generation=?),
-      (${full('(SELECT id FROM actor)')} AND EXISTS(SELECT 1 FROM permission_managers pm WHERE pm.principal_id=(SELECT id FROM actor) AND pm.active=1)),EXISTS(SELECT 1 FROM people WHERE person_id=?),
+      ${administrator('(SELECT id FROM actor)')},EXISTS(SELECT 1 FROM people WHERE person_id=?),
       json((SELECT json_group_array(json_array(id,email,evidence)) FROM target)),${full("(SELECT id FROM target ORDER BY (id LIKE 'school.%') DESC,id LIMIT 1)")},
       json((SELECT json_array(audit_id,actor_id,target_person_id,target_principal_id,status,
         EXISTS(SELECT 1 FROM panel_view_as_audit x WHERE x.entry_audit_id=a.audit_id AND x.action='exit'))

@@ -369,3 +369,21 @@ test('Wing grants using school login identity support entry and scoped reads, an
   assert.equal((await f.send(request,path)).status,403);
   assert.equal((await f.send(enter('unmapped','changed'))).body.status,'no-verified-login');
 });
+
+test("full Wing grants authorize administrator tools and revocation closes an active view", async t=>{
+  const f=await fixture(t);
+  const actor={...base,principalId:"outsider"};
+  const picker="/v1/admin/panel/view-as/people";
+  const grant=cap=>f.db.prepare("INSERT INTO admin_grants VALUES('outsider',?,'wing','*')").bind(cap);
+  await grant("frontend.read").run();
+  assert.equal((await f.send(actor,picker)).status,403);
+  await f.db.batch(["directory.manage","leadership.manage","events.manage","attendance.correct"].map(grant));
+  const access=await f.send(actor,"/v1/admin/panel/access");
+  assert.equal(access.body.access.capabilities.canViewAs,true);
+  assert.equal((await f.send(actor,picker)).status,200);
+  const start=await f.send({...enter("lead"),...actor});
+  assert.equal(start.body.status,"ready");
+  await f.db.prepare("DELETE FROM admin_grants WHERE principal_id='outsider' AND capability='directory.manage'").run();
+  assert.equal((await f.send(actor,picker)).status,403);
+  assert.equal((await f.send({...actor,targetPersonId:"lead",entryAuditId:"entry"},"/v1/admin/panel/view-as/access")).status,403);
+});

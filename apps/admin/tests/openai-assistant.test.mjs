@@ -22,8 +22,11 @@ test("shared budget serializes dispatches and rolls over only expired reservatio
 });
 const env = {ENVIRONMENT:"staging", STAGING_DATASET:"real", GENERATION:"1", BACKEND_SERVICE_NAME:"shamrock-real-parity",
   ASSISTANT_OWNER_SUB:"owner", ASSISTANT_KEY:"fixture", PANEL_DB:{reserveAssistant:async()=>true}};
-test("only configured staging subject in own view may use assistant", () => {
+test("Assistant requires owner or administrator tools in the signed-in workspace", () => {
   assert.equal(available(env,{google_sub:"owner"},null), true);
+  assert.equal(available(env,{google_sub:"administrator"},null,{fullSnapshot:true,canViewAs:true}),true);
+  assert.equal(available(env,{google_sub:"reader"},null,{fullSnapshot:true}),false);
+  assert.equal(available(env,{google_sub:"administrator"},{status:"ready"},{canViewAs:true}),false);
   for (const [e,subject,preview] of [[env,"other",null],[env,"owner",{}],[{...env,GENERATION:"2"},"owner",null],
     [{...env,ASSISTANT_KEY:""},"owner",null]]) assert.equal(available(e,{google_sub:subject},preview), false);
 });

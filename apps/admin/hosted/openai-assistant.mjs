@@ -7,11 +7,11 @@ import { areas, patchSourceArea, maintenanceRequest, proposalResult } from "./ma
 import { PanelError } from "../errors.mjs";
 
 export const model = "gpt-5.4-mini-2026-03-17";
-export function available(env, user, preview) {
+export function available(env, user, preview, capabilities) {
   return !preview && env.ENVIRONMENT === "staging" && env.STAGING_DATASET === "real" &&
     (isUnifiedSite(env) || env.BACKEND_SERVICE_NAME === "shamrock-real-parity") && String(env.GENERATION) === "1" &&
     Boolean(env.ASSISTANT_KEY && env.ASSISTANT_OWNER_SUB && env.PANEL_DB?.reserveAssistant) &&
-    env.ASSISTANT_OWNER_SUB === user.google_sub;
+    (env.ASSISTANT_OWNER_SUB === user.google_sub || capabilities?.canViewAs === true);
 }
 
 // One shared ledger across both panel hostnames and all sessions. The reservation

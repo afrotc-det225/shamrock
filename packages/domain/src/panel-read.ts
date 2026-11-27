@@ -58,11 +58,15 @@ const normalized = (value: string) => value.trim().toLowerCase().replace(/&/g, '
 const unique = (values: string[]) => [...new Set(values)].sort();
 
 /** Only fresh server-side role evidence belongs here; broad derived Sheets grants do not establish panel scope. */
+export const wingAdministratorGrants = ['frontend.read','directory.manage','leadership.manage','events.manage','attendance.correct'] as const;
+
 export function resolvePanelAccess(authority: PanelAuthority): PanelAccess | null {
     if (!authority.active) return null;
     const wingRead = (g: { capability: string; kind: string; scope: string; }) => g.capability === 'frontend.read' && g.kind === 'wing' && g.scope === '*';
     const fullSnapshot = authority.explicitAdminGrants.some(wingRead)
         || authority.permissionManager && authority.effectiveAdminGrants.some(wingRead);
+    const fullAdministrator = fullSnapshot && (authority.permissionManager || wingAdministratorGrants.every(capability =>
+        authority.explicitAdminGrants.some(g => g.capability === capability && g.kind === "wing" && g.scope === "*")));
     const flightIds = new Set<string>(fullSnapshot ? authority.flights.map(f => f.flightId) : []);
     for (const grant of authority.explicitAdminGrants) {
         if (grant.capability === 'frontend.read' && grant.kind === 'flight' && authority.flights.some(f => f.flightId === grant.scope)) flightIds.add(grant.scope);
@@ -87,7 +91,7 @@ export function resolvePanelAccess(authority: PanelAuthority): PanelAccess | nul
     return {
         mode: fullSnapshot ? 'wing' : 'scoped', flightIds: ids,
         capabilities: {
-            fullSnapshot, ...(fullSnapshot && authority.permissionManager ? {canViewAs:true} : {}),
+            fullSnapshot, ...(fullAdministrator ? {canViewAs:true} : {}),
             attendanceReportFlightIds: ids.filter(id => authority.effectiveAccessGrants.some(g => g.capability === 'attendance.report' && g.subjectScope === 'unit' && g.flightId === id)),
             attendanceCorrectionFlightIds: ids.filter(id => authority.effectiveAdminGrants.some(g => g.capability === 'attendance.correct' && (g.kind === 'wing' && g.scope === '*' || g.kind === 'flight' && g.scope === id))),
         },

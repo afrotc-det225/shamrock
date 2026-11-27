@@ -1,7 +1,7 @@
 import {PanelError} from "../errors.mjs";
 import {isUnifiedSite} from "./site.mjs";
 
-// Explicit day-to-day Wing capabilities. Permission management, View as and
+// Explicit day-to-day Wing capabilities. Permission management and
 // Assistant ownership are independent authorities.
 const capabilities=["frontend.read","directory.manage","leadership.manage","events.manage","attendance.correct"];
 const active="flight_path_status NOT IN ('Inactive','Commissioned','Dropped')";
@@ -27,7 +27,7 @@ export async function prepareWingGrant(env,actor,personId,hash){
   const principal="school."+await hash(row.email);
   const action={expiresAt:Date.now()+900000,id:crypto.randomUUID(),personId,principal,email:row.email,version:row.version,name:(row.first_name+" "+row.last_name).trim()};
   await env.HISTORY_FILES.put(key(actor,action.id),JSON.stringify(action),{expirationTtl:900});
-  return {content:"Grant "+action.name+" ("+action.email+") Wing access to view records and manage the Directory, leadership, events, and attendance corrections? Permission management, Assistant access and Google workbook sharing are separate.",wingGrant:{id:action.id}};
+  return {content:"Grant "+action.name+" ("+action.email+") Wing access to view records and manage the Directory, leadership, events, and attendance corrections? Includes Assistant and View as. Permission management and Google workbook sharing are separate.",wingGrant:{id:action.id}};
 }
 
 export async function applyWingGrant(env,actor,id){
