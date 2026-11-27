@@ -350,6 +350,8 @@ In **View as**, a permission manager can act in a linked cadet workspace and sub
 
 On Attendance and My attendance, hover or focus a mark to highlight the cadet and event. Click to select one cell, Shift-click for a rectangle, and Command-click (Mac) or Ctrl-click to toggle individual cells. Shift with an arrow key extends the range. Escape clears it. Use the single-cell action or double-click to open an authorized correction or personal review. Multi-cell selection is local to the page.
 
+On phones, **Events** puts search above **Filters**. Open Filters to choose the semester, event type, and sort order.
+
 In the leadership workspace, **Attendance → Semester** shows the current matrix and the archived semesters available to your account. Past semesters open as read-only reports. Existing History bookmarks open this same workspace. On phones, **Filters** opens the flight, AS year, and sort controls. The list icon beside the Cadet heading opens the attendance code key in both current and archived matrices.
 
 Selecting eligible attendance cells opens the correction panel. The panel follows the selection until it is closed. Shift selects a range and Command or Ctrl toggles individual cells. Cadets can send several events for Squadron review with one code and reason. Authorized leadership can review and apply corrections to several eligible cells together. Each correction retains its own receipt.
