@@ -68,9 +68,13 @@ try{
  assert.deepEqual(await eventTable.getByRole('columnheader').allTextContents(),['Event','Date & time','Status','']);
  const scheduled=await eventTable.locator('tbody tr td:first-child button').allTextContents();
  const filter=page.getByLabel('Type',{exact:true});
+ const columnWidths=()=>eventTable.locator('thead th').evaluateAll(headers=>headers.map(th=>th.getBoundingClientRect().width));
+ const initialWidths=await columnWidths();
+ assert(initialWidths[0]>initialWidths[1] && initialWidths[1]>initialWidths[2] && initialWidths[2]>initialWidths[3]);
  const groups=[];
  for(const option of await filter.locator('option').evaluateAll(options=>options.slice(1).map(o=>({value:o.value,label:o.label})))) {
    await filter.selectOption(option.value);
+   assert.deepEqual(await columnWidths(),initialWidths);
    groups.push({label:option.label,names:await eventTable.locator('tbody tr td:first-child button').allTextContents()});
  }
  await filter.selectOption('');
@@ -88,6 +92,8 @@ try{
  await page.screenshot({path:'/tmp/shamrock-editor-loading-desktop.png'});
  await page.setViewportSize({width:390,height:844});await page.screenshot({path:'/tmp/shamrock-editor-loading-mobile.png'});
  assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
+ assert(await eventTable.locator('.compact-event-status').first().isVisible());
+ assert(await eventTable.evaluate(table=>table.parentElement.scrollWidth<=table.parentElement.clientWidth+1));
  const account=await page.locator('.sidebar-bottom').boundingBox(),nav=await page.getByRole('navigation').boundingBox();
  assert(account.y+account.height<=nav.y,'account controls have their own row above mobile navigation');
  await page.getByRole('navigation').getByRole('link',{name:'History',exact:true}).click();

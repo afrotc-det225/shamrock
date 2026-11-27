@@ -1561,6 +1561,27 @@ html:has(dialog:modal) {
 .directory-photo iframe {display:block;flex-basis:100%;width:100%;max-width:20rem;height:14rem;border:1px solid var(--border)}
 
 .table-scroll th.action-column {width:1%;white-space:nowrap}
+
+.event-schedule {width:100%;max-width:48rem;container-type:inline-size}
+.event-schedule table {table-layout:fixed}
+.event-schedule th:nth-child(2) {width:14rem}
+.event-schedule th:nth-child(3) {width:8rem}
+.event-schedule :is(th,td):nth-child(3) {padding-inline:.65rem}
+.event-schedule th.action-column {width:3.25rem}
+.event-schedule :is(th,td):last-child {padding-inline:.25rem;text-align:center}
+.event-schedule .icon {min-width:2.5rem;min-height:2.5rem}
+.event-schedule td:first-child :is(.text-button,small) {white-space:normal;overflow-wrap:anywhere}
+.compact-event-status {display:none}
+@container (max-width:35rem) {
+  .event-schedule :is(th,td) {padding:.6rem}
+  .event-schedule th:nth-child(2) {width:6.75rem}
+  .event-schedule :is(th,td):nth-child(3) {display:none}
+  .event-schedule th.action-column, .event-schedule .icon {width:44px}
+  .event-schedule .icon {min-height:44px}
+  .event-schedule :is(th,td):last-child {padding-inline:0}
+  .compact-event-status {display:block;margin-top:.3rem}
+}
+
 .profile-identity { display:flex; align-items:center; gap:1rem; margin-bottom:1.5rem; overflow-wrap:anywhere }
 .profile-identity h2,.profile-identity p { margin:0 0 .25rem }
 .profile-portrait { flex:none; width:5rem; height:5rem; border-radius:50%; overflow:hidden; display:grid; place-items:center; font-size:1.6rem; font-weight:650; background:#deece6; color:#234d3d }

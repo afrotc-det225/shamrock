@@ -152,14 +152,15 @@ export default function Events({ snapshot, eventsList, propose, busy, refresh, r
         </div>
       </section>
       {loading && <span className="page-transfer" role="status">Loading event details…</span>}
-      <Table headers={["Event", "Date & time", "Status", ""]}>
+      <Table className="event-schedule" headers={["Event", "Date & time", "Status", ""]}>
         {rows.map((e) => (
           <tr key={e.eventId}>
             <td>
               <button className="text-button" disabled={readOnly || busy} onClick={() => open(e)}>
                 {e.label}
               </button>
-              <small>{e.location}</small>
+              {e.location && <small>{e.location}</small>}
+              <div className="compact-event-status"><Status>{e.status}</Status></div>
             </td>
             <td>{e.startAt ? <time dateTime={e.startAt}>{displayDate(e.startAt,e.timeZone)}</time> : "Not scheduled"}</td>
             <td>
