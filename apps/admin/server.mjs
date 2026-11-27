@@ -27,7 +27,7 @@ export function createPanelServer(service, { assistantKey, port = 4173 } = {}) {
     res.setHeader("Referrer-Policy", "no-referrer");
     res.setHeader(
       "Content-Security-Policy",
-      "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: https://drive.google.com https://drive.usercontent.google.com https://lh3.googleusercontent.com https://work.fife.usercontent.google.com; connect-src 'self'; frame-src 'self' https://drive.google.com; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
+      "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: https://drive.google.com https://drive.usercontent.google.com https://*.googleusercontent.com https://work.fife.usercontent.google.com; connect-src 'self'; frame-src 'self' https://drive.google.com; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
     );
     const json = (status, data) => {
       res.writeHead(status, { "content-type": "application/json" });

@@ -335,3 +335,5 @@ When a feature changes, update only the sections that help an operator use, vali
 ### Cadet navigation on the SHAMROCK site
 
 After sign-in, cadets use the same navigation layout as leadership. My requests shows excusals and attendance flags, and My profile opens the Directory record. Flight commanders also have My Flight, and squadron commanders have their Excusals queue. New cadets start with profile registration. On phones, page links run across the top.
+
+In **My profile**, cadets manage contact information, academics and career details, and their Directory photo. The AFSC field wraps longer career names. A saved Google Drive photo displays when the browser can access it. Cadets can open the original HTTPS photo link, replace it, or clear it and save. Photo previews use the existing file permissions.

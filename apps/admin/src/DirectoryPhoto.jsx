@@ -1,14 +1,15 @@
 import React, { useState } from "react";
 
-function photoSource(value, size) {
+export function directoryPhotoSource(value, size) {
   if (!value) return null;
   let url;
   try { url = new URL(value); } catch { return null; }
   if (url.protocol !== "https:" || url.username || url.password) return null;
   const link = { href: url.href };
+  if (url.hostname.endsWith(".googleusercontent.com")) return { ...link, src: url.href };
   if (url.origin !== "https://drive.google.com") return link;
   const id = url.pathname.match(/^\/file\/d\/([\w-]+)(?:\/|$)/)?.[1]
-    || (url.pathname === "/open" && url.searchParams.get("id"));
+    || url.searchParams.get("id");
   if (!id || !/^[\w-]+$/.test(id)) return link;
   const parameters = new URLSearchParams({ id, sz: "w" + size });
   const preview = new URL("/file/d/" + id + "/preview", url.origin);
@@ -22,7 +23,7 @@ function photoSource(value, size) {
 }
 
 export function DirectoryPhoto({ value, person, avatar = false }) {
-  const source = photoSource(value, avatar ? 96 : 320);
+  const source = directoryPhotoSource(value, avatar ? 96 : 320);
   const [failed, setFailed] = useState("");
   const [opened, setOpened] = useState("");
   const name = [person?.firstName, person?.lastName].filter(Boolean).join(" ");

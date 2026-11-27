@@ -1595,3 +1595,12 @@ html:has(dialog:modal) {
 .directory-photo iframe {display:block;flex-basis:100%;width:100%;max-width:20rem;height:14rem;border:1px solid var(--border)}
 
 .table-scroll th.action-column {width:1%;white-space:nowrap}
+.profile-identity { display:flex; align-items:center; gap:1rem; margin-bottom:1.5rem; overflow-wrap:anywhere }
+.profile-identity h2,.profile-identity p { margin:0 0 .25rem }
+.profile-portrait { flex:none; width:5rem; height:5rem; border-radius:50%; overflow:hidden; display:grid; place-items:center; font-size:1.6rem; font-weight:650; background:#deece6; color:#234d3d }
+.profile-portrait img { width:100%; height:100%; object-fit:cover }
+.profile-section { padding:.8rem 0 1rem; border-top:1px solid #d4ded8 }
+.profile-section h3 { margin:0 0 .8rem }
+.profile-wide { grid-column:1/-1; min-width:0 }
+.profile-wide textarea { width:100%; box-sizing:border-box; field-sizing:content; min-height:5em; overflow-wrap:anywhere; resize:vertical }
+.cadet-fields:empty { display:none }
