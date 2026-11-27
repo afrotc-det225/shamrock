@@ -32,12 +32,15 @@ try {
         if (path !== "/api/cadet" || route.request().method() !== "GET") return route.abort();
         return route.fulfill({ json: {
           linked: true, writable: true, registration: role === "Registration",
-          profile: role === "Registration" ? null : {personId:"one", firstName:"Sample", lastName:"Cadet", flightId:"alpha"},
+          profile: role === "Registration" ? null : {personId:"one", firstName:"Sample", lastName:"Cadet", flightId:"alpha",afsc:"13N – Nuclear and Missile Operations ".repeat(6).trim(),photoLink:"https://drive.google.com/file/d/fictional-photo/view"},
           flights: [{ flightId:"alpha", label:"Alpha" }], events: [], actions: [], queue: [],
           requests: [], roster: [], reportRoster: [], flightCommander:role === "Flight",
           squadron: role === "Squadron" ? "Blue" : null,
         } });
       });
+      await page.route("https://drive.google.com/**", route => width === 390 ? route.abort() : route.fulfill({
+        contentType:"image/svg+xml",body:'<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20"><circle cx="10" cy="10" r="8"/></svg>',
+      }));
       await page.goto(origin + (preview ? "/?workspace=cadet" : "/"));
       const nav = page.getByRole("navigation", { name:"Main navigation" });
       const heading = title => page.getByRole("heading", {name:title, level:1, exact:true});
@@ -55,6 +58,13 @@ try {
         await nav.getByRole("link", {name:"My profile"}).click();
         assert.equal(await nav.locator('[aria-current="page"]').innerText(), "My profile");
         await page.getByLabel("First name", {exact:true}).waitFor();
+        const afsc = page.getByLabel("Air Force Specialty Code (AFSC)");
+        assert.equal(await afsc.inputValue(),"13N – Nuclear and Missile Operations ".repeat(6).trim());
+        assert(await afsc.evaluate(el => el.scrollWidth <= el.clientWidth && el.scrollHeight <= el.clientHeight + 1));
+        if (width === 390) await page.getByLabel("Profile initials").waitFor();
+        else await page.waitForFunction(() => document.querySelector(".profile-portrait img")?.naturalWidth > 0);
+        assert.equal(await afsc.evaluate(el => el.tagName), "TEXTAREA");
+        assert.equal(await page.getByRole("link",{name:"Open original photo"}).getAttribute("href"), "https://drive.google.com/file/d/fictional-photo/view");
         assert.equal(new URL(page.url()).pathname,"/me/profile");
         await page.goBack();
         await heading("My requests").waitFor();

@@ -31,6 +31,41 @@ const required = new Set([
   "homeTown",
   "homeState",
 ]);
+function photoUrls(value) {
+  try {
+    const url = new URL(value);
+    if (url.protocol !== "https:" || url.username || url.password) return {};
+    let thumbnail;
+    if (url.origin === "https://drive.google.com") {
+      const id = url.pathname.match(/^\/file\/d\/([\w-]+)(?:\/|$)/)?.[1] || url.searchParams.get("id");
+      if (id && /^[\w-]+$/.test(id)) {
+        const image = new URL("https://drive.google.com/thumbnail");
+        image.searchParams.set("id", id);
+        image.searchParams.set("sz", "w256");
+        if (url.searchParams.has("resourcekey")) image.searchParams.set("resourcekey", url.searchParams.get("resourcekey"));
+        thumbnail = image.href;
+      }
+    } else if (url.hostname.endsWith(".googleusercontent.com")) thumbnail = url.href;
+    return {href:url.href, thumbnail};
+  } catch { return {}; }
+}
+
+function ProfilePhoto({profile}) {
+  const {href, thumbnail} = photoUrls(profile.photoLink);
+  const [failed, setFailed] = useState("");
+  const initials = [profile.firstName, profile.lastName].map(name => name?.trim()[0]).join("");
+  return <div className="profile-identity">
+    <div className="profile-portrait">{thumbnail && failed !== thumbnail
+      ? <img src={thumbnail} alt="Directory portrait" referrerPolicy="no-referrer" onError={() => setFailed(thumbnail)} />
+      : <span aria-label="Profile initials">{initials || "–"}</span>}</div>
+    <div><h2>{[profile.firstName,profile.lastName].filter(Boolean).join(" ")}</h2>
+      <p>{[profile.rank,profile.asYear,profile.university].filter(Boolean).join(" · ")}</p>
+      {profile.email && <p>{profile.email}</p>}
+      {href && <a href={href} target="_blank" rel="noreferrer">Open original photo</a>}
+    </div>
+  </div>;
+}
+
 function Profile({ state, save, disabled }) {
   const [form, set] = useState(() => ({
     ...state.profile,
@@ -46,6 +81,7 @@ function Profile({ state, save, disabled }) {
       ? fields.slice(0, 5)
       : fields.slice(5)
     : fields;
+  const groups = [["Contact information", ["firstName","lastName","phone","dateOfBirth","dorm","homeTown","homeState"]], ["Academics and career", ["classYear","cipBroadArea","cipCode","afsc"]], ["Directory photo", ["photoLink"]]];
   function submit(e) {
     e.preventDefault();
     if (register && step === 0) {
@@ -72,6 +108,7 @@ function Profile({ state, save, disabled }) {
   }
   return (
     <form onSubmit={submit} className="cadet-form form-section">
+      {!register && <ProfilePhoto profile={state.profile} />}
       {register && <h2>{step === 0 ? "Directory information" : "Academic and career information"}</h2>}
       <fieldset disabled={disabled && !register}>
         <div className="cadet-fields">
@@ -106,11 +143,20 @@ function Profile({ state, save, disabled }) {
               />
             </>
           )}
-          {visible.map(([key, label, type]) => (
+          </div>
+        {groups.map(([title, keys]) => {
+          const members = visible.filter(([key]) => keys.includes(key));
+          return members.length > 0 && <section key={title} className="profile-section"><h3>{title}</h3><div className="cadet-fields">
+          {members.map(([key, label, type]) => key === "afsc" ? (
+            <div className="profile-wide" key={key}><Field label="Air Force Specialty Code (AFSC)">
+              <textarea value={form.afsc || ""} maxLength={240} rows={4}
+                onChange={e => pick(key,e.target.value)} />
+            </Field></div>
+          ) : (
             <Field key={key} label={label}>
               <input
                 type={type || "text"}
-                maxLength={key === "classYear" ? 4 : 240}
+                maxLength={key === "classYear" ? 4 : key === "photoLink" ? 2048 : 240}
                 pattern={
                   key === "classYear"
                     ? "[0-9]{4}"
@@ -124,7 +170,8 @@ function Profile({ state, save, disabled }) {
               />
             </Field>
           ))}
-        </div>
+        </div></section>;
+        })}
       </fieldset>
       {(!register || step === 1) && (
         <p>
