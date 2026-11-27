@@ -18,7 +18,18 @@ const id = (v: unknown): v is string => typeof v === 'string' && /^[A-Za-z0-9][A
 const sha = (v: unknown): v is string => typeof v === 'string' && /^[a-f0-9]{64}$/.test(v);
 const canonical = (v: unknown): string => JSON.stringify(v, (_key, x) => object(x) ? Object.fromEntries(Object.keys(x).sort().map(k => [k, x[k]])) : x);
 const digest = async (v: unknown): Promise<string> => [...new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(canonical(v))))].map(n => n.toString(16).padStart(2, '0')).join('');
-const fail = (status: number, code: string): never => { throw new HttpError(status, code, 'Reload or exit the read-only account preview before continuing.'); };
+const viewErrors: Record<string,string> = {
+  NOT_AUTHORIZED: 'Your account does not have access to this action.',
+  VIEW_AS_UNAVAILABLE: 'This view has ended or the cadet’s account access has changed. Exit view to select the cadet again.',
+  VIEW_AS_CHANGED: 'The records or access changed while this page was loading.',
+  PANEL_NOT_READY: 'The cadet list is being updated. Try again shortly.',
+  NOT_FOUND: 'This cadet is no longer in the Directory.',
+  VIEW_AS_AUDIT_CONFLICT: 'This selection has expired. Exit view to select the cadet again.',
+  WRONG_GENERATION: 'This workspace has changed. Reopen SHAMROCK.',
+};
+const fail = (status: number, code: string): never => {
+  throw new HttpError(status, code, viewErrors[code] ?? 'SHAMROCK could not complete this request.');
+};
 function identity(env: Env, input: unknown): Row & { principalId: string } {
   if (!object(input) || !id(input.principalId)) return fail(400, 'INVALID_VIEW_AS_REQUEST');
   if (input.environment !== env.ENVIRONMENT || input.generation !== Number(env.GENERATION)) fail(409, 'WRONG_GENERATION');

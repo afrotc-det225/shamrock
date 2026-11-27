@@ -458,13 +458,28 @@ export default function CadetWorkspace({ session }) {
   const section = tab==="Overview" ? "overview" : tab==="Cadets" ? "directory" : tab==="Leadership" ? "leadership" : tab==="Excusals" ? "excusals" : tab==="My profile" ? "profile" : tab==="Submit attendance" ? "report" : tab==="My attendance" ? "attendance" : "";
   const currentSection=useRef(section);
   currentSection.current=section;
-  const load = async () => {
-    const s = await api("/cadet"+(section?"?section="+section:""));
-    if(currentSection.current===section)setState(s);
+  const [readError,setReadError] = useState(null);
+  const load = async (signal) => {
+    const path="/cadet"+(section?"?section="+section:"");
+    let s;
+    try { s=await api(path,undefined,{signal}); }
+    catch(e) {
+      if (!preview || e.code!=="VIEW_AS_CHANGED" || signal?.aborted) throw e;
+      s=await api(path,undefined,{signal});
+    }
+    if(currentSection.current===section){setState(s);setReadError(null);}
     return s;
   };
   useEffect(() => {
-    load().catch((e) => {if(currentSection.current===section)setError(e.message);});
+    const controller=new AbortController();
+    setReadError(null);
+    load(controller.signal).catch(e=>{
+      if(!controller.signal.aborted && currentSection.current===section){
+        setState(null);
+        setReadError(e);
+      }
+    });
+    return ()=>controller.abort();
   }, [section]);
   useEffect(() => { setNotice(""); }, [tab]);
   async function save(kind, fields, done, savedId) {
@@ -561,22 +576,16 @@ export default function CadetWorkspace({ session }) {
     </>}>
 
       {page !== "Excusals" && page !== "Overview" && page !== "Cadets" && <Heading title={state?.registration ? "Create profile" : page || "My workspace"} />}
-      {error && (
+      {error && <p className="error" role="alert">{error}</p>}
+      {readError && (
         <p className="error" role="alert">
-          {error}{" "}
-          <button
-            onClick={() =>
-              load()
-                .then(() => setError(""))
-                .catch((e) => setError(e.message))
-            }
-          >
-            Reload
-          </button>
+          {readError.message}{" "}
+          {(!preview || !["VIEW_AS_UNAVAILABLE","NOT_AUTHORIZED"].includes(readError.code)) &&
+            <button onClick={()=>load().catch(e=>{if(currentSection.current===section)setReadError(e);})}>Reload</button>}
         </p>
       )}
       {notice && <div className="success" role="status">{notice}</div>}
-      {!state && !error && <p role="status">Loading your workspace…</p>}
+      {!state && !error && !readError && <p role="status">Loading your workspace…</p>}
       {preview && state?.profile && !state.linked && <p className="notice">This cadet must connect their school account before you can act on their behalf.</p>}
       {state?.profile && !state.linked && !preview && (
         <button

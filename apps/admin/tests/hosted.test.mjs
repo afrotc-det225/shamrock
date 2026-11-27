@@ -776,6 +776,9 @@ test('View as keeps the verified actor, wraps reads, and blocks every mutation e
   assert.equal(chartResponse.status,403);
   assert.equal((await chartResponse.json()).error.code,'FORBIDDEN');
   const binding=await f.run('SELECT principal_id FROM identity_bindings WHERE google_sub=?','actual-sub');assert.equal(binding.results[0].principal_id,'actual-admin');
+  const stale=await f.mf.dispatchFetch(origin+'/api/cadet?section=profile',{headers:{...headers,'x-shamrock-workspace':'previous-entry'}});
+  assert.equal(stale.status,409);
+  assert.deepEqual((await stale.json()).error,{code:'WORKSPACE_SWITCHED',message:'Your workspace changed in another tab.',workspace:'personal'});
   for(const path of ['/api/cadet','/api/proposals','/api/proposals/00000000-0000-4000-8000-000000000001/apply','/api/proposals/00000000-0000-4000-8000-000000000001/cancel','/api/chat']){
     const r=await post(path,{operation:'excusal.decide',approved:true,payload:{}});assert.equal(r.status,403);assert.equal((await r.json()).error.code,'VIEW_AS_READ_ONLY');
   }

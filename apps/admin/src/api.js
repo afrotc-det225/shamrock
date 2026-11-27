@@ -4,6 +4,7 @@ import { hydrateReporting } from "./reporting";
 import { loadSnapshot, loadEventsList } from "../snapshot-client";
 import {beginApiRead} from "./read-usage";
 let csrf;
+let workspaceEntry;
 let retainedCapture;
 let retainedEvents;
 let retainedState;
@@ -20,6 +21,7 @@ export async function api(path, body, options = {}) {
   const response = await fetch(`/api${path}${path === "/state" ? `?profile=${encodeURIComponent(profile)}` : ""}`, {
     method: body === undefined ? "GET" : "POST",
     headers: {
+      ...(workspaceEntry && body===undefined && path.split("?")[0]==="/cadet" ? {"x-shamrock-workspace":workspaceEntry} : {}),
       ...(body === undefined ? {} : { "content-type": "application/json", "x-shamrock-csrf": csrf || "" }),
       ...(conditional && previous.browse?.profile==="attendance" && !previous.viewAs ? {"x-shamrock-delta":"corrections-v1"} : {}),
       ...(conditional ? {"x-shamrock-capture": encodeURIComponent(JSON.stringify({
@@ -39,6 +41,7 @@ export async function api(path, body, options = {}) {
       data.error?.message || "Unable to complete this request.",
     );
     error.code = data.error?.code;
+    if(error.code==="WORKSPACE_SWITCHED" && body===undefined) location.replace(data.error.workspace==="personal" ? "/me" : "/overview");
     error.status = response.status;
     const retryAfter = response.headers.get("retry-after");
     if (/^\d+$/.test(retryAfter || "") && Number(retryAfter) >= 1 && Number(retryAfter) <= 86400)
@@ -104,6 +107,7 @@ export async function api(path, body, options = {}) {
     }
     return hydrateReporting(data);
   }
+  if(path==="/session" || path==="/view-as") workspaceEntry=data.viewAs?.entryAuditId || "self";
   if (path === "/view-as") { retainedCapture = undefined; retainedEvents = undefined; retainedState = undefined; retainedViews.clear(); }
   return data;
 }

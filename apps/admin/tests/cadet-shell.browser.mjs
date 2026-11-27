@@ -25,7 +25,7 @@ try {
       const preview = role.startsWith("View as");
       const squadron = role === "Squadron" ? "Blue" : role === "View as Squadron" ? "Gold" : null;
       const flight = squadron === "Gold" ? "Delta" : "Alpha";
-      let decision;
+      let decision, interrupted=false;
       const page = await browser.newPage({ viewport: { width, height: 850 }, hasTouch:width===390 });
       const calls = [], errors = [], flags = [], submissions=[];
       page.on("pageerror", err => errors.push(err.message));
@@ -47,6 +47,11 @@ try {
           return route.fulfill({json:{ok:true}});
         }
         if (path !== "/api/cadet" || route.request().method() !== "GET") return route.abort();
+        assert.equal(route.request().headers()["x-shamrock-workspace"],preview ? "entry" : "self");
+        if(preview && !interrupted){
+          interrupted=true;
+          return route.fulfill({status:409,json:{error:{code:"VIEW_AS_CHANGED",message:"Records changed."}}});
+        }
         const section=new URL(route.request().url()).searchParams.get("section");
         if(section==="flight:other") return route.fulfill({json:{eventsForFlight:[{eventId:"other",label:"Earlier Mando"}],asOf:new Date().toISOString(),flightEvent:{eventId:"other",label:"Earlier Mando",startAt:"2026-01-01T14:00:00Z"},members:[{personId:"one",firstName:"Fixture",lastName:"Example",code:"P"}]}});
         if(section==="flight" && calls.filter(c=>c.endsWith("section=flight")).length===1){
@@ -369,7 +374,7 @@ try {
       });
       assert(layout.fits && (width === 390 ? layout.stacked : layout.alongside), JSON.stringify(layout));
       assert.deepEqual(errors, []);
-      assert.deepEqual(calls, ["POST /api/session", "GET /api/cadet",...(role==="Flight"?["GET /api/cadet?section=flight","GET /api/cadet?section=flight","GET /api/cadet?section=flight:other","GET /api/cadet?section=excusals","GET /api/cadet"]:[]),...(squadron?["GET /api/cadet?section=excusals","POST /api/cadet","GET /api/cadet?section=excusals","GET /api/cadet"]:[]),...(tabs.length?["GET /api/cadet?section=profile","GET /api/cadet","GET /api/cadet?section=profile","GET /api/cadet?section=attendance","POST /api/cadet","POST /api/cadet","GET /api/cadet?section=attendance","GET /api/cadet?section=report","GET /api/cadet?section=report:lab16","GET /api/cadet?section=directory","GET /api/cadet?section=leadership","GET /api/cadet?section=report","GET /api/cadet?section=report:lab16","GET /api/cadet?section=report:lab16","POST /api/cadet","GET /api/cadet?section=report"]:[])]);
+      assert.deepEqual(calls, ["POST /api/session", "GET /api/cadet",...(preview?["GET /api/cadet"]:[]),...(role==="Flight"?["GET /api/cadet?section=flight","GET /api/cadet?section=flight","GET /api/cadet?section=flight:other","GET /api/cadet?section=excusals","GET /api/cadet"]:[]),...(squadron?["GET /api/cadet?section=excusals","POST /api/cadet","GET /api/cadet?section=excusals","GET /api/cadet"]:[]),...(tabs.length?["GET /api/cadet?section=profile","GET /api/cadet","GET /api/cadet?section=profile","GET /api/cadet?section=attendance","POST /api/cadet","POST /api/cadet","GET /api/cadet?section=attendance","GET /api/cadet?section=report","GET /api/cadet?section=report:lab16","GET /api/cadet?section=directory","GET /api/cadet?section=leadership","GET /api/cadet?section=report","GET /api/cadet?section=report:lab16","GET /api/cadet?section=report:lab16","POST /api/cadet","GET /api/cadet?section=report"]:[])]);
       await page.close();
     }
   }

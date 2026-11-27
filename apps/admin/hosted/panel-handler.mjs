@@ -147,6 +147,10 @@ export default {
         return secure(await directoryPortrait(env, backend, user, preview, url.searchParams, () => cadetWorkspace("profile")));
       }
       if (url.pathname === "/api/cadet" && ["GET","POST"].includes(request.method)) {
+        const expected=request.headers.get("x-shamrock-workspace");
+        if(request.method==="GET" && expected!==null && expected!==(preview?.entry_audit_id ?? "self"))
+          return secure(json({error:{code:"WORKSPACE_SWITCHED",message:"Your workspace changed in another tab.",
+            workspace:preview || (user.principal_id.startsWith("school.") && !user.wingAccess) ? "personal" : "administrator"}},409));
         const section=url.searchParams.get("section");
         if(section!==null && !/^(?:report|flight):[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/.test(section) && !["overview","profile","report","attendance","flight","excusals","directory","leadership"].includes(section))throw new PanelError("INVALID_REQUEST","Unknown workspace section.");
         const workspace=await cadetWorkspace(section);
@@ -155,10 +159,11 @@ export default {
         }
         return secure(json(section==="profile" && request.method==="GET" ? await profileWithPortrait(env,workspace) : workspace));
       }
-      if (user.principal_id.startsWith("school.") && !user.wingAccess) throw new PanelError("CADET_WORKSPACE","Open your cadet workspace.",403);
-      if (request.method === "POST" && url.pathname === "/api/view-as")
+      if (request.method === "POST" && url.pathname === "/api/view-as" &&
+          (body?.personId === null || !user.principal_id.startsWith("school.") || user.wingAccess))
         return secure(json(await changePreview(env, user,
           new HostedBackend(env, user.principal_id), body)));
+      if (user.principal_id.startsWith("school.") && !user.wingAccess) throw new PanelError("CADET_WORKSPACE","Open your cadet workspace.",403);
       const proposalPath=/^\/api\/proposals(?:\/[a-f0-9-]{36}\/(?:apply|cancel))?$/.test(url.pathname);
       if(request.method==="POST" && proposalPath && (body?.viewEntry ?? null)!==(preview?.entry_audit_id ?? null))
         throw new PanelError("VIEW_AS_READ_ONLY","Reload the workspace before saving.",403);
