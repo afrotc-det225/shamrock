@@ -19,7 +19,11 @@ export function PageLink({workspace, title, navigate, children, className="", ..
   }}>{children}</a>;
 }
 
-export default function WorkspaceShell({ workspace="leadership", pages, page, navigate, account, children, drawer, mobileContext, session, preview }) {
+export default function WorkspaceShell({ workspace="leadership", pages, page, tabTitle=page, navigate, account, children, drawer, mobileContext, session, preview }) {
+  useLayoutEffect(() => {
+    document.title = tabTitle ? tabTitle + " · SHAMROCK" : "SHAMROCK";
+    return () => { document.title = "SHAMROCK"; };
+  }, [tabTitle]);
   const mobile = usePhone();
   const menu = useRef(null);
   const content = useRef(null);

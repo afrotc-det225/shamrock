@@ -331,6 +331,9 @@ function App() {
   const visiblePages = blockedPreview || (sessionInfo?.hosted && !access) ? [] : leadershipPages(!scoped, preview);
   const navigationPage = destination?.page ?? page;
   const common = { ...data, propose, busy, readOnly: !!preview && !data?.meta.delegatedEdits, notify: setNotice, refresh: reload, run };
+  useEffect(() => {
+    if (signIn) document.title = "Sign in · SHAMROCK";
+  }, [signIn]);
   if (signIn) {
     const code = new URLSearchParams(location.search).get("signin");
     const message =
@@ -404,7 +407,7 @@ function App() {
     <div hidden={!!outageScreen} inert={outageScreen ? true : undefined}>
     <EditorSuspended.Provider value={!!outageScreen}>
     <EditorError.Provider value={error}>
-      <WorkspaceShell session={sessionInfo} preview={preview} mobileContext={preview && ((data?.meta.delegatedEdits ? "Acting as " : "Viewing as ") + viewAsLabel)} pages={visiblePages} page={navigationPage === "History" ? "Attendance" : navigationPage} navigate={navigate} account={<>
+      <WorkspaceShell session={sessionInfo} preview={preview} mobileContext={preview && ((data?.meta.delegatedEdits ? "Acting as " : "Viewing as ") + viewAsLabel)} tabTitle={outageScreen ? "Records unavailable" : navigationPage === "History" ? "Attendance history" : navigationPage} pages={visiblePages} page={navigationPage === "History" ? "Attendance" : navigationPage} navigate={navigate} account={<>
       {preview && <ViewAsAccount acting={data?.meta.delegatedEdits} busy={busy} onExit={() => viewAs(null)}
               label={viewAsLabel} />}
             {!preview && !scoped && data?.meta.viewAsEnabled &&

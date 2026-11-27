@@ -110,6 +110,7 @@ try {
       .getByRole("link", { name: title, exact: true })
       .click();
     await page.getByRole("heading", { name: title, exact: true }).waitFor();
+    assert.equal(await page.title(),title+" · SHAMROCK");
   };
   const apply = async () => {
     await page
