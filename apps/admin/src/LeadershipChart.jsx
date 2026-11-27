@@ -56,8 +56,17 @@ function OfficeFork({depth, weights, children}) {
   },[]);
   const columns=Math.min(capacity,children.length);
   const grouped=columns<children.length;
+  // Give each branch a second lane before a large staff gets its third.
+  // This keeps sibling squadrons side by side whenever space permits.
+  const lanes=weights.map(()=>1);
+  let spare=capacity-columns;
+  for(let tier=2;spare>0 && tier<=Math.max(...weights);tier++) {
+    for(const [i,weight] of weights.entries()) {
+      if(weight>=tier && spare>0) { lanes[i]++; spare--; }
+    }
+  }
   const tracks=grouped ? `repeat(${columns},minmax(0,1fr))` :
-    weights.map(weight=>`minmax(min(9rem,100%),${weight}fr)`).join(" ");
+    lanes.map(lane=>`minmax(0,${lane}fr)`).join(" ");
   return <ul ref={ref} className="org-fork" data-tier={depth} style={{"--branches":tracks}}>
     {grouped ? Array.from({length:columns},(_,i)=>{
       const start=Math.floor(i*children.length/columns);
