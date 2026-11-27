@@ -41,7 +41,7 @@ function App() {
     [sync, setSync] = useState("");
   const [routeFamily, setRouteFamily] = useState(workspaceFromUrl);
   const [destination, setDestination] = useState(null);
-  const [preview, setPreview] = useState(null), [previewName, setPreviewName] = useState("");
+  const [preview, setPreview] = useState(null);
   const [readProgress, setReadProgress] = useState({stage: "Checking access"});
   const pendingAbort = useRef(null);
   const pendingActions = useRef(0);
@@ -314,7 +314,6 @@ function App() {
   const viewAs = (person) => run(async () => {
     readIntent.current++;
     if (pendingAbort.current) {pendingAbort.current.superseded=true; pendingAbort.current.abort();}
-    if (person?.firstName) setPreviewName([person.firstName,person.lastName].filter(Boolean).join(" "));
     let result;
     try { result = await api("/view-as", {personId:person?.personId || null}); }
     catch (error) {
@@ -322,11 +321,11 @@ function App() {
       if (current?.viewAs) { setPreview(current.viewAs); setData(null); }
       throw error;
     }
-    if(result.directoryWorkspace){location.assign("/me/profile");return;}
+    if(result.directoryWorkspace && result.viewAs?.status==="ready"){location.replace("/me");return;}
     if(person && result.viewAs?.status==="ready" && ["Assistant","System","Semester planning"].includes(page)){
       location.assign("/attendance");return;
     }
-    setPreview(result.viewAs); if (!person) setPreviewName("");
+    setPreview(result.viewAs);
     setProposal(null); setData(null); setNotice("");
     await reload(true);
     if (result.auditRecorded === false) setNotice("Exited View as; the exit audit could not be saved.");
@@ -407,16 +406,13 @@ function App() {
     </div>;
   }
 
-  const viewAsLabel = preview && (previewName || [data?.snapshot?.people.find(p => p.personId === preview.personId)?.firstName,
-                data?.snapshot?.people.find(p => p.personId === preview.personId)?.lastName].filter(Boolean).join(" ") || "selected cadet");
   return (
     <>
     <div hidden={!!outageScreen} inert={outageScreen ? true : undefined}>
     <EditorSuspended.Provider value={!!outageScreen}>
     <EditorError.Provider value={error}>
-      <WorkspaceShell fullWing={access?.capabilities.fullSnapshot} session={sessionInfo} preview={preview} mobileContext={preview && ((data?.meta.delegatedEdits ? "Acting as " : "Viewing as ") + viewAsLabel)} tabTitle={outageScreen ? "Records unavailable" : navigationPage === "History" ? "Attendance history" : navigationPage} pages={visiblePages} page={navigationPage === "History" ? "Attendance" : navigationPage} navigate={navigate} account={<>
-      {preview && <ViewAsAccount acting={data?.meta.delegatedEdits} busy={busy} onExit={() => viewAs(null)}
-              label={viewAsLabel} />}
+      <WorkspaceShell fullWing={access?.capabilities.fullSnapshot} session={sessionInfo} preview={preview} tabTitle={outageScreen ? "Records unavailable" : navigationPage === "History" ? "Attendance history" : navigationPage} pages={visiblePages} page={navigationPage === "History" ? "Attendance" : navigationPage} navigate={navigate} account={<>
+      {preview && <ViewAsAccount busy={busy} onExit={() => viewAs(null)} />}
             {!preview && !scoped && data?.meta.viewAsEnabled &&
               <ViewAsSelector people={data.snapshot?.people ?? (["cadets","leadership","cadet-details","semester"].includes(data.browse?.profile) ? data.list.people : null)} onSelect={viewAs} busy={busy} />}
             {!preview && !scoped && data?.meta.assistantAvailable && (

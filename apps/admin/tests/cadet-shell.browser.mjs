@@ -201,7 +201,7 @@ try {
         await nav.getByRole("link", {name:"My profile"}).click();
         assert.equal(await page.locator('nav [aria-current="page"]').textContent(), "My profile");
         await page.getByLabel("First name", {exact:true}).waitFor();
-        if (preview) await page.locator(width === 390 ? ".mobile-bar" : ".sidebar-bottom").getByText("Acting as Sample Cadet").waitFor();
+        if (preview) assert.equal(await page.getByText("Acting as Sample Cadet").count(),0);
         for (const field of ["First name","Last name","AS year","Rank","Role","University","Contact email"])
           assert(await page.getByLabel(field,{exact:true}).isVisible());
         const afsc = page.getByLabel("Air Force Specialty Code (AFSC)");

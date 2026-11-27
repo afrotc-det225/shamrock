@@ -1199,7 +1199,6 @@ html:has(dialog:modal) {
   }
 }
 
-.view-as-account {display:grid; gap:.3rem; justify-items:start; font-weight:600; overflow-wrap:anywhere}
 .view-as-people { display: grid; gap: 4px; }
 .view-as-people button { justify-content: space-between; text-align: left; }
 .view-as-people small { color: var(--muted); }

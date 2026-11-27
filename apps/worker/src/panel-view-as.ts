@@ -145,6 +145,7 @@ export async function authorizePanelViewAs(env: Env, input: unknown): Promise<Pa
     SELECT ?,?,'enter',?,?,?,?,json_extract(b,'$[3][0][0]'),'ready',?,? FROM captured
     WHERE json_extract(b,'$[0]')=1 AND json_extract(b,'$[1]')=1 AND json_extract(b,'$[2]')=1
       AND json_extract(b,'$[4]')=0 AND json_type(b,'$[6]')='text'
+      AND COALESCE(json_extract(b,'$[3][0][0]'),'') NOT LIKE 'school.%'
       AND (json_array_length(b,'$[3]')=0 OR (json_array_length(b,'$[3]')=1 AND json_extract(b,'$[3][0][1]')=json_extract(b,'$[6]')))
     ON CONFLICT(audit_id) DO NOTHING RETURNING target_person_id,target_principal_id`)
     .bind(...candidate.values,req.auditId,req.auditId,env.ENVIRONMENT,Number(env.GENERATION),req.principalId,req.targetPersonId,requestHash,now)]);
@@ -169,7 +170,7 @@ export async function authorizePanelViewAs(env: Env, input: unknown): Promise<Pa
   const saved = results[1].results[0];
   if (!saved || saved.request_hash !== requestHash || saved.target_principal_id !== binding.targetPrincipalId) fail(409, 'VIEW_AS_AUDIT_CONFLICT');
   if (saved.closed === 1 || saved.status !== status) fail(409, 'VIEW_AS_CHANGED');
-  return { contractVersion: 'panel-view-as-v1', readOnly: true, action: 'enter', directoryWorkspace:!!binding.directoryEmail, entryAuditId: String(req.auditId), targetPersonId: person, targetPrincipalId: binding.targetPrincipalId, status, access };
+  return { contractVersion: 'panel-view-as-v1', readOnly: true, action: 'enter', directoryWorkspace:!!(binding.directoryEmail || binding.schoolEmail), entryAuditId: String(req.auditId), targetPersonId: person, targetPrincipalId: binding.targetPrincipalId, status, access };
 }
 
 /** Revalidate an existing preview without replaying entry audit or counting its records. */

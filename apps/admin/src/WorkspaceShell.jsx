@@ -18,7 +18,7 @@ export function PageLink({workspace, title, navigate, children, className="", ..
   }}>{children}</a>;
 }
 
-export default function WorkspaceShell({ workspace="leadership", pages, page, fullWing, tabTitle=page, navigate, account, children, drawer, mobileContext, session, preview }) {
+export default function WorkspaceShell({ workspace="leadership", pages, page, fullWing, tabTitle=page, navigate, account, children, drawer, session, preview }) {
   useLayoutEffect(() => {
     document.title = tabTitle ? tabTitle + " · SHAMROCK" : "SHAMROCK";
     return () => { document.title = "SHAMROCK"; };
@@ -81,10 +81,10 @@ export default function WorkspaceShell({ workspace="leadership", pages, page, fu
         </PageLink>;
   const member = other?.personal;
   const personalHome = member?.registration ? "My profile" : member?.flightCommander ? "My Flight" : "Overview";
-  const personalSwitch = fullWing && member && (
+  const personalSwitch = !preview && fullWing && member && (
     <PageLink workspace="cadet" title={personalHome} navigate={name=>openPage("cadet",name)}>
       <UserRound size={18} aria-hidden="true"/>
-      {preview ? "Personal workspace" : "Exit view"}
+      Exit view
     </PageLink>
   );
   const links = <>
@@ -112,7 +112,7 @@ export default function WorkspaceShell({ workspace="leadership", pages, page, fu
     <div className="app">
       {mobile ? <>
         <header className="mobile-bar">
-          {brand}<div className="mobile-page"><strong>{page}</strong>{mobileContext && <small>{mobileContext}</small>}</div>
+          {brand}<div className="mobile-page"><strong>{page}</strong></div>
           <button aria-label="Open navigation" aria-expanded={open} aria-controls="mobile-navigation"
             onClick={() => {menu.current.showModal(); setOpen(true);}}><Menu size={19}/> Menu</button>
         </header>

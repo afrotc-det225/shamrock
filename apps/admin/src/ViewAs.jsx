@@ -38,9 +38,6 @@ export const viewAsStatus = {
   "no-verified-login": "This person does not have a verified sign-in linked to SHAMROCK.",
   "no-panel-access": "This person does not currently have access to the panel.",
 };
-export function ViewAsAccount({ label, onExit, busy, acting = false }) {
-  return <div className="view-as-account">
-    <span>{acting ? "Acting as" : "Viewing as"} {label}</span>
-    <button className="sign-out" disabled={busy} onClick={onExit}>Exit view</button>
-  </div>;
+export function ViewAsAccount({ onExit, busy }) {
+  return <button className="sign-out" disabled={busy} onClick={onExit}>Exit view</button>;
 }

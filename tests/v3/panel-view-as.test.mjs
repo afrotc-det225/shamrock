@@ -231,6 +231,17 @@ test('an active Directory assignment supports a read-only admin preview before f
     const {readOnly,...visible}=personal.body;
     assert.equal(readOnly,true);assert.deepEqual(visible,direct.body);
   }
+  // A school sign-in record may exist before the cadet has linked a personal workspace.
+  const school='school.'+principalId.slice('google.'.length);
+  await f.db.batch([
+    f.db.prepare("INSERT INTO principals VALUES(?,'unmapped',1)").bind(school),
+    f.db.prepare("INSERT INTO principal_accounts VALUES(?,?,'authenticated-confirmation','binding')").bind(school,email),
+  ]);
+  const schoolEntry=await f.send(enter('unmapped','school-entry'));
+  assert.equal(schoolEntry.body.status,'ready');
+  const schoolProfile=await f.send({...target,entryAuditId:'school-entry',section:'profile'},'/v1/cadet/preview');
+  assert.equal(schoolProfile.status,200);
+  assert.equal(schoolProfile.body.readOnly,true);
   const picker='/v1/admin/panel/view-as/people';
   assert.equal((await f.send(base,picker)).status,200);
   assert.equal((await f.send({...base,principalId:'outsider'},picker)).status,403);
@@ -344,7 +355,7 @@ test('Wing grants using school login identity support entry and scoped reads, an
     f.db.prepare("INSERT INTO admin_grants VALUES(?,'frontend.read','wing','*')").bind(account),
   ]);
   const entry=await f.send(enter('unmapped'));
-  assert.equal(entry.body.status,'ready');assert.equal(entry.body.directoryWorkspace,false);
+  assert.equal(entry.body.status,'ready');assert.equal(entry.body.directoryWorkspace,true);
   const request={...base,entryAuditId:'entry',targetPersonId:'unmapped'};
   const path='/v1/admin/panel/view-as/access';
   const access=await f.send(request,path);

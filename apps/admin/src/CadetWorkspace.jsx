@@ -545,16 +545,16 @@ export default function CadetWorkspace({ session }) {
     access: { capabilities: { fullSnapshot: false } },
   };
   return (
-    <WorkspaceShell session={session} preview={session.viewAs} mobileContext={preview && ((state?.readOnly === false ? "Acting as " : "Viewing as ") + (name || "selected cadet"))} workspace="cadet" pages={pages} page={state?.registration ? "Create profile" : page} navigate={navigate} account={<>
+    <WorkspaceShell session={session} preview={session.viewAs} workspace="cadet" pages={pages} page={state?.registration ? "Create profile" : page} navigate={navigate} account={<>
       {state && !state.writable && <small role="status" className="submission-status">Submissions are paused.</small>}
-      {preview && <ViewAsAccount acting={state?.readOnly === false} label={name || "selected cadet"} busy={busy} onExit={async () => {
+      {preview && <ViewAsAccount busy={busy} onExit={async () => {
         try {
           await api("/view-as", { personId: null });
-          location.assign("/overview");
+          location.replace("/overview");
         } catch (e) { setError(e.message); }
       }} />}
       <p>
-        {name && !preview && <strong className="account-name">{name}</strong>}
+        {name && <strong className="account-name">{name}</strong>}
         {role}
         {!preview && <button className="sign-out" onClick={() => logout().catch((e) => setError(e.message))}>Sign out</button>}
       </p>
