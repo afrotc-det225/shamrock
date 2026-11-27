@@ -350,6 +350,8 @@ In **View as**, a permission manager can act in a linked cadet workspace and sub
 
 On Attendance and My attendance, hover or focus a mark to highlight the cadet and event. Click to select one cell, Shift-click for a rectangle, and Command-click (Mac) or Ctrl-click to toggle individual cells. Shift with an arrow key extends the range. Escape clears it. Use the single-cell action or double-click to open an authorized correction or personal review. Multi-cell selection is local to the page.
 
+In the leadership workspace, **Attendance → Semester** shows the current matrix and the archived semesters available to your account. Past semesters open as read-only reports. Existing History bookmarks open this same workspace. On phones, **Filters** opens the flight, AS year, and sort controls.
+
 Selecting eligible attendance cells opens the correction panel. The panel follows the selection until it is closed. Shift selects a range and Command or Ctrl toggles individual cells. Cadets can send several events for Squadron review with one code and reason. Authorized leadership can review and apply corrections to several eligible cells together. Each correction retains its own receipt.
 
 On **Cadets**, the default columns are Cadet, AS year, Flight, Squadron and Status. Cadet combines the portrait, name and rank. Under **Columns**, you can hide Cadet and choose individual fields such as Last name and AFSC. **Copy table** pastes the selected columns into a spreadsheet. **Download CSV** exports the same headers and rows in the current filter and sort order. The browser remembers your column choices. Select a column heading to sort by it and select it again to reverse the order. **Sort by → Default** restores AS seniority followed by last and first name.

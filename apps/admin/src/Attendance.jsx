@@ -1,9 +1,11 @@
+import { ToolbarFilters } from "./ToolbarFilters";
 import React, { useState } from "react";
 import { Heading, Select, Field, Editor, Empty, SearchBox } from "./components";
 import { AttendanceMatrix, AttendanceKey } from "./AttendanceMatrix";
 import { defaultRosterFilters, MatrixRosterFilters, selectRosterRows } from "./MatrixRosterFilters";
 import { api, name, eventTypes } from "./api";
 export default function Attendance({
+  semesterPicker,
   snapshot,
   list,
   reporting,
@@ -84,33 +86,36 @@ export default function Attendance({
       <section className="page-controls">
         <Heading title="Attendance" />
         <div className="toolbar">
+          {semesterPicker}
           <SearchBox
             placeholder="Find a cadet"
             value={query}
             onChange={value=>{setQuery(value);if(edit)dismiss();}}
           />
-          <Select
-            label="Event type"
-            value={eventType}
-            onChange={value=>{setEventType(value);if(edit)dismiss();}}
-            options={[
-              { value: "", label: "All events" },
-              ...Object.entries(eventTypes).map(([value, label]) => ({
-                value,
-                label,
-              })),
-            ]}
-          />
-          <Select
-            label="Training week"
-            value={week}
-            onChange={value=>{setWeek(value);if(edit)dismiss();}}
-            options={[
-              { value: "", label: "All weeks" },
-              ...weeks.map((w) => ({ value: String(w), label: "TW-" + w })),
-            ]}
-          />
-          <MatrixRosterFilters rows={roster} value={filters} onChange={value=>{setFilters(value);if(edit)dismiss();}} />
+          <ToolbarFilters active={Boolean(eventType || week || filters.flight || filters.year || filters.sort !== "seniority")}>
+            <Select
+              label="Event type"
+              value={eventType}
+              onChange={value=>{setEventType(value);if(edit)dismiss();}}
+              options={[
+                { value: "", label: "All events" },
+                ...Object.entries(eventTypes).map(([value, label]) => ({
+                  value,
+                  label,
+                })),
+              ]}
+            />
+            <Select
+              label="Training week"
+              value={week}
+              onChange={value=>{setWeek(value);if(edit)dismiss();}}
+              options={[
+                { value: "", label: "All weeks" },
+                ...weeks.map((w) => ({ value: String(w), label: "TW-" + w })),
+              ]}
+            />
+            <MatrixRosterFilters rows={roster} value={filters} onChange={value=>{setFilters(value);if(edit)dismiss();}} />
+          </ToolbarFilters>
           <div className="toolbar-actions">
             <AttendanceKey />
           </div>
@@ -133,7 +138,7 @@ export default function Attendance({
           submitLabel={review ? "Apply corrections" : "Review change"}
           onClose={()=>{if(!busy)dismiss();}}
           onSubmit={review ? applySelected : submit}>
-          <ul>{edit.map(t=><li key={JSON.stringify([t.personId,t.eventId])}>{t.label}</li>)}</ul>
+          <ul className="correction-targets" role="list">{edit.map(t=><li key={JSON.stringify([t.personId,t.eventId])}>{t.label}</li>)}</ul>
           {review ? <><p>{code || "Clear to blank"} · {reason}</p>
             {review.next>0 && <p role="status">{review.next} of {edit.length} saved</p>}</> : <>
           <Select

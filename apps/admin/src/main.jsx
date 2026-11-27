@@ -10,16 +10,14 @@ import {
   Layers,
   Settings,
   Sparkles,
-  History as HistoryIcon,
 } from "lucide-react";
 import { api, startSession, label, logout } from "./api";
 import { Drawer, EditorError, EditorSuspended } from "./components";
 import Events from "./Events";
 import People from "./People";
-import Attendance from "./Attendance";
 import CadetWorkspace from "./CadetWorkspace";
 import Excusals from "./Excusals";
-import History from "./History";
+import AttendancePage from "./AttendancePage";
 import Semester from "./Semester";
 import { Overview, System, Assistant } from "./Secondary";
 import "@fontsource/libre-franklin/latin-400.css";
@@ -37,7 +35,6 @@ const pages = [
   ["Events", CalendarDays],
   ["Attendance", ClipboardList],
   ["Excusals", FileCheck2],
-  ["History", HistoryIcon],
   ["Cadets", Users],
   ["Leadership", ChevronsUp],
   ["Semester planning", Layers],
@@ -50,6 +47,7 @@ const profileFor = page => ({
 }[page] || "full");
 function App() {
   const [page, setPage] = useState(() => pageFromUrl("leadership") || "Events"),
+    [archiveVersion, setArchiveVersion] = useState(() => new URL(location.href).searchParams.get("semester") || "latest"),
     [data, setData] = useState(null),
     [error, setError] = useState(""),
     [errorSource, setErrorSource] = useState("read"),
@@ -272,8 +270,9 @@ function App() {
       setProposal(null);
       await reload(true);
     });
-  const navigate = (value, fromHistory = false) => {
-    if (!fromHistory) writePageUrl("leadership", value);
+  const navigate = (value, fromHistory = false, semester = "latest") => {
+    if (value === "History") setArchiveVersion(fromHistory ? new URL(location.href).searchParams.get("semester") || "latest" : semester);
+    if (!fromHistory) writePageUrl("leadership", value, false, semester);
     readIntent.current++;
     if (pendingAbort.current) { pendingAbort.current.superseded = true; pendingAbort.current.abort(); }
     setError("");
@@ -329,7 +328,8 @@ function App() {
   const browseReady = data?.browse?.profile === profileFor(page);
   const visiblePages = blockedPreview ? [] : scoped
     ? pages.filter(([title]) => ["Attendance", "Excusals"].includes(title))
-    : pages.filter(([title]) => title !== "History" || data?.meta.hosted);
+    : pages;
+  const navigationPage = destination?.page ?? page;
   const common = { ...data, propose, busy, readOnly: !!preview && !data?.meta.delegatedEdits, notify: setNotice, refresh: reload, run };
   if (signIn) {
     const code = new URLSearchParams(location.search).get("signin");
@@ -404,7 +404,7 @@ function App() {
     <div hidden={!!outageScreen} inert={outageScreen ? true : undefined}>
     <EditorSuspended.Provider value={!!outageScreen}>
     <EditorError.Provider value={error}>
-      <WorkspaceShell mobileContext={preview && ((data?.meta.delegatedEdits ? "Acting as " : "Viewing as ") + viewAsLabel)} pages={visiblePages} page={destination?.page ?? page} navigate={navigate} account={<>
+      <WorkspaceShell mobileContext={preview && ((data?.meta.delegatedEdits ? "Acting as " : "Viewing as ") + viewAsLabel)} pages={visiblePages} page={navigationPage === "History" ? "Attendance" : navigationPage} navigate={navigate} account={<>
       {preview && <ViewAsAccount acting={data?.meta.delegatedEdits} busy={busy} onExit={() => viewAs(null)}
               label={viewAsLabel} />}
             {sessionInfo?.cadetWorkspace && !preview && <a href="/me">My cadet workspace</a>}
@@ -521,9 +521,12 @@ function App() {
                 {!scoped && page === "Leadership" && (
                   <People key="leadership" leadership {...common} />
                 )}{" "}
-                {page === "Attendance" && <Attendance {...common} viewEntry={preview?.entryAuditId} />}
+                {(page === "Attendance" || page === "History") && <AttendancePage
+                  key={JSON.stringify([data.manifest?.generation, data.manifest?.revision?.access, preview?.entryAuditId])}
+                  {...common} viewEntry={preview?.entryAuditId} archivesAllowed={Boolean(access?.capabilities.fullSnapshot && data.meta.hosted)}
+                  archiveVersion={page === "History" ? archiveVersion : null}
+                  onSemester={version => navigate(version ? "History" : "Attendance", false, version)} />}
                 {page === "Excusals" && <Excusals {...common} />}{" "}
-                {!scoped && page === "History" && <History key={JSON.stringify([data.captureKey, data.manifest?.revision?.access, preview?.entryAuditId])} />}
                 {!preview && !scoped && page === "Semester planning" && <Semester {...common} snapshot={data.snapshot || data.list} />}{" "}
                 {!scoped && page === "Overview" && (
                   <Overview key={JSON.stringify([data.captureKey,data.viewAsRevision])} {...common} navigate={navigate} />

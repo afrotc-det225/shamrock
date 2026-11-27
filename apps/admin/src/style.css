@@ -9,7 +9,8 @@
   background: #fff;
   font-synthesis: none;
   font-size: 14px;
-  --navy: #14243b;
+  --sidebar-width: clamp(182px, 20vw, 244px);
+  --navy: #0c2340;
   --green: #21614a;
   --gold: #baa45c;
   --border: #d6dce3;
@@ -68,7 +69,7 @@ summary:focus-visible {
   min-height: 100vh;
 }
 .sidebar {
-  width: 244px;
+  width: var(--sidebar-width);
   background: var(--navy);
   color: #f5f8fc;
   padding: 27px 12px 20px;
@@ -140,8 +141,8 @@ summary:focus-visible {
   padding: 20px 5px 0;
 }
 .workspace {
-  margin-left: 244px;
-  width: calc(100% - 244px);
+  margin-left: var(--sidebar-width);
+  width: calc(100% - var(--sidebar-width));
 }
 .topbar {
   height: 64px;
@@ -563,7 +564,6 @@ blockquote {
 }
 @media (max-width: 950px) {
   .sidebar {
-    width: 204px;
     padding-left: 8px;
     padding-right: 8px;
   }
@@ -577,10 +577,6 @@ blockquote {
     font-size: 12px;
     gap: 9px;
     padding: 12px 10px;
-  }
-  .workspace {
-    margin-left: 204px;
-    width: calc(100% - 204px);
   }
   main {
     padding: 23px;
@@ -1597,20 +1593,24 @@ main:has(.matrix-scroll) { padding-bottom: 8px; }
 
 @media (max-width:640px) {
   .mobile-bar,.mobile-menu header {display:flex;align-items:center;justify-content:space-between;gap:.65rem}
-  .mobile-bar {background:var(--navy);color:white;padding:.2rem max(.75rem,env(safe-area-inset-right)) .2rem max(.75rem,env(safe-area-inset-left))}
+  html {background:var(--navy)}
+  body {background:white;min-height:100dvh}
+  .mobile-bar,.mobile-menu header {padding:calc(env(safe-area-inset-top) + .2rem) max(.75rem,env(safe-area-inset-right)) .2rem max(.75rem,env(safe-area-inset-left));background:var(--navy);color:white}
+  .mobile-menu header {position:sticky;top:0;z-index:1;flex:none}
+  .mobile-bar::before {content:"";position:fixed;inset:0 0 auto;height:env(safe-area-inset-top);background:var(--navy);z-index:50;pointer-events:none}
   .mobile-bar .brand,.mobile-menu .brand {margin:0;padding:0;flex:none;align-items:center;font-size:1.3rem;gap:.45rem}
   .mobile-bar .brand-mark,.mobile-menu .brand-mark {height:1.55rem}
   .mobile-bar small {min-width:0;overflow-wrap:anywhere;font-size:.72rem}
   .mobile-bar button,.mobile-menu header button {display:inline-flex;align-items:center;justify-content:center;flex:none;gap:.4rem;min-height:44px;min-width:44px;width:auto;margin:0;padding:.4rem .55rem;color:white;background:transparent;border:0}
   .mobile-menu.sidebar {position:fixed;inset:0 auto 0 0;margin:0;width:min(87vw,21rem);max-width:none;
-    height:100dvh;max-height:none;padding:.45rem .75rem max(.8rem,env(safe-area-inset-bottom));border:0;overflow:auto;overscroll-behavior:contain}
+    height:100dvh;max-height:none;padding:0 0 max(.8rem,env(safe-area-inset-bottom));border:0;overflow:auto;overscroll-behavior:contain}
   .mobile-menu:not([open]) {display:none}
   .mobile-menu[open],.mobile-menu .menu-links,.mobile-menu nav,.mobile-menu .sidebar-bottom {display:flex;flex-direction:column;align-items:stretch}
   .mobile-menu::backdrop {background:rgb(12 30 51 / .5)}
   body:has(.mobile-menu[open]) {overflow:hidden}
   .mobile-menu.sidebar header button {width:44px;min-height:44px;margin:0;padding:0;justify-content:center}
-  .mobile-menu header {border-bottom:1px solid #435772;padding-bottom:.45rem}
-  .mobile-menu .menu-links {flex:1;gap:1rem}
+  .mobile-menu header {box-shadow:0 1px #435772}
+  .mobile-menu .menu-links {flex:1;gap:1rem;padding:0 .75rem}
   .mobile-menu nav {gap:0;padding:0;overflow:visible}
   .mobile-menu nav a,.mobile-menu .sidebar-bottom :is(a,button) {min-height:44px;width:100%;padding:.65rem .75rem;font-size:.94rem}
   .mobile-menu nav a svg {width:19px}
@@ -1659,3 +1659,16 @@ main:has(.matrix-scroll) { padding-bottom: 8px; }
 .roster-transfer {display:flex;gap:.5rem;border-top:1px solid var(--border);padding-top:.65rem}
 .cadet-roster:not(.with-cadet) td:first-child {max-width:22rem;overflow-wrap:anywhere}
 .cadet-roster:not(.with-cadet) td:first-child .icon {margin-left:.5rem;vertical-align:middle}
+
+.correction-targets {list-style:none;margin:0;padding:0}
+.correction-targets li + li {margin-top:.3rem}
+.filter-fields {display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:.65rem}
+.filter-fields .field {min-width:0;margin:0}
+@media(max-width:640px) {
+  .page-controls .toolbar > .search {flex:1 1 8rem;min-width:min(8rem,100%);height:39px}
+  .page-controls .toolbar > .semester-picker {flex:0 1 auto;max-width:100%}
+  .page-controls .toolbar {gap:.4rem}
+  .page-controls .toolbar > .toolbar-tool {min-height:39px;border:1px solid var(--border)}
+  .page-controls .toolbar-actions {gap:.25rem}
+  .page-controls .toolbar-actions button {min-height:39px}
+}

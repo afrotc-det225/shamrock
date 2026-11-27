@@ -467,7 +467,9 @@ try {
     0,
   );
   await navigate("Excusals");
+  await page.getByRole("button",{name:"Filters",exact:true}).click();
   await page.getByLabel("Decision status").selectOption("");
+  await page.keyboard.press("Escape");
   await page.getByRole("button",{name:/^Request details for /}).click();
   await page.getByRole("dialog")
     .getByText("Fictional scheduling conflict.", { exact: true })

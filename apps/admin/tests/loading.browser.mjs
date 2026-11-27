@@ -101,10 +101,15 @@ try{
  await page.getByRole("dialog",{name:"Navigation",exact:true}).waitFor();
  await page.keyboard.press("Escape");
  assert(await toggle.evaluate(el=>el===document.activeElement));
+ const mark=await page.locator(".mobile-bar .brand").boundingBox();
  await openNavigation(page);
- await page.getByRole('navigation').getByRole('link',{name:'History',exact:true}).click();
+ assert.deepEqual(await page.locator(".mobile-menu .brand").boundingBox(),mark);
+ assert.equal(await page.getByRole("navigation").getByRole("link",{name:"History",exact:true}).count(),0);
+ await page.keyboard.press("Escape");
+ // An existing archive bookmark goes directly to Attendance's read-only semester view.
+ await page.evaluate(()=>{history.pushState(null,"","/history");dispatchEvent(new PopStateEvent("popstate"));});
  await page.getByRole("status",{name:"Loading historical attendance"}).waitFor();
- assert(await page.getByLabel("Semester",{exact:true}).isDisabled());
+ assert(await page.getByLabel("Semester",{exact:true}).isEnabled());
  assert.equal(await page.getByText("Loading semesters…",{exact:true}).count(),0);
  releaseCatalog();
  const archive=page.getByRole("table",{name:"History",exact:true});
@@ -115,6 +120,7 @@ try{
  assert.deepEqual(await archive.locator("thead th:not([title])").allTextContents(),["Cadet","Overall","LLAB"]);
  assert.deepEqual(await archive.locator("thead th[title]").first().locator("span").allTextContents(),["TW-1","LLAB"]);
  assert.equal(await archive.getByRole("button").count(),0);
+ await page.getByRole("button",{name:"Filters",exact:true}).click();
  await page.getByLabel("AS year",{exact:true}).selectOption("AS100");
  assert.deepEqual(await archive.getByRole("rowheader").allTextContents(),["Avery North"]);
  await page.getByLabel("AS year",{exact:true}).selectOption("");
@@ -123,11 +129,13 @@ try{
  await page.getByLabel("Flight",{exact:true}).selectOption("");
  await page.getByLabel("Sort by").selectOption("flight");
  assert.deepEqual(await archive.getByRole("rowheader").allTextContents(),["Avery North","Blair River"]);
+ await page.keyboard.press("Escape");
  assert.equal(archiveReads,1);
  assert.equal(reportReads,0);
  await page.getByLabel("Semester",{exact:true}).selectOption("older");
  await archive.getByRole("rowheader",{name:"Avery North"}).waitFor();
  assert.equal(reportReads,1);
+ assert.equal(new URL(page.url()).searchParams.get("semester"),"older");
  const afterHistory=requests.length;release();await page.waitForTimeout(120);
  assert.equal(requests.length,afterHistory,'History stops remaining current-record pages');
  assert.equal(await page.locator('dialog[open]').count(),0,'late capture cannot open old editor');

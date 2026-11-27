@@ -1,6 +1,7 @@
-import React, {useContext, useEffect, useRef, useState, useSyncExternalStore} from "react";
+import React, {useContext, useEffect, useRef, useState} from "react";
 import {Menu, X} from "lucide-react";
 import Brand from "./Brand";
+import {usePhone} from "./use-phone";
 import {EditorSuspended} from "./components";
 
 import {pageHref} from "./page-url";
@@ -13,15 +14,8 @@ export function PageLink({workspace, title, navigate, children, className="", ..
   }}>{children}</a>;
 }
 
-const phone = () => matchMedia("(max-width: 640px)").matches;
-function watchPhone(notify) {
-  const query = matchMedia("(max-width: 640px)");
-  query.addEventListener("change", notify);
-  return () => query.removeEventListener("change", notify);
-}
-
 export default function WorkspaceShell({ workspace="leadership", pages, page, navigate, account, children, drawer, mobileContext }) {
-  const mobile = useSyncExternalStore(watchPhone, phone, () => false);
+  const mobile = usePhone();
   const menu = useRef(null);
   const [open, setOpen] = useState(false);
   const suspended = useContext(EditorSuspended);

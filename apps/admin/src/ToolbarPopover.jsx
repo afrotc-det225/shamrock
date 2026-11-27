@@ -31,9 +31,13 @@ export function ToolbarPopover({
   }
   useEffect(() => {
     if (!open) return;
+    position();
+    const observer = new ResizeObserver(position);
+    observer.observe(trigger.current);
     window.addEventListener("resize", position);
     window.addEventListener("scroll", position, true);
     return () => {
+      observer.disconnect();
       window.removeEventListener("resize", position);
       window.removeEventListener("scroll", position, true);
     };
@@ -62,9 +66,9 @@ export function ToolbarPopover({
         aria-label={label}
         className="toolbar-popover"
         onBeforeToggle={(e) => {
-          if (e.newState === "open") position();
+          if (e.nativeEvent.newState === "open") position();
         }}
-        onToggle={(e) => setOpen(e.newState === "open")}
+        onToggle={() => setOpen(panel.current.matches(":popover-open"))}
       >
         {children}
       </div>

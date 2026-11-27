@@ -1,3 +1,4 @@
+import { ToolbarFilters } from "./ToolbarFilters";
 import React, { useState } from "react";
 import { Plus, Pencil } from "lucide-react";
 import {
@@ -116,29 +117,31 @@ export default function Events({ snapshot, eventsList, propose, busy, refresh, r
             onChange={setQuery}
             placeholder="Find an event"
           />
-          <Select
-            label="Semester"
-            value={term}
-            onChange={setTerm}
-            options={[
-              { value: "", label: "All semesters" },
-              ...s.terms.map((t) => ({ value: t.termId, label: t.label })),
-            ]}
-          />
-          <Select
-            label="Type"
-            value={type}
-            onChange={setType}
-            options={[
-              { value: "", label: "All types" },
-              ...Object.entries(eventTypes).map(([value, label]) => ({
-                value,
-                label,
-              })),
-            ]}
-          />
-          <Select label="Sort by" value={sort} onChange={setSort}
-            options={[{value:"default", label:"Default"}, {value:"type", label:"Type"}]} />
+          <ToolbarFilters active={Boolean(type || sort !== "default" || term !== (s.terms.find(t=>t.isCurrent)?.termId || ""))}>
+            <Select
+              label="Semester"
+              value={term}
+              onChange={setTerm}
+              options={[
+                { value: "", label: "All semesters" },
+                ...s.terms.map((t) => ({ value: t.termId, label: t.label })),
+              ]}
+            />
+            <Select
+              label="Type"
+              value={type}
+              onChange={setType}
+              options={[
+                { value: "", label: "All types" },
+                ...Object.entries(eventTypes).map(([value, label]) => ({
+                  value,
+                  label,
+                })),
+              ]}
+            />
+            <Select label="Sort by" value={sort} onChange={setSort}
+              options={[{value:"default", label:"Default"}, {value:"type", label:"Type"}]} />
+          </ToolbarFilters>
           <div className="toolbar-actions">
             <button disabled={readOnly || !term || busy} onClick={() => withEditor(() => setBulk(true))}>
               Change schedule

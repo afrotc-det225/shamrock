@@ -1,3 +1,4 @@
+import { ToolbarFilters } from "./ToolbarFilters";
 import React, { useState,useEffect } from "react";
 import { Plus, Pencil, Columns3 } from "lucide-react";
 import {
@@ -242,12 +243,14 @@ export default function People({
             onChange={setQuery}
             resultCount={query || flight || year || match || !["current","all"].includes(status) ? rows.length : undefined}
           />
-          {leadership ? <Select label="View" value={view} onChange={setView} options={["List","Organization"]}/> : <>
-            <Select label="Flight" value={flight} onChange={setFlight} options={[{value:"",label:"All flights"},...s.flights.map(f=>({value:f.flightId,label:f.label})).sort((a,b)=>textOrder(a.label,b.label))]}/>
-            <Select label="AS year" value={year} onChange={setYear} options={[{value:"",label:"All AS years"},...years]}/>
-            <Select label="Roster status" value={status} onChange={setStatus} options={[{value:"current",label:"Current roster"},{value:"all",label:"All statuses"},...statuses]}/>
-            <Select label="Sort by" value={sort} onChange={key=>{setSort(key);setDescending(false);}} options={[{value:"seniority",label:"Default"},...columnKeys.map(k=>({value:k,label:columnLabel(k)}))]}/>
-          </>}
+          <ToolbarFilters active={Boolean(flight || year || status !== "current" || sort !== "seniority" || view !== "List")}>
+            {leadership ? <Select label="View" value={view} onChange={setView} options={["List","Organization"]}/> : <>
+              <Select label="Flight" value={flight} onChange={setFlight} options={[{value:"",label:"All flights"},...s.flights.map(f=>({value:f.flightId,label:f.label})).sort((a,b)=>textOrder(a.label,b.label))]}/>
+              <Select label="AS year" value={year} onChange={setYear} options={[{value:"",label:"All AS years"},...years]}/>
+              <Select label="Roster status" value={status} onChange={setStatus} options={[{value:"current",label:"Current roster"},{value:"all",label:"All statuses"},...statuses]}/>
+              <Select label="Sort by" value={sort} onChange={key=>{setSort(key);setDescending(false);}} options={[{value:"seniority",label:"Default"},...columnKeys.map(k=>({value:k,label:columnLabel(k)}))]}/>
+            </>}
+          </ToolbarFilters>
           <div className="toolbar-actions">
             {!leadership && (
               <ToolbarPopover label="Columns" icon={Columns3}>

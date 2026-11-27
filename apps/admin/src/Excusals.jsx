@@ -1,3 +1,4 @@
+import { ToolbarFilters } from "./ToolbarFilters";
 import React, { useContext, useState } from "react";
 import {
   Drawer,
@@ -107,25 +108,27 @@ export default function Excusals({
             value={query}
             onChange={setQuery}
           />
-          <Select
-            label="Decision status"
-            value={status}
-            onChange={setStatus}
-            options={[
-              { value: "", label: "All decisions" },
-              {value:"Submitted",label:"Needs a decision"},
-              ...new Set(queue.filter(r=>r.status !== "Submitted").map(r=>r.status)),
-            ]}
-          />
-          <Select
-            label="Flight"
-            value={flight}
-            onChange={setFlight}
-            options={[
-              { value: "", label: "All Flights" },
-              ...Array.from(new Map(bySquadron.map(r => [r.flightId, flightName(r)])), ([value,label]) => ({value,label})).sort((a,b)=>a.label.localeCompare(b.label)),
-            ]}
-          />
+          <ToolbarFilters active={Boolean(flight || status !== "Submitted")}>
+            <Select
+              label="Decision status"
+              value={status}
+              onChange={setStatus}
+              options={[
+                { value: "", label: "All decisions" },
+                {value:"Submitted",label:"Needs a decision"},
+                ...new Set(queue.filter(r=>r.status !== "Submitted").map(r=>r.status)),
+              ]}
+            />
+            <Select
+              label="Flight"
+              value={flight}
+              onChange={setFlight}
+              options={[
+                { value: "", label: "All Flights" },
+                ...Array.from(new Map(bySquadron.map(r => [r.flightId, flightName(r)])), ([value,label]) => ({value,label})).sort((a,b)=>a.label.localeCompare(b.label)),
+              ]}
+            />
+          </ToolbarFilters>
         </div>
       </section>
       <Table className={`excusal-queue${showActions ? " actionable" : ""}`}

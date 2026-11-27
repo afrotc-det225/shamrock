@@ -1,7 +1,8 @@
+import {ToolbarFilters} from "./ToolbarFilters";
 import React, { useEffect, useState } from "react";
 import { rateStyle } from "./roster-colors";
 import { AttendanceKey, MatrixTable } from "./AttendanceMatrix";
-import { Heading, Select, SearchBox, Empty, LoadingRows } from "./components";
+import { Heading, SearchBox, Empty, LoadingRows } from "./components";
 import { api } from "./api";
 import { loadHistory } from "../history-client";
 
@@ -11,56 +12,39 @@ import { compactReport } from "../history-table.mjs";
 const percentage = (value) => typeof value === "number" && Number.isFinite(value)
   ? `${(value * 100).toFixed(1)}%` : value === null || value === undefined ? "—" : String(value);
 
-export default function History() {
-  const [catalog, setCatalog] = useState(null), [selected, setSelected] = useState(""),
-    [report, setReport] = useState(null), [error, setError] = useState(""),
-    [query, setQuery] = useState(""),
-    [filters, setFilters] = useState(defaultRosterFilters), [attempt, setAttempt] = useState(0),
-    [reportAttempt, setReportAttempt] = useState(0);
+export default function HistoricalAttendance({item, initialReport, semesterPicker}) {
+  const [report, setReport] = useState(null), [error, setError] = useState(""),
+    [query, setQuery] = useState(""), [filters, setFilters] = useState(defaultRosterFilters),
+    [attempt,setAttempt] = useState(0);
   useEffect(() => {
+    if (!item || initialReport) return;
     const controller = new AbortController();
-    setReport(null); setCatalog(null); setSelected("");
-    api("/history/list?include=latest", undefined, {signal:controller.signal}).then(result => {
-      if (controller.signal.aborted) return;
-      const options = result.semesters
-        ? result.semesters.map(s => ({value:s.version, label:s.label, file:true}))
-        : result.snapshots.map(s => ({value:s.snapshotId, label:s.periodLabel || s.title}));
-      setCatalog(options);
-      setSelected((result.semesters ? options.at(-1) : options[0])?.value || "");
-      if (result.latest) setReport(result.latest);
-    }).catch(e => { if (!controller.signal.aborted) setError(e.message); });
+    const request = (path,body) => api(path,body,{signal:controller.signal});
+    setError("");
+    const load = item.file ? request("/history/report",{version:item.value}) :
+      loadHistory(item.value,request).then(compactReport);
+    load.then(result=>{if (!controller.signal.aborted) setReport(result);})
+      .catch(e=>{if (!controller.signal.aborted) setError(e.message);});
     return () => controller.abort();
-  }, [attempt]);
-  useEffect(() => {
-    const item = catalog?.find(option => option.value === selected);
-    if (!item || report?.version === selected) return;
-    const controller = new AbortController();
-    const request = (path, body) => api(path, body, {signal:controller.signal});
-    setReport(null); setError(""); setFilters(defaultRosterFilters); setQuery("");
-    const load = item.file ? request("/history/report", {version:selected}) :
-      loadHistory(selected, request).then(compactReport);
-    load.then(value => {
-      if (!controller.signal.aborted) { setReport({version:selected, report:value}); }
-    }).catch(e => { if (!controller.signal.aborted) { setError(e.message); } });
-    return () => controller.abort();
-  }, [selected, catalog, reportAttempt]);
-  const current = report?.version === selected ? report?.report : null;
+  },[item,initialReport,attempt]);
+  const current = initialReport || report;
   const roster = current?.rows || [];
   const rows = selectRosterRows(roster, query, filters);
   const events = (current?.headers || []).map((label, eventId) => ({eventId, label}));
   return <>
     <section className="page-controls">
-      <Heading title="History" />
-      {catalog?.length !== 0 && <div className="toolbar">
-        <Select label="Semester" value={selected} onChange={setSelected} disabled={!catalog} options={catalog || [{value:"", label:"Semester"}]} />
+      <Heading title="Attendance" />
+      <div className="toolbar">
+        {semesterPicker}
         <SearchBox placeholder="Find a cadet" value={query} onChange={setQuery} />
-        <MatrixRosterFilters rows={roster} value={filters} onChange={setFilters} />
+        <ToolbarFilters active={Boolean(filters.year || filters.flight || filters.sort !== "seniority")}>
+          <MatrixRosterFilters rows={roster} value={filters} onChange={setFilters} />
+        </ToolbarFilters>
         <div className="toolbar-actions"><AttendanceKey /></div>
-      </div>}
+      </div>
     </section>
-    {error && <div className="error" role="alert">{error} <button onClick={() => { setError(""); if (selected) setReportAttempt(value => value + 1); else setAttempt(value => value + 1); }}>Retry</button></div>}
-    {!error && !current && catalog?.length !== 0 && <LoadingRows label="Loading historical attendance" rows={7} />}
-    {catalog?.length === 0 && <Empty>No archived reports.</Empty>}
+    {error && <div className="error" role="alert">{error} <button onClick={() => setAttempt(value=>value+1)}>Retry</button></div>}
+    {!error && !current && item && <LoadingRows label="Loading historical attendance" rows={7} />}
     {current && <>
       {(current.summary.unresolvedRows > 0 || current.summary.formulaMismatches > 0) &&
         <p className="notice">{current.summary.unresolvedRows > 0 ? `${current.summary.unresolvedRows} historical identities are not linked to the current Directory. ` : ""}
