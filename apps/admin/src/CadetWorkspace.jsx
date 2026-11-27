@@ -68,7 +68,7 @@ function Profile({ state, save, disabled }) {
       ? fields.slice(0, 5)
       : fields.slice(5)
     : fields;
-  const groups = [["Contact information", ["firstName","lastName","phone","dateOfBirth","dorm","homeTown","homeState"]], ["Academics and career", ["classYear","cipBroadArea","cipCode","afsc"]], ["Directory photo", ["photoLink"]]];
+  const groups = [["Contact information", ["firstName","lastName","phone","dateOfBirth","dorm","homeTown","homeState"]], ["Academics and career", ["classYear","cipBroadArea","cipCode","afsc"]], ...(register ? [["Directory photo", ["photoLink"]]] : [])];
   function submit(e) {
     e.preventDefault();
     if (register && step === 0) {
@@ -94,8 +94,12 @@ function Profile({ state, save, disabled }) {
     );
   }
   return (
-    <form onSubmit={submit} className="cadet-form form-section">
-      {!register && <ProfilePhoto profile={state.profile} />}
+    <form onSubmit={submit} className="cadet-form profile-form">
+      {!register && <div className="profile-header">
+        <ProfilePhoto profile={state.profile}/>
+        <fieldset disabled={disabled}><ProfileField field="photoLink" label="Directory photo link"
+          original={state.profile.photoLink} value={form.photoLink || ""} onChange={value=>pick("photoLink",value)}/></fieldset>
+      </div>}
       {register && <h2>{step === 0 ? "Directory information" : "Academic and career information"}</h2>}
       <fieldset disabled={disabled && !register}>
         {register && step === 0 && (
@@ -126,22 +130,19 @@ function Profile({ state, save, disabled }) {
         {groups.map(([title, keys]) => {
           const members = visible.filter(([key]) => keys.includes(key));
           return members.length > 0 && <section key={title} className="profile-section"><h3>{title}</h3><div className="cadet-fields">
-          {members.map(([key,label]) => <ProfileField key={key} field={key}
-            label={key === "afsc" ? "Air Force Specialty Code (AFSC)" : label}
-            broadArea={key === "cipCode" ? form.cipBroadArea : undefined} originalBroadArea={key === "cipCode" ? state.profile?.cipBroadArea : undefined}
-            original={state.profile?.[key]} required={required.has(key) && (register || !!state.profile?.[key])}
-            value={form[key] || ""} onChange={value=>pick(key,value)}/>)}
+          {members.map(([key,label]) => <div className="profile-input" data-field={key} key={key}>
+            <ProfileField field={key} label={key === "afsc" ? "Air Force Specialty Code (AFSC)" : label}
+              broadArea={key === "cipCode" ? form.cipBroadArea : undefined} originalBroadArea={key === "cipCode" ? state.profile?.cipBroadArea : undefined}
+              original={state.profile?.[key]} required={required.has(key) && (register || !!state.profile?.[key])}
+              value={form[key] || ""} onChange={value=>pick(key,value)}/>
+            {key === "cipCode" && <a className="field-resource" href="https://nces.ed.gov/ipeds/cipcode/" target="_blank" rel="noreferrer">Find your major’s CIP code <ExternalLink size={14}/></a>}
+            {key === "afsc" && <a className="field-resource" href="https://tmd.texas.gov/Data/Sites/1/media/tmd-jobs/ang-dsg-vacancy/fy26/quarter-3/air-force-officer-classification-directory-afocd-30-april-2025.pdf" target="_blank" rel="noreferrer">Officer classification directory (DAFOCD) <ExternalLink size={14}/></a>}
+          </div>)}
         </div>
-      {title === "Academics and career" && (
-        <div className="profile-resources">
-          <a href="https://nces.ed.gov/ipeds/cipcode/" target="_blank" rel="noreferrer">Find your major’s CIP code <ExternalLink size={15}/></a>
-          <a href="https://tmd.texas.gov/Data/Sites/1/media/tmd-jobs/ang-dsg-vacancy/fy26/quarter-3/air-force-officer-classification-directory-afocd-30-april-2025.pdf" target="_blank" rel="noreferrer">Officer classification directory (DAFOCD) <ExternalLink size={15}/></a>
-        </div>
-      )}
         </section>;
         })}
       </fieldset>
-      {register && step === 1 && (
+      <div className="profile-actions">{register && step === 1 && (
         <button type="button" onClick={() => setStep(0)}>
           Back
         </button>
@@ -155,7 +156,7 @@ function Profile({ state, save, disabled }) {
             ? "Continue"
             : "Create profile"
           : "Save changes"}
-      </button>
+      </button></div>
     </form>
   );
 }
@@ -555,7 +556,7 @@ export default function CadetWorkspace({ session }) {
       </p>
     </>}>
 
-      {page !== "Excusals" && page !== "Overview" && <Heading title={state?.registration ? "Create profile" : page || "My workspace"} />}
+      {page !== "Excusals" && page !== "Overview" && page !== "Cadets" && <Heading title={state?.registration ? "Create profile" : page || "My workspace"} />}
       {error && (
         <p className="error" role="alert">
           {error}{" "}
@@ -603,7 +604,7 @@ export default function CadetWorkspace({ session }) {
       )}
       {page==="Overview" && (state?.overview ? <Overview overview={state.overview} memberReport={state.compiled}
         birthdayCalendar={state.birthdayCalendar} birthdayFlights={state.birthdayFlights} birthdaySquadrons={state.birthdaySquadrons}/> : <p role="status">Loading Overview…</p>)}
-      {page==="Cadets" && (state.section==="directory" ? <CadetDirectory rows={state.directory}/> : <p role="status">Loading Directory…</p>)}
+      {page==="Cadets" && (state?.section==="directory" ? <CadetDirectory rows={state.directory}/> : <p role="status">Loading Directory…</p>)}
       {page==="Attendance reviews" && <AttendanceReviews state={state} save={save} disabled={disabled}/>}
       {page==="My attendance" && (state.section==="attendance" ? <PersonalAttendance state={state} flags={flags} save={save} disabled={disabled}/> : <p role="status">Loading attendance…</p>)}
       {page==="Submit attendance" && (state.section==="report" ? <FlightReport key={(session.viewAs?.entryAuditId || "self")+state.profile.personId} previewId={session.viewAs?.entryAuditId} state={state} save={save} disabled={disabled}/> : <p role="status">Loading Flight roster…</p>)}

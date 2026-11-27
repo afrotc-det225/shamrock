@@ -1,33 +1,17 @@
-import React, {useState} from "react";
-import {compareCadetsForDisplay} from "../../../packages/domain/src/cadet-display-order";
-import {Empty, Heading, SearchBox, Select, Table} from "./components";
-import {ToolbarFilters} from "./ToolbarFilters";
-import {cellStyle, flightColors, yearColors, profileColorStyle, flightPathColors} from "./roster-colors";
-import {useTableZoom} from "./TableZoom";
-
-const directoryFields = [["role","Role"],["university","University"],["email","School email"],["classYear","Graduation year"],
-  ["cipBroadArea","CIP broad area"],["cipCode","CIP code"],["afsc","AFSC"],["flightPathStatus","Status"]];
+import React, {useMemo} from "react";
+import People from "./People";
 
 export default function CadetDirectory({rows}) {
-  const [query,setQuery] = useState(""), [flight,setFlight] = useState("");
-  const zoom = useTableZoom("cadets");
-  const words = query.toLowerCase().trim().split(/[\s,]+/);
-  const roster = rows.filter(row => (!flight || row.flight===flight)
-    && words.every(word => [row.firstName,row.lastName,row.rank,row.asYear,row.flight,row.squadron,...directoryFields.map(([key])=>row[key])]
-      .some(value => String(value ?? "").toLowerCase().includes(word)))).sort(compareCadetsForDisplay);
-  return <>
-    <section className="page-controls"><Heading title="Cadets"/><div className="toolbar">
-      <SearchBox placeholder="Find a cadet" value={query} onChange={setQuery}/>
-      <ToolbarFilters active={!!flight}><Select label="Flight" value={flight} onChange={setFlight}
-        options={[{value:"",label:"All flights"},...Array.from(new Set(rows.map(row => row.flight))).sort()]}/>
-        {zoom.control}
-      </ToolbarFilters>
-    </div></section>
-    {roster.length ? <Table className="member-directory" zoom={zoom.scale} headers={["Cadet","AS year","Flight","Squadron",...directoryFields.map(([,label])=>label)]}>
-      {roster.map(row => <tr key={row.personId}><td>{row.rank} {row.firstName} {row.lastName}</td>
-        <td style={cellStyle(yearColors(row.asYear))}>{row.asYear}</td>
-        <td style={cellStyle(flightColors(row.flight,row.squadron))}>{row.flight}</td>
-        <td style={profileColorStyle("squadron",row.squadron)}>{row.squadron}</td>{directoryFields.map(([key])=><td key={key} style={row[key] ? (key === "flightPathStatus" ? cellStyle(flightPathColors(row[key])) : profileColorStyle(key,row[key])) : undefined}>{row[key] || "—"}</td>)}</tr>)}
-    </Table> : <Empty>No matching cadets.</Empty>}
-  </>;
+  const roster = useMemo(() => {
+    const flights = new Map(), squadrons = new Map();
+    const people = rows.map(person => {
+      const squadronId = person.squadron || null;
+      const flightId = person.flight ? JSON.stringify([squadronId, person.flight]) : null;
+      if (squadronId) squadrons.set(squadronId, {squadronId, label:person.squadron});
+      if (flightId) flights.set(flightId, {flightId, squadronId, label:person.flight});
+      return {...person, flightId};
+    });
+    return {people, flights:[...flights.values()], squadrons:[...squadrons.values()]};
+  }, [rows]);
+  return <People snapshot={roster} member readOnly/>;
 }

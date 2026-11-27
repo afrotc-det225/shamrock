@@ -24,22 +24,25 @@ import { DIRECTORY_FIELDS } from "../../../packages/domain/src/admin";
 import { compareAsYearsForDisplay, compareCadetsForDisplay, compareLeadershipForDisplay } from "../../../packages/domain/src/cadet-display-order";
 
 const coreColumns = ["cadet","asYear","flight","squadron","flightPathStatus"];
-const columnKeys = ["cadet","lastName","firstName","rank","asYear","flight","squadron","flightPathStatus",
+const adminColumns = ["cadet","lastName","firstName","rank","asYear","flight","squadron","flightPathStatus",
   ...profileFields.filter(k => !["lastName","firstName","rank",...coreColumns].includes(k))];
-const defaultColumns = columnKeys.filter(key => !["lastName","firstName","rank"].includes(key));
+const memberColumns = ["cadet","lastName","firstName","rank","asYear","flight","squadron","flightPathStatus","role","university","email","cipBroadArea","cipCode","afsc","classYear"];
+const memberStatuses = statuses.filter(value => !["Inactive","Dropped","Commissioned"].includes(value));
 const columnLabel = k=>({cadet:"Cadet",lastName:"Last name",firstName:"First name",flight:"Flight",squadron:"Squadron",flightPathStatus:"Status",classYear:"Graduation year"}[k] || label(k));
 const detailFields = new Set(["phone","dorm","homeTown","homeState","dateOfBirth"]);
 const preferenceKey = "shamrock.cadets.columns.v2";
-function initialColumns(){
+const memberPreference = "shamrock.member.columns.v1";
+function initialColumns(member = false){
+  const keysAllowed = member ? memberColumns : adminColumns;
   try {
-    const saved=localStorage.getItem(preferenceKey);
-    const keys=JSON.parse(saved ?? localStorage.getItem("shamrock.cadets.columns.v1"));
+    const saved=localStorage.getItem(member ? memberPreference : preferenceKey);
+    const keys=JSON.parse(saved ?? (member ? null : localStorage.getItem("shamrock.cadets.columns.v1")));
     if(Array.isArray(keys)) {
-      const selected=columnKeys.filter(k=>keys.includes(k) || (!saved && k==="cadet"));
+      const selected=keysAllowed.filter(k=>keys.includes(k) || (!saved && k==="cadet"));
       if(selected.length)return selected;
     }
   } catch {}
-  return defaultColumns;
+  return keysAllowed.filter(key => !["lastName","firstName","rank"].includes(key));
 }
 
 export function cadetBrowseProfile() {
@@ -48,6 +51,7 @@ export function cadetBrowseProfile() {
 
 function DirectoryValue({ field, value, person }) {
   if (field === "photoLink") return value ? <DirectoryPhoto value={value} person={person} /> : "—";
+  if (!value) return "—";
   const style = profileColorStyle(field, value);
   const label = String(value || "—");
   return style ? <span className="profile-tag" style={style} title={field==="dorm" && value ? residenceCategory(value) : undefined}>{label}</span> : label;
@@ -58,9 +62,10 @@ export default function People({
   propose,
   busy,
   leadership = false,
-  readOnly = false,
+  readOnly = false, member = false,
 }) {
   const s = snapshot || list;
+  const columnKeys = member ? memberColumns : adminColumns;
   const [query, setQuery] = useState(""),
     [flight, setFlight] = useState(""),
     [squadron, setSquadron] = useState(""),
@@ -136,7 +141,7 @@ export default function People({
     if (id && !s.flights.some(f => f.flightId === flight && f.squadronId === id)) setFlight("");
   }
   const zoom = useTableZoom("cadets");
-  const [columns,setColumns]=useState(initialColumns), [descending,setDescending]=useState(false);
+  const [columns,setColumns]=useState(()=>initialColumns(member)), [descending,setDescending]=useState(false);
   const [transferMessage,setTransferMessage]=useState("");
   const hasCadet = columns.includes("cadet");
   function valueOf(person, key) {
@@ -151,7 +156,7 @@ export default function People({
     if (!next.length) return;
     setTransferMessage("");
     setColumns(next);
-    try{localStorage.setItem(preferenceKey,JSON.stringify(next));}catch{}
+    try{localStorage.setItem(member ? memberPreference : preferenceKey,JSON.stringify(next));}catch{}
     if (shown && field === key) selectField("");
     if (!shown && !match) selectField(key);
   }
@@ -179,11 +184,13 @@ export default function People({
   },[extra,binding,extended?.binding,retry]);
   const waitingForField = extra && extended?.binding !== binding;
   const directory = extra && !waitingForField ? extended.people : s.people;
+  const words=query.toLowerCase().trim().split(/[\s,]+/);
   const rows = (leadership ? s.leadership : directory).filter(p=>{
     if (!leadership && (squadron && flightOf(p)?.squadronId !== squadron || flight && p.flightId!==flight || year && p.asYear!==year ||
       status==="current" && ["Dropped","Commissioned"].includes(p.flightPathStatus) ||
       !["current","all"].includes(status) && p.flightPathStatus!==status ||
       field && match && !waitingForField && !String(valueOf(p,field) ?? "").toLowerCase().includes(match.toLowerCase()))) return false;
+    if(member) return words.every(word => memberColumns.some(key => String(valueOf(p,key) ?? "").toLowerCase().includes(word)));
     return [name(p),p.email,p.role,p.rank].join(" ").toLowerCase().includes(query.toLowerCase());
   }).sort(leadership ? compareLeadershipForDisplay : (a,b)=>{
     if(sort==="seniority")return compareCadetsForDisplay(a,b);
@@ -259,7 +266,7 @@ export default function People({
               ]}/>
               <Select label="Flight" value={flight} onChange={setFlight} options={[{value:"",label:"All flights"},...rosterFlights.map(f=>({value:f.flightId,label:f.label})).sort((a,b)=>textOrder(a.label,b.label))]}/>
               <Select label="AS year" value={year} onChange={setYear} options={[{value:"",label:"All AS years"},...years]}/>
-              <Select label="Roster status" value={status} onChange={setStatus} options={[{value:"current",label:"Current roster"},{value:"all",label:"All statuses"},...statuses]}/>
+              <Select label="Roster status" value={status} onChange={setStatus} options={[{value:"current",label:"Current roster"},...(member ? memberStatuses : [{value:"all",label:"All statuses"},...statuses])]}/>
               <Select label="Sort by" value={sort} onChange={key=>{setSort(key);setDescending(false);}} options={[{value:"seniority",label:"Default"},...columnKeys.map(k=>({value:k,label:columnLabel(k)}))]}/>
             </>}
             {(!leadership || view!=="Organization") && zoom.control}
@@ -275,18 +282,18 @@ export default function People({
                     {value:"",label:"Choose a column"}, ...columns.map(k=>({value:k,label:columnLabel(k)}))
                   ]}/>
                   {field && <Field label={"Filter by "+columnLabel(field)} disabled={waitingForField} value={match} onChange={e=>setMatch(e.target.value)}/>}
-                  <div className="roster-transfer">
+                  {!member && <div className="roster-transfer">
                     <button disabled={waitingForField} onClick={()=>transferRoster("clipboard")}>Copy table</button>
                     <button disabled={waitingForField} onClick={()=>transferRoster("csv")}>Download CSV</button>
-                  </div>
+                  </div>}
                   {transferMessage && <small role="status">{transferMessage}</small>}
                 </div>
               </ToolbarPopover>
             )}
-            <button className="primary" aria-label={leadership ? "Add contact" : "Add cadet"} title={leadership ? "Add contact" : "Add cadet"} disabled={readOnly} onClick={() => open()}>
+            {!member && <button className="primary" aria-label={leadership ? "Add contact" : "Add cadet"} title={leadership ? "Add contact" : "Add cadet"} disabled={readOnly} onClick={() => open()}>
               <Plus size={17} />
               <span>{leadership ? "Add contact" : "Add cadet"}</span>
-            </button>
+            </button>}
           </div>
         </div>
 
@@ -299,7 +306,7 @@ export default function People({
         headers={
           leadership
             ? ["Name", "Role", "Email", "Office", ""]
-            : [...columns.map(k=>header(k,columnLabel(k))), ...(hasCadet ? [""] : [])]
+            : [...columns.map(k=>header(k,columnLabel(k))), ...(hasCadet && !member ? [""] : [])]
         }
       >
         {rows.map((p) => {
@@ -308,11 +315,11 @@ export default function People({
           <tr key={p.contactId || p.personId}>
             {(leadership || hasCadet) && <td>
               <div className="person-cell">
-                <DirectoryPhoto avatar value={p.photoLink} person={p} />
+                <DirectoryPhoto avatar value={member ? undefined : p.photoLink} person={p} />
                 <span>
-                  <button className="text-button" disabled={readOnly} title={name(p)} onClick={() => open(p)}>
+                  {member ? <strong className="member-name" title={name(p)}>{name(p)}</strong> : <button className="text-button" disabled={readOnly} title={name(p)} onClick={() => open(p)}>
                     {name(p)}
-                  </button>
+                  </button>}
                   <small>{p.rank}</small>
                 </span>
               </div>
@@ -337,7 +344,7 @@ export default function People({
                 </td>;
               })
             )}
-            {(leadership || hasCadet) && <td>{editButton}</td>}
+            {!member && (leadership || hasCadet) && <td>{editButton}</td>}
           </tr>
         );})}
       </Table>}

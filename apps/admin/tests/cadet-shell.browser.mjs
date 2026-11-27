@@ -58,7 +58,8 @@ try {
             ]}});
         }
         return route.fulfill({ json: {
-          section,eventsForFlight:[{eventId:"other",label:"Earlier Mando"}],directory:[{personId:"peer",rank:"C/AB",firstName:"Directory",lastName:"Peer",asYear:"AS100",flight:"Alpha",squadron:"Blue"}],attendance:section==="attendance"?[{eventId:"llab",label:"TW-1 LLAB",eventType:"llab",version:1,baseVersion:0,code:"A"},{eventId:"lab2",label:"TW-2 LLAB",eventType:"llab",version:2,baseVersion:0,code:"A"}]:[],
+          section,eventsForFlight:[{eventId:"other",label:"Earlier Mando"}],directory:[{personId:"peer",rank:"C/AB",firstName:"Directory",lastName:"Peer",asYear:"AS100",flight:"Alpha",squadron:"Blue",flightPathStatus:"Active 3/4",afsc:"13N",university:"Notre Dame"},
+            {personId:"senior",rank:"C/Capt",firstName:"Senior",lastName:"Sample",asYear:"AS400",flight:"Delta",squadron:"Gold",afsc:"17S",flightPathStatus:"Ready 4/4"}],attendance:section==="attendance"?[{eventId:"llab",label:"TW-1 LLAB",eventType:"llab",version:1,baseVersion:0,code:"A"},{eventId:"lab2",label:"TW-2 LLAB",eventType:"llab",version:2,baseVersion:0,code:"A"}]:[],
           linked: true, writable: true, readOnly:false, registration: role === "Registration",
           profile: role === "Registration" ? null : {personId:"one", firstName:"Sample", lastName:"Cadet", flightId:"alpha",afsc:"13N – Nuclear and Missile Operations ".repeat(6).trim(),photoLink:"https://drive.google.com/file/d/fictional-photo/view"},
           flights: [{ flightId:"alpha", label:"Alpha" }], events: [], actions: [], queue: (squadron || role==="Flight") ? [{requestId:"example",version:3,personId:"cadet",eventId:"llab",event:"TW-2 LLAB",eventStartAt:"2026-10-14T14:00:00Z",
@@ -95,6 +96,7 @@ try {
         await page.getByLabel("Flight attendance event").selectOption("other");
         await page.getByRole("cell",{name:"Present",exact:true}).waitFor();
         const mark=page.locator('.flight-roll [data-mark="P"]');
+        assert.ok(await mark.evaluate(badge=>badge.offsetWidth < badge.closest("td").offsetWidth));
         const fill=()=>mark.evaluate(cell=>getComputedStyle(cell).backgroundColor);
         const initialFill=await fill();
         assert.equal(initialFill,"rgb(193, 225, 205)");
@@ -186,6 +188,14 @@ try {
         await page.getByLabel("First name", {exact:true}).waitFor();
         if (preview) await page.locator(width === 390 ? ".mobile-bar" : ".sidebar-bottom").getByText("Acting as Sample Cadet").waitFor();
         const afsc = page.getByLabel("Air Force Specialty Code (AFSC)");
+        assert(await page.locator(".profile-header").getByLabel("Directory photo link").isVisible());
+        for(const [field,resource] of [["CIP code","Find your major’s CIP code"],["Air Force Specialty Code (AFSC)","Officer classification directory (DAFOCD)"]]){
+          const input=page.locator(".profile-input").filter({has:page.getByLabel(field,{exact:true})});
+          assert(await input.getByRole("link",{name:resource}).isVisible());
+        }
+        const gap=await page.locator(".profile-form").evaluate(form=>
+          form.querySelector(".profile-actions").getBoundingClientRect().top-form.querySelector(":scope > fieldset").getBoundingClientRect().bottom);
+        assert(gap>=0 && gap<=18,"profile footer gap "+gap);
         assert.equal(await afsc.inputValue(),"13N – Nuclear and Missile Operations ".repeat(6).trim());
         assert(await afsc.evaluate(el => el.validity.valid && el.list.options.length > 10));
         await afsc.fill("Typo");
@@ -252,7 +262,31 @@ try {
         await page.getByText("Draft saved on this device.").waitFor();
         await openNavigation(page);
         await nav.getByRole("link",{name:"Cadets",exact:true}).click();
-        await page.getByRole("cell",{name:"C/AB Directory Peer"}).waitFor();
+        const directory=page.locator(".cadet-roster");
+        await directory.getByText("Directory Peer",{exact:true}).waitFor();
+        const names=directory.locator(".member-name");
+        assert.deepEqual(await names.allTextContents(),["Senior Sample","Directory Peer"]);
+        if (width===390) await page.getByRole("button",{name:"Filters",exact:true}).click();
+        await page.getByRole("combobox",{name:"Squadron",exact:true}).selectOption("Blue");
+        assert.deepEqual(await names.allTextContents(),["Directory Peer"]);
+        assert.deepEqual(await page.getByRole("combobox",{name:"Flight",exact:true}).locator("option").allTextContents(),["All flights","Alpha"]);
+        await page.getByRole("combobox",{name:"Squadron",exact:true}).selectOption("");
+        if (width===390) await page.keyboard.press("Escape");
+        await directory.getByRole("button",{name:"Sort by AFSC",exact:true}).click();
+        assert.deepEqual(await names.allTextContents(),["Directory Peer","Senior Sample"]);
+        const peerRow=directory.getByRole("row").filter({hasText:"Directory Peer"});
+        for (const value of ["Blue","Notre Dame","13N","Active 3/4"]) {
+          assert(await peerRow.locator(".profile-tag,.status").filter({hasText:value}).count());
+        }
+        assert.equal(await peerRow.locator("td.formation").count(),2);
+        await page.getByRole("button",{name:"Columns",exact:true}).click();
+        const options=page.getByRole("region",{name:"Columns"});
+        assert.equal(await options.getByLabel("Phone",{exact:true}).count(),0);
+        await options.getByLabel("Filter column",{exact:true}).selectOption("afsc");
+        await options.getByLabel("Filter by AFSC",{exact:true}).fill("17S");
+        assert.deepEqual(await names.allTextContents(),["Senior Sample"]);
+        await page.keyboard.press("Escape");
+        assert.equal(await page.getByRole("button",{name:"Add cadet"}).count(),0);
         if(width===390) await page.evaluate(()=>window.scrollTo(0,document.documentElement.scrollHeight));
 
         await openNavigation(page);

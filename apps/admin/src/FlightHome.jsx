@@ -80,9 +80,9 @@ function RollCall() {
                   <td>
                     {m.lastName}, {m.firstName}
                   </td>
-                  <td className="personal-mark" data-mark={m.code || ""}>
-                    {attendanceMeanings[m.code] || "Unmarked"}
-                    {m.needsReview && " · Needs review"}
+                  <td>
+                    <span className="flight-mark code-label" data-mark={m.code || ""}>{attendanceMeanings[m.code] || "Unmarked"}</span>
+                    {m.needsReview && <small className="flight-review">Needs review</small>}
                   </td>
                 </tr>
               ))}

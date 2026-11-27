@@ -1406,11 +1406,9 @@ h1.page-title {position:absolute;width:1px;height:1px;margin:0;padding:0;overflo
 .account-name {display:block}
 .sidebar-bottom a {color:inherit;text-underline-offset:.2em}
 
-.flight-sections,.profile-resources,.personal-credit,.flight-roll header {display:flex;align-items:center;gap:.65rem;flex-wrap:wrap}
+.flight-sections,.personal-credit,.flight-roll header {display:flex;align-items:center;gap:.65rem;flex-wrap:wrap}
 .flight-sections {margin-bottom:1rem}
 .flight-sections [aria-pressed="true"] {background:var(--navy);color:white}
-.profile-resources a {display:inline-flex;align-items:center;gap:.5rem;border:1px solid var(--border,#cad4df);border-radius:.35rem;padding:.45rem .65rem;color:var(--navy);font-weight:600;text-decoration:none}
-.profile-resources a:hover,.profile-resources a:focus-visible {text-decoration:underline}
 .personal-credit {gap:2rem;margin:0 0 1rem}.personal-credit dt {font-size:.85rem}.personal-credit dd {border-radius:.25rem;padding:.08rem .35rem;margin:.2rem 0 0;font-size:1.5rem;font-weight:700}
 .personal-events {width:100%;max-width:44rem;min-width:0;border-collapse:collapse}
 .personal-events th,.personal-events td {text-align:left;padding:.45rem .65rem;border-bottom:1px solid var(--border,#cad4df)}
@@ -1796,7 +1794,6 @@ main:has(.matrix-scroll) { padding-bottom: 8px; }
 .flight-flags {margin-block-start:2rem}
 .flight-event-select {width:auto;max-width:100%;font-weight:650}
 .profile-section:last-child {padding-bottom:.25rem}
-.profile-section .profile-resources {margin-top:.8rem}
 .excusal-summary {display:grid;gap:.65rem;min-width:0}
 .excusal-person,.excusal-event-line,.excusal-meta {display:flex;align-items:center;gap:.55rem;flex-wrap:wrap}
 .excusal-person strong {font-size:1.15rem}
@@ -1834,21 +1831,37 @@ main:has(.matrix-scroll) { padding-bottom: 8px; }
 }
 
 /* A fixed row rhythm at each table zoom, including rows with a photo or a long name. */
-.cadet-roster tbody td,.member-directory tbody td {
+.cadet-roster tbody td {
   box-sizing:border-box;height:4rem;padding-block:.25rem;vertical-align:middle
 }
-.cadet-roster .person-cell .text-button,.cadet-roster .roster-value {
+.cadet-roster .person-cell :is(.text-button,.member-name),.cadet-roster .roster-value {
   display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;
   line-height:1.15rem
 }
 .cadet-roster .roster-value {max-width:21rem;overflow-wrap:anywhere}
 .cadet-roster .roster-value > .profile-tag {
   display:-webkit-inline-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;max-width:100%;
-  line-height:1.15rem;vertical-align:middle
+  line-height:1.15rem;vertical-align:middle;border-radius:999px;padding-inline:.65rem
 }
 .cadet-roster .roster-value:has(.photo-trigger) {display:inline-flex;overflow:visible}
 .cadet-roster:not(.with-cadet) td:first-child .roster-value {display:inline-block;vertical-align:middle;white-space:nowrap;text-overflow:ellipsis}
 .cadet-roster:not(.with-cadet) td:first-child {white-space:nowrap}
 .cadet-roster .person-cell small {line-height:1rem;margin-top:.1rem}
-.member-directory table {width:max-content;min-width:100%}
-.member-directory tbody td {height:2.75rem;white-space:nowrap}
+
+.profile-form {display:grid;gap:1rem;margin-block:0 1rem}
+.profile-form fieldset,.profile-form .field,.profile-form button {margin:0}
+.profile-header {display:grid;grid-template-columns:repeat(auto-fit,minmax(min(16rem,100%),1fr));gap:1rem;align-items:center}
+.profile-header .profile-identity {margin:0;min-width:0}
+.profile-form .profile-section {padding:.85rem 0 0}
+.profile-form .cadet-fields {grid-template-columns:repeat(2,minmax(0,1fr));align-items:start;gap:.8rem 1rem}
+.profile-input {min-width:0}
+.profile-input[data-field="dorm"] {grid-column:1 / -1}
+.field-resource {display:inline-flex;align-items:center;gap:.35rem;padding:.3rem 0;color:var(--navy);font-size:.85rem;font-weight:600;text-decoration:underline;text-underline-offset:.18em}
+.field-resource svg {flex:none}
+.profile-actions {display:flex;gap:.5rem;align-items:center}
+.member-name {overflow-wrap:anywhere}
+.flight-roll .flight-mark {border-radius:999px;padding:.16rem .55rem}
+.flight-review {display:inline-block;margin-inline-start:.45rem}
+@media(max-width:640px) {
+  .profile-form .cadet-fields {grid-template-columns:minmax(0,1fr)}
+}

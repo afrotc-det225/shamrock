@@ -204,8 +204,8 @@ try {
   const cadetRow = page.getByRole("row").filter({
     has: page.getByRole("button", {name:"Edit Alex Morgan", exact:true}),
   });
-  assert.deepEqual(await colors(cadetRow.getByText("AS400", {exact:true})), ["rgb(52, 78, 102)", "rgb(255, 255, 255)"]);
-  assert.deepEqual(await colors(cadetRow.getByText("Alpha", {exact:true})), ["rgb(56, 107, 163)", "rgb(255, 255, 255)"]);
+  assert.deepEqual(await colors(cadetRow.getByRole("cell", {name:"AS400", exact:true})), ["rgb(52, 78, 102)", "rgb(255, 255, 255)"]);
+  assert.deepEqual(await colors(cadetRow.getByRole("cell", {name:"Alpha", exact:true})), ["rgb(56, 107, 163)", "rgb(255, 255, 255)"]);
   assert.deepEqual(await colors(cadetRow.getByText("Active 3/4", {exact:true})), ["rgb(135, 201, 195)", "rgb(18, 58, 54)"]);
   await page.getByRole("checkbox",{name:"CIP code",exact:true}).check();
   assert.deepEqual(await colors(cadetRow.getByText("11.0701", {exact:true})), ["rgb(194, 223, 230)", "rgb(20, 62, 73)"]);
