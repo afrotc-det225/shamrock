@@ -419,6 +419,8 @@ try {
     failMenu=false;
     await page.evaluate(()=>window.dispatchEvent(new Event("online")));
     const switcher=page.getByRole("link",{name:"View as administrator",exact:true});
+    await switcher.waitFor();
+    assert.equal(await page.getByRole("link",{name:"Assistant",exact:true}).count(),0);
     await switcher.click();
     await page.getByRole("heading",{name:"Overview",level:1}).waitFor();
     assert.equal(new URL(page.url()).pathname,"/overview");
@@ -426,7 +428,7 @@ try {
     const homeLink=page.locator(".sidebar").getByRole("link",{name:"SHAMROCK home",exact:true});
     await page.getByRole("button",{name:"View as",exact:true}).waitFor();
     assert.equal(await homeLink.getAttribute("href"),"/overview");
-    await page.getByRole("link",{name:"Assistant",exact:true}).waitFor();
+    assert.equal(await page.getByRole("link",{name:"Assistant",exact:true}).count(),0);
     assert.equal(sessions,2,"switch keeps the same sign-in");
     await nav.getByRole("link",{name:"My excusals",exact:true}).click();
     await page.getByRole("heading",{name:"My excusals",level:1}).waitFor();

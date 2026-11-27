@@ -101,7 +101,7 @@ export default function WorkspaceShell({ workspace="leadership", pages, page, ta
           location.assign(result.directoryWorkspace ? "/me/profile" : "/attendance");
         } catch { setAccountError("Could not open View as. Reload to check your session."); }
       }}/>}
-      {other?.leadership?.full && !preview && <PageLink workspace="leadership" title="Assistant" navigate={name=>openPage("leadership",name)}><Sparkles size={20}/>Assistant</PageLink>}
+      {other?.leadership?.assistantAvailable && !preview && <PageLink workspace="leadership" title="Assistant" navigate={name=>openPage("leadership",name)}><Sparkles size={20}/>Assistant</PageLink>}
       {accountError && <p role="alert">{accountError}</p>}
       {account}
     </div>

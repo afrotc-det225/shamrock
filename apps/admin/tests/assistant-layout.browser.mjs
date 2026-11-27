@@ -10,12 +10,14 @@ try {
   for(const width of [1440,900,390]){
     const page=await browser.newPage({viewport:{width,height:850},isMobile:width===390,hasTouch:width===390});
     const threads=new Map();
+    let owner=true,chatReads=0;
     let paidCalls=0, failHistory=width===390;
     await page.route("**/api/**",route=>{
       const path=new URL(route.request().url()).pathname;
       if(path==="/api/session")return route.fulfill({json:{csrf:"fixture",schoolLogin:false}});
-      if(path==="/api/state")return route.fulfill({json:{meta:{hosted:true,assistantAvailable:true},transport:"paged-v1",manifest:{access:{capabilities:{fullSnapshot:true}}},history:[]}});
+      if(path==="/api/state")return route.fulfill({json:{meta:{hosted:true,assistantAvailable:owner},transport:"paged-v1",manifest:{access:{capabilities:{fullSnapshot:true}}},history:[]}});
       if(path==="/api/chat/history"){
+        chatReads++;
         if(failHistory){failHistory=false;return route.fulfill({status:503,json:{error:{message:"Try again."}}});}
         const id=new URL(route.request().url()).searchParams.get("id");
         return route.fulfill({json:id ? {messages:threads.get(id).messages} : {chats:[...threads.values()].map(({messages,...chat})=>chat)}});
@@ -110,6 +112,13 @@ try {
       assert(await page.getByRole("button",{name:"Send question"}).isEnabled());
     }
     assert.equal(paidCalls,1);
+    owner=false;
+    const priorReads=chatReads;
+    await page.goto("http://127.0.0.1:"+server.address().port+"/assistant");
+    await page.waitForURL("**/overview");
+    assert.equal(await page.getByLabel("Ask SHAMROCK").count(),0);
+    assert.equal(await page.getByRole("link",{name:"Assistant",exact:true}).count(),0);
+    assert.equal(chatReads,priorReads);
     await page.close();
   }
   console.log("Assistant composer and formatted responses passed at desktop and phone widths.");

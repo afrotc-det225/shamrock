@@ -120,6 +120,10 @@ function App() {
         writePageUrl("leadership", allowed, true);
       } else {
         const resolved = nextPage || live.current.page;
+        if (resolved === "Assistant" && (!value.meta?.assistantAvailable || value.viewAs)) {
+          location.replace("/overview");
+          return value;
+        }
         if (nextPage) setPage(nextPage);
         writePageUrl("leadership", resolved, true);
       }
@@ -415,7 +419,7 @@ function App() {
               label={viewAsLabel} />}
             {!preview && !scoped && data?.meta.viewAsEnabled &&
               <ViewAsSelector people={data.snapshot?.people ?? (["cadets","leadership","cadet-details","semester"].includes(data.browse?.profile) ? data.list.people : null)} onSelect={viewAs} busy={busy} />}
-            {!preview && !scoped && data && (
+            {!preview && !scoped && data?.meta.assistantAvailable && (
               <PageLink workspace="leadership" title="Assistant" navigate={navigate}
                 className={page === "Assistant" ? "selected" : ""}
               >
@@ -539,7 +543,7 @@ function App() {
                 {!preview && !scoped && page === "System" && (
                   <System {...common} retry={apply} />
                 )}{" "}
-                {!preview && !scoped && page === "Assistant" && (
+                {!preview && !scoped && data?.meta.assistantAvailable && page === "Assistant" && (
                   <Assistant meta={data.meta} />
                 )}
                 {preview && ["Semester planning", "System", "Assistant"].includes(page) && <p>Exit View as to use this page.</p>}

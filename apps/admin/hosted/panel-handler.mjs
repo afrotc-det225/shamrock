@@ -134,6 +134,7 @@ export default {
             if (user.principal_id.startsWith("school.") && !user.wingAccess) return secure(json({}));
             const {access} = await backend.panelAuthority();
             return secure(json({leadership:{full:access.capabilities.fullSnapshot,
+              assistantAvailable:access.capabilities.fullSnapshot && available(env,user,preview),
               canViewAs:!preview && env.VIEW_AS_ENABLED==="1" && access.capabilities.canViewAs===true}}));
           }
         } catch (error) {
