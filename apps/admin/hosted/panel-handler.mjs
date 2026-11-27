@@ -257,7 +257,7 @@ export default {
       if (request.method === "POST" && url.pathname === "/api/chat") {
         if (!available(env, user, preview) || !(await backend.panelAuthority()).access.capabilities.fullSnapshot)
           throw new PanelError("FORBIDDEN", "Assistant access is restricted.", 403);
-        return secure(json(await answer(env, body, env.operatorGuide)));
+        return secure(json(await answer(env, body, env.operatorGuide, fetch, ()=>wingCharts(backend))));
       }
       throw new PanelError("NOT_FOUND", "This action is unavailable.", 404);
     } catch (error) {

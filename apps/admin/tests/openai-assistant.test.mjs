@@ -51,16 +51,42 @@ test("maintenance charges three slots against existing reservations and binds th
   const area="Excusal queue", source="export function currentExcusalRequests(s){return s.requests;}";
   const config={...env,maintenanceSource:{commit:"a".repeat(40),files:{[area]:source}},
     PANEL_DB:{reserveAssistant:async weight=>weight===3}};
-  const messages=[{role:"user",content:"Do not send prior chat"},{role:"user",content:"Handle missing requests"}];
+  const messages=[{role:"user",content:"We are working on the excusal queue"},{role:"user",content:"Handle missing requests"}];
   const send=async (_,opts)=>{
     const q=JSON.parse(opts.body);
-    assert.equal(q.reasoning.effort,"low");assert.equal(q.max_output_tokens,2400);
-    assert.equal(JSON.parse(q.input).source,source);assert.ok(!q.input.includes(messages[0].content));
+    if(q.text?.format.name==="route")return respond(JSON.stringify({type:"patch",areas:[area]}));
+    assert.equal(q.reasoning.effort,"low");assert.equal(q.max_output_tokens,2200);
+    assert.equal(JSON.parse(q.input).source,source);assert.ok(q.input.includes(messages.at(-1).content));
     return Response.json({output:[{type:"message",content:[{type:"output_text",text:JSON.stringify({
       summary:"Handle missing requests.",before:"s.requests;",after:"s.requests ?? [];",args:["{}"],expected:"[]"})}]}]});
   };
   const r=await answer(config,{mode:"maintenance",area,messages},"Guide",send);
   assert.deepEqual(r.proposal.example,{args:[{}],expected:[]});
   assert.equal(r.proposal.source,source);
-  await assert.rejects(answer(config,{mode:"maintenance",area:"../secrets",messages},"Guide",send));
+  await assert.rejects(answer(config,{messages},"Guide",async()=>respond(JSON.stringify({type:"patch",areas:["../secrets"]}))));
+});
+
+
+function respond(text){
+  return Response.json({output:[{type:"message",content:[{type:"output_text",text}]}]});
+}
+test("Wing summary skips routing and sends only approved current and archived aggregates",async()=>{
+  let reads=0,calls=0;
+  const result=await answer(env,{messages:[{role:"user",content:"How is our detachment doing?"}]},"Guide",async(_,options)=>{
+    calls++;
+    const q=JSON.parse(options.body);
+    assert.equal(q.model,model);assert.match(q.instructions,/Spring 2026/);assert.match(q.instructions,/0.94/);
+    assert(!options.body.includes("private-fixture"));return respond("Overall attendance improved.");
+  },async()=>{reads++;return {dashboard:{averageOverall:.94,birthdays:["private-fixture"]},history:[{label:"Spring 2026",overall:.90,people:["private-fixture"]}]};});
+  assert.equal(reads,1);assert.equal(calls,1);assert.match(result.content,/improved/);
+});
+test("follow-up overhaul selects stronger reasoning and only reviewed release excerpts",async()=>{
+  let calls=0;
+  const area="Panel caching",cfg={...env,maintenanceSource:{commit:"fixture",files:{[area]:"export function cached() {}"}}};
+  await answer(cfg,{area:"../../other",messages:[{role:"user",content:"Our cache is inefficient."},{role:"user",content:"Overhaul it."}]},"Guide",async(_,options)=>{
+    const q=JSON.parse(options.body);calls++;
+    if(calls===1){assert.match(q.input,/inefficient/);return respond(JSON.stringify({type:"design",areas:[area]}));}
+    assert.equal(q.reasoning.effort,"high");assert.match(q.model,/^gpt-5.4-2026/);
+    assert.match(q.input,/cached/);assert(!q.input.includes("../../other"));return respond("Plan");
+  },()=>{throw Error("unexpected records read");});assert.equal(calls,2);
 });

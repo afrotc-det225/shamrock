@@ -353,3 +353,5 @@ Selecting eligible attendance cells opens the correction panel. The panel follow
 On **Cadets**, use **Columns** to show or hide Directory fields. The browser remembers your column choices. Select a column heading to sort by it and select it again to reverse the order. **Sort by → Default** restores AS seniority followed by last and first name.
 
 Squadron and university labels have distinct colors. Residence colors identify men’s halls, women’s halls, and other housing. Select a Directory portrait or its initials to preview it. **Open original photo** is available inside the preview.
+
+The maintainer Assistant chooses its context from the question. Ask about Wing performance for a semester comparison, describe a bug for a source-backed proposal, or request a redesign for a plan and staging tests.

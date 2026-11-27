@@ -1,6 +1,9 @@
 // Only reviewed source paths enter the assistant bundle. The build reads Git
 // objects from the release commit, never local provider files or working data.
 export const areas = {
+  "Application architecture and request routing": "apps/admin/hosted/worker.mjs",
+  "Wing reporting and historical comparisons": "apps/admin/hosted/wing-charts.mjs",
+  "Google adapter entry points": "apps/google-adapter/src/index.ts",
   "Excusal queue": "apps/admin/src/attendance-events.mjs",
   "Birthday agenda": "apps/admin/src/birthday-agenda.mjs",
   "Cadet sorting": "packages/domain/src/cadet-display-order.ts",
