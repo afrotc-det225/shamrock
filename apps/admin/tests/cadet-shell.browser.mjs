@@ -88,10 +88,9 @@ try {
         await page.getByRole("button",{name:/TW-1 LLAB.*A · Absent/}).click();
         const after=await matrix.boundingBox();
         assert.equal(after.y,before.y);
-        const selection=page.getByRole("group",{name:"Attendance selection"});
-        assert(await selection.evaluate(el=>el.previousElementSibling.classList.contains("matrix-scroll") && el.scrollWidth<=el.clientWidth));
+        await page.getByRole("dialog",{name:"Request correction"}).waitFor();
         await page.getByRole("button",{name:/TW-2 LLAB.*A · Absent/}).click({modifiers:["Shift"]});
-        await page.getByRole("button",{name:"Request correction"}).click();
+        assert.equal(await page.getByRole("group",{name:"Attendance selection"}).count(),0);
         await page.getByLabel("Requested code").selectOption("P");
         await page.getByLabel("Reason",{exact:true}).fill("Fixture review");
         await page.getByRole("button",{name:"Send for Squadron review"}).click();

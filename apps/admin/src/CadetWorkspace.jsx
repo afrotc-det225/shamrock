@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useRef } from "react";
 import { compareCadetsForDisplay } from "../../../packages/domain/src/cadet-display-order";
 import { api, logout, eventTypes } from "./api";
-import { Empty, Field, Heading, Select, Status, Table } from "./components";
+import { Drawer, Empty, Field, Heading, Select, Status, Table } from "./components";
 import Excusals from "./Excusals";
 import {pageFromUrl, writePageUrl} from "./page-url";
 import { useDirectoryPhoto } from "./DirectoryPhoto";
@@ -276,21 +276,22 @@ function Submission({ state, mode, save, disabled }) {
   );
 }
 function PersonalAttendance({state, flags, save, disabled}) {
-  const [selected,setSelected]=useState([]);
+  const [selected,setSelected]=useState([]), [generation,resetSelection]=useState(0);
+  function dismiss(){setSelected([]);resetSelection(n=>n+1);}
   const cells=(state.attendance || []).map(e=>({...e,effectiveCode:e.code,eligible:true}));
   const row={...state.profile,cells,overall:calculateAttendanceCredit(cells),llab:calculateAttendanceCredit(cells.filter(e=>e.eventType==="llab"))};
   return <section><AttendanceKey/>
-    {cells.length ? <AttendanceMatrix actionLabel="Request correction" rows={[row]} events={state.attendance} canCorrect={()=>true} onEdit={(_,event)=>setSelected([event])} onEditMany={targets=>setSelected(targets.map(t=>t.event))}/> : <Empty>No attendance events for this semester.</Empty>}
-    {selected.length>0 && <form key={JSON.stringify(selected.map(e=>e.eventId))} className="cadet-form" onSubmit={e=>{
+    {cells.length ? <AttendanceMatrix key={generation} rows={[row]} events={state.attendance} canCorrect={()=>true} onSelection={targets=>{if(!disabled)setSelected(targets.map(t=>t.event));}}/> : <Empty>No attendance events for this semester.</Empty>}
+    {selected.length>0 && <Drawer title="Request correction" bottomSheet onClose={dismiss}><form key={JSON.stringify(selected.map(e=>e.eventId))} className="cadet-form" onSubmit={e=>{
       e.preventDefault();
       const fields=new FormData(e.currentTarget), code=fields.get("code");
       const requests=selected.filter(event=>event.code!==code).map(event=>({
         eventId:event.eventId,eventVersion:event.version,baseVersion:event.baseVersion,code,detail:fields.get("reason")
       }));
-      save("flag",requests,()=>setSelected([]));
+      save("flag",requests,dismiss);
     }}><h2>{selected.map(event=>event.label).join(", ")}</h2>
       <Field label="Requested code"><select name="code" required defaultValue=""><option value="" disabled>Choose a code</option>{ATTENDANCE_CODES.filter(code=>selected.some(event=>event.code!==code)).map(c=><option key={c}>{c}</option>)}</select></Field>
-      <Field label="Reason"><textarea name="reason" required maxLength={500}/></Field><button className="primary" disabled={disabled}>Send for Squadron review</button></form>}
+      <Field label="Reason"><textarea name="reason" required maxLength={500}/></Field><button className="primary" disabled={disabled}>Send for Squadron review</button></form></Drawer>}
     {flags.length>0 && <section><h2>My correction requests</h2>{flags.map(a=><p key={a.actionId}><strong>{a.event}</strong> · {a.change?.code} {a.detail} · {a.resolution || (a.change?"Awaiting Squadron review":"Awaiting Flight review")}</p>)}</section>}
   </section>;
 }

@@ -40,7 +40,12 @@ export default function Attendance({
   const roster = matrix?.rows || [];
   const rows = selectRosterRows(roster, query, filters);
   const [review,setReview] = useState(null);
+  const [generation,resetSelection]=useState(0);
+  function dismiss(){setEdit(null);setReview(null);resetSelection(n=>n+1);}
   const startCorrection = targets => {
+    if(busy)return;
+    setReview(null);
+    if(!targets.length){setEdit(null);return;}
     setReason("");
     const codes=new Set(targets.map(t=>t.cell.effectiveCode || ""));
     setCode(codes.size===1 ? [...codes][0] : "choose");
@@ -53,7 +58,7 @@ export default function Attendance({
   };
   function submit() {
     const payloads=edit.map(({label,...target})=>({...target,code:code || null,reason}));
-    if(payloads.length===1) return propose("attendance.correct",payloads[0],()=>setEdit(null));
+    if(payloads.length===1) return propose("attendance.correct",payloads[0],dismiss);
     setReview({payloads,next:0,proposalId:null});
   }
   function applySelected() {
@@ -69,8 +74,7 @@ export default function Attendance({
         review.proposalId=null;
         setReview({...review});
       }
-      setEdit(null);
-      setReview(null);
+      dismiss();
       notify("Attendance corrections saved.");
       await refresh(true);
     });
@@ -87,12 +91,12 @@ export default function Attendance({
           <SearchBox
             placeholder="Find a cadet"
             value={query}
-            onChange={setQuery}
+            onChange={value=>{setQuery(value);if(edit)dismiss();}}
           />
           <Select
             label="Event type"
             value={eventType}
-            onChange={setEventType}
+            onChange={value=>{setEventType(value);if(edit)dismiss();}}
             options={[
               { value: "", label: "All events" },
               ...Object.entries(eventTypes).map(([value, label]) => ({
@@ -104,21 +108,21 @@ export default function Attendance({
           <Select
             label="Training week"
             value={week}
-            onChange={setWeek}
+            onChange={value=>{setWeek(value);if(edit)dismiss();}}
             options={[
               { value: "", label: "All weeks" },
               ...weeks.map((w) => ({ value: String(w), label: "TW-" + w })),
             ]}
           />
-          <MatrixRosterFilters rows={roster} value={filters} onChange={setFilters} />
+          <MatrixRosterFilters rows={roster} value={filters} onChange={value=>{setFilters(value);if(edit)dismiss();}} />
         </div>
       </section>
       <AttendanceMatrix
         rows={rows}
         events={columns}
         canCorrect={canCorrect}
-        onEdit={(row,event,code)=>startCorrection([{row,event,cell:{effectiveCode:code}}])}
-        onEditMany={startCorrection}
+        key={generation}
+        onSelection={startCorrection}
         readOnly={readOnly || busy}
       />
       {(!rows.length || !columns.length) && (
@@ -128,7 +132,7 @@ export default function Attendance({
         <Editor title={review ? "Review corrections" : "Correct attendance"} bottomSheet
           busy={busy || (!review && code==="choose")}
           submitLabel={review ? "Apply corrections" : "Review change"}
-          onClose={()=>{if(!busy){setEdit(null);setReview(null);}}}
+          onClose={()=>{if(!busy)dismiss();}}
           onSubmit={review ? applySelected : submit}>
           <ul>{edit.map(t=><li key={JSON.stringify([t.personId,t.eventId])}>{t.label}</li>)}</ul>
           {review ? <><p>{code || "Clear to blank"} · {reason}</p>

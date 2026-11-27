@@ -117,7 +117,10 @@ export function Drawer({ title, children, onClose, modal=false, bottomSheet=fals
     function open() {
       if(el.open)el.close();
       if(modal || (mobile.matches && !bottomSheet))el.showModal();
-      else el.show();
+      else {
+        el.show();
+        if(bottomSheet && opener?.matches("button[data-event]"))opener.focus({preventScroll:true});
+      }
     }
     function escape(e) {
       if (e.key !== "Escape" || document.querySelector("dialog:modal")) return;

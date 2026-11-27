@@ -279,9 +279,8 @@ try {
   assert.equal(await matrix.locator('[aria-pressed="true"]').count(),3);
   await matrixCell(0,0).click({modifiers:["Control"]});
   assert.equal(await matrix.locator('[aria-pressed="true"]').count(),4);
-  await page.getByRole("button",{name:"Clear selection",exact:true}).click();
+  await page.keyboard.press("Escape");
   await page.locator('button[data-event="veterans"]').and(page.getByRole("button",{name:/Alexis Morgan/})).click();
-  await page.getByRole("button",{name:"Correct attendance",exact:true}).click();
   await page.getByRole("dialog",{name:"Correct attendance"}).waitFor();
   assert.equal(await page.locator("dialog:modal").count(),0);
   assert.deepEqual(await layout(),beforeDrawer);
@@ -297,7 +296,6 @@ try {
   const targetEvents=await pair.evaluateAll(buttons=>buttons.slice(0,2).map(b=>b.dataset.event));
   await pair.nth(0).click();
   await pair.nth(1).click({modifiers:["Meta"]});
-  await page.getByRole("button",{name:"Correct attendance",exact:true}).click();
   await page.getByLabel("Attendance code",{exact:true}).selectOption("T");
   await page.getByLabel("Reason for this change").fill("Fixture bulk correction");
   await page.getByRole("button",{name:"Review change",exact:true}).click();

@@ -1,4 +1,4 @@
-import React, { useRef, useState } from "react";
+import React, { useLayoutEffect, useRef, useState } from "react";
 import { List } from "lucide-react";
 import { ToolbarPopover } from "./ToolbarPopover";
 import { rateStyle } from "./roster-colors";
@@ -91,43 +91,33 @@ export function AttendanceMatrix(props) {
   return <SelectableMatrix key={key} {...props}/>;
 }
 
-function SelectableMatrix({rows, events, canCorrect, onEdit, onEditMany, readOnly, actionLabel="Correct attendance"}) {
+function SelectableMatrix({rows, events, canCorrect, onSelection, readOnly}) {
   const focused = useRef(null), anchor=useRef(null), activeAxis=useRef(null);
   const [selection,setSelection]=useState(()=>new Set());
   const cols=events.length;
-  const targets = [...selection].map(position => {
-    const row = rows[Math.floor(position / cols)], event = events[position % cols];
-    return {row, event, cell: row.cells.find(cell => cell.eventId === event.eventId)};
-  });
-  const editable = !readOnly && targets.length > 0 && targets.every(({row,cell}) => cell?.eligible && canCorrect(row));
-  function editSelected() {
-    if (targets.length > 1) return onEditMany(targets);
-    const [{row,event,cell}] = targets;
-    onEdit(row,event,cell.effectiveCode || "");
+  function update(next) {
+    setSelection(next);
+    const targets=[...next].map(position=>{
+      const row=rows[Math.floor(position/cols)], event=events[position%cols];
+      return {row,event,cell:row.cells.find(cell=>cell.eventId===event.eventId)};
+    });
+    onSelection(!readOnly && targets.every(t=>t.cell?.eligible && canCorrect(t.row)) ? targets : []);
   }
   function select(button,event,origin) {
     const td=button.closest("td"), row=td.parentElement.sectionRowIndex, col=td.cellIndex-3;
-    const touch=event.nativeEvent?.pointerType==="touch";
-    const toggle=event.ctrlKey || event.metaKey || touch, pos=row*cols+col;
+    const toggle=event.ctrlKey || event.metaKey || event.nativeEvent?.pointerType==="touch", pos=row*cols+col;
     if(event.shiftKey && anchor.current===null && origin)
       anchor.current=origin.parentElement.sectionRowIndex*cols+origin.cellIndex-3;
+    const next=toggle ? new Set(selection) : new Set();
     if(event.shiftKey && anchor.current!==null) {
       const start=anchor.current, r=Math.floor(start/cols), c=start%cols;
-      setSelection(previous=>{
-        const next=toggle?new Set(previous):new Set();
-        for(let y=Math.min(row,r);y<=Math.max(row,r);y++)
-          for(let x=Math.min(col,c);x<=Math.max(col,c);x++) next.add(y*cols+x);
-        return next;
-      });
+      for(let y=Math.min(row,r);y<=Math.max(row,r);y++)
+        for(let x=Math.min(col,c);x<=Math.max(col,c);x++) next.add(y*cols+x);
     } else {
       anchor.current=pos;
-      setSelection(previous=>{
-        if(!toggle)return new Set([pos]);
-        const next=new Set(previous);
-        if(next.has(pos))next.delete(pos);else next.add(pos);
-        return next;
-      });
+      if(toggle && next.has(pos))next.delete(pos);else next.add(pos);
     }
+    update(next);
   }
   // Pointer movement touches only the old and new axes, without rerendering the matrix.
   function highlight(cell) {
@@ -146,7 +136,7 @@ function SelectableMatrix({rows, events, canCorrect, onEdit, onEditMany, readOnl
     }
     activeAxis.current=cell;
   }
-  function clear(){anchor.current=null;setSelection(new Set());}
+  function clear(){anchor.current=null;update(new Set());}
   return <div onPointerOver={e=>highlight(e.target.closest("td.mark-cell"))}
     onPointerLeave={()=>highlight(null)} onFocus={e=>highlight(e.target.closest("td.mark-cell"))}
     onBlur={e=>{if(!e.currentTarget.contains(e.relatedTarget))highlight(null);}}>
@@ -170,9 +160,7 @@ function SelectableMatrix({rows, events, canCorrect, onEdit, onEditMany, readOnl
               );
             })}
             {events.map((e,colIndex) => {
-              const c = byEvent.get(e.eventId),
-                editable =
-                  !readOnly && c?.eligible === true && canCorrect(row);
+              const c = byEvent.get(e.eventId);
               const code = c?.effectiveCode || "",
                 label =
                   code ||
@@ -219,8 +207,6 @@ function SelectableMatrix({rows, events, canCorrect, onEdit, onEditMany, readOnl
                         // macOS delivers Control-click as a contextual click.
                         if(ev.ctrlKey && ev.button===0){ev.preventDefault();select(ev.currentTarget,ev);}
                       }}
-                      onDoubleClick={ev=>{if(editable && !(ev.shiftKey || ev.metaKey || ev.ctrlKey))onEdit(row,e,code);}}
-                      onKeyDown={ev=>{if(ev.key==="Enter" && editable && !ev.shiftKey && !ev.ctrlKey && !ev.metaKey){ev.preventDefault();onEdit(row,e,code);}}}
                     >
                       {content}
                     </button>
@@ -231,18 +217,26 @@ function SelectableMatrix({rows, events, canCorrect, onEdit, onEditMany, readOnl
         );
       })}
     </MatrixTable>
-    {selection.size>0 && <div className="matrix-selection" role="group" aria-label="Attendance selection">
-      <span aria-live="polite">{selection.size} {selection.size===1?"cell":"cells"} selected</span>
-      <button onClick={clear} aria-label="Clear selection">Clear</button>
-      {editable && <button className="primary" onClick={editSelected}>{actionLabel}</button>}
-    </div>}
   </div>;
 }
 
 export function MatrixTable({events, label, onKeyDown, children}) {
+  const viewport=useRef(null);
+  useLayoutEffect(()=>{
+    const el=viewport.current;
+    const resize=()=>{
+      const top=el.getBoundingClientRect().top;
+      el.style.maxHeight=Math.max(160,window.innerHeight-Math.max(0,top)-8)+"px";
+    };
+    resize();
+    const observer=new ResizeObserver(resize);
+    for(const control of el.closest("main")?.querySelectorAll(".page-controls,.notice,.heading") || [])observer.observe(control);
+    window.addEventListener("resize",resize);
+    return ()=>{observer.disconnect();window.removeEventListener("resize",resize);};
+  },[]);
   return (
     <div
-      className="matrix-scroll"
+      ref={viewport} className="matrix-scroll"
       tabIndex={0}
       aria-label={label + " matrix"}
     >

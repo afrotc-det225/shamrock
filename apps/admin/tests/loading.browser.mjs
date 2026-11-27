@@ -103,6 +103,8 @@ try{
  releaseCatalog();
  const archive=page.getByRole("table",{name:"History",exact:true});
  await archive.getByRole("rowheader",{name:"Blair River"}).waitFor();
+ const bottomGap=await archive.evaluate(table=>{const box=table.parentElement;return innerHeight-box.getBoundingClientRect().top-parseFloat(getComputedStyle(box).maxHeight);});
+ assert(Math.abs(bottomGap-8)<2);
  assert.deepEqual(await archive.getByRole("rowheader").allTextContents(),["Blair River","Avery North"]);
  assert.deepEqual(await archive.locator("thead th:not([title])").allTextContents(),["Cadet","Overall","LLAB"]);
  assert.deepEqual(await archive.locator("thead th[title]").first().locator("span").allTextContents(),["TW-1","LLAB"]);
