@@ -395,11 +395,11 @@ try {
   assert.equal(await attendanceSummary.getByRole("link",{name:/pending excusal/}).count(),0);
   assert.equal(await attendanceSummary.getByText(/below 80% overall/).count(),0);
   const birthdays = page.getByRole("region",{name:"Wing birthdays"});
-  assert.equal(await birthdays.locator(".birthday-names li i").count(),0);
+  assert.equal(await birthdays.locator(".calendar-week button, .birthday-dots").count(),0);
   const month = birthdays.locator(".calendar-month strong");
   const originalMonth = await month.innerText();
   const week = birthdays.getByRole("button",{name:/^Week [0-9]/}).first();
-  await week.click();
+  await week.locator("span").last().click();
   assert.equal(await week.getAttribute("aria-pressed"), "true");
   await birthdays.getByRole("heading",{name:/^Week [0-9]/}).waitFor();
   assert.deepEqual(await page.locator(".overview-roster dt").allTextContents(),["Active cadets","GMC","POC","Crosstowns","Far crosstowns"]);
