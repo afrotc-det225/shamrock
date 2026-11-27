@@ -469,7 +469,8 @@ try {
   await navigate("Leadership");
   const readsBeforePicker=pageReads;
   const contact=(await service.snapshot()).leadership[0];
-  await page.getByRole("button",{name:"Edit "+contact.firstName+" "+contact.lastName,exact:true}).click();
+  await page.getByRole("button",{name:"Contact details for "+contact.firstName+" "+contact.lastName,exact:true}).first().click();
+  await page.getByRole("button",{name:"Edit contact",exact:true}).click();
   assert.equal(await page.getByLabel("Office phone",{exact:true}).inputValue(),contact.officePhone || "");
   await page.getByLabel("Office location",{exact:true}).fill("Fictional office");
   await apply();

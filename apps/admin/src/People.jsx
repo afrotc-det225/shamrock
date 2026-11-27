@@ -21,7 +21,7 @@ import LeadershipChart from "./LeadershipChart";
 import { textOrder, alphabetic } from "./RosterViews";
 import { api,name, label, years, statuses, profileFields } from "./api";
 import { DIRECTORY_FIELDS } from "../../../packages/domain/src/admin";
-import { compareAsYearsForDisplay, compareCadetsForDisplay, compareLeadershipForDisplay } from "../../../packages/domain/src/cadet-display-order";
+import { compareAsYearsForDisplay, compareCadetsForDisplay } from "../../../packages/domain/src/cadet-display-order";
 
 const coreColumns = ["cadet","asYear","flight","squadron","flightPathStatus"];
 const adminColumns = ["cadet","lastName","firstName","rank","asYear","flight","squadron","flightPathStatus",
@@ -132,7 +132,7 @@ export default function People({
       });
   };
   const [sort,setSort]=useState("seniority"), [status,setStatus]=useState("current"), [year,setYear]=useState(""),
-    [field,setField]=useState(""), [match,setMatch]=useState(""), [view,setView]=useState("List");
+    [field,setField]=useState(""), [match,setMatch]=useState("");
   const flightOf = p => s.flights.find(f=>f.flightId===p.flightId);
   const squadronOf = f => s.squadrons?.find(q=>q.squadronId===f?.squadronId)?.label;
   const rosterFlights = s.flights.filter(f => !squadron || f.squadronId === squadron);
@@ -185,14 +185,14 @@ export default function People({
   const waitingForField = extra && extended?.binding !== binding;
   const directory = extra && !waitingForField ? extended.people : s.people;
   const words=query.toLowerCase().trim().split(/[\s,]+/);
-  const rows = (leadership ? s.leadership : directory).filter(p=>{
-    if (!leadership && (squadron && flightOf(p)?.squadronId !== squadron || flight && p.flightId!==flight || year && p.asYear!==year ||
+  const rows = leadership ? [] : directory.filter(p=>{
+    if (squadron && flightOf(p)?.squadronId !== squadron || flight && p.flightId!==flight || year && p.asYear!==year ||
       status==="current" && ["Dropped","Commissioned"].includes(p.flightPathStatus) ||
       !["current","all"].includes(status) && p.flightPathStatus!==status ||
-      field && match && !waitingForField && !String(valueOf(p,field) ?? "").toLowerCase().includes(match.toLowerCase()))) return false;
+      field && match && !waitingForField && !String(valueOf(p,field) ?? "").toLowerCase().includes(match.toLowerCase())) return false;
     if(member) return words.every(word => memberColumns.some(key => String(valueOf(p,key) ?? "").toLowerCase().includes(word)));
     return [name(p),p.email,p.role,p.rank].join(" ").toLowerCase().includes(query.toLowerCase());
-  }).sort(leadership ? compareLeadershipForDisplay : (a,b)=>{
+  }).sort((a,b)=>{
     if(sort==="seniority")return compareCadetsForDisplay(a,b);
     const direction=descending ? -1 : 1;
     if(sort==="cadet")return direction*alphabetic(a,b);
@@ -254,13 +254,12 @@ export default function People({
         <Heading title={leadership ? "Leadership" : "Cadets"} />
         <div className="toolbar">
           <SearchBox
-            placeholder={leadership ? (view==="Organization" ? "Find a leader or office" : "Find a leader") : "Find a cadet"}
+            placeholder={leadership ? "Find a person or office" : "Find a cadet"}
             value={query}
             onChange={setQuery}
-            resultCount={leadership && view==="Organization" ? undefined : query || squadron || flight || year || match || !["current","all"].includes(status) ? rows.length : undefined}
+            resultCount={leadership ? undefined : query || squadron || flight || year || match || !["current","all"].includes(status) ? rows.length : undefined}
           />
-          <ToolbarFilters active={Boolean(squadron || flight || year || status !== "current" || sort !== "seniority" || view !== "List")}>
-            {leadership ? <Select label="View" value={view} onChange={setView} options={["List","Organization"]}/> : <>
+          {!leadership && <ToolbarFilters active={Boolean(squadron || flight || year || status !== "current" || sort !== "seniority")}>
               <Select label="Squadron" value={squadron} onChange={changeSquadron} options={[
                 {value:"",label:"Entire wing"},...(s.squadrons || []).map(q=>({value:q.squadronId,label:q.label})).sort((a,b)=>textOrder(a.label,b.label))
               ]}/>
@@ -268,9 +267,8 @@ export default function People({
               <Select label="AS year" value={year} onChange={setYear} options={[{value:"",label:"All AS years"},...years]}/>
               <Select label="Roster status" value={status} onChange={setStatus} options={[{value:"current",label:"Current roster"},...(member ? memberStatuses : [{value:"all",label:"All statuses"},...statuses])]}/>
               <Select label="Sort by" value={sort} onChange={key=>{setSort(key);setDescending(false);}} options={[{value:"seniority",label:"Default"},...columnKeys.map(k=>({value:k,label:columnLabel(k)}))]}/>
-            </>}
-            {(!leadership || view!=="Organization") && zoom.control}
-          </ToolbarFilters>
+            {zoom.control}
+          </ToolbarFilters>}
           <div className="toolbar-actions">
             {!leadership && (
               <ToolbarPopover label="Columns" icon={Columns3}>
@@ -301,19 +299,14 @@ export default function People({
       {waitingForField && (fieldError
         ? <p role="alert">{fieldError} <button onClick={()=>setRetry(retry+1)}>Retry</button></p>
         : <span className="page-transfer" role="status">Loading directory fields…</span>)}
-      {leadership && view==="Organization" ? <LeadershipChart roster={s} query={query}/> : <Table zoom={zoom.scale}
-        className={leadership ? "leadership-roster" : hasCadet ? "cadet-roster with-cadet" : "cadet-roster"}
-        headers={
-          leadership
-            ? ["Name", "Role", "Email", "Office", ""]
-            : [...columns.map(k=>header(k,columnLabel(k))), ...(hasCadet && !member ? [""] : [])]
-        }
-      >
+      {leadership ? <LeadershipChart roster={s} query={query} onEdit={readOnly ? undefined : open}/> : <Table zoom={zoom.scale}
+        className={hasCadet ? "cadet-roster with-cadet" : "cadet-roster"}
+        headers={[...columns.map(k=>header(k,columnLabel(k))), ...(hasCadet && !member ? [""] : [])]}>
         {rows.map((p) => {
           const editButton = <button className="icon" disabled={readOnly} aria-label={`Edit ${name(p)}`} onClick={() => open(p)}><Pencil size={16}/></button>;
           return (
           <tr key={p.contactId || p.personId}>
-            {(leadership || hasCadet) && <td>
+            {hasCadet && <td>
               <div className="person-cell">
                 <DirectoryPhoto avatar value={member ? undefined : p.photoLink} person={p} />
                 <span>
@@ -324,14 +317,7 @@ export default function People({
                 </span>
               </div>
             </td>}
-            {leadership ? (
-              <>
-                <td>{p.role}</td>
-                <td>{p.email}</td>
-                <td>{p.officeLocation || "—"}</td>
-              </>
-            ) : (
-              dataColumns.map(key=>{
+            {dataColumns.map(key=>{
                 const value=valueOf(p,key);
                 const formation=key==="flight" || key==="asYear";
                 const style=key==="flight" ? cellStyle(flightColors(value,squadronOf(flightOf(p)))) :
@@ -342,13 +328,12 @@ export default function People({
                     <DirectoryValue field={key} value={value} person={p}/>}</span>
                   {key===columns[0] && !readOnly && editButton}
                 </td>;
-              })
-            )}
-            {!member && (leadership || hasCadet) && <td>{editButton}</td>}
+              })}
+            {!member && hasCadet && <td>{editButton}</td>}
           </tr>
         );})}
       </Table>}
-      {!rows.length && <Empty>No records match your search.</Empty>}
+      {!leadership && !rows.length && <Empty>No records match your search.</Empty>}
       {edit && (
         <Editor
           title={leadership ? "Leadership contact" : "Cadet profile"}
@@ -360,11 +345,6 @@ export default function People({
               edit,
               () => setEdit(null),
             )
-          }
-          note={
-            leadership
-              ? "Leadership titles do not automatically grant system access."
-              : ""
           }
         >
           {edit.profile ? (
@@ -389,11 +369,12 @@ export default function People({
                   })),
                 ]}
               />
-              <DirectoryPhoto value={edit.profile.photoLink} person={edit.profile} personId={edit.personId} />
-              <details>
-                <summary>Academic, personal & photo details</summary>
-                {profileFields.filter((k) => !basic.includes(k)).map(input)}
-              </details>
+              <div className="cadet-profile-tools">
+                <DirectoryPhoto value={edit.profile.photoLink} person={edit.profile} personId={edit.personId} />
+                <details><summary>Academic, personal &amp; photo details</summary>
+                  {profileFields.filter((k) => !basic.includes(k)).map(input)}
+                </details>
+              </div>
             </>
           )}
           {leadership && (
