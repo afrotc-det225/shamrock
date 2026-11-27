@@ -118,7 +118,6 @@ summary:focus-visible {
 }
 .sidebar :is(button, .workspace-page-link).selected {
   background: #3d5b59;
-  box-shadow: inset 4px 0 var(--gold);
   font-weight: 650;
 }
 .sidebar-bottom {
@@ -1151,30 +1150,6 @@ tr:hover td {
 .person-cell small {
   margin-top: 3px;
 }
-.event-type {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  font-size: 12px;
-  font-weight: 500;
-  white-space: nowrap;
-}
-.event-type::before {
-  content: "";
-  width: 3px;
-  height: 15px;
-  background: #71839a;
-  border-radius: 2px;
-}
-.event-type.mando::before {
-  background: #a57b30;
-}
-.event-type.secondary::before {
-  background: #32766e;
-}
-.event-type.llab::before {
-  background: #426a9c;
-}
 .review-needed {
   color: #8d352e;
   font-weight: 600;
@@ -1546,6 +1521,7 @@ html:has(dialog:modal) {
   pointer-events: none;
   animation: reveal-transfer .18s step-end;
 }
+[inert] .page-transfer { visibility: hidden; }
 @keyframes reveal-transfer { from { opacity: 0; } to { opacity: 1; } }
 
 .sidebar .workspace-page-link { display: inline-flex; align-items: center; text-decoration: none; }

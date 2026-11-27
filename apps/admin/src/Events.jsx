@@ -19,6 +19,7 @@ export default function Events({ snapshot, eventsList, propose, busy, refresh, r
   const [details,setDetails] = useState(null), [loading,setLoading] = useState(false);
   const [bulk, setBulk] = useState(false);
   const [query, setQuery] = useState(""),
+    [sort, setSort] = useState("default"),
     [type, setType] = useState(""),
     [term, setTerm] = useState((snapshot || eventsList).terms.find((t) => t.isCurrent)?.termId || ""),
     [edit, setEdit] = useState(null);
@@ -98,7 +99,13 @@ export default function Events({ snapshot, eventsList, propose, busy, refresh, r
         (!type || e.eventType === type) &&
         `${e.label} ${e.notes}`.toLowerCase().includes(query.toLowerCase()),
     )
-    .sort((a, b) => a.displayOrder - b.displayOrder);
+    .sort((a, b) => {
+      if (sort === "type") {
+        const byType = (eventTypes[a.eventType] || a.eventType).localeCompare(eventTypes[b.eventType] || b.eventType);
+        if (byType) return byType;
+      }
+      return a.displayOrder - b.displayOrder;
+    });
   return (
     <>
       <section className="page-controls">
@@ -140,10 +147,12 @@ export default function Events({ snapshot, eventsList, propose, busy, refresh, r
               })),
             ]}
           />
+          <Select label="Sort by" value={sort} onChange={setSort}
+            options={[{value:"default", label:"Default"}, {value:"type", label:"Type"}]} />
         </div>
       </section>
-      {loading && <p role="status">Loading event details…</p>}
-      <Table headers={["Event", "Type", "Date & time", "Status", ""]}>
+      {loading && <span className="page-transfer" role="status">Loading event details…</span>}
+      <Table headers={["Event", "Date & time", "Status", ""]}>
         {rows.map((e) => (
           <tr key={e.eventId}>
             <td>
@@ -151,11 +160,6 @@ export default function Events({ snapshot, eventsList, propose, busy, refresh, r
                 {e.label}
               </button>
               <small>{e.location}</small>
-            </td>
-            <td>
-              <span className={`event-type ${e.eventType}`}>
-                {eventTypes[e.eventType] || e.eventType}
-              </span>
             </td>
             <td>{e.startAt ? <time dateTime={e.startAt}>{displayDate(e.startAt,e.timeZone)}</time> : "Not scheduled"}</td>
             <td>

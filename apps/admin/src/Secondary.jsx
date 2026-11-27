@@ -173,7 +173,7 @@ export function Assistant({ meta }) {
             <p>{m.content}</p>{m.proposal && <MaintenanceProposal proposal={m.proposal}/>}
           </article>
         ))}
-        {busy && <p>{mode==="maintenance" ? "Reviewing release source…" : "Checking SHAMROCK procedures…"}</p>}
+        {busy && <span className="page-transfer" role="status">{mode==="maintenance" ? "Reviewing release source…" : "Checking SHAMROCK procedures…"}</span>}
         {error && (
           <p role="alert" className="error">
             {error}

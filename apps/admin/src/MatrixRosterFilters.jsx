@@ -36,7 +36,7 @@ export function MatrixRosterFilters({ rows, value, onChange }) {
     <Select label="AS year" value={value.year} onChange={change("year")}
       options={[{value:"", label:"All AS years"}, ...options("asYear", compareAsYearsForDisplay)]} />
     <Select label="Sort by" value={value.sort} onChange={change("sort")} options={[
-      {value:"seniority", label:"AS year, then name"}, {value:"name", label:"Last name"},
+      {value:"seniority", label:"Default"}, {value:"name", label:"Last name"},
       {value:"flight", label:"Flight"}, {value:"overall", label:"Lowest overall"},
     ]} />
   </>;
