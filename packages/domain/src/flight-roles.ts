@@ -9,3 +9,7 @@ export function flightRoleOptions(flight: string): string[] {
     "Uniform & MWR",
   ].map((position) => `${flight} Flight ${position} Officer`);
 }
+
+export function selfServiceRoles(flight: string): string[] {
+  return ["", "Cadet", ...flightRoleOptions(flight)];
+}

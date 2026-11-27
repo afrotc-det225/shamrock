@@ -403,3 +403,6 @@ In the Assistant, the sidebar button beside the title opens recent conversations
 The Assistant can suggest improvements and discuss your selection. Ask it to implement the selected change when you want a tested proposal.
 
 From a cadet page, **View as administrator** opens the Wing overview when the signed-in or selected cadet has Wing access. During View as, switching pages keeps that cadet selected. If the sidebar cannot load permissions, use **Retry loading menu**.
+
+Cadets can update their first and last names, AS year, rank, and university under **My profile**. Select **Save changes** to update the Directory.
+Cadets may also select a non-command position in their assigned Flight. A Directory manager handles command or combined roles. Contact email is shared in the cadet Directory. Clearing it restores the school address. Google sign-in, permission grants, and official notifications use the school address.

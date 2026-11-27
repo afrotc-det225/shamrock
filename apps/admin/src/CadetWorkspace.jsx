@@ -19,6 +19,7 @@ import { ToolbarPopover } from "./ToolbarPopover";
 import { FlightHome } from "./FlightHome";
 import { calculateAttendanceCredit } from "../../../packages/domain/src/frontend-reporting";
 import { ATTENDANCE_CODES } from "../../../packages/domain/src/index";
+import { selfServiceRoles } from "../../../packages/domain/src/flight-roles";
 import { AS_YEARS } from "../../../packages/domain/src/admin";
 
 const fields = [
@@ -64,12 +65,16 @@ function Profile({ state, save, disabled }) {
   const [step, setStep] = useState(0);
   const register = state.registration,
     pick = (key, value) => set((old) => ({ ...old, [key]: value }));
+  const editableFields = register ? fields : [...fields, ["university","University"], ["asYear","AS year"], ["rank","Rank"], ["role","Role"], ["contactEmail","Contact email"]];
+  const flight = state.flights.find(f=>f.flightId === form.flightId);
+  const roles = flight ? selfServiceRoles(flight.label) : [""];
+  const managerRole = !roles.includes(state.profile?.role || "");
   const visible = register
     ? step === 0
       ? fields.slice(0, 5)
       : fields.slice(5)
-    : fields;
-  const groups = [["Contact information", ["firstName","lastName","phone","dateOfBirth","dorm","homeTown","homeState"]], ["Academics and career", ["classYear","cipBroadArea","cipCode","afsc"]], ...(register ? [["Directory photo", ["photoLink"]]] : [])];
+    : editableFields;
+  const groups = [["Contact information", ["firstName","lastName","contactEmail","phone","dateOfBirth","dorm","homeTown","homeState"]], ["Academics and career", ["university","classYear","cipBroadArea","cipCode","afsc"]], ...(!register ? [["Cadet information", ["asYear","rank","role"]]] : []), ...(register ? [["Directory photo", ["photoLink"]]] : [])];
   function submit(e) {
     e.preventDefault();
     if (register && step === 0) {
@@ -77,7 +82,7 @@ function Profile({ state, save, disabled }) {
       return;
     }
     const changes = Object.fromEntries(
-      fields
+      editableFields
         .map(([k]) => [k, form[k]?.trim() || (k === "dateOfBirth" ? null : "")])
         .filter(([k, v]) => register || (state.profile[k] ?? (k === "dateOfBirth" ? null : "")) !== v),
     );
@@ -132,10 +137,13 @@ function Profile({ state, save, disabled }) {
           const members = visible.filter(([key]) => keys.includes(key));
           return members.length > 0 && <section key={title} className="profile-section"><h3>{title}</h3><div className="cadet-fields">
           {members.map(([key,label]) => <div className="profile-input" data-field={key} key={key}>
-            <ProfileField field={key} label={key === "afsc" ? "Air Force Specialty Code (AFSC)" : label}
+            {key === "asYear" ? <Select label={label} value={form.asYear} required onChange={v=>pick(key,v)} options={[{value:"",label:"Choose AS year"}, ...AS_YEARS]}/> : key === "role" ? <Select label={label} value={form.role || ""} disabled={managerRole || !flight} onChange={v=>pick(key,v)}
+              options={[{value:"",label:"No Flight position"}, ...roles.filter(Boolean), ...(managerRole ? [state.profile.role] : [])]}/> : <ProfileField field={key === "contactEmail" ? "email" : key} label={key === "afsc" ? "Air Force Specialty Code (AFSC)" : label}
               broadArea={key === "cipCode" ? form.cipBroadArea : undefined} originalBroadArea={key === "cipCode" ? state.profile?.cipBroadArea : undefined}
               original={state.profile?.[key]} required={required.has(key) && (register || !!state.profile?.[key])}
-              value={form[key] || ""} onChange={value=>pick(key,value)}/>
+              value={form[key] || ""} onChange={value=>pick(key,value)}/>}
+            {key === "role" && <small>Command assignments are managed by the Directory manager.</small>}
+            {key === "contactEmail" && <small>Shown in the cadet Directory. Leave blank to use your school email.</small>}
             {key === "cipCode" && <a className="field-resource" href="https://nces.ed.gov/ipeds/cipcode/" target="_blank" rel="noreferrer">Find your major’s CIP code <ExternalLink size={14}/></a>}
             {key === "afsc" && <a className="field-resource" href="https://tmd.texas.gov/Data/Sites/1/media/tmd-jobs/ang-dsg-vacancy/fy26/quarter-3/air-force-officer-classification-directory-afocd-30-april-2025.pdf" target="_blank" rel="noreferrer">Officer classification directory (DAFOCD) <ExternalLink size={14}/></a>}
           </div>)}

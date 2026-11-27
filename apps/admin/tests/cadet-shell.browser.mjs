@@ -202,6 +202,8 @@ try {
         assert.equal(await page.locator('nav [aria-current="page"]').textContent(), "My profile");
         await page.getByLabel("First name", {exact:true}).waitFor();
         if (preview) await page.locator(width === 390 ? ".mobile-bar" : ".sidebar-bottom").getByText("Acting as Sample Cadet").waitFor();
+        for (const field of ["First name","Last name","AS year","Rank","Role","University","Contact email"])
+          assert(await page.getByLabel(field,{exact:true}).isVisible());
         const afsc = page.getByLabel("Air Force Specialty Code (AFSC)");
         assert(await page.locator(".profile-header").getByLabel("Directory photo link").isVisible());
         for(const [field,resource] of [["CIP code","Find your major’s CIP code"],["Air Force Specialty Code (AFSC)","Officer classification directory (DAFOCD)"]]){

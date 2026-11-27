@@ -6,6 +6,7 @@ import { preparePermissionMutation, permissionManagerSql } from './permissions.j
 import { effectiveAdminGrants } from './permission-grants.js';
 import { attendanceVersionsSql, baselineRevisionSql, correctionReceipt } from './corrections.js';
 import { adminIdentifier, DIRECTORY_FIELDS, directoryLeadershipRole, operationallyActive, parseAdminCommand, type AdminCommand, type DirectoryRecord, type FrontendSnapshot, type LeadershipRecord, } from '../../../packages/domain/src/admin.js';
+import { selfServiceRoles } from "../../../packages/domain/src/flight-roles.js";
 import {profileFieldIssue} from "../../../packages/domain/src/profile-fields.js";
 import { HttpError } from './http-error.js';
 interface AdminEnv {
@@ -170,6 +171,22 @@ export async function acceptAdminCommand(env: AdminEnv, input: unknown): Promise
     const existing = rows[0].results[0] as unknown as DirectoryRecord | undefined;
     if (c.operation === 'directory.selfUpdate' && !existing) throw new HttpError(409, 'ENROLLMENT_REQUIRED', 'A Directory manager must review this enrollment first.');
     const p = c.operation === 'directory.upsert' ? c.payload : { personId: target.personId, expectedVersion: target.expectedVersion, flightId: existing!.flightId, profile: { ...existing!, ...c.payload.changes } };
+    if (c.operation === "directory.selfUpdate") {
+      const {role,contactEmail} = c.payload.changes;
+      if (role !== undefined && role !== existing!.role) {
+        const flight = await stmt(env.DB,"SELECT label FROM organizational_units WHERE unit_id=?",existing!.flightId).first<string>("label");
+        const allowed = flight ? selfServiceRoles(flight) : [];
+        if (!allowed.includes(role) || !allowed.includes(existing!.role))
+          throw new HttpError(403,"ROLE_REVIEW_REQUIRED","A Directory manager must change this assignment.");
+      }
+      if (contactEmail !== undefined) {
+        const issue = profileFieldIssue("email",contactEmail);
+        if (issue) throw new HttpError(400,"INVALID_PROFILE_FIELD",issue);
+        writes.push(contactEmail ? stmt(env.DB,`INSERT INTO directory_contact_emails VALUES(?,?)
+          ON CONFLICT(person_id) DO UPDATE SET email=excluded.email`,targetId,contactEmail)
+          : stmt(env.DB,"DELETE FROM directory_contact_emails WHERE person_id=?",targetId));
+      }
+    }
     validateWebFields(p.profile, existing);
     if(!existing||existing.flightId!==p.flightId||(['lastName','firstName','asYear','flightPathStatus','dateOfBirth'] as const).some(key=>existing[key]!==p.profile[key]))rosterFlights=[existing?.flightId,p.flightId].filter((id):id is string=>!!id);
     const memberships = rows[1].results as {

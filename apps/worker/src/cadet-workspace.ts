@@ -89,7 +89,7 @@ export async function readCadetWorkspace(
   const actor = loginPrincipal ?? principal;
   const lookup = db
     .prepare(
-      `SELECT ${directoryCatalogQuery.select},
+      `SELECT ${directoryCatalogQuery.select}, (SELECT email FROM directory_contact_emails c WHERE c.person_id=d.person_id) AS contactEmail,
     EXISTS(SELECT 1 FROM memberships m WHERE m.person_id=d.person_id AND m.unit_id=d.flight_id AND m.active=1) AS enrolled
     FROM directory_profiles d WHERE lower(d.email)=? LIMIT 2`,
     )
@@ -210,7 +210,7 @@ export async function readCadetWorkspace(
     let directory;
     if (section==="directory") {
       const [peers,...checked] = await db.batch<Row>([db.prepare(`SELECT d.person_id AS personId,d.first_name AS firstName,
-    d.last_name AS lastName,d.as_year AS asYear,d.rank,d.role,d.university,d.email,d.class_year AS classYear,d.afsc,d.cip_broad_area AS cipBroadArea,d.cip_code AS cipCode,d.flight_path_status AS flightPathStatus,u.label AS flight,s.label AS squadron
+    d.last_name AS lastName,d.as_year AS asYear,d.rank,d.role,d.university,COALESCE((SELECT email FROM directory_contact_emails c WHERE c.person_id=d.person_id),d.email) AS email,d.class_year AS classYear,d.afsc,d.cip_broad_area AS cipBroadArea,d.cip_code AS cipCode,d.flight_path_status AS flightPathStatus,u.label AS flight,s.label AS squadron
     FROM directory_profiles d JOIN memberships m ON m.person_id=d.person_id AND m.unit_id=d.flight_id AND m.active=1
     JOIN organizational_units u ON u.unit_id=d.flight_id
     LEFT JOIN flight_hierarchy h ON h.unit_id=u.unit_id LEFT JOIN squadrons s ON s.squadron_id=h.squadron_id

@@ -252,7 +252,7 @@ test('a linked cadet permits an audited profile edit through View as, with the s
   assert.equal(entry.body.directoryWorkspace,true);
   const target={...base,targetPersonId:'cadet',entryAuditId:'entry'};
   assert.equal((await f.send(target,path)).body.readOnly,false);
-  const action={id:crypto.randomUUID(),kind:'profile',fields:{changes:{dorm:'Off-Campus'},version:1}};
+  const action={id:crypto.randomUUID(),kind:'profile',fields:{changes:{dorm:'Off-Campus',rank:'C/Capt',asYear:'AS300',role:'Alpha Flight MWR Officer',university:'Notre Dame',contactEmail:'contact@example.invalid'},version:1}};
   const input={...target,action};
   assert.equal((await f.send(input,path)).body.error.code,'WRITES_PAUSED');
   await f.db.prepare('UPDATE system_control SET accepting_commands=1').run();
@@ -261,6 +261,13 @@ test('a linked cadet permits an audited profile edit through View as, with the s
   assert.equal(saved.body.commandId,'portal.entry.'+action.id);
   assert.equal((await f.send(input,path)).status,200);
   assert.equal(await f.db.prepare("SELECT dorm FROM directory_profiles WHERE person_id='cadet'").first('dorm'),'Off-Campus');
+  const changed=await f.db.prepare("SELECT d.as_year AS year,d.rank,d.role,d.email,c.email AS contact FROM directory_profiles d JOIN directory_contact_emails c USING(person_id) WHERE d.person_id='cadet'").first();
+  assert.deepEqual(changed,{year:'AS300',rank:'C/Capt',role:'Alpha Flight MWR Officer',email,contact:'contact@example.invalid'});
+  const edit=changes=>f.send({...target,action:{id:crypto.randomUUID(),kind:'profile',fields:{changes,version:2}}},path);
+  assert.equal((await edit({role:'Alpha Flight Commander'})).status,403);
+  assert.equal((await edit({email:'other@example.invalid'})).status,400);
+  assert.equal((await edit({contactEmail:''})).status,200);
+  assert.equal(await f.db.prepare("SELECT email FROM directory_contact_emails WHERE person_id='cadet'").first(),null);
   assert.equal((await f.send({...input,action:{...action,kind:'link'}},path)).status,403);
   assert.equal((await f.send({...input,targetPersonId:'lead'},path)).status,403);
   assert.equal((await f.send({...base,action:'exit',auditId:'exit',entryAuditId:'entry'})).status,200);

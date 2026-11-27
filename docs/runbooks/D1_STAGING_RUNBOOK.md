@@ -289,3 +289,5 @@ The real-data Forms display the event, flight, cadet or Directory option by name
 To convert an existing catalog, close intake, retain the current Form definitions and private checkpoint, and match each existing choice to its reference in the published edition. Update only the choice values using a required revision ID. Verify all choices and branch destinations before saving the clean publication fingerprints, initial label mappings and activation times in the private checkpoint. Resume through the normal controls after verification.
 
 Blue and Gold use native alternating table bands. The timestamp column displays the submitted local date and time. Newly allocated queue rows inherit these formats, including when an existing table grows.
+
+Schema 19 adds optional cadet Directory contact emails keyed by person ID. Apply it through the reviewed migration procedure before publishing the corresponding panel. Existing profiles display their school address until a contact email is saved. Sign-in and permission checks continue to use the verified school address.

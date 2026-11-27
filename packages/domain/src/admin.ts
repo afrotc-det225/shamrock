@@ -38,11 +38,12 @@ export interface DirectoryUpsert {
   profile: DirectoryProfile;
 }
 export const DIRECTORY_SELF_FIELDS = ['lastName', 'firstName', 'university', 'phone', 'dorm', 'cipBroadArea', 'cipCode', 'afsc', 'homeTown', 'homeState', 'classYear', 'dateOfBirth', 'photoLink'] as const;
+const WEB_SELF_FIELDS = [...DIRECTORY_SELF_FIELDS, "asYear", "rank", "role", "contactEmail"] as const;
 export interface DirectoryEnrollment { verifiedEmail: string; flightId: string; profile: DirectoryProfile }
 export interface DirectorySelfUpdate {
   personId: string;
   expectedVersion: number;
-  changes: Partial<Pick<DirectoryProfile, typeof DIRECTORY_SELF_FIELDS[number]>>;
+  changes: Partial<Pick<DirectoryProfile, Exclude<typeof WEB_SELF_FIELDS[number], "contactEmail">>> & { contactEmail?: string };
 }
 export interface LeadershipUpsert {
   contactId: string;
@@ -311,9 +312,11 @@ export function parseAdminCommand(value: unknown): AdminCommand {
     const p = object(c.payload, 'payload', ['personId', 'expectedVersion', 'changes']);
     if (!p.changes || typeof p.changes !== 'object' || Array.isArray(p.changes)) return invalid('payload.changes', 'Expected profile changes.');
     const changes = p.changes as Record<string, unknown>, keys = Object.keys(changes);
-    if (!keys.length || keys.some(k => !(DIRECTORY_SELF_FIELDS as readonly string[]).includes(k))) return invalid('payload.changes', 'Only self-service profile fields may be changed.');
-    const validated = profile({ lastName: 'Unchanged', firstName: 'Unchanged', asYear: 'AS100', rank: '', role: '', university: '', email: '', phone: '', dorm: '', cipBroadArea: '', cipCode: '', afsc: '', homeTown: '', homeState: '', classYear: '', dateOfBirth: null, flightPathStatus: 'Active 3/4', photoLink: '', ...changes });
-    return { ...envelope, operation: 'directory.selfUpdate', payload: { personId: adminIdentifier(p.personId, 'payload.personId'), expectedVersion: integer(p.expectedVersion, 'payload.expectedVersion', 1), changes: Object.fromEntries(keys.map(k => [k, validated[k as keyof DirectoryProfile]])) } };
+    const allowed: readonly string[] = sourceKind === "test" ? WEB_SELF_FIELDS : DIRECTORY_SELF_FIELDS;
+    if (!keys.length || keys.some(k => !allowed.includes(k))) return invalid('payload.changes', 'Only self-service profile fields may be changed.');
+    const {contactEmail, ...directoryChanges} = changes;
+    const validated = profile({ lastName: 'Unchanged', firstName: 'Unchanged', asYear: 'AS100', rank: '', role: '', university: '', email: '', phone: '', dorm: '', cipBroadArea: '', cipCode: '', afsc: '', homeTown: '', homeState: '', classYear: '', dateOfBirth: null, flightPathStatus: 'Active 3/4', photoLink: '', ...directoryChanges });
+    return { ...envelope, operation: 'directory.selfUpdate', payload: { personId: adminIdentifier(p.personId, 'payload.personId'), expectedVersion: integer(p.expectedVersion, 'payload.expectedVersion', 1), changes: Object.fromEntries(keys.map(k => [k, k === "contactEmail" ? email(contactEmail,"payload.changes.contactEmail") : validated[k as keyof DirectoryProfile]])) } };
   }
   if (c.operation === 'directory.upsert') {
     const p = object(c.payload, 'payload', ['personId', 'expectedVersion', 'flightId', 'profile']);
