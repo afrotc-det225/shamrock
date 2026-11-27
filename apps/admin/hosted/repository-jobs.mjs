@@ -30,6 +30,12 @@ export async function runnerOperation(request,operation){
 export async function repositoryJob(storage,input,now){
   return storage.transaction(async tx=>{
     const {operation,id,run}=input;
+    if(operation==="status"){
+      const job=await tx.get(prefix+id);
+      if(!job || now-job.at>7*day)return null;
+      if(["running","publishing"].includes(job.state) && now-job.started>35*60000 || job.state==="queued" && now-job.at>day)return {state:"expired"};
+      return {state:job.state};
+    }
     const records=await tx.list({prefix});
     const jobs=[];
     for(const [key,job] of records){

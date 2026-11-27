@@ -11,7 +11,7 @@ test("only the staging runner workflow and ref may claim jobs",()=>{
 });
 test("claimed proposals have one runner; stale work expires and another run cannot report success",async()=>{
   const jobs=new Map();
-  const storage={transaction:f=>f({list:()=>structuredClone(jobs),put:(k,v)=>jobs.set(k,structuredClone(v)),delete:k=>jobs.delete(k)})};
+  const storage={transaction:f=>f({get:k=>jobs.get(k),list:()=>structuredClone(jobs),put:(k,v)=>jobs.set(k,structuredClone(v)),delete:k=>jobs.delete(k)})};
   const send=(operation,other={},now=0)=>repositoryJob(storage,{operation,id:"fixture",...other},now);
   await send("create",{patch:{area:"fixture"}});
   const claim=await send("claim",{run:"1/1"});
@@ -24,7 +24,7 @@ test("claimed proposals have one runner; stale work expires and another run cann
 });
 
 test("publication requires owner approval of the exact passing patch",async()=>{
-  const rows=new Map(),storage={transaction:f=>f({list:()=>structuredClone(rows),put:(k,v)=>rows.set(k,structuredClone(v))})};
+  const rows=new Map(),storage={transaction:f=>f({get:k=>rows.get(k),list:()=>structuredClone(rows),put:(k,v)=>rows.set(k,structuredClone(v))})};
   const send=(operation,options)=>repositoryJob(storage,{operation,id:"job",...options},0);
   await send("create",{patch:{after:"fixture"}});
   assert.deepEqual(await send("approve"),{state:"queued"});
