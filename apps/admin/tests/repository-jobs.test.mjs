@@ -22,3 +22,17 @@ test("claimed proposals have one runner; stale work expires and another run cann
   assert.deepEqual(await send("status"),{state:"failed"});
   assert.equal(await send("status",{},8*86400000),null);
 });
+
+test("publication requires owner approval of the exact passing patch",async()=>{
+  const rows=new Map(),storage={transaction:f=>f({list:()=>structuredClone(rows),put:(k,v)=>rows.set(k,structuredClone(v))})};
+  const send=(operation,options)=>repositoryJob(storage,{operation,id:"job",...options},0);
+  await send("create",{patch:{after:"fixture"}});
+  assert.deepEqual(await send("approve"),{state:"queued"});
+  await send("claim",{run:"1/1"});
+  await send("finish",{run:"1/1",passed:true});
+  assert.equal(await send("claim",{run:"2/1"}),null);
+  await send("approve");
+  assert.deepEqual(await send("claim",{run:"2/1"}),{id:"job",patch:{after:"fixture"},operation:"publish"});
+  assert.deepEqual(await send("finish",{run:"1/1",passed:true}),{state:"publishing"});
+  assert.deepEqual(await send("finish",{run:"2/1",passed:true}),{state:"published"});
+});

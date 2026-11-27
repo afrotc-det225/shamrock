@@ -80,6 +80,9 @@ async function classify(env,history,send){
   if([403,404].includes(response.status)){
     const denial=await response.json().catch(()=>null);
     const providerCode=String(denial?.error?.code ?? "denied");
+    const diagnostic=String(denial?.error?.message ?? denial?.detail ?? "").slice(0,400)
+      .replace(/(?:proj_|org[-_]|sk-)[A-Za-z0-9_-]+/g,"[redacted]");
+    console.warn("SHAMROCK Decisions rejected",response.status,providerCode,diagnostic);
     const fallback = {model,reasoning:{effort:"none"},max_output_tokens:120,input:request.input,
       instructions:"Classify the latest request and choose its most relevant source area. "+JSON.stringify(types),
       text:{format:{type:"json_schema",name:"route",strict:true,schema:{type:"object",additionalProperties:false,

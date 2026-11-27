@@ -267,13 +267,17 @@ export default {
         );
       }
       const chatHistory=request.method==="GET" && url.pathname==="/api/chat/history";
-      const testJob=request.method==="GET" && url.pathname==="/api/chat/repository-test";
+      const testJob=["GET","POST"].includes(request.method) && url.pathname==="/api/chat/repository-test";
       if (testJob || chatHistory || (request.method==="POST" && url.pathname==="/api/chat")) {
         if (!available(env,user,preview) || !(await backend.panelAuthority()).access.capabilities.fullSnapshot)
           throw new PanelError("FORBIDDEN","Assistant access is restricted.",403);
         if(testJob){
-          const id=checkChatId(url.searchParams.get("id"));
-          return secure(json(await env.PANEL_DB.repositoryJob({operation:"status",id}) ?? {state:"expired"}));
+          const approve=request.method==="POST";
+          const id=checkChatId(approve?body?.id:url.searchParams.get("id"));
+          if(approve && body.publishPublicBranch!==true)throw new PanelError("INVALID_REQUEST","Confirm the public review branch.");
+          const result=await env.PANEL_DB.repositoryJob({operation:approve?"approve":"status",id});
+          if(approve && result?.state==="approved")await wakeRunner(env);
+          return secure(json(result ?? {state:"expired"}));
         }
         const prefix="assistant/chat/v1/"+env.GENERATION+"/"+await sha(user.google_sub)+"/";
         if(chatHistory){

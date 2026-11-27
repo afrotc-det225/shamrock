@@ -34,7 +34,7 @@ export async function repositoryJob(storage,input,now){
     const jobs=[];
     for(const [key,job] of records){
       if(now-job.at>7*day){await tx.delete(key);continue;}
-      if(job.state==="running" && now-job.started>35*60000 || job.state==="queued" && now-job.at>day){
+      if(["running","publishing"].includes(job.state) && now-job.started>35*60000 || job.state==="queued" && now-job.at>day){
         job.state="expired";await tx.put(key,job);
       }
       jobs.push(job);
@@ -45,17 +45,22 @@ export async function repositoryJob(storage,input,now){
       await tx.put(prefix+id,job);return id;
     }
     if(operation==="claim"){
-      const job=jobs.find(j=>j.state==="running" && j.run===run) ?? jobs.find(j=>j.state==="queued");
+      const job=jobs.find(j=>["running","publishing"].includes(j.state) && j.run===run) ?? jobs.find(j=>["queued","approved"].includes(j.state));
       if(!job)return null;
-      if(job.state==="queued"){
-        Object.assign(job,{run,state:"running",started:now});await tx.put(prefix+job.id,job);
+      if(["queued","approved"].includes(job.state)){
+        Object.assign(job,{run,state:job.state==="approved"?"publishing":"running",started:now});await tx.put(prefix+job.id,job);
       }
-      return {id:job.id,patch:job.patch};
+      return {id:job.id,patch:job.patch,operation:job.state==="publishing"?"publish":"test"};
     }
     const job=jobs.find(j=>j.id===id);
     if(!job)return null;
-    if(operation==="finish" && job.run===run && job.state==="running"){
-      job.state=input.passed?"passed":"failed";delete job.patch;await tx.put(prefix+id,job);
+    if(operation==="approve" && job.state==="passed" && job.patch){
+      job.state="approved";await tx.put(prefix+id,job);
+    }
+    if(operation==="finish" && job.run===run && job.state==="publishing"){
+      job.state=input.passed?"published":"passed";await tx.put(prefix+id,job);
+    }else if(operation==="finish" && job.run===run && job.state==="running"){
+      job.state=input.passed?"passed":"failed";if(!input.passed)delete job.patch;await tx.put(prefix+id,job);
     }
     return {state:job.state};
   });

@@ -23,6 +23,13 @@ export function MaintenanceProposal({proposal:p,autoTest=false}) {
     return ()=>active.current?.();
   },[autoTest,p]);
   const [testState,setTestState]=useState("queued");
+  const [refreshKey,setRefreshKey]=useState(0);
+  async function publish(){
+    try{
+      const result=await api("/chat/repository-test",{id:p.jobId,publishPublicBranch:true});
+      setTestState(result.state);setRefreshKey(k=>k+1);
+    }catch(e){setStatus(e.message);}
+  }
   useEffect(()=>{
     if(!p.jobId)return;
     let stopped=false,timer;
@@ -32,10 +39,10 @@ export function MaintenanceProposal({proposal:p,autoTest=false}) {
       catch{state="unavailable";}
       if(stopped)return;
       setTestState(state);
-      if(["queued","running","unavailable"].includes(state))timer=setTimeout(refresh,30000);
+      if(["queued","running","approved","publishing","unavailable"].includes(state))timer=setTimeout(refresh,30000);
     }
     refresh();return ()=>{stopped=true;clearTimeout(timer);};
-  },[p.jobId]);
+  },[p.jobId,refreshKey]);
   const download = () => {
     const url = URL.createObjectURL(new Blob([p.source.replace(p.before,()=>p.after)],{type:"text/plain"}));
     const a = document.createElement("a"); a.href=url; a.download=p.path.split("/").pop(); a.click();
@@ -45,6 +52,8 @@ export function MaintenanceProposal({proposal:p,autoTest=false}) {
     <details><summary>Review proposed edit</summary>{p.routing && <p>Routed by {p.routing} · GPT-5.3-Codex</p>}<p>Current</p><pre>{p.before}</pre><p>Proposed</p><pre>{p.after || "(remove)"}</pre></details>
     <button onClick={download}>Download proposed file</button>
     {p.jobId && <p role="status">Repository tests · {testState}</p>}
+    {testState==="passed" && <button onClick={publish}>Publish tested change to a public review branch</button>}
+    {testState==="published" && <a href={"https://github.com/afrotc-det225/shamrock-staging-runner/tree/proposals/"+p.jobId} target="_blank" rel="noreferrer">Open tested branch</a>}
     {p.jobId===null && <p>The daily repository test allowance has been used.</p>}
     {Object.hasOwn(runnable,p.area) ? <button disabled={status==="Running…"} onClick={run}>Test with fictional data</button>
       : null}
