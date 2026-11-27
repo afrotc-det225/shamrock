@@ -57,5 +57,5 @@ test('semester chart averages retain zero credit and omit missing scores and ide
   const rows = [{asYear:'AS 300', overall:0, llab:null, firstName:'Private'},
     {asYear:'AS300', overall:1, llab:1}, {asYear:'AS100', overall:null, llab:0}];
   assert.deepEqual(semesterAverages('2025 Fall', rows), {
-    label:'2025 Fall', byYear:{AS300:.5, AS100:null}, overall:.5, llab:.5});
+    label:'2025 Fall', rosterByYear:[{asYear:'AS300',cadets:2},{asYear:'AS100',cadets:1}], byYear:{AS300:.5, AS100:null}, overall:.5, llab:.5});
 });

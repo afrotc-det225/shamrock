@@ -119,7 +119,7 @@ export class StagingPanelStore extends DurableObject {
     });
   }
 
-  reserveAssistant(weight) { return reserve(this.ctx.storage, Date.now(), weight); }
+  reserveAssistant(weight) { return reserve(this.ctx.storage, Date.now(), weight, true); }
 
   status() { return this.ready; }
 
