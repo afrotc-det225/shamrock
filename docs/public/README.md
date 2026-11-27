@@ -383,3 +383,5 @@ The same answer separately lists operational backend workbook owners and editors
 For named roster questions, ask “Whose birthdays are in May?” or “Who is in Alpha Flight?” Birthday answers use the active directory’s month and day, ordered by day. These lists load directly for the signed-in owner and reopen against the current records.
 
 For career and major questions, the Assistant can select the Directory as a reporting source. It receives counts of active cadets by desired AFSC and academic field. Unknown entries and missing responses are counted separately. The two distributions do not show which particular cadets chose both.
+
+Directory questions can combine AS year, flight, squadron, school, class year, academic field and desired AFSC. Ask for a count, breakdown or names, then narrow the previous result in the same chat. SHAMROCK saves the matched record IDs in that owner’s conversation. Names are resolved inside the panel from currently authorized active records; the model receives field choices and the conversation, without the result IDs or names.

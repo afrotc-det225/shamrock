@@ -64,3 +64,18 @@ test("career reports count active preferences separately from majors and redact 
   assert.equal(result.academicField["14 - Engineering"],2);
   assert.equal(result.desiredAfsc["Unrecognized entry"],1);assert.ok(!JSON.stringify(result).includes("private"));
 });
+
+import {rosterDataset,rosterVocabulary,runRosterQuery,cohortNames} from "../hosted/roster-query.mjs";
+test("cross-field queries and named follow-ups preserve the prior result across a roster change",()=>{
+ const person=(id,asYear,afsc)=>[id,1,"f","Example",id,"",asYear,"Active","","",afsc,"Notre Dame","2028","","14"];
+ const t={flights:'[["f","Alpha","s"]]',squadrons:'[["s","Blue"]]',people:JSON.stringify([person("one","AS300","32E"),person("two","AS400","62E"),person("three","AS300","11X")])};
+ const rows=rosterDataset(t);
+ const plan={scope:"active roster",filters:[{field:"afsc",values:["32E - Civil Engineer","62E - Developmental Engineer"]}],groupBy:"squadron",listNames:false};
+ const first=runRosterQuery(rows,plan);
+ assert.deepEqual(first.cohort.ids,["one","two"]);
+ rows.push({...rows[0],id:"late"});
+ const next=runRosterQuery(rows,{...plan,scope:"previous result",filters:[{field:"asYear",values:["AS300"]}],listNames:true},first.cohort.ids);
+ assert.deepEqual(cohortNames(rows,next.cohort.ids),["one Example"]);
+ assert.ok(!JSON.stringify(rosterVocabulary(rows)).includes("Example"));
+ assert.throws(()=>runRosterQuery(rows,{...plan,filters:[{field:"last",values:["Example"]}]}));
+});

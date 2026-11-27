@@ -13,6 +13,7 @@ import { json, boundedJson, secure } from "./http.mjs";
 import { TRANSITION_POLICY } from "../../../packages/domain/src/transitions.ts";
 import { previewFromSession, previewResponse, changePreview } from "./view-as.mjs";
 import { browseState, browseProfiles } from "./browse.mjs";
+import {rosterDataset,cohortNames} from "./roster-query.mjs";
 import {rosterQuestion,rosterRows} from "./roster-questions.mjs";
 import {asksForAdministrators,currentAdministrators} from "./admin-directory.mjs";
 import {reportTotals} from "./operational-reports.mjs";
@@ -295,9 +296,17 @@ export default {
       const testJob=["GET","POST"].includes(request.method) && url.pathname==="/api/chat/repository-test";
       const adminDirectory=request.method==="GET" && url.pathname==="/api/chat/administrators";
       const rosterLookup=request.method==="GET" && url.pathname==="/api/chat/roster";
-      if (rosterLookup || adminDirectory || testJob || chatHistory || (request.method==="POST" && url.pathname==="/api/chat")) {
+      const names=request.method==="POST" && url.pathname==="/api/chat/cohort-names";
+      if (names || rosterLookup || adminDirectory || testJob || chatHistory || (request.method==="POST" && url.pathname==="/api/chat")) {
         if (!available(env,user,preview) || !(await backend.panelAuthority()).access.capabilities.fullSnapshot)
           throw new PanelError("FORBIDDEN","Assistant access is restricted.",403);
+        const readRoster=async(withExcusals=false)=>{
+          const authority=await backend.panelAuthority();
+          const directory=await browseState(backend,authority,"cadets");
+          const excusals=withExcusals ? await browseState(backend,authority,"excusals") : null;
+          return rosterDataset(directory.tables,excusals?.tables);
+        };
+        if(names)return secure(json({rows:cohortNames(await readRoster(),body.ids)}));
         if(rosterLookup){
           const kind=url.searchParams.get("kind"),value=url.searchParams.get("value");
           if(!["birthday","flight"].includes(kind))throw new PanelError("INVALID_REQUEST","Unknown roster question.");
@@ -331,7 +340,7 @@ export default {
         const reply=asksForAdministrators(body?.messages?.at(-1)) ? {content:"SHAMROCK administrators",adminDirectory:true} : rosterQuestion(body?.messages) ?? await eventCancellationReply(body?.messages?.at(-1),backend,service) ?? await answer(env,body,env.operatorGuide,fetch,()=>wingCharts(backend),async profile=>{
           const view=await browseState(backend,await backend.panelAuthority(),profile==="careers"?"cadets":profile);
           return reportTotals(profile,view.tables);
-        });
+        },readRoster);
         if(isUnifiedSite(env) && reply.proposal){
           const {area,path,commit,before,after,edits}=reply.proposal;
           reply.proposal.jobId=await env.PANEL_DB.repositoryJob({operation:"create",id:crypto.randomUUID(),patch:{area,path,commit,before,after,edits}});

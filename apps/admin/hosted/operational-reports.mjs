@@ -3,7 +3,8 @@ import {profileChoices} from "../../../.build/v3/packages/domain/src/profile-cho
 // These descriptions let the router select data by meaning, including follow-up questions.
 export const reportCatalog = {
   careers:"Current cadets’ desired occupations, AFSC preferences, career interests and academic fields of study (CIP).",
-  cadets:"Current active cadet counts by university or campus.",
+  rosterExcusals:"Which cadets have pending, approved or denied excusals, optionally grouped or filtered by directory attributes. Joins the current excusal queue to the Directory.",
+  cadets:"Active cadet directory: count, name or group cadets; filter by AS year, graduation year, campus, flight, squadron, AFSC interest or major. Use for which of those cadets and similar follow-ups.",
   leadership:"Leadership contact coverage.",
   overview:"Pending excusals and active event totals.",
   "event-list":"Events by type and current status.",
