@@ -25,7 +25,7 @@ export async function runnerOperation(request,operation){
     const {id,passed}=await boundedJson(request,256);
     if(!uuid.test(id) || typeof passed!=="boolean")throw new Error();
     return {operation,run,id,passed};
-  }catch{throw new PanelError("FORBIDDEN","Invalid staging runner identity or result.",403);}
+  }catch{throw new PanelError("FORBIDDEN","The test runner or its result could not be verified.",403);}
 }
 export async function repositoryJob(storage,input,now){
   return storage.transaction(async tx=>{

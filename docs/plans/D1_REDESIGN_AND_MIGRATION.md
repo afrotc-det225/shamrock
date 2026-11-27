@@ -456,6 +456,8 @@ A one-workflow pilot demonstrates technical feasibility but does not authorize a
 
 ## 12. Production cutover runbook
 
+Use the normal SHAMROCK names on the panel, Forms and workbooks. During rehearsal, isolated Google copies carry environment suffixes and the adapter verifies their reviewed titles. At cutover, configure and verify the production resource IDs, owners and exact titles together, and replace the staging-only title checks in the native Form and input adapters with checks against the approved production manifest. Open the published Form links and workbook tabs from the panel to confirm their visible titles and destinations before enabling submissions.
+
 This is a future execution procedure, not authorization to run it now.
 
 1. Confirm approved release, actual operator account, protected backup location, capacity, completed staging rehearsal, and rollback support. Avoid an active event/closeout/transition window.

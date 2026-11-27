@@ -7,7 +7,7 @@ const capabilities=["frontend.read","directory.manage","leadership.manage","even
 const active="flight_path_status NOT IN ('Inactive','Commissioned','Dropped')";
 const manager="EXISTS(SELECT 1 FROM permission_managers m JOIN principals p USING(principal_id) WHERE m.principal_id=? AND m.active=1 AND p.active=1)";
 const key=(actor,id)=>"assistant/wing-grant/"+encodeURIComponent(actor)+"/"+id;
-const conflict=()=>new PanelError("STALE_ACCESS","The account, your authority, or staging write status changed. Review a new grant.",409);
+const conflict=()=>new PanelError("STALE_ACCESS","The account or your permissions changed, or changes are paused. Review a new grant.",409);
 
 export async function schoolWingAccess(db,principal,email){
   if(!db || !email)return false;
@@ -24,7 +24,7 @@ export async function prepareWingGrant(env,actor,personId,hash){
   const principal="school."+await hash(row.email);
   const action={expiresAt:Date.now()+900000,id:crypto.randomUUID(),personId,principal,email:row.email,version:row.version,name:(row.first_name+" "+row.last_name).trim()};
   await env.HISTORY_FILES.put(key(actor,action.id),JSON.stringify(action),{expirationTtl:900});
-  return {content:"Grant "+action.name+" ("+action.email+") staging Wing access to view records and manage the Directory, leadership, events, and attendance corrections? Permission management, Assistant access and Google workbook sharing are separate.",wingGrant:{id:action.id}};
+  return {content:"Grant "+action.name+" ("+action.email+") Wing access to view records and manage the Directory, leadership, events, and attendance corrections? Permission management, Assistant access and Google workbook sharing are separate.",wingGrant:{id:action.id}};
 }
 
 export async function applyWingGrant(env,actor,id){

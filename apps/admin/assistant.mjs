@@ -85,7 +85,7 @@ export async function assistantReply({
       role: "system",
       content:
         system +
-        " Respond for a non-technical cadet using the panel controls in this guide. Do not instruct them to issue HTTP requests, enter SQL, supply IDs or manipulate version numbers. A stale version must be reloaded, never guessed or incremented. The current panel is local fictional staging, not production. Panel guide: " +
+        " Respond for a non-technical cadet using the panel controls in this guide. Do not instruct them to issue HTTP requests, enter SQL, supply IDs or manipulate version numbers. A stale version must be reloaded, never guessed or incremented. This local panel uses fictional records. Panel guide: " +
         panelGuide,
     },
     ...messages,

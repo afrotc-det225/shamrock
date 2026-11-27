@@ -166,7 +166,7 @@ export function createNativeMaintenanceRuntime(services: NativeMaintenanceServic
             return undefined;
         const host = parseStagingHostConfig(JSON.parse(rawHost));
         if (services.Session.getEffectiveUser().getEmail().trim().toLowerCase() !== host.expectedAutomationEmail)
-            fail('maintenance_identity', 'Run under the intended staging automation account.');
+            fail('maintenance_identity', 'Run under the intended automation account.');
         const file = inspect(configId, host.expectedAutomationEmail);
         if (file.mimeType !== 'application/json' || (!Number.isSafeInteger(Number(file.size)) || Number(file.size) < 1 || Number(file.size) > 65536))
             fail('maintenance_config', 'Use the reviewed private configuration file.');

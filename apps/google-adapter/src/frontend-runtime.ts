@@ -469,7 +469,7 @@ export function consumeFrontendRefresh(runtime: FrontendRefreshPorts): { status:
     if (window && !equal(projected.snapshot?.revision, window.revision)) fail('frontend_contract', 'The projection revision differs from the reviewed maintenance snapshot.');
     if (!projected.effect || projected.effect.effectId !== claim.effectId || projected.effect.kind !== 'frontend.refresh'
       || projected.snapshot?.contractVersion !== 1 || projected.snapshot.environment !== 'staging'
-      || projected.snapshot.generation !== runtime.config.generation) fail('frontend_contract', 'The snapshot does not match the leased staging effect.');
+      || projected.snapshot.generation !== runtime.config.generation) fail('frontend_contract', 'The snapshot does not match the leased effect.');
     if (state.completedClaim?.effectId === claim.effectId && state.completedClaim.claimToken === claim.claimToken) {
       // A prior run completed publication and restored the field policy. New human
       // drafts may now exist: do not replay the previous publication over them.
@@ -655,7 +655,7 @@ export function createNativeFrontendRuntime(services: NativeFrontendServices,
   const now = services.nowSeconds ?? (() => Math.floor(Date.now() / 1000));
   const account = () => services.Session.getEffectiveUser().getEmail().trim().toLowerCase();
   function api(url: string, body?: unknown, patch = false, max = MAX_STATE_BYTES): Record<string, any> {
-    const token = services.ScriptApp.getOAuthToken(); if (!token) fail('frontend_google_auth', 'Authorize the staging automation account.');
+    const token = services.ScriptApp.getOAuthToken(); if (!token) fail('frontend_google_auth', 'Authorize the automation account.');
     const payload = body === undefined ? undefined : JSON.stringify(body);
     if (payload && bytes(payload) > max) fail('frontend_capacity', 'The bounded Google request is too large.');
     let response: ReturnType<NativeFrontendServices['UrlFetchApp']['fetch']>;
@@ -686,12 +686,12 @@ export function createNativeFrontendRuntime(services: NativeFrontendServices,
     const rawHost = properties.getProperty(HOST_PROPERTIES.config);
     if (!rawHost) return undefined;
     const host = parseStagingHostConfig(JSON.parse(rawHost));
-    if (account() !== host.expectedAutomationEmail) fail('frontend_identity', 'Run frontend publication under the staging automation account.');
+    if (account() !== host.expectedAutomationEmail) fail('frontend_identity', 'Run frontend publication under the automation account.');
     let raw = properties.getProperty(FRONTEND_PROPERTIES.config);
     if (!raw) {
       const configFile = properties.getProperty(CONFIG_FILE_ID_PROPERTY); if (!configFile) return undefined;
       const info = inspectFile(fileId(configFile), host.expectedAutomationEmail);
-      if (info.mimeType !== 'application/json' || Number(info.size) > 65536) fail('frontend_configuration', 'Use the reviewed private staging configuration file.');
+      if (info.mimeType !== 'application/json' || Number(info.size) > 65536) fail('frontend_configuration', 'Use the reviewed private configuration file.');
       const map = api(`${driveUrl(configFile)}?alt=media`, undefined, false, 65536);
       raw = map[FRONTEND_PROPERTIES.config]; if (raw === undefined) return undefined;
     }
@@ -702,7 +702,7 @@ export function createNativeFrontendRuntime(services: NativeFrontendServices,
       || !f.main || !f.main.sheets || typeof f.main.expectedTitle !== 'string' || f.main.expectedTitle.length > 200 || !/staging/i.test(f.main.expectedTitle)
       || !f.access || email(f.access.ownerEmail) !== host.expectedAutomationEmail
       || email(f.access.automationEmail) !== host.expectedAutomationEmail || !Array.isArray(f.allowedFileEditors)
-      || f.allowedFileEditors.length > 50 || !Array.isArray(f.seeds) || f.seeds.length > 30) fail('frontend_configuration', 'Frontend bindings must match the reviewed isolated staging host.');
+      || f.allowedFileEditors.length > 50 || !Array.isArray(f.seeds) || f.seeds.length > 30) fail('frontend_configuration', 'Frontend bindings must match the reviewed isolated host.');
     fileId(f.stateFileId); fileId(f.main.spreadsheetId);
     const transportBooks = stagingTransportSpreadsheetIds(host);
     if (f.stateFileId === f.main.spreadsheetId || transportBooks.includes(f.main.spreadsheetId)
@@ -736,7 +736,7 @@ export function createNativeFrontendRuntime(services: NativeFrontendServices,
       || config.supplemental.excusals.allowedFileEditors.length || account() !== owner || properties.getProperty(PERMISSION_FENCE_PROPERTY) !== 'pending'
       || properties.getProperty(HOST_PROPERTIES.enabled) === 'true' || properties.getProperty(INPUT_REORDER_PROPERTY) !== null
       || properties.getProperty('SHAMROCK_V3_INPUT_PAUSED') !== 'true' || properties.getProperty('SHAMROCK_V3_FORM_INTAKE_PAUSED') !== 'true'
-      || properties.getProperty(FRONTEND_PROPERTIES.config) !== null) fail('closed_publication', 'The private staging input and access fences must already be closed.');
+      || properties.getProperty(FRONTEND_PROPERTIES.config) !== null) fail('closed_publication', 'The private input and access fences must already be closed.');
     const privateJson = (id: string) => {
       const file = inspectFile(fileId(id), owner);
       if (file.mimeType !== 'application/json' || Number(file.size) > MAX_STATE_BYTES) fail('closed_publication', 'A bound private JSON checkpoint is required.');
@@ -752,7 +752,7 @@ export function createNativeFrontendRuntime(services: NativeFrontendServices,
     };
     const input = readBinding('SHAMROCK_V3_INPUT_CONFIG'), forms = readBinding('SHAMROCK_V3_FORMS_CONFIG'), permissions = readBinding('SHAMROCK_V3_PERMISSION_CONFIG');
     if ([input, forms, permissions].some(c => c.enabled !== false || c.environment !== 'staging' || c.generation !== config.generation)
-      || forms.intakeEnabled !== false) fail('closed_publication', 'Ordinary staging publishers, intake and permission changes must be disabled.');
+      || forms.intakeEnabled !== false) fail('closed_publication', 'Ordinary publishers, intake and permission changes must be disabled.');
     for (const id of [input.journalFileId, forms.intakeFileId]) {
       const journal = privateJson(fileId(id));
       if (journal.environment !== 'staging' || journal.generation !== config.generation
@@ -1070,10 +1070,10 @@ export function createNativeFrontendRuntime(services: NativeFrontendServices,
         if (window) verifyClosedWindow(window, loaded);
         if (account() !== host.expectedAutomationEmail) fail('frontend_identity', 'Frontend execution identity changed.');
         const book = inspectFrontendBook(config.main.spreadsheetId, config.allowedFileEditors, 'main');
-        if (book.mimeType !== 'application/vnd.google-apps.spreadsheet' || book.name !== config.main.expectedTitle) fail('frontend_isolation', 'The frontend binding is not the reviewed native staging spreadsheet.');
+        if (book.mimeType !== 'application/vnd.google-apps.spreadsheet' || book.name !== config.main.expectedTitle) fail('frontend_isolation', 'The frontend binding is not the reviewed native spreadsheet.');
         if (supplemental) {
           const other = inspectFrontendBook(supplemental.excusals.spreadsheetId, supplemental.excusals.allowedFileEditors, 'excusals');
-          if (other.mimeType !== 'application/vnd.google-apps.spreadsheet' || other.name !== supplemental.excusals.expectedTitle) fail('frontend_isolation', 'The Excusals binding is not the reviewed native staging spreadsheet.');
+          if (other.mimeType !== 'application/vnd.google-apps.spreadsheet' || other.name !== supplemental.excusals.expectedTitle) fail('frontend_isolation', 'The Excusals binding is not the reviewed native spreadsheet.');
         }
         const state = inspectFile(config.stateFileId, host.expectedAutomationEmail);
         if (state.mimeType !== 'application/json' || Number(state.size) > MAX_STATE_BYTES) fail('frontend_state', 'The private frontend state file is invalid or oversized.');
@@ -1156,12 +1156,12 @@ export function createNativeFrontendRuntime(services: NativeFrontendServices,
   }
   return { refresh: () => refresh(),
     closedPublicationWindow: () => configuration()?.frontend.closedPublication,
-    assertClosedMaintenance(window: ClosedPublicationWindow) { const loaded = configuration(); if (!loaded) fail('closed_publication', 'Staging maintenance is unbound.'); verifyClosedWindow(window, loaded); },
+    assertClosedMaintenance(window: ClosedPublicationWindow) { const loaded = configuration(); if (!loaded) fail('closed_publication', 'Maintenance resources have not been configured.'); verifyClosedWindow(window, loaded); },
     publishClosedMaintenance: (window: ClosedPublicationWindow) => refresh(undefined,false,false,window),
     permissionSession:(operation:(session:NativeFrontendInputSession)=>unknown)=>refresh(operation,true,true), inputSession: (operation: (session: NativeFrontendInputSession) => unknown, options: {allowPaused?: boolean} = {}) => refresh(operation, options.allowPaused === true),
     pause() { pauseFrontend(); return { status: 'paused' as const }; },
     resume() {
-      const configured = configuration(); if (!configured || !configured.frontend.enabled) fail('frontend_configuration', 'Enable only a reviewed staging frontend configuration.');
+      const configured = configuration(); if (!configured || !configured.frontend.enabled) fail('frontend_configuration', 'Enable only a reviewed frontend configuration.');
       properties.deleteProperty(FRONTEND_PROPERTIES.pause);
       if (properties.getProperty(FRONTEND_PROPERTIES.pause) !== null) fail('frontend_state', 'The frontend pause override could not be cleared.');
       return { status: 'ready-for-staging-retry' as const };

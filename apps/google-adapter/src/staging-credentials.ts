@@ -12,7 +12,7 @@ export interface StagingCredentialServices {
   ScriptApp:{getOAuthToken():string};LockService:{getScriptLock():{tryLock(ms:number):boolean;releaseLock():void}};
   UrlFetchApp:{fetch(url:string,options:{method:'get'|'patch';headers:Record<string,string>;contentType?:string;payload?:string;muteHttpExceptions:true;followRedirects:false;validateHttpsCertificates:true}):{getResponseCode():number;getContentText():string}};
 }
-function fail():never{throw new AdapterError('staging_credential_import','The private credential delivery could not be verified. Staging remains paused.');}
+function fail():never{throw new AdapterError('staging_credential_import','The private credential delivery could not be verified. Synchronization remains paused.');}
 const fileId=(v:unknown)=>typeof v==='string'&&/^[A-Za-z0-9_-]{1,512}$/.test(v);
 const exact=(v:object,fields:string[])=>v&&typeof v==='object'&&!Array.isArray(v)&&Object.keys(v).sort().join(',')===fields.sort().join(',');
 export function importStagingCredential(s:StagingCredentialServices,nowSeconds=()=>Math.floor(Date.now()/1000)) {

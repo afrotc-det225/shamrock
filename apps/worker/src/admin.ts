@@ -466,7 +466,7 @@ export async function adminEffect(env: AdminEnv, action: 'claim' | 'project' | '
         AND ((state='leased' AND lease_expires_at>?) OR (state='done' AND completed_by_effect_id=effect_id))
         AND substr(claim_token,1,length(?))=? AND ${guard.sql}`,req.expectedEffectId,req.kind,req.workerId,now,
         token.slice(0,-36),token.slice(0,-36),...guard.values).first();
-      if (!receipt) throw new HttpError(409,'REVIEWED_PUBLICATION_CONFLICT','The named refresh or its reviewed staging conditions changed.');
+      if (!receipt) throw new HttpError(409,'REVIEWED_PUBLICATION_CONFLICT','The named refresh or its reviewed conditions changed.');
       const {state,...retainedEffect} = receipt;
       return {effect:state === 'done' ? null : retainedEffect};
     }

@@ -121,7 +121,7 @@ function AdministratorList({lookup,cohort}){
     {checked ? <><p>{recent ? "Drive access checked" : "Last known access, checked"} {displayDate(checked)}.</p>
       <ul>{workbook.admins.map(a=><li key={a.account}>{a.label}{a.account!==a.label ? " ("+a.account+")" : ""} · {a.role}</li>)}</ul></> :
       <p>The workbook access list has not been verified.</p>}
-    <strong>Staging panel</strong>
+    <strong>SHAMROCK panel</strong>
   <ul>{rows.administrators.map((r,i)=><li key={i}>{r.name} · {r.managesAccess ? "Manages permissions" : "Wing panel access"}</li>)}</ul></div>;
 }
 function WingGrantApproval({action}){
@@ -235,7 +235,7 @@ function AssistantWorkspace({ meta }) {
         api("/chat",{
           ...(hosted ? {chatId:chat.id,chatTitle:chat.title} : {}),
           previousCohort:messages.at(-1)?.cohort?.ids,
-          messages:next.slice(-15).map(({role,content,wingGrant})=>({role,content:wingGrant ? "Prepared a staging Wing access grant for the named cadet. Awaiting owner review." : content})),
+          messages:next.slice(-15).map(({role,content,wingGrant})=>({role,content:wingGrant ? "Prepared a Wing access grant for the named cadet. Awaiting owner review." : content})),
         }),
       ]);
       const transcript=[...next,{role:"assistant",content:reply.content,proposal:reply.proposal,wingGrant:reply.wingGrant,eventAction:reply.eventAction,cohort:reply.cohort,adminDirectory:reply.adminDirectory,rosterLookup:reply.rosterLookup,autoTest:true}];

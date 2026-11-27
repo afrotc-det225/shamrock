@@ -134,7 +134,7 @@ export function captureFrontendEdit(input:{event:NativeEditEvidence;binding:Inpu
   current:FrontendTableRead;snapshot:FrontendInputContext;principals:InputPrincipal[];config:AdapterConfig;signer:Signer;providerCoordinatesVerified:boolean;automationEmail:string;captureSequence?:number}):CapturedFrontendEdit{
   const {event:e,binding:b,baseline,current,signer}=input;
   if(input.config.environment!=='staging'||baseline.generation!==input.config.generation||input.snapshot.generation!==baseline.generation||input.snapshot.environment!=='staging'
-    ||e.spreadsheetId!==b.spreadsheetId||e.sheetId!==b.sheetId||current.sheetId!==b.sheetId||current.tableId!==b.tableId)fail('input_binding','A bounded, exact staging edit binding is required.');
+    ||e.spreadsheetId!==b.spreadsheetId||e.sheetId!==b.sheetId||current.sheetId!==b.sheetId||current.tableId!==b.tableId)fail('input_binding','A bounded, exact edit binding is required.');
   assertImmutableInputSlots(baseline,current,b.surface);
   if(!natural(input.captureSequence??0))fail('input_identity','Invalid capture sequence.');
   const bounds=nativeInputBounds(e,current,b.surface,baseline);

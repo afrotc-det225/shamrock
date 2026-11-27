@@ -44,7 +44,7 @@ export interface StagingConfigurationServices {
 
 function fail(code: string, message: string): never { throw new AdapterError(code, message); }
 function object(value: unknown): Json {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) fail('configuration_invalid', 'Expected structured nonsecret staging configuration.');
+  if (!value || typeof value !== 'object' || Array.isArray(value)) fail('configuration_invalid', 'Expected structured nonsecret configuration.');
   return value as Json;
 }
 function keys(value: Json, required: string[], optional: string[] = []) {
@@ -58,7 +58,7 @@ function bytes(value: string): number {
   catch { return fail('configuration_invalid', 'Configuration contains invalid Unicode.'); }
 }
 function json(text: string, limit: number): Json {
-  if (!text || bytes(text) > limit) fail('configuration_size', 'Configuration exceeds its bounded staging size.');
+  if (!text || bytes(text) > limit) fail('configuration_size', 'Configuration exceeds its size limit.');
   try { return object(JSON.parse(text)); }
   catch (error) { if (error instanceof AdapterError) throw error; return fail('configuration_invalid', 'Configuration contains invalid JSON.'); }
 }
@@ -99,7 +99,7 @@ function validatePrincipals(value: Json) {
 }
 function validateCatalog(value: Json) {
   keys(value, ['references']); const references = object(value.references);
-  if (Object.keys(references).length > 500) fail('configuration_invalid', 'The staging choice catalog is too large.');
+  if (Object.keys(references).length > 500) fail('configuration_invalid', 'The choice catalog is too large.');
   for (const [token, raw] of Object.entries(references)) {
     if (!/^[A-Za-z0-9_.:-]{1,96}$/.test(token)) fail('configuration_invalid', 'A choice token is invalid.');
     const reference = object(raw);
@@ -116,7 +116,7 @@ function validateCatalog(value: Json) {
 function validateProjection(value: Json, host: TransportStagingHostConfig) {
   const kinds = ['attendance', 'decisions', 'cursors'] as const;
   keys(value, ['version', 'environment', 'generation', 'workerId', ...kinds]);
-  if (value.version !== 1 || value.environment !== 'staging' || integer(value.generation) !== host.generation) fail('configuration_invalid', 'Projection configuration must match the staging generation.');
+  if (value.version !== 1 || value.environment !== 'staging' || integer(value.generation) !== host.generation) fail('configuration_invalid', 'Projection configuration must match the configured generation.');
   id(value.workerId);
   const targets = new Set<string>();
   for (const kind of kinds) {
@@ -192,7 +192,7 @@ export function importStagingConfiguration(services: StagingConfigurationService
   if (bytes(source) !== Number(metadata.size)) fail('configuration_changed', 'The configuration file changed during import; retry after saving it.');
   const map = json(source, FILE_LIMIT);
   if (Object.keys(map).some(key => !ALLOWED.includes(key)) || !Object.prototype.hasOwnProperty.call(map, HOST_PROPERTIES.config)) {
-    fail('configuration_keys', 'Import only the approved nonsecret staging property names.');
+    fail('configuration_keys', 'Import only the approved nonsecret property names.');
   }
   const pending: Record<string, string> = {}; const parsed: Record<string, Json> = {};
   for (const [key, value] of Object.entries(map)) {
@@ -201,12 +201,12 @@ export function importStagingConfiguration(services: StagingConfigurationService
     if (![FRONTEND_CONFIG_PROPERTY,MAINTENANCE_PROPERTIES.config,FORMS_CONFIG_PROPERTY,INPUT_CONFIG_PROPERTY,PERMISSION_CONFIG_PROPERTY,HISTORY_CONFIG_PROPERTY,OWNER_MAIL_CONFIG_PROPERTY,CREDENTIAL_IMPORT_PROPERTY].includes(key)) pending[key] = value;
   }
   const host = parseStagingHostConfig(parsed[HOST_PROPERTIES.config]); sameShape(parsed[HOST_PROPERTIES.config], host);
-  if (host.expectedAutomationEmail !== executor) fail('configuration_identity', 'The proposed staging configuration belongs to a different automation account.');
+  if (host.expectedAutomationEmail !== executor) fail('configuration_identity', 'The proposed configuration belongs to a different automation account.');
   const previousHost = properties.getProperty(HOST_PROPERTIES.config);
   let previousMode: 'native-only' | undefined;
   try { previousMode = previousHost && JSON.parse(previousHost)?.mode === 'native-only' ? 'native-only' : undefined; } catch { /* A damaged transport config can still be repaired in place. */ }
   if (previousHost && previousMode !== host.mode) {
-    fail('configuration_mode_change', 'Use a separate staging script for native-only operation; existing transport bindings and recovery state were retained.');
+    fail('configuration_mode_change', 'Use a separate automation script for native-only operation; existing transport bindings and recovery state were retained.');
   }
   if (host.mode === 'native-only') {
     if (TRANSPORT_ONLY.some(key => Object.prototype.hasOwnProperty.call(map, key))) fail('configuration_keys', 'Native-only configuration cannot include legacy transport properties.');
@@ -234,13 +234,13 @@ export function importStagingConfiguration(services: StagingConfigurationService
     if(frontend.resumeRequest){const r=object(frontend.resumeRequest);keys(r,['requestId','sequence','stateSha256']);id(r.requestId);integer(r.sequence);if(typeof r.stateSha256!=='string'||!/^[a-f0-9]{64}$/.test(r.stateSha256))fail('configuration_invalid','Frontend resume requires a reviewed state digest.');}
     if(frontend.leaseRecovery){const r=object(frontend.leaseRecovery);keys(r,['recoveryId','checkpointSha256','previousExpiry']);id(r.recoveryId);if(typeof r.checkpointSha256!=='string'||!/^[a-f0-9]{64}$/.test(r.checkpointSha256)||typeof r.previousExpiry!=='string'||!Number.isFinite(Date.parse(r.previousExpiry)))fail('configuration_invalid','Frontend lease recovery requires a reviewed checkpoint and expiry.');}
     if (frontend.version !== 1 || frontend.environment !== 'staging' || frontend.generation !== host.generation || typeof frontend.enabled !== 'boolean'
-      || !['EXISTING_FICTIONAL_FRONTEND_REVIEWED_FOR_STAGING', 'EXISTING_REAL_DATA_FRONTEND_REVIEWED_FOR_STAGING'].includes(String(frontend.resourceReview))) fail('configuration_invalid', 'Frontend configuration must match the reviewed staging generation.');
+      || !['EXISTING_FICTIONAL_FRONTEND_REVIEWED_FOR_STAGING', 'EXISTING_REAL_DATA_FRONTEND_REVIEWED_FOR_STAGING'].includes(String(frontend.resourceReview))) fail('configuration_invalid', 'Frontend configuration must match the reviewed generation.');
     id(frontend.workerId); id(frontend.principalId); id(frontend.stateFileId, 512);
     const main = object(frontend.main); keys(main, ['spreadsheetId', 'expectedTitle', 'sheets']); id(main.spreadsheetId, 512);
     if (typeof main.expectedTitle !== 'string' || main.expectedTitle.length > 200 || !/staging/i.test(main.expectedTitle)
-      || !Array.isArray(frontend.allowedFileEditors) || !Array.isArray(frontend.seeds)) fail('configuration_invalid', 'Frontend configuration requires an exact staging binding and bounded access/seed lists.');
+      || !Array.isArray(frontend.allowedFileEditors) || !Array.isArray(frontend.seeds)) fail('configuration_invalid', 'Frontend configuration requires an exact binding and bounded access/seed lists.');
     const access = object(frontend.access);
-    if (email(access.ownerEmail) !== executor || email(access.automationEmail) !== executor) fail('configuration_identity', 'Frontend ownership must match the staging account.');
+    if (email(access.ownerEmail) !== executor || email(access.automationEmail) !== executor) fail('configuration_identity', 'Frontend ownership must match the automation account.');
     if (host.mode !== 'native-only' && (main.spreadsheetId === host.journal.spreadsheetId || main.spreadsheetId === host.decisionInput?.spreadsheetId)
       || frontend.stateFileId === main.spreadsheetId || frontend.stateFileId === fileId) fail('configuration_invalid', 'Frontend, private state and existing transport resources must remain separate.');
     // Full native binding, role and seed validation occurs before a refresh can write.

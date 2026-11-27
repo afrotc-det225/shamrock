@@ -171,10 +171,10 @@ function email(value: unknown): string {
 export function parseStagingHostConfig(value: unknown): StagingHostConfig {
   const v = record(value);
   if (v.version !== 1 || v.environment !== 'staging' || v.resourceReview !== 'EXISTING_RESOURCES_REVIEWED_FOR_STAGING') {
-    fail('staging_configuration_required', 'An explicit reviewed staging configuration is required.');
+    fail('staging_configuration_required', 'An explicit reviewed configuration is required.');
   }
   const origin = string(v.workerOrigin);
-  if (!/^https:\/\/[A-Za-z0-9.-]+(?::\d+)?$/.test(origin)) fail('invalid_host_config', 'The staging Worker must use an HTTPS origin.');
+  if (!/^https:\/\/[A-Za-z0-9.-]+(?::\d+)?$/.test(origin)) fail('invalid_host_config', 'The Worker must use an HTTPS origin.');
   const identity: StagingHostIdentity = {
     version: 1, environment: 'staging', resourceReview: 'EXISTING_RESOURCES_REVIEWED_FOR_STAGING',
     workerOrigin: origin, keyId: id(v.keyId), generation: integer(v.generation), expectedAutomationEmail: email(v.expectedAutomationEmail),
@@ -183,7 +183,7 @@ export function parseStagingHostConfig(value: unknown): StagingHostConfig {
     if (Object.keys(v).some(key => ![...Object.keys(identity), 'mode'].includes(key))) fail('invalid_host_config', 'A native-only host cannot bind legacy transport resources.');
     return { ...identity, mode: 'native-only' };
   }
-  if (v.mode !== undefined) fail('invalid_host_config', 'The staging host mode is invalid.');
+  if (v.mode !== undefined) fail('invalid_host_config', 'The automation host mode is invalid.');
   const attendance = record(v.attendance); const roles = record(attendance.itemRoles);
   if (!Array.isArray(roles.present) || roles.present.length === 0 || roles.present.length > 30) fail('invalid_host_config', 'Attendance checkbox item bindings are required.');
   const result: TransportStagingHostConfig = {
@@ -225,7 +225,7 @@ export function createStagingHost(runtime: StagingHostRuntime) {
   const props = runtime.properties;
   function propertyJson(key: string): { text: string; value: unknown } {
     const text = props.getProperty(key);
-    if (!text || encodeURIComponent(text).replace(/%[A-F0-9]{2}/g, 'x').length > 8000) fail('invalid_host_config', 'Required configuration is missing or exceeds the small staging limit.');
+    if (!text || encodeURIComponent(text).replace(/%[A-F0-9]{2}/g, 'x').length > 8000) fail('invalid_host_config', 'Required configuration is missing or exceeds the size limit.');
     try { return { text, value: JSON.parse(text) }; }
     catch { return fail('invalid_host_config', 'Configuration contains invalid JSON.'); }
   }
@@ -235,7 +235,7 @@ export function createStagingHost(runtime: StagingHostRuntime) {
     if (config.mode === 'native-only') fail('native_only_host', 'Use the separate native Forms, spreadsheet input and frontend controls in this host.');
     let executor = '';
     try { executor = runtime.session.getEffectiveUser().getEmail().trim().toLowerCase(); } catch { /* fail closed below */ }
-    if (!executor || executor !== config.expectedAutomationEmail) fail('wrong_automation_identity', 'Run this host under the configured staging automation account.');
+    if (!executor || executor !== config.expectedAutomationEmail) fail('wrong_automation_identity', 'Run this host under the configured automation account.');
     const secret = props.getProperty(HOST_PROPERTIES.secret) || '';
     const signer = createGoogleSigner(runtime.utilities, secret);
     const registry = propertyJson(HOST_PROPERTIES.principals);
@@ -257,7 +257,7 @@ export function createStagingHost(runtime: StagingHostRuntime) {
     const saved = props.getProperty(HOST_PROPERTIES.setupReceipt);
     if (saved) { try { receipt = JSON.parse(saved) as Receipt; } catch { /* invalid receipt fails readiness */ } }
     if (requireReceipt && (!receipt || receipt.fingerprint !== fingerprint || receipt.executor !== executor || receipt.scheduleMinutes !== 5 || !Number.isSafeInteger(receipt.verifiedAfter) || receipt.verifiedAfter < 1 || !receipt.triggers || typeof receipt.triggers !== 'object' || Array.isArray(receipt.triggers))) {
-      fail('setup_required', 'Configuration changed or setup has not been verified. Run staging setup while paused.');
+      fail('setup_required', 'Configuration changed or setup has not been verified. Run automation setup while paused.');
     }
     return { config, signer, principals, references, excusalReferences, fingerprint, receipt,
       adapter: { baseUrl: config.workerOrigin, keyId: config.keyId, environment: 'staging', generation: config.generation } };
@@ -281,7 +281,7 @@ export function createStagingHost(runtime: StagingHostRuntime) {
     catch { return fail('configured_resource_unavailable', 'A configured existing Form is unavailable; no replacement was created.'); }
     if (form.getId() !== binding.formId) fail('wrong_resource', 'The opened Form did not match its binding.');
     const token = runtime.scriptApp.getOAuthToken();
-    if (!token) fail('forms_api_authorization_required', 'Authorize the Forms metadata read scope for the staging host.');
+    if (!token) fail('forms_api_authorization_required', 'Authorize the Forms metadata read scope for the automation host.');
     const response = runtime.urlFetch.fetch(`https://forms.googleapis.com/v1/forms/${encodeURIComponent(binding.formId)}?fields=formId,settings.emailCollectionType`, {
       method: 'get', headers: { Authorization: `Bearer ${token}` }, muteHttpExceptions: true,
       followRedirects: false, validateHttpsCertificates: true,
@@ -348,12 +348,12 @@ export function createStagingHost(runtime: StagingHostRuntime) {
     for (const spec of specs(ctx)) {
       const found = list.filter(t => t.getHandlerFunction() === spec.handler);
       if (found.length !== 1 || !matches(found[0], spec) || ctx.receipt?.triggers[spec.handler] !== found[0].getUniqueId()) {
-        fail('trigger_repair_required', 'The staging trigger manifest needs repair under its configured owner.');
+        fail('trigger_repair_required', 'The trigger manifest needs repair under its configured owner.');
       }
     }
   }
   function checkTriggerEvent(ctx: Context, name: string, uid?: string) {
-    if (!uid || ctx.receipt?.triggers[name] !== String(uid)) fail('unrecognized_trigger', 'This event is not from a verified staging trigger.');
+    if (!uid || ctx.receipt?.triggers[name] !== String(uid)) fail('unrecognized_trigger', 'This event is not from a verified trigger.');
   }
   function ready(): Context | undefined {
     if (props.getProperty(HOST_PROPERTIES.enabled) !== 'true') return undefined;
@@ -436,7 +436,7 @@ export function createStagingHost(runtime: StagingHostRuntime) {
     let submitted = NaN;
     try { submitted = response.getTimestamp().getTime(); } catch { /* Native timestamp is mandatory. */ }
     if (!Number.isFinite(submitted) || !ctx.receipt || submitted < ctx.receipt.verifiedAfter * 1000 || submitted > (runtime.nowSeconds() + 60) * 1000) {
-      fail('historical_response_review_required', 'This response predates verified staging setup or lacks a valid native timestamp; retain it for explicit review.');
+      fail('historical_response_review_required', 'This response predates verified automation setup or lacks a valid native timestamp; retain it for explicit review.');
     }
   }
   function acceptAttendance(ctx: Context, source: { getId(): string }, response: SubmittedFormResponse) {
@@ -485,17 +485,17 @@ export function createStagingHost(runtime: StagingHostRuntime) {
   function setupNativeOnly(config: NativeOnlyStagingHostConfig, raw: string) {
     let executor = '';
     try { executor = runtime.session.getEffectiveUser().getEmail().trim().toLowerCase(); } catch { /* fail closed */ }
-    if (executor !== config.expectedAutomationEmail) fail('wrong_automation_identity', 'Run this host under the configured staging automation account.');
+    if (executor !== config.expectedAutomationEmail) fail('wrong_automation_identity', 'Run this host under the configured automation account.');
     const signer = createGoogleSigner(runtime.utilities, props.getProperty(HOST_PROPERTIES.secret) || '');
     const fingerprint = signer.sha256(raw);
     const lock = runtime.lockService.getScriptLock();
-    if (!lock.tryLock(100)) fail('setup_busy', 'Another staging operation is in progress.');
+    if (!lock.tryLock(100)) fail('setup_busy', 'Another operation is in progress.');
     try {
       const list = runtime.scriptApp.getProjectTriggers();
       // A mode change is not a migration. Retain the old fixture and its receipts.
       const transportHandlers: string[] = [STAGING_HANDLERS.attendance, STAGING_HANDLERS.excusal, STAGING_HANDLERS.decision];
       if (list.some(t => transportHandlers.includes(t.getHandlerFunction()))) {
-        fail('native_only_project_required', 'Use a separate staging script; existing transport triggers were retained.');
+        fail('native_only_project_required', 'Use a separate automation script; existing transport triggers were retained.');
       }
       let saved: Receipt | undefined;
       try { saved = JSON.parse(props.getProperty(HOST_PROPERTIES.setupReceipt) || 'null') ?? undefined; } catch { /* repair only this scheduler below */ }
@@ -511,7 +511,7 @@ export function createStagingHost(runtime: StagingHostRuntime) {
       props.setProperty(HOST_PROPERTIES.setupReceipt, JSON.stringify(receipt));
       const after = runtime.scriptApp.getProjectTriggers().filter(t => t.getHandlerFunction() === spec.handler);
       if (after.length !== 1 || !matches(after[0], spec) || after[0].getUniqueId() !== receipt.triggers[spec.handler]
-        || props.getProperty(HOST_PROPERTIES.setupReceipt) !== JSON.stringify(receipt)) fail('trigger_repair_required', 'The native staging scheduler could not be verified.');
+        || props.getProperty(HOST_PROPERTIES.setupReceipt) !== JSON.stringify(receipt)) fail('trigger_repair_required', 'The native scheduler could not be verified.');
       return { status: 'ready-paused', mode: 'native-only', triggers: 1, verifiedForms: 0 };
     } finally { lock.releaseLock(); }
   }
@@ -569,7 +569,7 @@ export function createStagingHost(runtime: StagingHostRuntime) {
     },
     replayExcusalResponse(responseId: string) {
       const ctx = ready(); if (!ctx) return { status: 'paused' };
-      if (!ctx.config.excusal) fail('wrong_source', 'No staging excusal Form is configured.');
+      if (!ctx.config.excusal) fail('wrong_source', 'No excusal Form is configured.');
       const form = verifiedForm(ctx.config.excusal);
       return acceptExcusal(ctx, form, form.getResponse(id(responseId)));
     },
@@ -618,7 +618,7 @@ export function createStagingHost(runtime: StagingHostRuntime) {
       try { result = withJournalLock(openJournal(ctx), runtime.lockService.getScriptLock(), journal => {
         const currentContext = ready();
         if (!currentContext) return { status: 'paused' };
-        if (currentContext.fingerprint !== ctx.fingerprint) fail('setup_required', 'Staging configuration changed while this edit waited; retain the input for review.');
+        if (currentContext.fingerprint !== ctx.fingerprint) fail('setup_required', 'The configuration changed while this edit waited; retain the input for review.');
         checkTriggerEvent(currentContext, STAGING_HANDLERS.decision, frozen.triggerUid);
         // Native lock acquisition invalidates cached metadata: ownership/sharing
         // and protections may drift during the wait without a config edit.
@@ -644,7 +644,7 @@ export function createStagingHost(runtime: StagingHostRuntime) {
           return { status: 'queued' };
         }
         const candidate = captureDecisionDraft({ slot, draftId: runtime.utilities.getUuid(), resourceKey: binding.resourceKey,
-          decision: frozen.value ?? '', reason: 'Decision selected in the staging spreadsheet.', editedCellCount: 1,
+          decision: frozen.value ?? '', reason: 'Decision selected in the spreadsheet.', editedCellCount: 1,
           eventUserEmail: frozen.actorEmail,
         }, resolver(ctx));
         const draft = candidate;

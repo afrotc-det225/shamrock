@@ -64,13 +64,13 @@ export function createNativeFrontendInput(services:NativeInputServices,frontend=
   function privateRead(id:string,owner:string){const metadata=inspect(id,owner);if(metadata.mimeType!=='application/json'||Number(metadata.size)>5*1024*1024)fail('input_state','A bounded private JSON file is required.');return api(`${drive(id)}?alt=media`);}
   function context(){
     const hostRaw=properties.getProperty(HOST_PROPERTIES.config);if(!hostRaw)return undefined;const host=parseStagingHostConfig(JSON.parse(hostRaw)),owner=services.Session.getEffectiveUser().getEmail().trim().toLowerCase();
-    if(owner!==host.expectedAutomationEmail)fail('input_identity','Use the configured staging automation account.');
+    if(owner!==host.expectedAutomationEmail)fail('input_identity','Use the configured automation account.');
     let raw:any=properties.getProperty(INPUT_PROPERTIES.config);if(!raw){const id=properties.getProperty(CONFIG_FILE_ID_PROPERTY);if(id)raw=privateRead(id,owner)[INPUT_PROPERTIES.config];}if(!raw)return undefined;
     const doc=typeof raw==='string'?JSON.parse(raw):raw,config=(doc.configFileId?privateRead(doc.configFileId,owner):doc) as NativeInputConfig;
     if(config.version!==1||config.environment!=='staging'||config.generation!==host.generation||config.resourceReview!=='EXISTING_INPUT_SURFACES_REVIEWED_FOR_STAGING'||typeof config.enabled!=='boolean'
       ||!Array.isArray(config.surfaces)||config.surfaces.length!==5||new Set(config.surfaces.map(s=>s.surface)).size!==5||config.surfaces.some(s=>!['directory','leadership','attendance','blue','gold'].includes(s.surface))
       ||!Array.isArray(config.principals)||new Set(config.principals.map(p=>p.email.toLowerCase())).size!==config.principals.length||!config.confirmation?.expectedTitle.includes('Staging')
-      ||config.journalFileId===config.confirmation.formId)fail('input_configuration','An exact reviewed staging input configuration is required.');
+      ||config.journalFileId===config.confirmation.formId)fail('input_configuration','An exact reviewed input configuration is required.');
     const signer=createGoogleSigner(services.Utilities,properties.getProperty(HOST_PROPERTIES.secret)??'');
     if(config.retention&&[config.retention.indexFileId,config.retention.archiveFolderId].some(id=>[config.journalFileId,config.confirmation.formId,...config.surfaces.map(s=>s.spreadsheetId)].includes(id)))fail('input_configuration','Retention storage must be separate from input resources.');
     const retention=config.retention?createNativeRetention(services,config.retention,owner,config.generation,signer):undefined;
@@ -93,7 +93,7 @@ export function createNativeFrontendInput(services:NativeInputServices,frontend=
       api(`https://www.googleapis.com/upload/drive/v3/files/${encodeURIComponent(config.journalFileId)}?uploadType=media&fields=id`,value,'patch');if(inputCanonical(privateRead(config.journalFileId,owner))!==text)fail('input_state','The private input journal did not persist.');previous=text;
     }};}
     function confirmationRead(requireResponders=false){const b=config.confirmation,metadata=inspect(b.formId,owner,b.allowedEditors),read=api(form(b.formId));
-      if(metadata.mimeType!=='application/vnd.google-apps.form'||metadata.name!==b.expectedTitle||read.info?.title!==b.expectedTitle||read.settings?.emailCollectionType!=='VERIFIED')fail('input_confirmation','The staging confirmation Form must collect verified identity.');
+      if(metadata.mimeType!=='application/vnd.google-apps.form'||metadata.name!==b.expectedTitle||read.info?.title!==b.expectedTitle||read.settings?.emailCollectionType!=='VERIFIED')fail('input_confirmation','The confirmation Form must collect verified identity.');
       for(const field of ['reference','summary','action'] as const){const item=read.items?.find((i:any)=>i.itemId===b[field].itemId);if(item?.questionItem?.question?.questionId!==b[field].questionId)fail('input_confirmation','A bound confirmation question changed.');}
       const question=(name:'reference'|'summary'|'action')=>read.items.find((i:any)=>i.itemId===b[name].itemId).questionItem.question;
       if(!question('reference').textQuestion||question('reference').textQuestion.paragraph||question('summary').textQuestion?.paragraph!==true

@@ -73,7 +73,7 @@ const NATIVE_CONTRACT = 'dynamic-decision-v2:presentation-v1';
 
 function fail(code: string, message: string): never { throw new AdapterError(code, message); }
 function object(value: unknown): Json {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) fail('native_configuration', 'Expected structured staging configuration or metadata.');
+  if (!value || typeof value !== 'object' || Array.isArray(value)) fail('native_configuration', 'Expected structured configuration or metadata.');
   return value as Json;
 }
 function positive(value: unknown, minimum = 1): number {
@@ -104,7 +104,7 @@ export function parseNativePresentationConfig(value: unknown, host: TransportSta
   if (Object.keys(v).sort().join(',') !== 'environment,generation,legend,version'
     || v.version !== 1 || v.environment !== 'staging' || positive(v.generation) !== host.generation
     || projection.environment !== 'staging' || projection.generation !== host.generation
-    || host.decisionInput?.mode !== 'projection') fail('native_configuration', 'Presentation requires reviewed staging projection and dynamic input bindings.');
+    || host.decisionInput?.mode !== 'projection') fail('native_configuration', 'Presentation requires reviewed projection and dynamic input bindings.');
   const raw = object(v.legend);
   if (Object.keys(raw).sort().join(',') !== 'sheetId,spreadsheetId') fail('native_configuration', 'The presentation legend binding contains unexpected fields.');
   const legend = reference(raw);
@@ -137,16 +137,16 @@ export function createNativeStagingRuntime(services: NativeStagingServices): Sta
   };
   function readJson(key: string): { raw: string; value: Json } {
     const raw = properties.getProperty(key);
-    if (!raw || encodeURIComponent(raw).replace(/%[A-F0-9]{2}/g, 'x').length > 8000) fail('native_configuration', 'Required private staging configuration is missing or too large.');
+    if (!raw || encodeURIComponent(raw).replace(/%[A-F0-9]{2}/g, 'x').length > 8000) fail('native_configuration', 'Required private configuration is missing or too large.');
     try { return { raw, value: object(JSON.parse(raw)) }; }
-    catch { return fail('native_configuration', 'Private staging configuration contains invalid JSON.'); }
+    catch { return fail('native_configuration', 'Private configuration contains invalid JSON.'); }
   }
   function host() {
     const saved = readJson(HOST_PROPERTIES.config);
     const config = parseStagingHostConfig(saved.value);
     let executor = '';
     try { executor = canonicalEmail(services.Session.getEffectiveUser().getEmail()); } catch { /* fail closed */ }
-    if (executor !== config.expectedAutomationEmail) fail('wrong_automation_identity', 'Run this host under the configured staging automation account.');
+    if (executor !== config.expectedAutomationEmail) fail('wrong_automation_identity', 'Run this host under the configured automation account.');
     if (config.mode === 'native-only') fail('native_only_host', 'Legacy transport resources are unavailable in this native-only host.');
     return { config, raw: saved.raw };
   }
@@ -155,7 +155,7 @@ export function createNativeStagingRuntime(services: NativeStagingServices): Sta
     const cached = body === undefined && lockHeld ? reads.get(url) : undefined;
     if (cached !== undefined) return object(JSON.parse(cached));
     const token = services.ScriptApp.getOAuthToken();
-    if (!token) fail('google_authorization', 'Authorize the staging Google services before continuing.');
+    if (!token) fail('google_authorization', 'Authorize the Google services before continuing.');
     const payload = body === undefined ? undefined : JSON.stringify(body);
     if (payload && payload.length > 2_000_000) fail('google_request_size', 'The bounded Google request is too large.');
     let response: ReturnType<StagingHostRuntime['urlFetch']['fetch']>;
@@ -195,9 +195,9 @@ export function createNativeStagingRuntime(services: NativeStagingServices): Sta
   function openNative(ref: ExistingSheetReference): NativeSheet {
     let book: NativeSpreadsheet;
     try { book = services.SpreadsheetApp.openById(ref.spreadsheetId); }
-    catch { return fail('configured_resource_unavailable', 'A configured staging workbook is unavailable.'); }
+    catch { return fail('configured_resource_unavailable', 'A configured workbook is unavailable.'); }
     const sheet = book.getSheets().find(item => item.getSheetId() === ref.sheetId);
-    if (book.getId() !== ref.spreadsheetId || !sheet) fail('configured_resource_unavailable', 'A configured existing staging tab is unavailable.');
+    if (book.getId() !== ref.spreadsheetId || !sheet) fail('configured_resource_unavailable', 'A configured existing tab is unavailable.');
     return sheet;
   }
   const boundSheets = new Map<string, BoundSheet>();
@@ -213,7 +213,7 @@ export function createNativeStagingRuntime(services: NativeStagingServices): Sta
       const data = api(`${sheetsUrl(ref.spreadsheetId)}/values/${encodeURIComponent(title)}?valueRenderOption=UNFORMATTED_VALUE&dateTimeRenderOption=SERIAL_NUMBER`);
       const values = data.values ?? [];
       if (!Array.isArray(values) || values.length > 2002 || values.some(row => !Array.isArray(row) || row.length > 100)) {
-        fail('google_request_size', 'The configured staging table exceeds its bounded capacity.');
+        fail('google_request_size', 'The configured table exceeds its bounded capacity.');
       }
       const result = { rows: values.length, columns: Math.max(0, ...values.map(row => row.length)) };
       if (lockHeld) extents.set(cacheKey, result);
@@ -221,7 +221,7 @@ export function createNativeStagingRuntime(services: NativeStagingServices): Sta
     }
     function range(row: number, column: number, rows: number, columns: number): string {
       [row, column, rows, columns].forEach(v => positive(v));
-      if (rows > 2002 || columns > 100 || rows * columns > 30_000) fail('google_request_size', 'The requested staging range exceeds its bound.');
+      if (rows > 2002 || columns > 100 || rows * columns > 30_000) fail('google_request_size', 'The requested range exceeds its bound.');
       return `'${source.getName().replace(/'/g, "''")}'!${columnName(column)}${row}:${columnName(column + columns - 1)}${row + rows - 1}`;
     }
     function writeRaw(row: number, column: number, input: unknown[][]): void {
@@ -295,7 +295,7 @@ export function createNativeStagingRuntime(services: NativeStagingServices): Sta
     const data = api(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(id)}?supportsAllDrives=true&fields=${encodeURIComponent('id,mimeType,driveId,owners(emailAddress)')}`);
     if (data.id !== id || data.mimeType !== mimeType || data.driveId
       || !Array.isArray(data.owners) || data.owners.length !== 1 || canonicalEmail(object(data.owners[0]).emailAddress) !== config.expectedAutomationEmail) {
-      fail('staging_owner_required', 'The staging resource must be owned by its configured automation account.');
+      fail('staging_owner_required', 'The resource must be owned by its configured automation account.');
     }
   }
   function assertTrustedFile(id: string, mimeType: string, allowReadOnly: boolean): void {
@@ -309,7 +309,7 @@ export function createNativeStagingRuntime(services: NativeStagingServices): Sta
         if (p.deleted === true) continue;
         if (allowReadOnly && (p.role === 'reader' || p.role === 'commenter')) continue;
         if (p.type !== 'user' || canonicalEmail(p.emailAddress) !== config.expectedAutomationEmail || !['owner', 'writer', 'reader', 'commenter'].includes(String(p.role))) {
-          fail('private_resource_required', allowReadOnly ? 'Only the staging automation account may edit the source Form.' : 'The command journal must be private to the staging automation account.');
+          fail('private_resource_required', allowReadOnly ? 'Only the automation account may edit the source Form.' : 'The command journal must be private to the automation account.');
         }
         if (p.role === 'owner') sawOwner = true;
       }
@@ -326,7 +326,7 @@ export function createNativeStagingRuntime(services: NativeStagingServices): Sta
     if (data.spreadsheetId !== ref.spreadsheetId || !Array.isArray(data.sheets)) fail('protection_unverified', 'The output protection metadata is unavailable.');
     const sheets = data.sheets.map(object).filter(s => object(s.properties).sheetId === ref.sheetId);
     const ranges = sheets.length === 1 ? sheets[0].protectedRanges : undefined;
-    if (!Array.isArray(ranges) || ranges.length !== 1) fail('protection_unverified', 'Use one strict whole-tab protection for the staging table.');
+    if (!Array.isArray(ranges) || ranges.length !== 1) fail('protection_unverified', 'Use one strict whole-tab protection for the table.');
     const p = object(ranges[0]); const range = object(p.range); const editors = p.editors === undefined ? {} : object(p.editors);
     const { config } = host();
     const users = editors.users ?? []; const groups = editors.groups ?? [];
@@ -334,9 +334,9 @@ export function createNativeStagingRuntime(services: NativeStagingServices): Sta
       || (range.startColumnIndex !== undefined && range.startColumnIndex !== 0) || range.endRowIndex !== undefined || range.endColumnIndex !== undefined
       || p.warningOnly === true || editors.domainUsersCanEdit === true || !Array.isArray(groups) || groups.length !== 0
       || !Array.isArray(users) || users.some(user => canonicalEmail(user) !== config.expectedAutomationEmail)) {
-      fail('protection_unverified', 'The staging table allows an unapproved editor or is not fully protected.');
+      fail('protection_unverified', 'The table allows an unapproved editor or is not fully protected.');
     }
-    if (p.unprotectedRanges !== undefined && !Array.isArray(p.unprotectedRanges)) fail('protection_unverified', 'The staging protection exceptions are invalid.');
+    if (p.unprotectedRanges !== undefined && !Array.isArray(p.unprotectedRanges)) fail('protection_unverified', 'The protection exceptions are invalid.');
     return p;
   }
   function projectionBinding() {
@@ -344,7 +344,7 @@ export function createNativeStagingRuntime(services: NativeStagingServices): Sta
     if (Object.keys(v).sort().join(',') !== ['version', 'environment', 'generation', 'workerId', ...KINDS].sort().join(',')
       || v.version !== 1 || v.environment !== 'staging' || positive(v.generation) !== h.config.generation
       || typeof v.workerId !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/.test(v.workerId)) {
-      fail('native_configuration', 'The projection binding must match the reviewed staging generation.');
+      fail('native_configuration', 'The projection binding must match the reviewed generation.');
     }
     const config: NativeProjectionConfig = { version: 1, environment: 'staging', generation: h.config.generation, workerId: v.workerId,
       attendance: reference(v.attendance), decisions: reference(v.decisions), cursors: reference(v.cursors) };
@@ -525,7 +525,7 @@ export function createNativeStagingRuntime(services: NativeStagingServices): Sta
   function applyPresentation(bound: ReturnType<typeof projectionBinding>, mode: 'repair' | 'growth'): number {
     const binding = presentationBinding(bound);
     if (!binding) return 0;
-    if (mode === 'growth' && properties.getProperty(NATIVE_PROPERTIES.presentationReceipt) !== binding.fingerprint) fail('presentation_setup_required', 'Repair the configured presentation while staging is paused before publication.');
+    if (mode === 'growth' && properties.getProperty(NATIVE_PROPERTIES.presentationReceipt) !== binding.fingerprint) fail('presentation_setup_required', 'Repair the configured presentation while synchronization is paused before publication.');
     let input = presentationInput(bound, binding, mode === 'repair');
     let requestCount = 0;
     for (let phase = 0; phase < (mode === 'repair' ? 2 : 1); phase++) {
@@ -567,7 +567,7 @@ export function createNativeStagingRuntime(services: NativeStagingServices): Sta
     properties, utilities: services.Utilities, urlFetch: services.UrlFetchApp, scriptApp: services.ScriptApp,
     session: services.Session, formApp: { openById(id) {
       const { config } = host();
-      if (id !== config.attendance.formId && id !== config.excusal?.formId) fail('wrong_source', 'This source Form is outside the reviewed staging configuration.');
+      if (id !== config.attendance.formId && id !== config.excusal?.formId) fail('wrong_source', 'This source Form is outside the reviewed configuration.');
       assertTrustedFile(id, 'application/vnd.google-apps.form', true);
       const form = services.FormApp.openById(id);
       const roles = id === config.attendance.formId ? config.attendance.itemRoles : config.excusal!.itemRoles;
@@ -605,10 +605,10 @@ export function createNativeStagingRuntime(services: NativeStagingServices): Sta
       const bound = projectionBinding();
       if (context.config.environment !== 'staging' || context.config.generation !== bound.config.generation
         || context.config.baseUrl !== bound.host.workerOrigin || context.config.keyId !== bound.host.keyId) fail('native_configuration', 'Projection delivery differs from the verified host binding.');
-      if (properties.getProperty(NATIVE_PROPERTIES.projectionReceipt) !== bound.fingerprint) fail('projection_setup_required', 'Initialize reviewed projection bindings while staging is paused.');
+      if (properties.getProperty(NATIVE_PROPERTIES.projectionReceipt) !== bound.fingerprint) fail('projection_setup_required', 'Initialize reviewed projection bindings while synchronization is paused.');
       const binding = bound.host.decisionInput;
       const presentation = presentationBinding(bound);
-      if (presentation && properties.getProperty(NATIVE_PROPERTIES.presentationReceipt) !== presentation.fingerprint) fail('presentation_setup_required', 'Repair the configured presentation while staging is paused before publication.');
+      if (presentation && properties.getProperty(NATIVE_PROPERTIES.presentationReceipt) !== presentation.fingerprint) fail('presentation_setup_required', 'Repair the configured presentation while synchronization is paused before publication.');
       return consumeProjectionJobs({ ...context, workerId: bound.config.workerId, lock: sharedLock, sheets: bound.sheets,
         assertProtected: bound.assertProtected, flush: () => services.SpreadsheetApp.flush(), claimStore: claimStore(bound.fingerprint),
         ...(binding?.mode === 'projection' || presentation ? { publishDecisionSlots(snapshot) {
@@ -622,11 +622,11 @@ export function createNativeStagingRuntime(services: NativeStagingServices): Sta
     },
     initializeProjections() {
       if (nativeOnly()) return { status: 'native-only' };
-      if (properties.getProperty(HOST_PROPERTIES.enabled) === 'true') fail('pause_required', 'Pause staging before initializing projection outputs.');
+      if (properties.getProperty(HOST_PROPERTIES.enabled) === 'true') fail('pause_required', 'Pause synchronization before initializing projection outputs.');
       const bound = projectionBinding();
-      if (!sharedLock.tryLock(100)) fail('projection_busy', 'Another staging operation is in progress.');
+      if (!sharedLock.tryLock(100)) fail('projection_busy', 'Another operation is in progress.');
       try {
-        if (properties.getProperty(HOST_PROPERTIES.enabled) === 'true') fail('pause_required', 'Pause staging before initializing projection outputs.');
+        if (properties.getProperty(HOST_PROPERTIES.enabled) === 'true') fail('pause_required', 'Pause synchronization before initializing projection outputs.');
         if (claimStore(bound.fingerprint).load()) fail('claim_integrity', 'Reconcile the outstanding claim before initializing output bindings.');
         for (const kind of KINDS) bound.assertProtected(kind, PROJECTION_HEADERS[kind]);
         upgradeRecordedDecisionLabels(bound.sheets, { generation: bound.host.generation });
@@ -649,12 +649,12 @@ export function createNativeStagingRuntime(services: NativeStagingServices): Sta
     },
     repairPresentation() {
       if (nativeOnly()) return { status: 'native-only' };
-      if (properties.getProperty(HOST_PROPERTIES.enabled) === 'true') fail('pause_required', 'Pause staging before repairing spreadsheet presentation.');
+      if (properties.getProperty(HOST_PROPERTIES.enabled) === 'true') fail('pause_required', 'Pause synchronization before repairing spreadsheet presentation.');
       const bound = projectionBinding();
       if (!presentationBinding(bound)) return { status: 'presentation-not-configured' };
-      if (!sharedLock.tryLock(100)) fail('projection_busy', 'Another staging operation is in progress.');
+      if (!sharedLock.tryLock(100)) fail('projection_busy', 'Another operation is in progress.');
       try {
-        if (properties.getProperty(HOST_PROPERTIES.enabled) === 'true') fail('pause_required', 'Pause staging before repairing spreadsheet presentation.');
+        if (properties.getProperty(HOST_PROPERTIES.enabled) === 'true') fail('pause_required', 'Pause synchronization before repairing spreadsheet presentation.');
         if (claimStore(bound.fingerprint).load()) fail('claim_integrity', 'Reconcile the outstanding projection claim before presentation repair.');
         assertTrustedFile(bound.host.journal.spreadsheetId, 'application/vnd.google-apps.spreadsheet', false);
         if (properties.getProperty(NATIVE_PROPERTIES.projectionReceipt) !== bound.fingerprint) fail('projection_setup_required', 'Initialize the reviewed projection schemas before presentation repair.');

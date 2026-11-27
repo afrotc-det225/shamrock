@@ -20,7 +20,7 @@ function fail(message:string):never{throw new AdapterError('scheduled_probe',mes
 export function createEffectAvailabilityProbe(services:Pick<Parameters<typeof createNativeFrontendRuntime>[0],'PropertiesService'|'Utilities'|'UrlFetchApp'>,nowSeconds:()=>number){
   const cached=new Map<string,EffectAvailability>();
   return(principalId:string):EffectAvailability=>{
-    const props=services.PropertiesService.getScriptProperties(),raw=props.getProperty(HOST_PROPERTIES.config);if(!raw)fail('The staging host is not configured.');
+    const props=services.PropertiesService.getScriptProperties(),raw=props.getProperty(HOST_PROPERTIES.config);if(!raw)fail('The automation host is not configured.');
     const host=parseStagingHostConfig(JSON.parse(raw)),body=JSON.stringify({environment:'staging',generation:host.generation,principalId});
     if(cached.has(body))return cached.get(body)!;
     const signer=createGoogleSigner(services.Utilities,props.getProperty(HOST_PROPERTIES.secret)??''),timestamp=String(nowSeconds()),path='/v1/admin/effects/availability';
@@ -50,7 +50,7 @@ export function runScheduledStaging(input:Services,nowSeconds=()=>Math.floor(Dat
   if (nativeOnly) {
     const window = createNativeFrontendRuntime(services).closedPublicationWindow();
     if (window) {
-      if (props.getProperty(PERMISSION_FENCE_PROPERTY) !== 'pending') fail('Closed staging publication lost its existing permission fence.');
+      if (props.getProperty(PERMISSION_FENCE_PROPERTY) !== 'pending') fail('Closed publication lost its existing permission fence.');
       const uncached = {...input, nowSeconds};
       return runClosedPublicationTick(window, createNativeFrontendRuntime(uncached), createNativeFormsRuntime(uncached));
     }

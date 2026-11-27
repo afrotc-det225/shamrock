@@ -47,7 +47,7 @@ export function createNativeHistoryRuntime(services:NativeHistoryServices,nowSec
     if(p.nextPageToken||!Array.isArray(p.permissions)||p.permissions.length!==1||p.permissions[0].deleted||p.permissions[0].type!=='user'||p.permissions[0].role!=='owner'||String(p.permissions[0].emailAddress).toLowerCase()!==owner)fail('History resources must have exactly one owner and no other sharing.');return m;
   }
   function configuration(){
-    const rawHost=properties.getProperty(HOST_PROPERTIES.config),configId=properties.getProperty(CONFIG_FILE_ID_PROPERTY);if(!rawHost||!configId)fail('Configure the isolated staging host first.');
+    const rawHost=properties.getProperty(HOST_PROPERTIES.config),configId=properties.getProperty(CONFIG_FILE_ID_PROPERTY);if(!rawHost||!configId)fail('Configure the isolated automation host first.');
     const host=parseStagingHostConfig(JSON.parse(rawHost));if(services.Session.getEffectiveUser().getEmail().trim().toLowerCase()!==host.expectedAutomationEmail)fail('Run history publication under the configured automation account.');
     const configMeta=inspect(configId,host.expectedAutomationEmail);if(configMeta.mimeType!=='application/json'||Number(configMeta.size)>65536)fail('The private configuration file is not a bounded JSON file.');
     const map=google(`${drive(configId)}?alt=media`,'get',undefined,65536),raw=map[HISTORY_PROPERTIES.config];if(typeof raw!=='string'||bytes(raw)>8000)fail('Add the reviewed private history configuration first.');

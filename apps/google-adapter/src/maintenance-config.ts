@@ -25,7 +25,7 @@ export function parseNativeMaintenanceConfig(value: unknown, generation: number)
         || ['principalId', 'workerId', 'sourceResource'].some(k => typeof r[k] !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/.test(String(r[k])))
         || ['stateFileId', 'archiveSpreadsheetId'].some(k => typeof r[k] !== 'string' || !/^[A-Za-z0-9_-]{1,512}$/.test(String(r[k])))
         || r.stateFileId === r.archiveSpreadsheetId || typeof r.archiveExpectedTitle !== 'string' || !/staging/i.test(r.archiveExpectedTitle) || r.archiveExpectedTitle.length > 200)
-        throw new AdapterError('maintenance_config', 'Bind separate reviewed staging maintenance resources and an explicit generation.');
+        throw new AdapterError('maintenance_config', 'Bind separate reviewed maintenance resources and an explicit generation.');
     return { version: 1, environment: 'staging', generation, enabled: r.enabled, closeoutEnabled: r.closeoutEnabled === true,rosterRefreshEnabled:r.rosterRefreshEnabled===true,
         resourceReview: 'EXISTING_PRIVATE_MAINTENANCE_REVIEWED_FOR_STAGING',
         principalId: String(r.principalId), workerId: String(r.workerId), sourceResource: String(r.sourceResource),

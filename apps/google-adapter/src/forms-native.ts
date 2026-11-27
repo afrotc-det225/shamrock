@@ -79,7 +79,7 @@ export function createNativeFormsRuntime(services: NativeFormsServices) {
   function context() {
     const rawHost = props.getProperty(HOST_PROPERTIES.config); if (!rawHost) return undefined;
     const host = parseStagingHostConfig(JSON.parse(rawHost)), owner = services.Session.getEffectiveUser().getEmail().trim().toLowerCase();
-    if (owner !== host.expectedAutomationEmail) fail('forms_identity', 'Use the configured SHAMROCK staging automation account.');
+    if (owner !== host.expectedAutomationEmail) fail('forms_identity', 'Use the configured SHAMROCK automation account.');
     let raw = props.getProperty(FORMS_PROPERTIES.config), configurationFileId: string | undefined;
     if (!raw) { const id = props.getProperty(CONFIG_FILE_ID_PROPERTY); if (id) { raw = privateJson(id, owner).value[FORMS_PROPERTIES.config]; configurationFileId = id; } }
     if (!raw) return undefined;
@@ -90,7 +90,7 @@ export function createNativeFormsRuntime(services: NativeFormsServices) {
       || typeof config.enabled !== 'boolean' || typeof config.intakeEnabled !== 'boolean' || !Array.isArray(config.forms) || config.forms.length !== 3
       || !Array.isArray(config.principals) || config.principals.length > 1000 || new Set(config.principals.map(p => p.email.toLowerCase())).size !== config.principals.length
       || new Set([config.stateFileId, config.intakeFileId, ...config.forms.map(f => f.formId)]).size !== 5) fail('forms_configuration', 'Reviewed isolated Form configuration is required.');
-    for (const b of config.forms) if (!b.expectedTitle.includes('Staging') || b.intake.formId !== b.formId || b.intake.resourceKey !== b.resourceKey || b.intake.kind !== b.key) fail('forms_configuration', 'Native intake and publication must bind the same staging Forms.');
+    for (const b of config.forms) if (!b.expectedTitle.includes('Staging') || b.intake.formId !== b.formId || b.intake.resourceKey !== b.resourceKey || b.intake.kind !== b.key) fail('forms_configuration', 'Native intake and publication must bind the same Forms.');
     const signer = createGoogleSigner(services.Utilities, props.getProperty(HOST_PROPERTIES.secret) ?? '');
     const adapter: AdapterConfig = { environment: 'staging', generation: config.generation, baseUrl: host.workerOrigin, keyId: host.keyId };
     if(config.retention&&[config.retention.indexFileId,config.retention.archiveFolderId].some(id=>[config.stateFileId,config.intakeFileId,...config.forms.map(f=>f.formId)].includes(id)))fail('forms_configuration','Retention storage must be separate from live resources.');
@@ -169,7 +169,7 @@ export function createNativeFormsRuntime(services: NativeFormsServices) {
       if (action === 'CONTINUE') page.setGoToPage(services.FormApp.PageNavigationType.SUBMIT);
     }
     function isolation(requireResponders = false) {
-      for (const b of config.forms) { const info = file(b.formId, owner, b.allowedEditors); if (info.name !== b.expectedTitle || info.mimeType !== 'application/vnd.google-apps.form') fail('forms_isolation', 'The bound staging Form changed.'); }
+      for (const b of config.forms) { const info = file(b.formId, owner, b.allowedEditors); if (info.name !== b.expectedTitle || info.mimeType !== 'application/vnd.google-apps.form') fail('forms_isolation', 'The bound Form changed.'); }
       if (requireResponders || enabled() || intakeEnabled()) {
         try {
           if (!config.responderAccess || Object.keys(config.responderAccess).sort().join(',') !== 'attendance,directory,excusals') fail('form_responder_access', 'Review all three named Form responder lists before resuming.');
@@ -319,7 +319,7 @@ export function createNativeFormsRuntime(services: NativeFormsServices) {
     const inputId = ref('SHAMROCK_V3_INPUT_CONFIG')?.configFileId;
     if (typeof inputId !== 'string' || !inputId) fail('forms_fence', 'The private confirmation Form binding is missing.');
     const input = privateJson(inputId, ctx.owner).value as NativeInputConfig;
-    if (input.environment !== 'staging' || input.generation !== ctx.config.generation || input.enabled !== false || !input.confirmation?.expectedTitle.includes('Staging')) fail('forms_fence', 'The staging confirmation Form must remain paused.');
+    if (input.environment !== 'staging' || input.generation !== ctx.config.generation || input.enabled !== false || !input.confirmation?.expectedTitle.includes('Staging')) fail('forms_fence', 'The confirmation Form must remain paused.');
     const bindings = [...ctx.config.forms, input.confirmation];
     if (new Set(bindings.map(b => b.formId)).size !== 4) fail('forms_binding', 'The four reviewed Forms must be distinct.');
     for (const b of bindings) {
@@ -406,7 +406,7 @@ export function createNativeFormsRuntime(services: NativeFormsServices) {
       assertClosedPublicationWindow(window, Math.floor(now() / 1000));
       guard();
       const ctx = context();
-      if (!ctx || ctx.host.mode !== 'native-only' || ctx.config.enabled || ctx.config.intakeEnabled) fail('forms_fence', 'Use the paused native staging configuration.');
+      if (!ctx || ctx.host.mode !== 'native-only' || ctx.config.enabled || ctx.config.intakeEnabled) fail('forms_fence', 'Use the paused native configuration.');
       paused(FORMS_PROPERTIES.pause); paused(FORMS_PROPERTIES.intakePause);
       return publish(ctx, {window, guard});
     },

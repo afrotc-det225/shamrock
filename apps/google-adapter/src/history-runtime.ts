@@ -29,7 +29,7 @@ export function validateHistoryState(input:unknown,generation:number,bindingHash
   return input as unknown as HistoryPublicationState;
 }
 function call(ports:HistoryPorts,path:'/v1/admin/history/list'|'/v1/admin/history/page',fields:Record<string,unknown>):Record<string,any>{
-  if(ports.config.environment!=='staging'||!/^https:\/\/[A-Za-z0-9.-]+$/.test(ports.config.baseUrl)||!id(ports.principalId)||!id(ports.config.keyId))fail('Use the explicitly bound staging history reader.');
+  if(ports.config.environment!=='staging'||!/^https:\/\/[A-Za-z0-9.-]+$/.test(ports.config.baseUrl)||!id(ports.principalId)||!id(ports.config.keyId))fail('Use the explicitly bound history reader.');
   const body=JSON.stringify({environment:'staging',generation:ports.config.generation,principalId:ports.principalId,...fields}),timestamp=String(ports.nowSeconds());
   const response=ports.transport.send({method:'POST',url:ports.config.baseUrl+path,body,headers:{'content-type':'application/json','x-shamrock-key-id':ports.config.keyId,'x-shamrock-timestamp':timestamp,'x-shamrock-signature':ports.signer.hmacSha256(`POST\n${path}\n${timestamp}\n${ports.signer.sha256(body)}`)}});
   if(response.status!==200||typeof response.body!=='string'||bytes(response.body)>160000)fail(`A bounded history read failed (HTTP ${response.status}); its saved cursor is retained.`);

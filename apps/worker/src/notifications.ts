@@ -304,7 +304,7 @@ export async function claimLocalNotification(env: NotificationEnv, input: {
   claimId: string;
 }): Promise<DeliveryClaimResult> {
   if (env.ENVIRONMENT !== 'local')
-    throw new HttpError(403, 'DELIVERY_SUPPRESSED', 'Staging delivery is permanently suppressed.');
+    throw new HttpError(403, 'DELIVERY_SUPPRESSED', 'Delivery is disabled in this environment.');
   adminIdentifier(input.principalId);
   adminIdentifier(input.workerId);
   const now = instant(input.asOf);
@@ -381,7 +381,7 @@ export async function completeLocalNotification(env: NotificationEnv, input: {
   principalId: string; workerId: string; attemptId: string; claimToken: string; asOf: string;
   outcome: 'confirmed' | 'known-not-sent' | 'lost-result'; providerReference: string | null;
 }): Promise<unknown> {
-  if (env.ENVIRONMENT !== 'local') throw new HttpError(403, 'DELIVERY_SUPPRESSED', 'Staging delivery is permanently suppressed.');
+  if (env.ENVIRONMENT !== 'local') throw new HttpError(403, 'DELIVERY_SUPPRESSED', 'Delivery is disabled in this environment.');
   for (const value of [input.principalId, input.workerId, input.attemptId, input.claimToken]) adminIdentifier(value);
   if (!['confirmed', 'known-not-sent', 'lost-result'].includes(input.outcome)
     || input.providerReference !== null && !/^[A-Za-z0-9_.:-]{1,128}$/.test(input.providerReference)) return invalid();
@@ -448,7 +448,7 @@ export async function notificationDelivery(env: NotificationEnv, action: 'claim'
 /** A crashed local attempt is terminal uncertain. It is never reclaimed as queued. */
 export async function recoverLocalNotificationAttempts(env: NotificationEnv, asOf: string): Promise<void> {
   if (env.ENVIRONMENT !== 'local')
-    throw new HttpError(403, 'DELIVERY_SUPPRESSED', 'Staging delivery is permanently suppressed.');
+    throw new HttpError(403, 'DELIVERY_SUPPRESSED', 'Delivery is disabled in this environment.');
   const now = instant(asOf);
   await env.DB.batch([
     statement(env.DB, `INSERT INTO notification_delivery_events(notice_id,attempt_id,action,principal_id,accepted_at,previous_state,state)

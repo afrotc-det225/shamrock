@@ -75,7 +75,7 @@ export function createNativePermissionProvider(config: {
     function read(book: PermissionBook) {
         const file = api.readFile(book.spreadsheetId);
         if (file.id !== book.spreadsheetId || file.mimeType !== 'application/vnd.google-apps.spreadsheet' || file.owners.length !== 1 || email(file.owners[0].emailAddress) !== email(book.fixedAccess.ownerEmail))
-            fail('The staging spreadsheet owner or type changed.');
+            fail('The spreadsheet owner or type changed.');
         const permissions = api.readPermissions(book.spreadsheetId);
         if (!Array.isArray(permissions) || permissions.length > 1000 || new Set(permissions.map(p => p.id)).size !== permissions.length || permissions.some(p => !p.id || !p.type || !p.role))
             fail('Complete bounded permission metadata is required.');

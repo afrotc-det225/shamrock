@@ -3,7 +3,7 @@ import { HttpError } from './http-error.js';
 interface Pin { operations: number; administration: number }
 /** A lost ACK can be replayed for the same immutable, terminal receipt. */
 export const reviewedPublicationState = "(state='leased' OR (state='done' AND completed_by_effect_id=effect_id))";
-const invalid = () => new HttpError(400,'INVALID_REVIEWED_PUBLICATION','Use a named staging publication and its reviewed snapshot revision.');
+const invalid = () => new HttpError(400,'INVALID_REVIEWED_PUBLICATION','Use a named publication and its reviewed snapshot revision.');
 
 export function parsePublicationPin(value: unknown): Pin {
   if (!value || typeof value !== 'object' || Object.keys(value).sort().join(',') !== 'administration,operations') throw invalid();
