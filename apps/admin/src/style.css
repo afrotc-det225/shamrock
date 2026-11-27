@@ -79,6 +79,7 @@ summary:focus-visible {
   inset: 0 auto 0 0;
 }
 .brand {
+  color:inherit;text-decoration:none;
   display: flex;
   gap: 11px;
   align-items: flex-start;
@@ -1782,7 +1783,13 @@ main:has(.matrix-scroll) { padding-bottom: 8px; }
 }
 
 .toolbar-actions .toolbar-tool[aria-label="Columns"] {border:1px solid var(--border);background:white;border-radius:5px;min-height:2.5rem}
-.cadet-form .cadet-inline-actions,.draft-banner {display:flex;align-items:center;gap:.5rem;flex-wrap:wrap}
+.cadet-form .cadet-inline-actions {display:flex;align-items:center;gap:.5rem;flex-wrap:wrap}
+.draft-banner {display:flex;align-items:center;gap:.35rem;min-width:0;max-width:100%;margin-bottom:.5rem;border-bottom:1px solid var(--border)}
+.draft-banner span {flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:.9rem;font-weight:600}
+.cadet-form .draft-banner button {flex:none;margin:0;padding:.35rem .5rem;min-height:44px;border:0;background:transparent;color:var(--navy);font-weight:600}
+.cadet-form .draft-banner button:hover {text-decoration:underline}
+.report-completion {display:flex;gap:.5rem;align-items:center;min-height:44px}
+.excusal-queue tbody tr {cursor:pointer}
 .cadet-inline-actions:empty {display:none}
 .cadet-form .cadet-inline-actions > button {margin:.5rem 0 0}
 .cadet-form fieldset.report-checklist {gap:0;margin:.5rem 0 1rem}
@@ -1841,7 +1848,7 @@ main:has(.matrix-scroll) { padding-bottom: 8px; }
 .cadet-roster .roster-value {max-width:21rem;overflow-wrap:anywhere}
 .cadet-roster .roster-value > .profile-tag {
   display:-webkit-inline-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;max-width:100%;
-  line-height:1.15rem;vertical-align:middle;border-radius:999px;padding-inline:.65rem
+  line-height:1.15rem;vertical-align:middle
 }
 .cadet-roster .roster-value:has(.photo-trigger) {display:inline-flex;overflow:visible}
 .cadet-roster:not(.with-cadet) td:first-child .roster-value {display:inline-block;vertical-align:middle;white-space:nowrap;text-overflow:ellipsis}
@@ -1860,7 +1867,7 @@ main:has(.matrix-scroll) { padding-bottom: 8px; }
 .field-resource svg {flex:none}
 .profile-actions {display:flex;gap:.5rem;align-items:center}
 .member-name {overflow-wrap:anywhere}
-.flight-roll .flight-mark {border-radius:999px;padding:.16rem .55rem}
+.flight-roll .flight-mark {border-radius:3px;padding:.16rem .45rem}
 .flight-review {display:inline-block;margin-inline-start:.45rem}
 @media(max-width:640px) {
   .profile-form .cadet-fields {grid-template-columns:minmax(0,1fr)}
