@@ -30,7 +30,7 @@ try {
       page.on("pageerror", err => errors.push(err.message));
       await page.route("**/api/**", async route => {
         const path = new URL(route.request().url()).pathname;
-        calls.push(route.request().method() + " " + path);
+        calls.push(route.request().method() + " " + path + decodeURIComponent(new URL(route.request().url()).search));
         if (path === "/api/session") return route.fulfill({ json: {
           csrf: "fixture", schoolLogin: !preview, viewAs: preview ? {status:"ready", personId:"one",entryAuditId:"entry"} : null,
         } });
@@ -171,7 +171,7 @@ try {
       });
       assert(layout.fits && (width === 390 ? layout.stacked : layout.alongside), JSON.stringify(layout));
       assert.deepEqual(errors, []);
-      assert.deepEqual(calls, ["POST /api/session", "GET /api/cadet",...(squadron?["POST /api/cadet","GET /api/cadet"]:[]),...(tabs.length?["GET /api/cadet","POST /api/cadet","POST /api/cadet","GET /api/cadet","GET /api/cadet","GET /api/cadet"]:[])]);
+      assert.deepEqual(calls, ["POST /api/session", "GET /api/cadet",...(squadron?["POST /api/cadet","GET /api/cadet"]:[]),...(tabs.length?["GET /api/cadet?section=profile","GET /api/cadet","GET /api/cadet?section=profile","GET /api/cadet?section=attendance","POST /api/cadet","POST /api/cadet","GET /api/cadet?section=attendance","GET /api/cadet?section=report","GET /api/cadet?section=report:lab16"]:[])]);
       await page.close();
     }
   }
