@@ -33,6 +33,14 @@ export const runnable = {
   "Excusal queue": "currentExcusalRequests",
   "Birthday agenda": "birthdayGroups",
 };
+export function patchSourceArea(question, classifiedArea) {
+  const identifiers = new Set(question.match(/[A-Za-z0-9_./-]+/g) ?? []);
+  const named = Object.entries(areas).filter(([area, path]) =>
+    identifiers.has(path) || identifiers.has(path.split("/").pop()) || identifiers.has(runnable[area]));
+  if (named.length === 1) return named[0][0];
+  return classifiedArea;
+}
+
 export function maintenanceRequest(area, question, catalog) {
   if (!Object.hasOwn(areas, area) || !catalog?.commit || !catalog.files[area]) throw Error("Unknown source area");
   const path = areas[area], source = catalog.files[area];

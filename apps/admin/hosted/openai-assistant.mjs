@@ -1,6 +1,6 @@
 import {afrotcContext} from "./afrotc-context.mjs";
 import {isUnifiedSite} from "./site.mjs";
-import { areas, maintenanceRequest, proposalResult } from "./maintenance.mjs";
+import { areas, patchSourceArea, maintenanceRequest, proposalResult } from "./maintenance.mjs";
 import { PanelError } from "../errors.mjs";
 
 export const model = "gpt-5.4-mini-2026-03-17";
@@ -120,7 +120,8 @@ export async function answer(env, body, guide, send = fetch, readCharts) {
   route ??= await classify(env,history,send);
   const request={model,reasoning:{effort:"none"},max_output_tokens:700,input:JSON.stringify(history)};
   let maxBytes=16000, timeout=30000;
-  const area=route.areas?.[0], catalog=env.maintenanceSource;
+  const area=route.type==="patch" ? patchSourceArea(question,route.areas?.[0]) : route.areas?.[0];
+  const catalog=env.maintenanceSource;
   if(route.type==="report"){
     const summary=summaryOf(await readCharts());
     request.instructions="Answer the latest question using these authorized Wing aggregates. Overall and LLAB are fractions. Compare current with available historical terms in percentage points. Identify gaps and avoid inferring causes. "+JSON.stringify(summary);

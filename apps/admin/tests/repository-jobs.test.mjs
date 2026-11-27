@@ -45,3 +45,10 @@ test("multi-file changes require unique release matches in every selected file",
   assert.throws(()=>validateEdits([edits[0],edits[0]],files));
   assert.throws(()=>validateEdits(edits,{...files,[edits[1].area]:"other"}));
 });
+
+test("a uniquely named reviewed source resolves a mistaken Decisions file selection", async () => {
+  const {patchSourceArea}=await import("../hosted/maintenance.mjs");
+  for(const question of ["Fix currentExcusalRequests(snapshot)", "Edit apps/admin/src/attendance-events.mjs now"])
+    assert.equal(patchSourceArea(question,"Google adapter entry points"),"Excusal queue");
+  assert.equal(patchSourceArea("Improve attendance processing","Sheet edits"),"Sheet edits");
+});
