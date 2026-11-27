@@ -331,3 +331,7 @@ Accounts explicitly added as editors of the backend/admin workbook are treated a
 ## Maintaining This Catalog
 
 When a feature changes, update only the sections that help an operator use, validate, or troubleshoot the system. Avoid copying implementation details that are already clearer in code or internal docs.
+
+### Cadet navigation on the SHAMROCK site
+
+After sign-in, cadets use the same navigation layout as leadership. My requests shows excusals and attendance flags, and My profile opens the Directory record. Flight commanders also have My Flight, and squadron commanders have their Excusals queue. New cadets start with profile registration. On phones, page links run across the top.

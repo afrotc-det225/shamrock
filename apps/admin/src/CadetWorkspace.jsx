@@ -1,8 +1,10 @@
 import React, { useEffect, useState, useRef } from "react";
 import { api, logout } from "./api";
-import { Field, Select, Status, Table } from "./components";
+import { Empty, Field, Heading, Select, Status, Table } from "./components";
 import Excusals from "./Excusals";
-import Brand from "./Brand";
+import WorkspaceShell from "./WorkspaceShell";
+import { ViewAsBanner } from "./ViewAs";
+import { ClipboardList, FileCheck2, Users, UserRound } from "lucide-react";
 import { AS_YEARS } from "../../../packages/domain/src/admin";
 
 const fields = [
@@ -68,14 +70,8 @@ function Profile({ state, save, disabled }) {
     );
   }
   return (
-    <form onSubmit={submit} className="cadet-form">
-      <h2>
-        {register
-          ? step === 0
-            ? "Create your Directory profile"
-            : "Academic and career information"
-          : "My Directory profile"}
-      </h2>
+    <form onSubmit={submit} className="cadet-form form-section">
+      {register && <h2>{step === 0 ? "Directory information" : "Academic and career information"}</h2>}
       <fieldset disabled={disabled && !register}>
         <div className="cadet-fields">
           {register && step === 0 && (
@@ -169,77 +165,78 @@ function Profile({ state, save, disabled }) {
 function Submission({ state, mode, save, disabled }) {
   const [count, setCount] = useState(1);
   return (
-    <form
-      key={mode}
-      className="cadet-form"
-      onSubmit={(e) => {
-        e.preventDefault();
-        const f = new FormData(e.currentTarget),
-          events = f
-            .getAll("event")
-            .map((id) => state.events.find((x) => x.eventId === id));
-        save(
-          mode,
-          mode === "flag"
-            ? { eventId: events[0].eventId, detail: f.get("reason") }
-            : {
-                events: events.map((e) => ({
-                  eventId: e.eventId,
-                  version: e.version,
-                })),
-                outcome: f.get("outcome"),
-                reason: f.get("reason"),
-              },
-        );
-      }}
-    >
-      <h2>{mode === "flag" ? "Flag attendance" : "Request an excusal"}</h2>
-      <fieldset disabled={disabled}>
-        {Array.from({ length: count }, (_, i) => (
-          <Field key={i} label={count === 1 ? "Event" : `Event ${i + 1}`}>
-            <select name="event" required defaultValue="">
-              <option value="" disabled>
-                Select an event
-              </option>
-              {state.events.map((e) => (
-                <option value={e.eventId} key={e.eventId}>
-                  {e.label}
-                </option>
-              ))}
-            </select>
-          </Field>
-        ))}
-        {mode === "excusal" && count < Math.min(state.events.length, 25) && (
-          <button type="button" onClick={() => setCount(count + 1)}>
-            Add event
-          </button>
-        )}
-        {count > 1 && (
-          <button type="button" onClick={() => setCount(count - 1)}>
-            Remove last event
-          </button>
-        )}
-        {mode === "excusal" && (
-          <Field label="Requested code">
-            <select name="outcome" defaultValue="E">
-              {["P", "T", "E", "ES", "MED"].map((c) => (
-                <option key={c}>{c}</option>
-              ))}
-            </select>
-          </Field>
-        )}
-        <Field
-          label={
+    <details className="cadet-compose">
+      <summary>{mode === "flag" ? "Flag attendance" : "Request an excusal"}</summary>
+      <form
+        className="cadet-form"
+        onSubmit={(e) => {
+          e.preventDefault();
+          const f = new FormData(e.currentTarget),
+            events = f
+              .getAll("event")
+              .map((id) => state.events.find((x) => x.eventId === id));
+          save(
+            mode,
             mode === "flag"
-              ? "What should your Flight commander review?"
-              : "Reason"
-          }
-        >
-          <textarea name="reason" required maxLength={500} />
-        </Field>
-        <button className="primary">Submit</button>
-      </fieldset>
-    </form>
+              ? { eventId: events[0].eventId, detail: f.get("reason") }
+              : {
+                  events: events.map((e) => ({
+                    eventId: e.eventId,
+                    version: e.version,
+                  })),
+                  outcome: f.get("outcome"),
+                  reason: f.get("reason"),
+                },
+          );
+        }}
+      >
+        <fieldset disabled={disabled}>
+          {Array.from({ length: count }, (_, i) => (
+            <Field key={i} label={count === 1 ? "Event" : `Event ${i + 1}`}>
+              <select name="event" required defaultValue="">
+                <option value="" disabled>
+                  Select an event
+                </option>
+                {state.events.map((e) => (
+                  <option value={e.eventId} key={e.eventId}>
+                    {e.label}
+                  </option>
+                ))}
+              </select>
+            </Field>
+          ))}
+          {mode === "excusal" && count < Math.min(state.events.length, 25) && (
+            <button type="button" onClick={() => setCount(count + 1)}>
+              Add event
+            </button>
+          )}
+          {count > 1 && (
+            <button type="button" onClick={() => setCount(count - 1)}>
+              Remove last event
+            </button>
+          )}
+          {mode === "excusal" && (
+            <Field label="Requested code">
+              <select name="outcome" defaultValue="E">
+                {["P", "T", "E", "ES", "MED"].map((c) => (
+                  <option key={c}>{c}</option>
+                ))}
+              </select>
+            </Field>
+          )}
+          <Field
+            label={
+              mode === "flag"
+                ? "What should your Flight commander review?"
+                : "Reason"
+            }
+          >
+            <textarea name="reason" required maxLength={500} />
+          </Field>
+          <button className="primary">Submit</button>
+        </fieldset>
+      </form>
+    </details>
   );
 }
 function FlightReport({ state, save, disabled }) {
@@ -451,21 +448,25 @@ export default function CadetWorkspace({ session }) {
   const flight = state?.flights.find(
     (f) => f.flightId === state.profile?.flightId,
   )?.label;
-  const tabs =
+  const pages =
     state && !state.registration
       ? [
-          ...(state.squadron ? ["Excusals"] : []),
-          ...(state.flightCommander ? ["My Flight"] : []),
-          "My requests",
-          "My profile",
+          ...(state.squadron ? [["Excusals", FileCheck2]] : []),
+          ...(state.flightCommander ? [["My Flight", Users]] : []),
+          ["My requests", ClipboardList],
+          ["My profile", UserRound],
         ]
       : [];
-  const page = tabs.includes(tab) ? tab : tabs[0];
+  const page = pages.find(([title]) => title === tab)?.[0] || pages[0]?.[0];
+  const name = [state?.profile?.firstName, state?.profile?.lastName].filter(Boolean).join(" ");
+  const role = state?.squadron ? `${state.squadron} Squadron Commander`
+    : state?.flightCommander && flight ? `${flight} Flight Commander` : "Cadet";
   const disabled =
     busy ||
     preview ||
     !state?.writable ||
     (!state?.linked && !state?.registration);
+  const flags = (state?.actions || []).filter(a => a.kind === "flag" && a.personId === state.profile?.personId);
   const queue = state?.queue || [];
   const list = state?.squadron && {
     terms: [{ termId: "current", isCurrent: true }],
@@ -488,41 +489,21 @@ export default function CadetWorkspace({ session }) {
     access: { capabilities: { fullSnapshot: false } },
   };
   return (
-    <main className="cadet-workspace">
-      <header>
-        <Brand />
-        <div>
-          {!preview && !session.schoolLogin && (
-            <a href="/?workspace=leadership">Leadership workspace</a>
-          )}
-          {preview ? (
-            <button
-              onClick={async () => {
-                try {
-                  await api("/view-as", { personId: null });
-                  location.assign("/");
-                } catch (e) {
-                  setError(e.message);
-                }
-              }}
-            >
-              Exit View as
-            </button>
-          ) : (
-            <button onClick={() => logout().catch((e) => setError(e.message))}>
-              Sign out
-            </button>
-          )}
-        </div>
-      </header>
-      <h1>
-        {state?.profile
-          ? [state.profile.firstName, state.profile.lastName].join(" ")
-          : "Cadet workspace"}
-      </h1>
-      {preview && <strong>View as · Read-only</strong>}
-      {state?.squadron && <p>{state.squadron} Squadron Commander</p>}
-      {state?.flightCommander && <p>{flight} Flight</p>}
+    <WorkspaceShell pages={pages} page={page} navigate={setTab} account={<>
+      {!preview && !session.schoolLogin && <a className="workspace-switch" href="/?workspace=leadership">Leadership workspace</a>}
+      <p>
+        {name && <strong className="account-name">{name}</strong>}
+        {role}
+        {!preview && <button className="sign-out" onClick={() => logout().catch((e) => setError(e.message))}>Sign out</button>}
+      </p>
+    </>}>
+      {preview && <ViewAsBanner label={name || "selected cadet"} busy={busy} onExit={async () => {
+        try {
+          await api("/view-as", { personId: null });
+          location.assign("/");
+        } catch (e) { setError(e.message); }
+      }} />}
+      {page !== "Excusals" && <Heading title={state?.registration ? "Create profile" : page || "My workspace"} />}
       {error && (
         <p className="error" role="alert">
           {error}{" "}
@@ -537,10 +518,10 @@ export default function CadetWorkspace({ session }) {
           </button>
         </p>
       )}
-      {notice && <p role="status">{notice}</p>}
+      {notice && <div className="success" role="status">{notice}</div>}
       {!state && !error && <p role="status">Loading your workspace…</p>}
       {state && !preview && !state.writable && (
-        <p>Submissions are paused.</p>
+        <p className="notice">Submissions are paused.</p>
       )}
       {state?.profile && !state.linked && !preview && (
         <button
@@ -549,19 +530,6 @@ export default function CadetWorkspace({ session }) {
         >
           Connect my Directory record
         </button>
-      )}
-      {!!tabs.length && (
-        <nav aria-label="Cadet workspace">
-          {tabs.map((t) => (
-            <button
-              key={t}
-              aria-current={page === t ? "page" : undefined}
-              onClick={() => setTab(t)}
-            >
-              {t}
-            </button>
-          ))}
-        </nav>
       )}
       {page === "Excusals" && (
         <Excusals
@@ -594,51 +562,52 @@ export default function CadetWorkspace({ session }) {
         />
       )}
       {page === "My requests" && (
-        <>
-          <h2>My excusals</h2>
-          {!state.requests.length ? (
-            <p>No requests this term.</p>
-          ) : (
-            <Table
-              headers={["Event", "Requested", "Status", "Decision reason"]}
-            >
-              {state.requests.map((r) => (
-                <tr key={r.requestId}>
-                  <td>{r.event}</td>
-                  <td>{r.requestedOutcome}</td>
-                  <td>
-                    <Status>{r.status}</Status>
-                  </td>
-                  <td>{r.decisionReason || "—"}</td>
-                </tr>
+        <div className="cadet-requests">
+          <section className="form-section">
+            <h2>My excusals</h2>
+            {!state.requests.length ? (
+              <Empty>No requests this term.</Empty>
+            ) : (
+              <Table
+                headers={["Event", "Requested", "Status", "Decision reason"]}
+              >
+                {state.requests.map((r) => (
+                  <tr key={r.requestId}>
+                    <td>{r.event}</td>
+                    <td>{r.requestedOutcome}</td>
+                    <td>
+                      <Status>{r.status}</Status>
+                    </td>
+                    <td>{r.decisionReason || "—"}</td>
+                  </tr>
+                ))}
+              </Table>
+            )}
+            <Submission
+              mode="excusal"
+              state={state}
+              save={save}
+              disabled={disabled}
+            />
+          </section>
+          <section className="form-section">
+            <h2>My attendance flags</h2>
+            {!flags.length && <Empty>No attendance flags this term.</Empty>}
+            {flags.map((a) => (
+                <p key={a.actionId}>
+                  <strong>{a.event}</strong> · {a.detail} ·{" "}
+                  {a.resolution || "Awaiting Flight review"}
+                </p>
               ))}
-            </Table>
-          )}
-          <Submission
-            mode="excusal"
-            state={state}
-            save={save}
-            disabled={disabled}
-          />
-          <h2>My attendance flags</h2>
-          {state.actions
-            .filter(
-              (a) => a.kind === "flag" && a.personId === state.profile.personId,
-            )
-            .map((a) => (
-              <p key={a.actionId}>
-                <strong>{a.event}</strong> · {a.detail} ·{" "}
-                {a.resolution || "Awaiting Flight review"}
-              </p>
-            ))}
-          <Submission
-            mode="flag"
-            state={state}
-            save={save}
-            disabled={disabled}
-          />
-        </>
+            <Submission
+              mode="flag"
+              state={state}
+              save={save}
+              disabled={disabled}
+            />
+          </section>
+        </div>
       )}
-    </main>
+    </WorkspaceShell>
   );
 }

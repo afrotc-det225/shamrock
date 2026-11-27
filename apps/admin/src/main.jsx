@@ -28,6 +28,7 @@ import "@fontsource/libre-franklin/latin-600.css";
 import "@fontsource/libre-franklin/latin-700.css";
 import "@fontsource/barlow-condensed/latin-600.css";
 import Brand from "./Brand";
+import WorkspaceShell from "./WorkspaceShell";
 import { ViewAsSelector, ViewAsBanner, viewAsStatus } from "./ViewAs";
 import "./style.css";
 const pages = [
@@ -341,6 +342,12 @@ function App() {
     );
   }
 
+  if (!sessionInfo && !error) {
+    return <WorkspaceShell pages={[]}><section className="loading-panel" aria-busy="true">
+      <p role="status">Checking access…</p>
+    </section></WorkspaceShell>;
+  }
+
   let outageScreen = null;
   if(sessionInfo && (new URLSearchParams(location.search).get("workspace")==="cadet" ||
     !preview && (sessionInfo.schoolLogin || sessionInfo.cadetWorkspace && new URLSearchParams(location.search).get("workspace")!=="leadership")))
@@ -375,23 +382,7 @@ function App() {
     <div hidden={!!outageScreen} inert={outageScreen ? true : undefined}>
     <EditorSuspended.Provider value={!!outageScreen}>
     <EditorError.Provider value={error}>
-      <div className="app">
-        <aside className="sidebar">
-          <Brand />
-          <nav aria-label="Main navigation">
-            {visiblePages.map(([title, Icon]) => (
-              <button
-                key={title}
-                className={page === title ? "selected" : ""}
-                aria-current={page === title ? "page" : undefined}
-                onClick={() => navigate(title)}
-              >
-                <Icon size={19} />
-                {title}
-              </button>
-            ))}
-          </nav>
-          <div className="sidebar-bottom">
+      <WorkspaceShell pages={visiblePages} page={page} navigate={navigate} account={<>
             {sessionInfo?.cadetWorkspace && !preview && <a href="/?workspace=cadet">My cadet workspace</a>}
             {!preview && !scoped && data?.meta.viewAsEnabled &&
               <ViewAsSelector people={data.snapshot?.people ?? (["cadets","leadership","cadet-details","semester"].includes(data.browse?.profile) ? data.list.people : null)} onSelect={viewAs} busy={busy} />}
@@ -414,10 +405,50 @@ function App() {
                 </button>
               )}
             </p>
-          </div>
-        </aside>
-        <div className="workspace">
-          <main>
+      </>} drawer={proposal && (
+          <Drawer modal title="Review change" onClose={() => setProposal(null)}>
+            <div className="fields">
+              <h3>{proposal.summary.title}</h3>
+              <p>{displayTarget(proposal.summary.target, data?.snapshot || data?.list)}</p>
+              <dl className="review">
+                {proposal.summary.changes.map((c, i) => (
+                  <React.Fragment key={i}>
+                    <dt>{label(c.field)}</dt>
+                    <dd>{displayValue(c.value, proposal.reviewContext || data?.snapshot || data?.list, c.field)}</dd>
+                  </React.Fragment>
+                ))}
+              </dl>
+              {proposal.summary.consequence && (
+                <p className="notice">{proposal.summary.consequence}</p>
+              )}
+              {error && (
+                <p role="alert" className="error">
+                  {error}
+                </p>
+              )}
+            </div>
+            <footer className="actions">
+              <button
+                disabled={busy}
+                onClick={() =>
+                  run(async () => {
+                    await api(`/proposals/${proposal.id}/cancel`, {});
+                    setProposal(null);
+                  })
+                }
+              >
+                Cancel change
+              </button>
+              <button
+                className="primary"
+                disabled={busy}
+                onClick={() => apply(proposal.id)}
+              >
+                {busy ? "Saving…" : "Apply change"}
+              </button>
+            </footer>
+          </Drawer>
+        )}>
             {preview && <ViewAsBanner busy={busy} onExit={() => viewAs(null)}
               label={previewName || [data?.snapshot?.people.find(p => p.personId === preview.personId)?.firstName,
                 data?.snapshot?.people.find(p => p.personId === preview.personId)?.lastName].filter(Boolean).join(" ") || "selected cadet"} />}
@@ -483,53 +514,7 @@ function App() {
                 {preview && ["Semester planning", "System", "Assistant"].includes(page) && <p>Exit View as to use this page.</p>}
               </React.Fragment>
             )}
-          </main>
-        </div>
-        {proposal && (
-          <Drawer modal title="Review change" onClose={() => setProposal(null)}>
-            <div className="fields">
-              <h3>{proposal.summary.title}</h3>
-              <p>{displayTarget(proposal.summary.target, data?.snapshot || data?.list)}</p>
-              <dl className="review">
-                {proposal.summary.changes.map((c, i) => (
-                  <React.Fragment key={i}>
-                    <dt>{label(c.field)}</dt>
-                    <dd>{displayValue(c.value, proposal.reviewContext || data?.snapshot || data?.list, c.field)}</dd>
-                  </React.Fragment>
-                ))}
-              </dl>
-              {proposal.summary.consequence && (
-                <p className="notice">{proposal.summary.consequence}</p>
-              )}
-              {error && (
-                <p role="alert" className="error">
-                  {error}
-                </p>
-              )}
-            </div>
-            <footer className="actions">
-              <button
-                disabled={busy}
-                onClick={() =>
-                  run(async () => {
-                    await api(`/proposals/${proposal.id}/cancel`, {});
-                    setProposal(null);
-                  })
-                }
-              >
-                Cancel change
-              </button>
-              <button
-                className="primary"
-                disabled={busy}
-                onClick={() => apply(proposal.id)}
-              >
-                {busy ? "Saving…" : "Apply change"}
-              </button>
-            </footer>
-          </Drawer>
-        )}
-      </div>
+      </WorkspaceShell>
     </EditorError.Provider>
     </EditorSuspended.Provider>
     </div>

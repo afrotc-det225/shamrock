@@ -1524,11 +1524,14 @@ html:has(dialog:modal) {
 }
 .chart-tip strong,.chart-tip span {display:block}
 
-.cadet-workspace {max-width:68rem;margin:auto;padding:clamp(1rem,4vw,3rem);min-width:0}
-.cadet-workspace>header,.cadet-workspace>header>div,.cadet-workspace>nav,.squadron-tabs {display:flex;align-items:center;gap:.6rem;flex-wrap:wrap}
-.cadet-workspace>header {justify-content:space-between;margin-bottom:2rem}
-.cadet-workspace>nav,.squadron-tabs {margin:1rem 0}
-.cadet-workspace button[aria-current=page],.squadron-tabs button[aria-pressed=true] {background:#173d54;color:white}
+.squadron-tabs {display:flex;align-items:center;gap:.6rem;flex-wrap:wrap;margin:1rem 0}
+.squadron-tabs button[aria-pressed=true] {background:#173d54;color:white}
+.account-name {display:block}
+.sidebar-bottom a {color:inherit;text-underline-offset:.2em}
+.cadet-requests {display:grid;grid-template-columns:repeat(auto-fit,minmax(min(25rem,100%),1fr));gap:1rem;align-items:start}
+.cadet-requests .form-section {min-width:0;margin:0}
+.cadet-requests .cadet-form {margin-bottom:0}
+.cadet-compose summary {width:fit-content;padding:.4rem 0;color:var(--green);font-weight:600;cursor:pointer}
 .cadet-form {max-width:48rem;margin:1rem 0 2rem}
 .cadet-form fieldset {min-width:0;border:0;padding:0;display:grid;gap:.75rem}
 .cadet-fields {display:grid;grid-template-columns:repeat(auto-fit,minmax(min(15rem,100%),1fr));gap:.8rem}
