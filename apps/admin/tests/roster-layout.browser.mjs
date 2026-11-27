@@ -31,7 +31,13 @@ try {
   await page.route("https://drive.google.com/thumbnail?*", route => {
     const params = new URL(route.request().url()).searchParams;
     assert.equal(params.get("resourcekey"),"test");
-    return params.get("id")==="fixture0" ? route.fulfill({contentType:"image/svg+xml",body:svg}) : route.abort();
+    assert.equal(params.get("id"), "fixture1");
+    return route.abort();
+  });
+  await page.route("**/api/directory/photo?*", route => {
+    const params = new URL(route.request().url()).searchParams;
+    assert.equal(params.get("person"), params.get("file") === "fixture0" ? "test-0" : "test-1");
+    return params.get("file") === "fixture0" ? route.fulfill({contentType:"image/svg+xml",body:svg}) : route.abort();
   });
   const settle = () => page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
   for (const path of ["cadets","leadership"]) {

@@ -41,9 +41,12 @@ try {
           squadron: role === "Squadron" ? "Blue" : null,
         } });
       });
-      await page.route("https://drive.google.com/**", route => width === 390 ? route.abort() : route.fulfill({
+      await page.route("https://drive.google.com/**", route => route.abort());
+      await page.route("**/api/directory/photo?*", route => {
+        assert.deepEqual([...new URL(route.request().url()).searchParams],[["file","fictional-photo"]]);
+        return width === 390 ? route.abort() : route.fulfill({
         contentType:"image/svg+xml",body:'<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20"><circle cx="10" cy="10" r="8"/></svg>',
-      }));
+      }); });
       await page.goto(origin + (preview ? "/?workspace=cadet" : "/"));
       const nav = page.getByRole("navigation", { name:"Main navigation" });
       const heading = title => page.getByRole("heading", {name:title, level:1, exact:true});

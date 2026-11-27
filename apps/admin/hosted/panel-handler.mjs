@@ -1,3 +1,4 @@
+import { directoryPortrait } from "./directory-photo.mjs";
 import {isWorkspacePath} from "../src/page-url.js";
 import {isUnifiedSite} from "./site.mjs";
 import { available, answer, model } from "./openai-assistant.mjs";
@@ -96,18 +97,24 @@ export default {
           );
         body = await boundedJson(request);
       }
-      if (url.pathname === "/api/cadet" && ["GET","POST"].includes(request.method)) {
-        const section=url.searchParams.get("section");
-        if(section!==null && !/^report:[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/.test(section) && !["report","attendance"].includes(section))throw new PanelError("INVALID_REQUEST","Unknown workspace section.");
+      const cadetWorkspace = async section => {
         if (preview) {
           if (env.VIEW_AS_ENABLED !== "1" || preview.status !== "ready" || (request.method === "POST" && body?.entryAuditId !== preview.entry_audit_id)) throw new PanelError("VIEW_AS_READ_ONLY","Exit View as before making changes.",403);
-          return secure(json(await backend.send("/v1/cadet/preview",{...backend.identity(),targetPersonId:preview.person_id,entryAuditId:preview.entry_audit_id,...(section?{section}:{}),...(request.method==="POST"?{action:body.action}:{})})));
+          return backend.send("/v1/cadet/preview",{...backend.identity(),targetPersonId:preview.person_id,entryAuditId:preview.entry_audit_id,...(section?{section}:{}),...(request.method==="POST"?{action:body.action}:{})});
         }
         if (request.method==="POST" && body && "entryAuditId" in body) throw new PanelError("VIEW_AS_CHANGED","Reopen the selected workspace.",409);
         if (!user.schoolEmail) throw new PanelError("FORBIDDEN","Sign in with your school account.",403);
         const input={...backend.identity(),principalId:user.principal_id.startsWith("school.") ? "google."+await sha(user.schoolEmail) : user.principal_id,email:user.schoolEmail};
         if (request.method==="POST" && (!body || !body.kind)) throw new PanelError("INVALID_REQUEST","Choose a workspace action.");
-        return secure(json(await backend.post("/v1/cadet/workspace",{...input,...(section?{section}:{}),...(request.method==="POST"?{action:body}:{})})));
+        return backend.post("/v1/cadet/workspace",{...input,...(section?{section}:{}),...(request.method==="POST"?{action:body}:{})});
+      };
+      if (url.pathname === "/api/directory/photo" && request.method === "GET") {
+        return secure(await directoryPortrait(env, backend, user, preview, url.searchParams, () => cadetWorkspace(null)));
+      }
+      if (url.pathname === "/api/cadet" && ["GET","POST"].includes(request.method)) {
+        const section=url.searchParams.get("section");
+        if(section!==null && !/^report:[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/.test(section) && !["report","attendance"].includes(section))throw new PanelError("INVALID_REQUEST","Unknown workspace section.");
+        return secure(json(await cadetWorkspace(section)));
       }
       if (user.principal_id.startsWith("school.")) throw new PanelError("CADET_WORKSPACE","Open your cadet workspace.",403);
       if (request.method === "POST" && url.pathname === "/api/view-as")
