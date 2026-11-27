@@ -1,4 +1,4 @@
-// Rehearse an owner-downloaded staging proposal against the exact released source.
+// Test the released source and staging proposal in matching offline environments.
 import {execFileSync} from "node:child_process";
 import {readFileSync} from "node:fs";
 import {areas} from "../apps/admin/hosted/maintenance.mjs";
@@ -22,12 +22,19 @@ const docker=(...args)=>execFileSync("docker",args,{stdio:"inherit",timeout:6000
 try{
   const run=["run","--rm","--cap-drop=ALL","--security-opt=no-new-privileges","--pids-limit=256","--memory=2g","--cpus=2",
     "-v",volume+":/work","-w","/work"];
-  const image="node:26-bookworm";
+  const image="shamrock-repository-checks:node26-chromium";
+  // Install browser libraries once, before giving any candidate code to the container.
+  execFileSync("docker",["build","--tag",image,"-"],{
+    input:["FROM node:26-bookworm",
+      "RUN apt-get update && apt-get install -y --no-install-recommends chromium && rm -rf /var/lib/apt/lists/*",
+      "ENV SHAMROCK_CHROMIUM_PATH=/usr/bin/chromium"].join("\n")+"\n",
+    stdio:["pipe","inherit","inherit"], timeout:600000,
+  });
   docker("volume","create",volume);
   const pipe=(data,args)=>execFileSync("docker",[...run,"-i",...args],{input:data,stdio:["pipe","inherit","inherit"],timeout:600000});
   pipe(git("archive","--format=tar",commit),[image,"sh","-ec",
     "tar xf - && git init -q && git add . && git -c user.name=Fixture -c user.email=fixture@invalid commit -qm baseline && npm ci --no-audit && npm --prefix apps/admin ci --no-audit"]);
-  const test="npm run check && npm --prefix apps/admin run build:domain && npm --prefix apps/admin test && npm --prefix apps/admin run build";
+  const test="npm run check && npm --prefix apps/admin run build:domain && npm --prefix apps/admin test && npm --prefix apps/admin run build && npm --prefix apps/admin run test:browser && node apps/admin/tests/maintenance-runner.smoke.mjs";
   docker(...run,"--network=none",image,"sh","-ec",test);
   pipe(JSON.stringify(proposal),["--network=none",image,"sh","-ec",
     "node scripts/apply-reviewed-proposal.mjs && "+test]);
