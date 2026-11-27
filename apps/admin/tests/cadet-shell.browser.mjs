@@ -1,3 +1,4 @@
+import { openNavigation } from "./navigation.mjs";
 import assert from "node:assert/strict";
 import { chromium } from "playwright";
 import { createPanelServer } from "../server.mjs";
@@ -51,7 +52,7 @@ try {
           profile: role === "Registration" ? null : {personId:"one", firstName:"Sample", lastName:"Cadet", flightId:"alpha",afsc:"13N – Nuclear and Missile Operations ".repeat(6).trim(),photoLink:"https://drive.google.com/file/d/fictional-photo/view"},
           flights: [{ flightId:"alpha", label:"Alpha" }], events: [], actions: [], queue: squadron ? [{requestId:"example",version:3,personId:"cadet",eventId:"llab",event:"TW-2 LLAB",
             personDisplayName:"Test Requester",requestedOutcome:"E",status:decision?.decision || "Submitted",
-            reason:"Fixture scheduling conflict",flightId:"test-flight",capturedFlightLabel:flight,capturedSquadronLabel:squadron}] : [],
+            submittedAt:"2026-10-10T13:20:00Z",reason:"Fixture scheduling conflict",flightId:"test-flight",capturedFlightLabel:flight,capturedSquadronLabel:squadron}] : [],
           requests: [], roster: [], reportEvents:[{eventId:"lab16",eventType:"llab",label:"TW-16 LLAB"},{eventId:"sec16",eventType:"secondary",label:"TW-16 Secondary"}],
           reportRoster:section==="report:lab16"?[["AS100","Able","Tom"],["AS400","Zed","Ron"],["AS400","Able","Zoe"],["AS400","Able","Amy"]].map(([asYear,lastName,firstName],i)=>({asYear,lastName,firstName,personId:"fixture"+i,flightId:"alpha",version:1})):[], flightCommander:role === "Flight",
           squadron,
@@ -67,13 +68,18 @@ try {
       const nav = page.getByRole("navigation", { name:"Main navigation" });
       const heading = title => page.getByRole("heading", {name:title, level:1, exact:true});
       await heading(tabs[0] || "Create profile").waitFor();
+      await openNavigation(page);
       assert.deepEqual(await nav.getByRole("link").allTextContents(), tabs);
+      if (width === 390) await page.keyboard.press("Escape");
       if (squadron) {
         const row = page.locator(".excusal-queue tbody tr");
-        await row.getByText(flight,{exact:true}).waitFor();
+        await row.getByTitle(flight,{exact:true}).waitFor();
+        assert.equal(await row.locator("td").nth(1).innerText(),"E");
+        assert.match(await row.locator("time").innerText(),/9:20 AM EDT/);
         const actions = row.getByRole("button");
         for (const verb of ["Approve","Deny","Withdraw","Supersede"]) {
-          await actions.filter({hasText:new RegExp("^"+verb+"$")}).click();
+          if (verb === "Withdraw" || verb === "Supersede") await row.getByLabel("More decisions").selectOption({label:verb});
+          else await actions.filter({hasText:new RegExp("^"+verb+"$")}).click();
           const confirm = page.getByRole("dialog",{name:verb+" excusal?"});
           await confirm.getByText("Test Requester",{exact:true}).waitFor();
           assert.equal(decision,undefined);
@@ -83,7 +89,7 @@ try {
         const confirm = page.getByRole("dialog",{name:"Approve excusal?"});
         if (preview) await confirm.getByLabel("Decision note (optional)").fill("Reviewed conflict");
         await confirm.getByRole("button",{name:"Confirm decision"}).click();
-        await page.getByText("0 pending",{exact:true}).waitFor();
+        await page.getByText("No requests match these filters.",{exact:true}).waitFor();
         assert.deepEqual(decision,{requestId:"example",version:3,decision:"Approved",
           reason:preview ? "Reviewed conflict" : "Approved in the Excusals queue."});
       }
@@ -91,15 +97,17 @@ try {
         await page.screenshot({path:`${process.env.SHAMROCK_SCREENSHOT_DIR}/cadet-${width}.png`});
       }
       if (tabs.length) {
+        await openNavigation(page);
         await nav.getByRole("link", {name:"My requests"}).click();
         await heading("My requests").waitFor();
         const compose = page.locator("details").filter({has:page.locator("summary", {hasText:"Request an excusal"})});
         await compose.locator("summary").click();
         assert.equal(await compose.getByRole("button", {name:"Submit"}).isEnabled(), true);
+        await openNavigation(page);
         await nav.getByRole("link", {name:"My profile"}).click();
-        assert.equal(await nav.locator('[aria-current="page"]').innerText(), "My profile");
+        assert.equal(await page.locator('nav [aria-current="page"]').textContent(), "My profile");
         await page.getByLabel("First name", {exact:true}).waitFor();
-        if (preview) await page.locator(".sidebar-bottom").getByText("Acting as Sample Cadet").waitFor();
+        if (preview) await page.locator(width === 390 ? ".mobile-bar" : ".sidebar-bottom").getByText("Acting as Sample Cadet").waitFor();
         const afsc = page.getByLabel("Air Force Specialty Code (AFSC)");
         assert.equal(await afsc.inputValue(),"13N – Nuclear and Missile Operations ".repeat(6).trim());
         assert(await afsc.evaluate(el => el.scrollWidth <= el.clientWidth && el.scrollHeight <= el.clientHeight + 1));
@@ -115,6 +123,7 @@ try {
         await heading("My requests").waitFor();
         await page.goForward();
         await heading("My profile").waitFor();
+        await openNavigation(page);
         await nav.getByRole("link",{name:"My attendance",exact:true}).click();
         const matrix=page.getByRole("table",{name:"Attendance",exact:true});
         const before=await matrix.boundingBox();
@@ -129,6 +138,7 @@ try {
         await page.getByRole("button",{name:"Send for Squadron review"}).click();
         await page.getByText("Saved.",{exact:true}).waitFor();
         assert.deepEqual(flags,["llab","lab2"]);
+        await openNavigation(page);
         await nav.getByRole("link",{name:"Submit attendance",exact:true}).click();
         const picker=page.getByLabel("Attendance event");
         await picker.waitFor();assert(await picker.isDisabled());
@@ -146,9 +156,11 @@ try {
       } else {
         await page.getByRole("button", {name:"Continue"}).waitFor();
       }
+      await openNavigation(page);
       await page.getByRole("button", {name:preview ? "Exit view" : "Sign out"}).waitFor();
+      if (width === 390) await page.keyboard.press("Escape");
       const layout = await page.evaluate(() => {
-        const sidebar = document.querySelector(".sidebar").getBoundingClientRect();
+        const sidebar = document.querySelector(".mobile-bar, .sidebar").getBoundingClientRect();
         const main = document.querySelector(".workspace").getBoundingClientRect();
         return { alongside:sidebar.right <= main.left + 1, stacked:sidebar.bottom <= main.top + 1,
           fits:document.documentElement.scrollWidth <= innerWidth };

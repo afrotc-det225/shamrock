@@ -83,7 +83,6 @@ export default function BirthdayAgenda({calendar, flights, squadrons, now}) {
       <div className="birthday-names" aria-live="polite">
         <h4>{listHeading}</h4>
         {list.length ? <ul>{list.flatMap(({date,people}) => people.map((p,i) => <li key={date+i}>
-          <i aria-hidden="true" style={{background:inks.get(p.flightId)}}/>
           <span title={[p.firstName,p.lastName].join(" ")}>C/{surnames.get(p.lastName)>1 && p.firstName ? p.firstName[0] + ". " : ""}{p.lastName} <time dateTime={date}>({shortDate.format(midnight(date))})</time></span>
         </li>))}</ul> : <p>{selected ? (selected.week ? "No birthdays this week." : "No birthdays on this day.") : month ? "No birthdays this month." : "No birthdays recorded."}</p>}
       </div>

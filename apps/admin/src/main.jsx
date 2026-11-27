@@ -397,15 +397,16 @@ function App() {
     </div>;
   }
 
+  const viewAsLabel = preview && (previewName || [data?.snapshot?.people.find(p => p.personId === preview.personId)?.firstName,
+                data?.snapshot?.people.find(p => p.personId === preview.personId)?.lastName].filter(Boolean).join(" ") || "selected cadet");
   return (
     <>
     <div hidden={!!outageScreen} inert={outageScreen ? true : undefined}>
     <EditorSuspended.Provider value={!!outageScreen}>
     <EditorError.Provider value={error}>
-      <WorkspaceShell pages={visiblePages} page={destination?.page ?? page} navigate={navigate} account={<>
+      <WorkspaceShell mobileContext={preview && ((data?.meta.delegatedEdits ? "Acting as " : "Viewing as ") + viewAsLabel)} pages={visiblePages} page={destination?.page ?? page} navigate={navigate} account={<>
       {preview && <ViewAsAccount acting={data?.meta.delegatedEdits} busy={busy} onExit={() => viewAs(null)}
-              label={previewName || [data?.snapshot?.people.find(p => p.personId === preview.personId)?.firstName,
-                data?.snapshot?.people.find(p => p.personId === preview.personId)?.lastName].filter(Boolean).join(" ") || "selected cadet"} />}
+              label={viewAsLabel} />}
             {sessionInfo?.cadetWorkspace && !preview && <a href="/me">My cadet workspace</a>}
             {!preview && !scoped && data?.meta.viewAsEnabled &&
               <ViewAsSelector people={data.snapshot?.people ?? (["cadets","leadership","cadet-details","semester"].includes(data.browse?.profile) ? data.list.people : null)} onSelect={viewAs} busy={busy} />}

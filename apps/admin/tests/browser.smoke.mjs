@@ -1,3 +1,4 @@
+import { openNavigation } from "./navigation.mjs";
 import assert from "node:assert/strict";
 import { chromium } from "playwright";
 import { createLocalBackend } from "../backend.mjs";
@@ -101,6 +102,7 @@ try {
   );
   assert(stateReads >= 2, "visible idle panel refreshes automatically");
   const navigate = async (title) => {
+    await openNavigation(page);
     await page
       .getByRole("navigation")
       .getByRole("link", { name: title, exact: true })
@@ -238,7 +240,7 @@ try {
     "Alexis",
   );
   await navigate("Excusals");
-  await page.getByText("1 pending", {exact:true}).waitFor();
+  await page.locator(".excusal-status").getByText("Submitted",{exact:true}).waitFor();
   const deny = page.getByRole("button", {name:"Deny",exact:true});
   await deny.click();
   const review = page.getByRole("dialog",{name:"Review change"});
@@ -385,6 +387,7 @@ try {
   assert.deepEqual(await attendanceSummary.locator("dt").allTextContents(), ["Overall", "LLAB"]);
   assert.equal(await attendanceSummary.getByRole("link",{name:/pending excusal/}).getAttribute("href"),"/excusals");
   const birthdays = page.getByRole("region",{name:"Wing birthdays"});
+  assert.equal(await birthdays.locator(".birthday-names li i").count(),0);
   const month = birthdays.locator(".calendar-month strong");
   const originalMonth = await month.innerText();
   const week = birthdays.getByRole("button",{name:/^Week [0-9]/}).first();
@@ -453,6 +456,7 @@ try {
     console.error(await page.locator("body").innerText(), errors);
     throw e;
   }
+  await openNavigation(page);
   assert.equal(
     await page.getByRole("navigation").getByRole("link").count(),
     2,

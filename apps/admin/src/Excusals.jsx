@@ -11,16 +11,32 @@ import {
   SearchBox,
 } from "./components";
 import { cellStyle, flightColors } from "./roster-colors";
+import { eventZone } from "./time";
 import { name } from "./api";
 import { currentExcusalRequests } from "./attendance-events.mjs";
 
 const decisions = { Approved: "Approve", Denied: "Deny", Withdrawn: "Withdraw", Superseded: "Supersede" };
 
+const submissionTime = new Intl.DateTimeFormat("en-US", {
+  timeZone:eventZone, month:"short", day:"numeric", year:"numeric",
+  hour:"numeric", minute:"2-digit", timeZoneName:"short",
+});
+function SubmittedAt({value}) {
+  if (!value || !Number.isFinite(Date.parse(value))) return null;
+  const label = /^\d{4}-\d{2}-\d{2}$/.test(value) ? value : submissionTime.format(new Date(value));
+  return <time dateTime={value} aria-label={"Submitted " + label} title={"Submitted " + label}>{label}</time>;
+}
+
 function DecisionButtons({request, busy, onPick}) {
   return <div className="excusal-actions">
-    {Object.entries(decisions).map(([outcome, verb]) =>
+    {["Approved","Denied"].map(outcome =>
       <button key={outcome} data-decision={outcome} disabled={busy || outcome === request.status}
-        onClick={() => onPick(outcome)}>{verb}</button>)}
+        onClick={() => onPick(outcome)}>{decisions[outcome]}</button>)}
+    <select aria-label="More decisions" value="" disabled={busy} onChange={e => onPick(e.target.value)}>
+      <option value="" disabled>More</option>
+      {["Withdrawn","Superseded"].map(outcome =>
+        <option key={outcome} value={outcome} disabled={outcome === request.status}>{decisions[outcome]}</option>)}
+    </select>
   </div>;
 }
 
@@ -80,11 +96,7 @@ export default function Excusals({
   return (
     <>
       <section className="page-controls">
-        <Heading title="Excusals">
-          <span className="pending-total">
-            {queue.filter((r) => r.status === "Submitted").length} pending
-          </span>
-        </Heading>
+        <Heading title="Excusals" />
         {squadrons.length > 1 && <div className="squadron-tabs" aria-label="Squadron queues">
           {["", ...squadrons].map(label => <button key={label} aria-pressed={squadron === label}
             onClick={() => { setSquadron(label); setFlight(""); }}>{label || "Wing"} · {queue.filter(r => (!label || r.capturedSquadronLabel === label) && r.status === "Submitted").length}</button>)}
@@ -117,19 +129,19 @@ export default function Excusals({
         </div>
       </section>
       <Table className={`excusal-queue${showActions ? " actionable" : ""}`}
-        headers={["Cadet", "Flight", "Event / request", "Code", "Status", ...(showActions ? ["Decision"] : [])]}>
+        headers={["Cadet", "Code", "Event / request", "Status", ...(showActions ? ["Decision"] : [])]}>
         {visible.map(r => <tr key={r.requestId}>
-          <td className="excusal-cadet"><button className="text-button"
-            aria-label={`Request details for ${who(r)} · ${events.get(r.eventId)}`}
+          <td className="excusal-cadet" style={cellStyle(flightColors(flightName(r), r.capturedSquadronLabel))}><button
+            title={flightName(r)} className="text-button"
+            aria-label={`Request details for ${who(r)} · ${flightName(r)} · ${events.get(r.eventId)}`}
             onClick={() => { setReason(""); setEdit({requestId:r.requestId,version:r.version}); }}>
             {who(r)}
           </button></td>
-          <td className="excusal-flight" style={cellStyle(flightColors(flightName(r), r.capturedSquadronLabel))}>{flightName(r)}</td>
+          <td className="excusal-code" data-mark={r.requestedOutcome}>{r.requestedOutcome}</td>
           <td className="excusal-event">{events.get(r.eventId)}
             {r.reason && <small>{r.reason}</small>}
           </td>
-          <td className="excusal-code" data-mark={r.requestedOutcome}>{r.requestedOutcome}</td>
-          <td className="excusal-status" data-status={r.status}><Status>{r.status}</Status></td>
+          <td className="excusal-status" data-status={r.status}><Status>{r.status}</Status><SubmittedAt value={r.submittedAt}/></td>
           {showActions && <td className="excusal-controls">{canDecide(r) &&
             <DecisionButtons request={r} busy={busy} onPick={d => pick(r,d)} />}
           </td>}
@@ -139,7 +151,7 @@ export default function Excusals({
       {selected && <Drawer modal={Boolean(edit.decision)}
         title={edit.decision ? decisions[edit.decision] + " excusal?" : "Request details"} onClose={close}>
         <div className="fields">
-          <RequestDetails request={selected} cadet={who(selected)} event={events.get(selected.eventId)} />
+          <RequestDetails request={selected} cadet={who(selected)} flight={flightName(selected)} event={events.get(selected.eventId)} />
           {(error || editorError) && <p className="error" role="alert">{error || editorError}</p>}
           {stale && <p role="alert">This request changed. Reopen it to review the latest decision.</p>}
           {canDecide(selected) && !stale && <Field label="Decision note (optional)">
@@ -163,10 +175,10 @@ function payload(target, note) {
     reason:note.trim() || target.decision + " in the Excusals queue."};
 }
 
-function RequestDetails({request, cadet, event}) {
-  return <><strong>{cadet}</strong><div>{event} · {request.requestedOutcome}</div>
+function RequestDetails({request, cadet, flight, event}) {
+  return <><strong>{cadet}</strong>{flight !== "—" && <span>{flight} Flight</span>}<div>{event} · {request.requestedOutcome}</div>
     <Status>{request.status}</Status>
-    {request.submittedAt && <small>Submitted {new Date(request.submittedAt).toLocaleDateString()}</small>}
+    <SubmittedAt value={request.submittedAt}/>
     <blockquote>{request.reason}</blockquote>
     {request.decisionReason && <p>Decision reason · {request.decisionReason}</p>}</>;
 }
