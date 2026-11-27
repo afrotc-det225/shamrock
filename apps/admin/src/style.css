@@ -1612,3 +1612,40 @@ main:has(.matrix-scroll) { padding-bottom: 8px; }
 .portrait-preview header,.portrait-preview footer {display:flex;align-items:center;justify-content:space-between;padding:.65rem 1rem}
 .portrait-preview header button {display:grid;place-items:center;border:0;background:transparent}
 .portrait-preview img,.portrait-preview iframe {display:block;width:100%;height:min(56dvh,30rem);object-fit:contain;border:0}
+.excusal-queue {container-type:inline-size;width:100%;max-width:73rem}
+.excusal-queue table {table-layout:fixed}
+.excusal-queue :is(td,th) {padding:.55rem .7rem}
+.excusal-queue th:nth-child(1) {width:22%}
+.excusal-queue th:nth-child(2) {width:5.4rem}
+.excusal-queue th:nth-child(4) {width:3.4rem}
+.excusal-queue th:nth-child(5) {width:8rem}
+.excusal-queue.actionable th:last-child {width:12.25rem}
+.excusal-cadet button,.excusal-event {white-space:normal;overflow-wrap:anywhere}
+.excusal-event small {display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden}
+.excusal-flight,.excusal-code {text-align:center;font-weight:700}
+.excusal-queue .excusal-code {background-color:var(--mark-bg,#f0f1f2);color:var(--mark-ink,#424a51)}
+.excusal-status[data-status="Withdrawn"] .status {background:#f4e5bc;color:#5b4115}
+.excusal-status[data-status="Superseded"] .status {background:#e6dff1;color:#493366}
+.excusal-actions {display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:.2rem}
+.excusal-actions button {min-width:0;min-height:1.95rem;padding:.2rem .4rem;font-size:.81rem}
+.excusal-actions [data-decision="Approved"] {color:#18523a;background:#e8f3ec;border-color:#a7c9b6}
+.excusal-actions [data-decision="Denied"] {color:#7c2835;background:#fcf0f0;border-color:#d9b0b4}
+.excusal-actions :is([data-decision="Withdrawn"],[data-decision="Superseded"]) {color:#405369;background:transparent;border-color:transparent}
+.excusal-actions button:hover:enabled {text-decoration:underline}
+.excusal-actions button:disabled {opacity:.55}
+@container (max-width:51rem) {
+  .excusal-queue thead {position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%)}
+  .excusal-queue :is(table,tbody) {display:block}
+  .excusal-queue tbody tr {display:grid;grid-template-columns:minmax(0,1fr) auto auto;align-items:center;
+    gap:.4rem .55rem;padding:.7rem;border-bottom:1px solid var(--border)}
+  .excusal-queue tbody tr:last-child {border-bottom:0}
+  .excusal-queue tbody td {position:static;background:transparent;border:0;padding:0}
+  .excusal-queue .excusal-cadet {grid-column:1;grid-row:1}
+  .excusal-queue .excusal-flight {grid-column:2;grid-row:1;padding:.25rem .45rem}
+  .excusal-queue td.excusal-code {grid-column:3;grid-row:1;padding:.25rem .45rem;background:var(--mark-bg,#f0f1f2)}
+  .excusal-queue .excusal-event {grid-column:1/-1;grid-row:2}
+  .excusal-queue .excusal-status {grid-column:1/-1;grid-row:3}
+  .excusal-queue .excusal-controls {grid-column:1/-1;grid-row:4}
+  .excusal-queue .excusal-actions {grid-template-columns:repeat(4,minmax(0,1fr))}
+  .excusal-queue .excusal-actions button {min-height:44px}
+}

@@ -1,32 +1,45 @@
-import React, { useState } from "react";
+import React, { useContext, useState } from "react";
 import {
   Drawer,
+  EditorError,
   Heading,
   Select,
   Field,
-  Editor,
   Table,
   Status,
   Empty,
   SearchBox,
 } from "./components";
+import { cellStyle, flightColors } from "./roster-colors";
 import { name } from "./api";
 import { currentExcusalRequests } from "./attendance-events.mjs";
+
+const decisions = { Approved: "Approve", Denied: "Deny", Withdrawn: "Withdraw", Superseded: "Supersede" };
+
+function DecisionButtons({request, busy, onPick}) {
+  return <div className="excusal-actions">
+    {Object.entries(decisions).map(([outcome, verb]) =>
+      <button key={outcome} data-decision={outcome} disabled={busy || outcome === request.status}
+        onClick={() => onPick(outcome)}>{verb}</button>)}
+  </div>;
+}
 
 export default function Excusals({
   snapshot,
   list,
   propose,
+  onDecide,
   busy,
+  error,
   readOnly = false,
 }) {
+  const editorError = useContext(EditorError);
   const s = snapshot || list;
   const [query, setQuery] = useState(""),
     [status, setStatus] = useState("Submitted"),
     [flight, setFlight] = useState(""),
     [squadron, setSquadron] = useState(""),
     [edit, setEdit] = useState(null),
-    [decision, setDecision] = useState("Approved"),
     [reason, setReason] = useState("");
   const queue = currentExcusalRequests(s);
   const events = new Map(s.events.map((e) => [e.eventId, e.label]));
@@ -50,6 +63,20 @@ export default function Excusals({
     who(a).localeCompare(who(b)));
   const selected = edit && queue.find(r => r.requestId === edit.requestId);
   const scoped = s.access && !s.access.capabilities.fullSnapshot;
+  const canDecide = r => !readOnly && (scoped ? r.canDecide === true : r.canDecide !== false);
+  const showActions = visible.some(canDecide);
+  const close = () => { setEdit(null); setReason(""); };
+  function pick(request, decision, note = "") {
+    if (!canDecide(request) || busy) return;
+    const target = {requestId: request.requestId, version: request.version, decision};
+    if (onDecide) {
+      setReason(note);
+      setEdit(target);
+    } else {
+      propose("excusal.decide", payload(target, note), close);
+    }
+  }
+  const stale = selected && selected.version !== edit.version;
   return (
     <>
       <section className="page-controls">
@@ -89,74 +116,51 @@ export default function Excusals({
           />
         </div>
       </section>
-      <Table headers={["Cadet / Flight", "Event", "Requested", "Status", ""]}>
-        {visible.map((r) => (
-          <tr key={r.requestId}>
-            <td>
-              {who(r)}
-              <small>{flightName(r)}</small>
-            </td>
-            <td>{events.get(r.eventId)}</td>
-            <td>{r.requestedOutcome}</td>
-            <td>
-              <Status>{r.status}</Status>
-            </td>
-            <td>
-                <button
-                  disabled={busy}
-                  onClick={() => {
-                    setReason("");
-                    setDecision("Approved");
-                    setEdit({requestId:r.requestId,version:r.version});
-                  }}
-                >
-                  {readOnly || (scoped && !r.canDecide) ? "Details" : "Review"}
-                </button>
-            </td>
-          </tr>
-        ))}
+      <Table className={`excusal-queue${showActions ? " actionable" : ""}`}
+        headers={["Cadet", "Flight", "Event / request", "Code", "Status", ...(showActions ? ["Decision"] : [])]}>
+        {visible.map(r => <tr key={r.requestId}>
+          <td className="excusal-cadet"><button className="text-button"
+            aria-label={`Request details for ${who(r)} · ${events.get(r.eventId)}`}
+            onClick={() => { setReason(""); setEdit({requestId:r.requestId,version:r.version}); }}>
+            {who(r)}
+          </button></td>
+          <td className="excusal-flight" style={cellStyle(flightColors(flightName(r), r.capturedSquadronLabel))}>{flightName(r)}</td>
+          <td className="excusal-event">{events.get(r.eventId)}
+            {r.reason && <small>{r.reason}</small>}
+          </td>
+          <td className="excusal-code" data-mark={r.requestedOutcome}>{r.requestedOutcome}</td>
+          <td className="excusal-status" data-status={r.status}><Status>{r.status}</Status></td>
+          {showActions && <td className="excusal-controls">{canDecide(r) &&
+            <DecisionButtons request={r} busy={busy} onPick={d => pick(r,d)} />}
+          </td>}
+        </tr>)}
       </Table>
       {!visible.length && <Empty>No requests match these filters.</Empty>}
-      {selected && (readOnly || (scoped && !selected.canDecide)) &&
-        <Drawer title="Request details" onClose={() => setEdit(null)}>
-          <div className="fields"><RequestDetails request={selected} cadet={who(selected)} event={events.get(selected.eventId)} /></div>
-        </Drawer>}
-      {selected && !readOnly && (!scoped || selected.canDecide === true) && (
-          <Editor
-            title="Review excusal"
-            busy={busy}
-            onClose={() => setEdit(null)}
-            onSubmit={() =>
-              propose(
-                "excusal.decide",
-                {
-                  requestId: edit.requestId,
-                  expectedVersion: edit.version,
-                  decision,
-                  reason,
-                },
-                () => setEdit(null),
-              )
-            }
-          >
-            <RequestDetails request={selected} cadet={who(selected)} event={events.get(selected.eventId)} />
-            <Select
-              label="Decision"
-              value={decision}
-              onChange={setDecision}
-              options={["Approved", "Denied", "Withdrawn", "Superseded"]}
-            />
-            <Field label="Reason for this change">
-              <textarea
-                required
-                value={reason}
-                onChange={(e) => setReason(e.target.value)}
-              />
-            </Field>
-          </Editor>
-        )}
+      {selected && <Drawer modal={Boolean(edit.decision)}
+        title={edit.decision ? decisions[edit.decision] + " excusal?" : "Request details"} onClose={close}>
+        <div className="fields">
+          <RequestDetails request={selected} cadet={who(selected)} event={events.get(selected.eventId)} />
+          {(error || editorError) && <p className="error" role="alert">{error || editorError}</p>}
+          {stale && <p role="alert">This request changed. Reopen it to review the latest decision.</p>}
+          {canDecide(selected) && !stale && <Field label="Decision note (optional)">
+            <textarea maxLength={4000} value={reason} onChange={e => setReason(e.target.value)} />
+          </Field>}
+        </div>
+        {canDecide(selected) && !stale && <footer className="actions">
+          {edit.decision ? <>
+            <button disabled={busy} onClick={close}>Cancel</button>
+            <button className="primary" disabled={busy}
+              onClick={() => onDecide(payload(edit,reason),close)}>Confirm decision</button>
+          </> : <DecisionButtons request={selected} busy={busy} onPick={d => pick(selected,d,reason)} />}
+        </footer>}
+      </Drawer>}
     </>
   );
+}
+
+function payload(target, note) {
+  return {requestId:target.requestId, expectedVersion:target.version, decision:target.decision,
+    reason:note.trim() || target.decision + " in the Excusals queue."};
 }
 
 function RequestDetails({request, cadet, event}) {

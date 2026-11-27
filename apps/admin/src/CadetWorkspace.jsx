@@ -490,11 +490,11 @@ export default function CadetWorkspace({ session }) {
   const name = [state?.profile?.firstName, state?.profile?.lastName].filter(Boolean).join(" ");
   const role = state?.squadron ? `${state.squadron} Squadron Commander`
     : state?.flightCommander && flight ? `${flight} Flight Commander` : "Cadet";
-  const disabled =
-    busy ||
+  const readOnly =
     (preview && state?.readOnly !== false) ||
     !state?.writable ||
     (!state?.linked && !state?.registration);
+  const disabled = busy || readOnly;
   const flags = (state?.actions || []).filter(a => a.kind === "flag" && a.personId === state.profile?.personId);
   const queue = state?.queue || [];
   const list = state?.squadron && {
@@ -564,8 +564,9 @@ export default function CadetWorkspace({ session }) {
         <Excusals
           list={list}
           busy={busy}
-          readOnly={disabled}
-          propose={(_, p, done) =>
+          readOnly={readOnly}
+          error={error}
+          onDecide={(p, done) =>
             save(
               "decide",
               {

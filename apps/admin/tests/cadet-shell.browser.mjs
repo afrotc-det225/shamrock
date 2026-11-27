@@ -14,12 +14,16 @@ const scenarios = [
   { role: "Flight", tabs: ["My Flight", ...requests] },
   { role: "Squadron", tabs: ["Excusals", ...requests.slice(0,-1),"Attendance reviews","My profile"] },
   { role: "Registration", tabs: [] },
+  { role: "View as Squadron", tabs: ["Excusals", ...requests.slice(0,-1),"Attendance reviews","My profile"] },
   { role: "View as", tabs: requests },
 ];
 try {
   for (const width of [1440, 390]) {
     for (const { role, tabs } of scenarios) {
-      const preview = role === "View as";
+      const preview = role.startsWith("View as");
+      const squadron = role === "Squadron" ? "Blue" : role === "View as Squadron" ? "Gold" : null;
+      const flight = squadron === "Gold" ? "Delta" : "Alpha";
+      let decision;
       const page = await browser.newPage({ viewport: { width, height: 850 } });
       const calls = [], errors = [], flags = [];
       page.on("pageerror", err => errors.push(err.message));
@@ -31,7 +35,12 @@ try {
         } });
         if(path==="/api/cadet" && route.request().method()==="POST"){
           const body=route.request().postDataJSON();
-          flags.push((preview ? body.action : body).fields.eventId);
+          const action = preview ? body.action : body;
+          if (action.kind === "decide") {
+            assert.equal(decision,undefined);
+            if (preview) assert.equal(body.entryAuditId,"entry");
+            decision = action.fields;
+          } else flags.push(action.fields.eventId);
           return route.fulfill({json:{ok:true}});
         }
         if (path !== "/api/cadet" || route.request().method() !== "GET") return route.abort();
@@ -40,10 +49,12 @@ try {
           section,attendance:section==="attendance"?[{eventId:"llab",label:"TW-1 LLAB",eventType:"llab",version:1,baseVersion:0,code:"A"},{eventId:"lab2",label:"TW-2 LLAB",eventType:"llab",version:2,baseVersion:0,code:"A"}]:[],
           linked: true, writable: true, readOnly:false, registration: role === "Registration",
           profile: role === "Registration" ? null : {personId:"one", firstName:"Sample", lastName:"Cadet", flightId:"alpha",afsc:"13N – Nuclear and Missile Operations ".repeat(6).trim(),photoLink:"https://drive.google.com/file/d/fictional-photo/view"},
-          flights: [{ flightId:"alpha", label:"Alpha" }], events: [], actions: [], queue: [],
+          flights: [{ flightId:"alpha", label:"Alpha" }], events: [], actions: [], queue: squadron ? [{requestId:"example",version:3,personId:"cadet",eventId:"llab",event:"TW-2 LLAB",
+            personDisplayName:"Test Requester",requestedOutcome:"E",status:decision?.decision || "Submitted",
+            reason:"Fixture scheduling conflict",flightId:"test-flight",capturedFlightLabel:flight,capturedSquadronLabel:squadron}] : [],
           requests: [], roster: [], reportEvents:[{eventId:"lab16",eventType:"llab",label:"TW-16 LLAB"},{eventId:"sec16",eventType:"secondary",label:"TW-16 Secondary"}],
           reportRoster:section==="report:lab16"?[["AS100","Able","Tom"],["AS400","Zed","Ron"],["AS400","Able","Zoe"],["AS400","Able","Amy"]].map(([asYear,lastName,firstName],i)=>({asYear,lastName,firstName,personId:"fixture"+i,flightId:"alpha",version:1})):[], flightCommander:role === "Flight",
-          squadron: role === "Squadron" ? "Blue" : null,
+          squadron,
         } });
       });
       await page.route("https://drive.google.com/**", route => route.abort());
@@ -57,6 +68,25 @@ try {
       const heading = title => page.getByRole("heading", {name:title, level:1, exact:true});
       await heading(tabs[0] || "Create profile").waitFor();
       assert.deepEqual(await nav.getByRole("link").allTextContents(), tabs);
+      if (squadron) {
+        const row = page.locator(".excusal-queue tbody tr");
+        await row.getByText(flight,{exact:true}).waitFor();
+        const actions = row.getByRole("button");
+        for (const verb of ["Approve","Deny","Withdraw","Supersede"]) {
+          await actions.filter({hasText:new RegExp("^"+verb+"$")}).click();
+          const confirm = page.getByRole("dialog",{name:verb+" excusal?"});
+          await confirm.getByText("Test Requester",{exact:true}).waitFor();
+          assert.equal(decision,undefined);
+          await confirm.getByRole("button",{name:"Cancel"}).click();
+        }
+        await row.getByRole("button",{name:"Approve",exact:true}).click();
+        const confirm = page.getByRole("dialog",{name:"Approve excusal?"});
+        if (preview) await confirm.getByLabel("Decision note (optional)").fill("Reviewed conflict");
+        await confirm.getByRole("button",{name:"Confirm decision"}).click();
+        await page.getByText("0 pending",{exact:true}).waitFor();
+        assert.deepEqual(decision,{requestId:"example",version:3,decision:"Approved",
+          reason:preview ? "Reviewed conflict" : "Approved in the Excusals queue."});
+      }
       if (role === "Cadet" && process.env.SHAMROCK_SCREENSHOT_DIR) {
         await page.screenshot({path:`${process.env.SHAMROCK_SCREENSHOT_DIR}/cadet-${width}.png`});
       }
@@ -125,7 +155,7 @@ try {
       });
       assert(layout.fits && (width === 390 ? layout.stacked : layout.alongside), JSON.stringify(layout));
       assert.deepEqual(errors, []);
-      assert.deepEqual(calls, ["POST /api/session", "GET /api/cadet",...(tabs.length?["GET /api/cadet","POST /api/cadet","POST /api/cadet","GET /api/cadet","GET /api/cadet","GET /api/cadet"]:[])]);
+      assert.deepEqual(calls, ["POST /api/session", "GET /api/cadet",...(squadron?["POST /api/cadet","GET /api/cadet"]:[]),...(tabs.length?["GET /api/cadet","POST /api/cadet","POST /api/cadet","GET /api/cadet","GET /api/cadet","GET /api/cadet"]:[])]);
       await page.close();
     }
   }

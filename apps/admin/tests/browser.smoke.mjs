@@ -239,13 +239,19 @@ try {
   );
   await navigate("Excusals");
   await page.getByText("1 pending", {exact:true}).waitFor();
-  await page.getByRole("button", { name: "Review", exact: true }).click();
-  await page.getByLabel("Decision", { exact: true }).selectOption("Denied");
-  await page
-    .getByLabel("Reason for this change")
-    .fill("Fictional browser rehearsal");
-  await apply();
-  assert.equal((await service.snapshot()).requests[0].status, "Denied");
+  const deny = page.getByRole("button", {name:"Deny",exact:true});
+  await deny.click();
+  const review = page.getByRole("dialog",{name:"Review change"});
+  await review.getByText("Denied",{exact:true}).waitFor();
+  assert.equal((await service.snapshot()).requests[0].status,"Submitted");
+  await review.getByRole("button",{name:"Cancel change"}).click();
+  await review.waitFor({state:"detached"});
+  await deny.click();
+  await review.getByRole("button",{name:"Apply change"}).click();
+  await review.waitFor({state:"detached"});
+  const decided = (await service.snapshot()).requests[0];
+  assert.equal(decided.status, "Denied");
+  assert.equal(decided.decisionReason,"Denied in the Excusals queue.");
   await page.getByRole("link", { name: "Attendance", exact: true }).click();
   const keyTool=page.getByRole("button",{name:"Attendance code key"});
   const matrixTop=await tableTop();
@@ -441,12 +447,12 @@ try {
   );
   await navigate("Excusals");
   await page.getByLabel("Decision status").selectOption("");
-  await page.getByRole("button",{name:"Details",exact:true}).click();
-  await page
+  await page.getByRole("button",{name:/^Request details for /}).click();
+  await page.getByRole("dialog")
     .getByText("Fictional scheduling conflict.", { exact: true })
     .waitFor();
   assert.equal(
-    await page.getByRole("button", { name: "Review", exact: true }).count(),
+    await page.getByRole("button", { name: "Approve", exact: true }).count(),
     0,
   );
   await page.screenshot({ path: "/tmp/shamrock-scoped-mobile.png" });
