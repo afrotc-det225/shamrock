@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useRef } from "react";
-import { api, logout } from "./api";
+import { compareCadetsForDisplay } from "../../../packages/domain/src/cadet-display-order";
+import { api, logout, eventTypes } from "./api";
 import { Empty, Field, Heading, Select, Status, Table } from "./components";
 import Excusals from "./Excusals";
 import {pageFromUrl, writePageUrl} from "./page-url";
@@ -195,6 +196,20 @@ function Profile({ state, save, disabled }) {
     </form>
   );
 }
+function EventPicker({events, label, choose, type, setType, eventId, typeLabel="Event type"}) {
+  return <>
+    <Select label={typeLabel} value={type} onChange={value=>{setType(value);choose("");}} required
+      options={[{value:"",label:"Select an event type"},...Object.entries(eventTypes).filter(([key])=>events.some(e=>e.eventType===key)).map(([value,label])=>({value,label}))]}/>
+    <Field label={label}><select name="event" value={eventId} onChange={e=>choose(e.target.value)} required disabled={!type}>
+      <option value="">Select an event</option>
+      {events.filter(e=>e.eventType===type).map(e=><option key={e.eventId} value={e.eventId}>{e.label}</option>)}
+    </select></Field>
+  </>;
+}
+function ExcusalEvent({events,number}) {
+  const [type,setType]=useState(""), [eventId,choose]=useState("");
+  return <EventPicker events={events} label={number?"Event "+number:"Event"} typeLabel={number?"Event type "+number:"Event type"} {...{type,setType,eventId,choose}}/>;
+}
 function Submission({ state, mode, save, disabled }) {
   const [count, setCount] = useState(1);
   return (
@@ -225,18 +240,7 @@ function Submission({ state, mode, save, disabled }) {
       >
         <fieldset disabled={disabled}>
           {Array.from({ length: count }, (_, i) => (
-            <Field key={i} label={count === 1 ? "Event" : `Event ${i + 1}`}>
-              <select name="event" required defaultValue="">
-                <option value="" disabled>
-                  Select an event
-                </option>
-                {state.events.map((e) => (
-                  <option value={e.eventId} key={e.eventId}>
-                    {e.label}
-                  </option>
-                ))}
-              </select>
-            </Field>
+            <ExcusalEvent key={i} number={count===1?null:i+1} events={state.events}/>
           ))}
           {mode === "excusal" && count < Math.min(state.events.length, 25) && (
             <button type="button" onClick={() => setCount(count + 1)}>
@@ -296,102 +300,50 @@ function AttendanceReviews({state,save,disabled}) {
     {["Approved","Denied"].map(decision=><button key={decision} disabled={disabled} onClick={()=>save("reviewFlag",{parentId:a.actionId,decision})}>{decision==="Approved"?"Approve correction":"Deny request"}</button>)}</section>) : <Empty>No attendance corrections awaiting Squadron review.</Empty>;
 }
 function FlightReport({ state, save, disabled }) {
-  const [eventId, select] = useState(""),
-    [present, setPresent] = useState([]),
-    [complete, setComplete] = useState(false);
-  const events = [
-    ...new Map(state.reportRoster.map((r) => [r.eventId, r])).values(),
-  ];
-  const eligible = new Set(
-    state.reportRoster
-      .filter((r) => r.eventId === eventId)
-      .map((r) => r.personId),
-  );
-  const roster = state.roster.filter((r) => eligible.has(r.personId));
-  const flight = state.flights.find(
-    (f) => f.flightId === state.profile.flightId,
-  );
-  return (
-    <section>
-      <p>{flight?.label} Flight</p>
-      {!events.length && <Empty>No attendance events are available for this Flight.</Empty>}
-      <form
-        className="cadet-form"
-        onSubmit={(e) => {
-          e.preventDefault();
-          save(
-            "report",
-            {
-              eventId,
-              version: events.find((v) => v.eventId === eventId).version,
-              rosterVersion: flight.rosterVersion,
-              present,
-              completeness: complete ? "complete" : "partial",
-            },
-            () => {
-              select("");
-              setPresent([]);
-              setComplete(false);
-            },
-          );
-        }}
-      >
-        <Select
-          label="Attendance event"
-          value={eventId}
-          onChange={(id) => {
-            select(id);
-            setPresent([]);
-            setComplete(false);
-          }}
-          required
-          options={[
-            { value: "", label: "Select an event" },
-            ...events.map((r) => ({ value: r.eventId, label: r.label })),
-          ]}
-        />
-        {eventId && (
-          <>
-            <fieldset>
-              <legend>Present</legend>
-              {roster.map((r) => (
-                <label key={r.personId}>
-                  <input
-                    type="checkbox"
-                    checked={present.includes(r.personId)}
-                    onChange={(e) =>
-                      setPresent(
-                        e.target.checked
-                          ? [...present, r.personId]
-                          : present.filter((p) => p !== r.personId),
-                      )
-                    }
-                  />
-                  {r.name}
-                </label>
-              ))}
-            </fieldset>
-            {roster.length === state.roster.length && (
-              <label>
-                <input
-                  type="checkbox"
-                  checked={complete}
-                  onChange={(e) => setComplete(e.target.checked)}
-                />
-                Complete Flight report
-              </label>
-            )}
-            <button
-              className="primary"
-              disabled={disabled || (!present.length && !complete)}
-            >
-              Submit attendance
-            </button>
-          </>
-        )}
-      </form>
-    </section>
-  );
+  const [type,setType]=useState(""), [eventId,setEvent]=useState("");
+  const [details,setDetails]=useState(null), [error,setError]=useState(""), [attempt,retry]=useState(0);
+  const [present,setPresent]=useState([]), [complete,setComplete]=useState(false);
+  const events=state.reportEvents || [];
+  const event=events.find(e=>e.eventId===eventId);
+  function choose(id){
+    setEvent(id);setDetails(null);setError("");setPresent([]);setComplete(false);
+  }
+  useEffect(()=>{
+    if(!eventId)return;
+    const controller=new AbortController();
+    api("/cadet?section="+encodeURIComponent("report:"+eventId),undefined,{signal:controller.signal})
+      .then(v=>{if(!controller.signal.aborted)setDetails(v);})
+      .catch(e=>{if(!controller.signal.aborted)setError(e.message);});
+    return ()=>controller.abort();
+  },[eventId,attempt]);
+  const roster=[...(details?.reportRoster || [])].sort(compareCadetsForDisplay);
+  const groups=new Map();
+  for(const cadet of roster){
+    const year=cadet.asYear || "Unassigned AS year";
+    if(!groups.has(year))groups.set(year,[]);
+    groups.get(year).push(cadet);
+  }
+  const campus=roster[0]?.campus;
+  const flight=state.flights.find(f=>f.flightId===state.profile.flightId)?.label;
+  const crossFlight=type==="secondary" || (type==="mando" && !!campus);
+  return <section><form className="cadet-form" onSubmit={e=>{
+    e.preventDefault();
+    if(!event || !roster.length)return;
+    save("report",{eventId,version:roster[0].version,rosterVersions:Object.fromEntries(details.flights.map(f=>[f.flightId,f.rosterVersion])),
+      present,completeness:complete?"complete":"partial"},()=>choose(""));
+  }}>
+    <EventPicker label="Attendance event" {...{events,type,setType,eventId,choose}}/>
+    {event && !details && !error && <p role="status">Loading event roster…</p>}
+    {error && <p role="alert">{error} <button type="button" onClick={()=>{setError("");retry(n=>n+1);}}>Retry</button></p>}
+    {event && details && (roster.length ? <>
+      <h2>{type==="secondary"?"All Flights":type==="mando" && campus ? campus+" · All Flights" : flight+" Flight"}</h2>
+      {Array.from(groups,([year,people])=><fieldset key={year}><legend>{year}</legend>{people.map(r=><label key={r.personId}>
+        <input type="checkbox" checked={present.includes(r.personId)} onChange={e=>setPresent(e.target.checked?[...present,r.personId]:present.filter(p=>p!==r.personId))}/>
+        {r.lastName}, {r.firstName}</label>)}</fieldset>)}
+      {!crossFlight && details.ownFlightCount===roster.length && <label><input type="checkbox" checked={complete} onChange={e=>setComplete(e.target.checked)}/> Complete Flight report</label>}
+      <button className="primary" disabled={disabled || (!present.length && !complete)}>Submit attendance</button>
+    </> : <Empty>No eligible cadets for this event.</Empty>)}
+  </form></section>;
 }
 function Flight({ state, save, disabled }) {
   return (

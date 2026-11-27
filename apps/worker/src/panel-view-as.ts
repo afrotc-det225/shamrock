@@ -1,4 +1,4 @@
-import { cadetRoute, eligibleSchoolSql, readCadetWorkspace } from "./cadet-workspace.js";
+import { cadetRoute, reportSection, eligibleSchoolSql, readCadetWorkspace } from "./cadet-workspace.js";
 import type {WingTableCache} from './panel-cache.js';
 import {browsePanel, profiles, type Profile} from "./panel-browse.js";
 import { PANEL_VIEW_AS_PAGE_MAX_BYTES, type PanelViewAsAuthorization, type PanelViewAsKind, type PanelViewAsPage, type PanelViewAsStatus } from '../../../packages/domain/src/panel-view-as.js';
@@ -189,7 +189,7 @@ export async function previewCadetWorkspace<E extends Env>(env:E, input:unknown,
   const req=identity(env,input);
   const action = Object.hasOwn(req,'action');
   const keys = 'entryAuditId,environment,generation,principalId,'+(Object.hasOwn(req,'section')?'section,':'')+'targetPersonId';
-  if(req.section!==undefined && !['report','attendance'].includes(String(req.section)))return fail(400,'INVALID_VIEW_AS_REQUEST');
+  if(req.section!==undefined && !reportSection(req.section) && !['report','attendance'].includes(String(req.section)))return fail(400,'INVALID_VIEW_AS_REQUEST');
   if(Object.keys(req).sort().join(',')!==(action?'action,'+keys:keys)
     || !id(req.entryAuditId) || !id(req.targetPersonId)) return fail(400,'INVALID_VIEW_AS_REQUEST');
   const {query,binding}=await readBinding(env,req.principalId,req.targetPersonId,req.entryAuditId);

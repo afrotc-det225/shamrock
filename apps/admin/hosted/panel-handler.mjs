@@ -98,7 +98,7 @@ export default {
       }
       if (url.pathname === "/api/cadet" && ["GET","POST"].includes(request.method)) {
         const section=url.searchParams.get("section");
-        if(section!==null && !["report","attendance"].includes(section))throw new PanelError("INVALID_REQUEST","Unknown workspace section.");
+        if(section!==null && !/^report:[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/.test(section) && !["report","attendance"].includes(section))throw new PanelError("INVALID_REQUEST","Unknown workspace section.");
         if (preview) {
           if (env.VIEW_AS_ENABLED !== "1" || preview.status !== "ready" || (request.method === "POST" && body?.entryAuditId !== preview.entry_audit_id)) throw new PanelError("VIEW_AS_READ_ONLY","Exit View as before making changes.",403);
           return secure(json(await backend.send("/v1/cadet/preview",{...backend.identity(),targetPersonId:preview.person_id,entryAuditId:preview.entry_audit_id,...(section?{section}:{}),...(request.method==="POST"?{action:body.action}:{})})));

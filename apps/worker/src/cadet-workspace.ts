@@ -50,6 +50,24 @@ export const eligibleSchoolSql =
   schoolDomains.map((x) => "'" + x + "'").join(",") +
   ")";
 
+export const reportSection = (value:unknown) => typeof value==="string" && /^report:[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/.test(value);
+// Match the Directory school aliases used by the operational attendance Form.
+const campus = (alias:string) => `CASE WHEN lower(${alias}.university) LIKE '%trine%' THEN 'Trine'
+  WHEN lower(${alias}.university) LIKE '%valpo%' OR lower(${alias}.university) LIKE '%valpar%' THEN 'Valparaiso' ELSE '' END`;
+const reportMembers = `FROM directory_profiles reporter CROSS JOIN event_details d
+  JOIN event_units eu ON eu.event_id=d.event_id JOIN memberships m ON m.unit_id=eu.unit_id AND m.active=1
+  JOIN directory_profiles candidate ON candidate.person_id=m.person_id AND candidate.flight_id=m.unit_id
+  WHERE reporter.person_id=? AND reporter.flight_path_status NOT IN ('Inactive','Dropped','Commissioned')
+  AND EXISTS(SELECT 1 FROM memberships own WHERE own.person_id=reporter.person_id AND own.unit_id=reporter.flight_id AND own.active=1)
+  AND d.event_id=? AND ${current}
+  AND EXISTS(SELECT 1 FROM events e WHERE e.event_id=d.event_id AND e.active=1)
+  AND candidate.flight_path_status NOT IN ('Inactive','Dropped','Commissioned')
+  AND (d.event_type='secondary' OR CASE WHEN d.event_type='mando' THEN
+    ${campus("reporter")}=${campus("candidate")} AND (${campus("reporter")}<>'' OR m.unit_id=reporter.flight_id)
+    ELSE m.unit_id=reporter.flight_id END)
+  AND (NOT EXISTS(SELECT 1 FROM event_roster_versions v WHERE v.event_id=d.event_id AND v.version=d.version)
+    OR EXISTS(SELECT 1 FROM event_roster_members rm WHERE rm.event_id=d.event_id AND rm.version=d.version AND rm.person_id=m.person_id AND rm.flight_id=m.unit_id))`;
+
 export async function readCadetWorkspace(
   env: CadetEnv,
   email: string,
@@ -148,7 +166,8 @@ export async function readCadetWorkspace(
     FROM excusal_records r JOIN event_details d ON d.event_id=r.event_id JOIN events e ON e.event_id=r.event_id
     JOIN people p ON p.person_id=r.person_id LEFT JOIN excusal_request_scopes sc ON sc.request_id=r.request_id
     WHERE ${predicate} AND ${current} AND ${adopted} ORDER BY r.submitted_at,r.request_id`;
-  const data = [
+  const reporting=section==="report" || reportSection(section);
+  const data = reporting ? [] : [
     db.prepare(requests("r.person_id=?")).bind(profile.personId),
     db
       .prepare(
@@ -160,10 +179,10 @@ export async function readCadetWorkspace(
       )
       .bind(profile.flightId, profile.personId),
   ];
-  if (squadronCommander)
+  if (!reporting && squadronCommander)
     data.push(db.prepare(requests("sc.squadron_id=?")).bind(owner.squadron_id));
   const actionsIndex = data.length;
-  data.push(
+  if(!reporting)data.push(
     db
       .prepare(
         `SELECT a.action_id AS actionId,a.kind,a.detail,a.accepted_at AS acceptedAt,
@@ -176,7 +195,8 @@ export async function readCadetWorkspace(
       )
       .bind(profile.personId, flightCommander ? profile.flightId : null, squadronCommander ? owner.squadron_id : null),
   );
-  if (flightCommander || section==="report")
+  const ownIndex=data.length;
+  if (!reporting && flightCommander)
     data.push(
       db
         .prepare(
@@ -186,20 +206,17 @@ export async function readCadetWorkspace(
         )
         .bind(profile.flightId),
     );
+  if(reportSection(section))data.push(db.prepare("SELECT COUNT(*) AS n FROM memberships WHERE unit_id=? AND active=1").bind(profile.flightId));
   const reportIndex = data.length;
-  if (section==="report")
-    data.push(
-      db
-        .prepare(
-          `SELECT d.event_id AS eventId,e.label,d.version,m.person_id AS personId FROM event_details d JOIN events e ON e.event_id=d.event_id
-    JOIN event_units eu ON eu.event_id=d.event_id AND eu.unit_id=?
-    JOIN memberships m ON m.unit_id=eu.unit_id AND m.active=1 WHERE ${current} AND (
-    NOT EXISTS(SELECT 1 FROM event_roster_versions v WHERE v.event_id=d.event_id AND v.version=d.version)
-    OR EXISTS(SELECT 1 FROM event_roster_members rm WHERE rm.event_id=d.event_id AND rm.version=d.version AND rm.person_id=m.person_id AND rm.flight_id=m.unit_id))
-    ORDER BY d.display_order,d.event_id,m.person_id`,
-        )
-        .bind(profile.flightId),
-    );
+  if(section==="report")data.push(db.prepare(`SELECT d.event_id AS eventId,e.label,d.event_type AS eventType,d.version
+    FROM event_details d JOIN events e USING(event_id) JOIN directory_profiles reporter ON reporter.person_id=?
+    WHERE ${current} AND e.active=1 AND EXISTS(SELECT 1 FROM event_units eu WHERE eu.event_id=d.event_id AND
+      (eu.unit_id=reporter.flight_id OR d.event_type='secondary' OR (d.event_type='mando' AND ${campus("reporter")}<>'')))
+    ORDER BY d.display_order,d.event_id`).bind(profile.personId));
+  if(reportSection(section))data.push(db.prepare(`SELECT m.person_id AS personId,m.unit_id AS flightId,
+    candidate.first_name AS firstName,candidate.last_name AS lastName,candidate.as_year AS asYear,
+    d.event_id AS eventId,d.event_type AS eventType,d.version,${campus("reporter")} AS campus ${reportMembers}`)
+    .bind(profile.personId,String(section).slice(7)));
   const factsIndex=data.length;
   if (section==="attendance") {
     for (const [alias, fact] of [["o",cadetAttendanceFacts.observations],["c",cadetAttendanceFacts.corrections],["b",cadetAttendanceFacts.baselines]] as const) {
@@ -232,16 +249,18 @@ export async function readCadetWorkspace(
         obs as unknown as ReportingObservation[],cor as unknown as ReportingCorrection[],requests as unknown as ReportingRequest[],true,[],base as unknown as ReportingLegacyBaseline);
       return {...event,needsReview:cell.needsReview,code:cell.effectiveCode,baseVersion:Number(base?.baselineRevision||0)+Math.max(0,...[...obs,...cor,...requests].map(r=>Number(r.order)))};
     }):[],
-    reportRoster: section==="report" ? all[reportIndex] : [],
-    actions: all[actionsIndex].map(a=>{
+    reportEvents:section==="report" ? all[reportIndex] : [],
+    reportRoster:reportSection(section) ? all[reportIndex] : [],
+    actions: reporting ? [] : all[actionsIndex].map(a=>{
       let change=null;
       if(a.kind==="flag" && String(a.actionId).startsWith("cell."))try {const parsed=JSON.parse(String(a.detail));if(parsed?.type==="cell-review")change=parsed;}catch{}
       return {...a,change,detail:change?.reason??a.detail} as Row;
     }),
-    roster: flightCommander || section==="report" ? all[actionsIndex + 1] : [],
-    requests: all[0],
-    events: all[1],
-    queue: squadronCommander ? all[2] : [],
+    roster: !reporting && flightCommander ? all[ownIndex] : [],
+    ownFlightCount:reportSection(section) ? Number(all[ownIndex][0].n) : null,
+    requests: reporting ? [] : all[0],
+    events: reporting ? [] : all[1],
+    queue: !reporting && squadronCommander ? all[2] : [],
   };
 }
 
@@ -266,7 +285,7 @@ export async function cadetRoute(
   input: unknown,
   submit: (
     c: Command,
-    guard: { memberReport?:true; sql: string; values: (string | number | null)[] },
+    guard: { reportBatch?:D1PreparedStatement[]; memberReport?:true; sql: string; values: (string | number | null)[] },
   ) => Promise<unknown>,
   viewEntry?: string,
 ) {
@@ -302,8 +321,8 @@ export async function cadetRoute(
         "revision",
       )
     : null;
-  const section=object(a) && a.kind==="report" ? "report" : input.section;
-  if(section!=null && !["attendance","report"].includes(String(section))) throw bad();
+  const section=object(a) && a.kind==="report" && object(a.fields) ? "report:"+a.fields.eventId : input.section;
+  if(section!=null && !reportSection(section) && !["attendance","report"].includes(String(section))) throw bad();
   const state = await readCadetWorkspace(env, input.email, input.principalId, section);
   if (
     !state.linked &&
@@ -424,41 +443,42 @@ export async function cadetRoute(
       !["complete", "partial"].includes(String(f.completeness))
     )
       throw denied();
-    const roster =
-      state.reportRoster
-        ?.filter((r) => r.eventId === f.eventId && r.version === f.version)
-        .map((r) => String(r.personId)) || [];
-    if (
-      !roster.length ||
-      f.present.some((id) => typeof id !== "string" || !roster.includes(id))
-    )
-      throw bad();
-    const flight = state.flights.find((r) => r.flightId === p.flightId);
-    if (flight?.rosterVersion !== f.rosterVersion)
-      throw new HttpError(409, "ROSTER_CHANGED", "Reload the Flight roster.");
-    if (f.completeness === "complete" && state.roster?.length !== roster.length)
-      throw new HttpError(
-        409,
-        "PARTIAL_ROSTER",
-        "Submit a partial report for this event roster.",
-      );
-    return submit(
-      parseCommand({
-        ...envelope,
-        operation: "attendance.report",
-        payload: {
-          reportId: "report." + a.id,
-          eventId: f.eventId,
-          expectedEventVersion: f.version,
-          unitId: p.flightId,
-          rosterVersion: f.rosterVersion,
-          completeness: f.completeness,
-          coveredPersonIds: f.completeness === "complete" ? roster : f.present,
-          presentPersonIds: f.present,
-        },
-      }),
-      {...permissionGuard, memberReport:true},
-    );
+    const roster=state.reportRoster.filter(r=>r.version===f.version);
+    const present=f.present as unknown[];
+    const selected=roster.filter(r=>present.includes(r.personId));
+    if(!roster.length || selected.length!==present.length || (!selected.length && f.completeness!=="complete"))throw bad();
+    const ownFlight=roster.every(r=>r.flightId===p.flightId);
+    const partialOnly=roster[0].eventType==="secondary" || (roster[0].eventType==="mando" && !!roster[0].campus);
+    const complete=f.completeness==="complete";
+    if(complete && (partialOnly || !ownFlight || state.ownFlightCount!==roster.length))
+      throw new HttpError(409,"PARTIAL_ROSTER","Submit a partial report for this event roster.");
+    const covered=complete ? roster : selected;
+    const flightIds=[...new Set(covered.map(r=>String(r.flightId)))].sort();
+    const supplied=object(f.rosterVersions) ? f.rosterVersions : {};
+    // Bind retries to the complete selection, even when it spans Flight ledgers.
+    const signature=Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256",new TextEncoder().encode(
+      JSON.stringify([f.eventId,f.version,f.completeness,[...present].sort()])))),n=>n.toString(16).padStart(2,"0")).join("");
+    const statements:D1PreparedStatement[]=[];
+    const receipts=[];
+    for(const [i,flightId] of flightIds.entries()){
+      const version=state.flights.find(r=>r.flightId===flightId)?.rosterVersion;
+      if(version!==(supplied[flightId] ?? (flightId===p.flightId ? f.rosterVersion : null)))
+        throw new HttpError(409,"ROSTER_CHANGED","Reload the event roster before submitting.");
+      const ids=covered.filter(r=>r.flightId===flightId).map(r=>String(r.personId)).sort();
+      const childId=i===0 ? commandId : commandId+"."+i;
+      const guard={memberReport:true as const,reportBatch:statements,
+        sql:permissionGuard.sql+` AND (SELECT COUNT(*) ${reportMembers} AND m.unit_id=? AND m.person_id IN (SELECT value FROM json_each(?)))=?`,
+        values:[...permissionGuard.values,p.personId,String(f.eventId),flightId,JSON.stringify(ids),ids.length]};
+      receipts.push(await submit(parseCommand({...envelope, commandId:childId,
+        source:{...envelope.source,submissionId:!f.rosterVersions && flightIds.length===1 ? childId : childId+"."+signature.slice(0,24)},operation:"attendance.report",
+        payload:{reportId:"report."+a.id+(i?"."+i:""),eventId:f.eventId,expectedEventVersion:f.version,unitId:flightId,
+          rosterVersion:version,completeness:f.completeness,coveredPersonIds:ids,presentPersonIds:ids.filter(id=>present.includes(id))}}),guard));
+    }
+    if(statements.length) {
+      try {await env.DB.batch(statements);}
+      catch(error){if(/constraint|command_preconditions/i.test(String(error)))throw new HttpError(409,"REPORT_CONFLICT","The roster or report changed. Reload and verify the saved attendance.");throw error;}
+    }
+    return receipts[0];
   }
   if (a.kind === "profile") {
     return acceptAdminCommand(env, {

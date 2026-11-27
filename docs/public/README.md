@@ -340,7 +340,7 @@ In **My profile**, cadets manage contact information, academics and career detai
 
 **My attendance** displays the cadet’s current-semester attendance matrix. Select a cell, choose **Review selected cell**, choose the requested code, and enter a reason. The recorded code stays in place until the Squadron Commander approves the request in **Attendance reviews**. Approval checks the original cell and roster versions and queues a spreadsheet refresh. Denial leaves the cell as recorded. Earlier free-text flags remain available for Flight review.
 
-**Submit attendance** is a separate cadet workspace tab. Any linked cadet may submit for eligible members of their own Flight, including secondary events. Use a partial report for a subset of the Flight.
+**Submit attendance** is a separate cadet workspace tab. Choose the event type first, then the event (for example, LLAB → TW-16 LLAB). Cadets are grouped by AS year in Directory order, then alphabetically by last and first name. LLAB and other events use the signed-in cadet’s Flight. For Mando PT, Trine and Valparaiso each report their own school across Flights. Other cadets report their Flight’s Mando group excluding Trine and Valparaiso. Secondary PT includes eligible cadets across Flights. Cross-Flight submissions record selected cadets as present under their respective Flights. Each event’s roster still determines eligibility.
 
 In **View as**, a permission manager can act in a linked cadet workspace and submit authorized attendance, excusal and directory edits. Receipts identify the effective account and reference the administrator’s audited entry. An account without a verified link can be inspected before first sign-in. The normal write pause applies.
 

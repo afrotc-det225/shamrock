@@ -36,7 +36,8 @@ try {
           linked: true, writable: true, readOnly:false, registration: role === "Registration",
           profile: role === "Registration" ? null : {personId:"one", firstName:"Sample", lastName:"Cadet", flightId:"alpha",afsc:"13N – Nuclear and Missile Operations ".repeat(6).trim(),photoLink:"https://drive.google.com/file/d/fictional-photo/view"},
           flights: [{ flightId:"alpha", label:"Alpha" }], events: [], actions: [], queue: [],
-          requests: [], roster: [], reportRoster: [], flightCommander:role === "Flight",
+          requests: [], roster: [], reportEvents:[{eventId:"lab16",eventType:"llab",label:"TW-16 LLAB"},{eventId:"sec16",eventType:"secondary",label:"TW-16 Secondary"}],
+          reportRoster:section==="report:lab16"?[["AS100","Able","Tom"],["AS400","Zed","Ron"],["AS400","Able","Zoe"],["AS400","Able","Amy"]].map(([asYear,lastName,firstName],i)=>({asYear,lastName,firstName,personId:"fixture"+i,flightId:"alpha",version:1})):[], flightCommander:role === "Flight",
           squadron: role === "Squadron" ? "Blue" : null,
         } });
       });
@@ -79,7 +80,19 @@ try {
         await page.getByLabel("Requested code").selectOption("P");
         assert(await page.getByRole("button",{name:"Request correction"}).isEnabled());
         await nav.getByRole("link",{name:"Submit attendance",exact:true}).click();
-        await page.getByLabel("Attendance event").waitFor();
+        const picker=page.getByLabel("Attendance event");
+        await picker.waitFor();assert(await picker.isDisabled());
+        await page.getByLabel("Event type",{exact:true}).selectOption("llab");
+        assert.deepEqual(await picker.locator("option").allTextContents(),["Select an event","TW-16 LLAB"]);
+        await picker.selectOption("lab16");
+        const seniors=page.getByRole("group",{name:"AS400",exact:true});
+        await seniors.waitFor();
+        assert.deepEqual(await seniors.locator("label").allTextContents(),["Able, Amy","Able, Zoe","Zed, Ron"]);
+        assert.deepEqual(await page.locator(".cadet-form legend").allTextContents(),["AS400","AS100"]);
+        await seniors.getByLabel("Able, Amy").check();
+        await page.getByLabel("Event type",{exact:true}).selectOption("secondary");
+        assert.equal(await picker.inputValue(),"");
+        assert.equal(await page.getByRole("checkbox").count(),0);
       } else {
         await page.getByRole("button", {name:"Continue"}).waitFor();
       }
@@ -92,7 +105,7 @@ try {
       });
       assert(layout.fits && (width === 390 ? layout.stacked : layout.alongside), JSON.stringify(layout));
       assert.deepEqual(errors, []);
-      assert.deepEqual(calls, ["POST /api/session", "GET /api/cadet",...(tabs.length?["GET /api/cadet","GET /api/cadet"]:[])]);
+      assert.deepEqual(calls, ["POST /api/session", "GET /api/cadet",...(tabs.length?["GET /api/cadet","GET /api/cadet","GET /api/cadet"]:[])]);
       await page.close();
     }
   }

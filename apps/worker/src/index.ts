@@ -171,7 +171,7 @@ function membershipGuard(ctx: Context): { sql: string; values: (string | number 
 
 function guardParts(env: Env, command: Command, ctx: Context, scope?: CommandScopeGuard): { sql: string; values: (string | number | null)[] } {
   const decision=command.operation==='excusal.decide',permission=scope?.memberReport && command.operation==='attendance.report'
-    ? {sql:'EXISTS(SELECT 1 FROM principals p JOIN memberships m USING(person_id) WHERE p.principal_id=? AND p.active=1 AND m.active=1 AND m.unit_id=?)',values:[command.actor.principalId,ctx.unitId]}
+    ? {sql:'EXISTS(SELECT 1 FROM principals p JOIN memberships m USING(person_id) WHERE p.principal_id=? AND p.active=1 AND m.active=1)',values:[command.actor.principalId]}
     : decision?excusalDecisionPermission(command.actor.principalId,command.payload.requestId,ctx.unitId):{sql:permissionSql,values:[command.actor.principalId,capability(command),ctx.unitId,submission(command)?ctx.personId:null]};
   return {
     sql: `${controlSql} AND ${permission.sql} AND ${sourceSql}
@@ -356,6 +356,7 @@ async function acceptCommand(env: Env, command: Command, panelScope?: CommandSco
       crypto.randomUUID(), command.commandId, now),
     statement(env.DB, 'DELETE FROM command_assertions WHERE command_id=?', command.commandId),
   ];
+  if(command.operation==="attendance.report" && panelScope?.reportBatch){panelScope.reportBatch.push(...batch);return receipt;}
   try { await env.DB.batch(batch); }
   catch (error) {
     // A daily limit also prevents the receipt read. Preserve the classification

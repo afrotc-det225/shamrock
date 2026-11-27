@@ -572,3 +572,39 @@ test('cadet cell requests preserve the mark until their Squadron Commander appro
   assert.equal((await call('blue',action('reviewFlag',{parentId:second.body.commandId,decision:'Denied'}))).status,200);
   assert.equal((await cell()).code,'P');
 });
+
+test('report picker scopes LLAB and other by Flight, Mando by campus, and Secondary by event eligibility across Flights',async t=>{
+  const f=await fixture(t);
+  await f.db.batch([
+    f.db.prepare("INSERT INTO adapter_sources VALUES('test','admin-staging-web',1)"),
+    f.db.prepare("UPDATE directory_profiles SET university='Trine University' WHERE person_id IN ('cadet','gold')"),
+    f.db.prepare("UPDATE directory_profiles SET university='Valpo' WHERE person_id='other'"),
+    f.db.prepare("UPDATE directory_profiles SET university='Valparaiso University' WHERE person_id='deputy'"),
+  ]);
+  const path='/v1/cadet/workspace';
+  const call=(principalId,extra)=>f.send({environment:'local',generation:1,principalId,email:principalId+'@example.invalid',...extra},path);
+  const roster=async(person)=>{const r=await call(person,{section:'report:event'});assert.equal(r.status,200,JSON.stringify(r));return r.body.reportRoster.map(row=>row.personId).sort();};
+  const flight=['blue','cadet','deputy','flight'];
+  assert.deepEqual(await roster('cadet'),flight);
+  const catalog=await call('cadet',{section:'report'});
+  assert(catalog.body.reportEvents.some(e=>e.eventType==='llab'));assert.deepEqual(catalog.body.reportRoster,[]);
+  const type=v=>f.db.prepare("UPDATE event_details SET event_type=? WHERE event_id='event'").bind(v).run();
+  await type('other');assert.deepEqual(await roster('cadet'),flight);
+  await type('mando');assert.deepEqual(await roster('cadet'),['cadet','gold']);assert.deepEqual(await roster('other'),['deputy','other']);
+  assert.deepEqual(await roster('blue'),['blue','flight']);
+  const report=(present)=>({id:crypto.randomUUID(),kind:'report',fields:{eventId:'event',version:2,rosterVersions:{alpha:1,bravo:1},completeness:'partial',present}});
+  assert.equal((await call('cadet',{action:report(['other'])})).status,400);
+  await type('secondary');assert.deepEqual(await roster('cadet'),['advisor','blue','cadet','deputy','flight','gold','other']);
+  const action=report(['cadet','other']);
+  const badVersion=structuredClone(action);badVersion.fields.rosterVersions.bravo=99;
+  assert.equal((await call('cadet',{action:badVersion})).status,409);
+  assert.equal(await f.db.prepare('SELECT COUNT(*) AS n FROM attendance_reports').first('n'),0);
+  await f.db.prepare("CREATE TRIGGER fail_second_flight BEFORE INSERT ON attendance_reports WHEN NEW.unit_id='bravo' BEGIN SELECT RAISE(ABORT,'fixture interrupted'); END").run();
+  assert((await call('cadet',{action})).status>=400);
+  assert.equal(await f.db.prepare('SELECT COUNT(*) AS n FROM attendance_reports').first('n'),0);
+  assert.equal(await f.db.prepare('SELECT COUNT(*) AS n FROM attendance_observations').first('n'),0);
+  await f.db.prepare('DROP TRIGGER fail_second_flight').run();
+  for(let i=0;i<2;i++){const result=await call('cadet',{action});assert.equal(result.status,200,JSON.stringify(result));}
+  assert.equal(await f.db.prepare('SELECT COUNT(*) AS n FROM attendance_reports').first('n'),2);
+  assert.equal(await f.db.prepare('SELECT COUNT(*) AS n FROM attendance_observations').first('n'),2);
+});
