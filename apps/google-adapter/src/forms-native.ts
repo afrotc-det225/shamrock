@@ -11,6 +11,7 @@ import {createPagedFrontendTransport} from './frontend-page-client.js';
 import { HOST_PROPERTIES, parseStagingHostConfig } from './staging-host.js';
 import { CONFIG_FILE_ID_PROPERTY } from './staging-config.js';
 import { consumeFormsRefresh, type FormsClaim, type FormsState } from './forms-refresh.js';
+import { resolvePublishedAnswers } from './forms-choice-labels.js';
 import { formReadFingerprint, formsCanonical, type ManagedFormBinding, type NativeFormRead } from './forms-publication.js';
 import { commandsFromManagedForm, directoryDraftFromManagedForm, directoryReviewCommand, verifyDirectoryPhoto,
   type DirectorySubmissionDraft, type FormIntakeBinding, type FormPrincipal, type VerifiedFormSubmission } from './forms-intake.js';
@@ -224,7 +225,9 @@ export function createNativeFormsRuntime(services: NativeFormsServices) {
   function interpretation(ctx: FormsContext, journal: IntakeState, binding: NativeFormsConfig['forms'][number], source: VerifiedFormSubmission) {
     assertNamedResponder(ctx.config.responderAccess?.[binding.key],ctx.owner,source.respondentEmail);
     const catalog = ctx.storage<FormsState>(ctx.config.stateFileId).load();
-    return { submission:source, binding:binding.intake, editions:ctx.catalogArchive ? ctx.catalogArchive.forSubmission(catalog,source,binding.intake) : catalog.editions,
+    const submission = resolvePublishedAnswers(source, catalog.choiceWindows?.[binding.key],
+      id => catalog.editions[id] ?? ctx.catalogArchive?.load(id));
+    return { submission, binding:binding.intake, editions:ctx.catalogArchive ? ctx.catalogArchive.forSubmission(catalog,submission,binding.intake) : catalog.editions,
       principals:principals(ctx,journal), config:ctx.adapter, signer:ctx.signer };
   }
   function reviewHashes(ctx: FormsContext, journal: IntakeState, entry: IntakeEntry, binding: NativeFormsConfig['forms'][number]) {

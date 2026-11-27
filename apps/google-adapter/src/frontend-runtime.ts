@@ -19,7 +19,7 @@ import { planFrontendPublication, assertFrontendPublicationPreconditions, verify
   type FrontendValidationExpectation, type FrontendValidationRead } from './frontend-publication.js';
 import type { FrontendSnapshot } from '../../../packages/domain/src/admin.js';
 import { buildCoherentFrontendReporting } from './frontend-history-summary.js';
-import { buildExcusalPublicationTables, planExcusalPublication, planDashboardPublication, verifyDashboardPublicationReadback, dashboardReadFingerprint,
+import { excusalRowFormats, buildExcusalPublicationTables, planExcusalPublication, planDashboardPublication, verifyDashboardPublicationReadback, dashboardReadFingerprint,
   type DashboardPublicationPlan, type DashboardPublicationRead } from './frontend-supplemental.js';
 import { SHAMROCK_MARK_FORMULA, type DashboardAction } from './frontend-dashboard.js';
 import { createPrivateCheckpoint } from './private-checkpoint.js';
@@ -1022,6 +1022,11 @@ export function createNativeFrontendRuntime(services: NativeFrontendServices,
           if (body.fields !== 'gridProperties.rowCount,gridProperties.columnCount' || !sheetIds.has(body.properties?.sheetId)
             || !natural(body.properties?.gridProperties?.rowCount) || body.properties.gridProperties.rowCount < 3 || body.properties.gridProperties.rowCount > 10002
             || !natural(body.properties?.gridProperties?.columnCount) || body.properties.gridProperties.columnCount < 1 || body.properties.gridProperties.columnCount > 512) fail('frontend_request', 'A retained frontend grid update is invalid.');
+        } else if (excusals && operation === 'repeatCell') {
+          if (!boundedRange(body.range)) fail('frontend_request', 'Unbound excusal format target.');
+          const queue = QUEUES.find(key => supplemental?.excusals.sheets[key].sheetId === body.range.sheetId);
+          if (!queue || !excusalRowFormats(body.range.sheetId, body.range.startRowIndex, body.range.endRowIndex, readExcusal(queue).headers)
+            .some(format => canonical(format) === canonical(request))) fail('frontend_request', 'Unexpected excusal format or field mask.');
         } else if (!excusals && (operation === 'repeatCell' || (operation === 'updateDimensionProperties' && body.fields === 'pixelSize'))) {
           assertNativeAttendanceLayoutRequest(request, config.main.sheets.attendance.sheetId);
         } else if (operation === 'updateDimensionProperties') {

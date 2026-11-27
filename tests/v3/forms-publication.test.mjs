@@ -162,3 +162,38 @@ test('empty Flight and crosstown profiles are absent from active attendance bran
  const f=fixture();f.binding.choices[1].source={kind:'profiles',profiles:[{key:'alpha',label:'Alpha',filter:{flightIds:['alpha']}},{key:'empty',label:'Empty Flight',filter:{flightIds:['missing']}}]};
  const p=plan(f);assert.equal(p.expectedAfter.items[1].questionItem.question.choiceQuestion.options.length,1);assert.match(option(p,1),/^Alpha /);
 });
+
+test('respondent labels resolve privately against the question and submission-time edition', async () => {
+  const {resolvePublishedAnswers} = await import('../../.build/v3/apps/google-adapter/src/forms-choice-labels.js');
+  for (const key of ['attendance', 'excusals', 'directory']) {
+    const f = fixture(key), old = plan(f);
+    const clean = planNativeFormPublication({...f, signer, plainLabels:true});
+    const question = f.binding.choices[0].questionId, label = option(clean, 0);
+    assert.doesNotMatch(label, /\[sr:/);
+    const submitted = submit(clean, {[question]:[label], plain:'Unmodified comment'});
+    const from = Date.parse(submitted.lastSubmittedTime);
+    const windows = [{from,editionId:clean.edition.editionId},{from:from + 1000,editionId:'later'}];
+    const resolve = s => resolvePublishedAnswers(s,windows,id => id === clean.edition.editionId ? clean.edition : undefined);
+    const answers = resolve(submitted).answers;
+    assert.equal(answers.plain,'Unmodified comment');
+    assert.deepEqual(submitted.answers[question],[label]);
+    const token = /\[sr:([a-f0-9]+)\]$/.exec(answers[question][0])[1];
+    assert.equal(clean.edition.references[token].questionId,question);
+    assert.throws(()=>resolve({...submitted,answers:{[question]:'unknown'}}));
+    const legacy = {...submitted,lastSubmittedTime:new Date(from-1).toISOString(),answers:{[question]:option(old,0)}};
+    assert.equal(resolve(legacy),legacy);
+  }
+});
+
+test('plain attendance answers generate the same command as the private choices on the original form', async () => {
+  const {resolvePublishedAnswers} = await import('../../.build/v3/apps/google-adapter/src/forms-choice-labels.js');
+  const f=fixture(), p=plan(f), labels={}, original={'q-0':option(p,0),'q-1':option(p,1),'q-2':[option(p,2)],complete:'complete'};
+  for (const item of p.expectedAfter.items) for (const o of item.questionItem?.question?.choiceQuestion?.options ?? []) {
+    const match=/^(.*) \[sr:([a-f0-9]{12})\]$/.exec(o.value);
+    if(match) labels[match[2]]=match[1];
+  }
+  const old=submit(p,original), plain=submit(p,{'q-0':'TW-1 LLAB','q-1':'Alpha','q-2':[option(p,2).split(' [sr:')[0]],complete:'complete'});
+  const restored=resolvePublishedAnswers(plain,[{from:Date.parse(old.lastSubmittedTime),editionId:p.edition.editionId,initialLabels:labels}],()=>p.edition);
+  const input={binding:{...f.binding,kind:'attendance',events:['q-0'],scope:['q-1'],present:['q-2'],completeness:'complete'},editions:{[p.edition.editionId]:p.edition},principals:principal,config,signer};
+  assert.deepEqual(commandsFromManagedForm({...input,submission:restored}),commandsFromManagedForm({...input,submission:old}));
+});

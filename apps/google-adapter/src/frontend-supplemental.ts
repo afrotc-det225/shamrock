@@ -127,11 +127,27 @@ export function buildExcusalPublicationTables(input: {
   return tables;
 }
 
+export function excusalRowFormats(sheetId: number, top: number, bottom: number, headers: string[]) {
+  const timestamp = headers.indexOf('timestamp');
+  if (top < 2 || bottom <= top || bottom > 502 || timestamp < 0 || headers.length !== EXCUSALS.length) fail('Invalid excusal table format range.');
+  return [
+    { repeatCell: { range: range(sheetId, top, bottom, 0, headers.length), cell: {}, fields: 'userEnteredFormat.backgroundColor,userEnteredFormat.backgroundColorStyle' } },
+    { repeatCell: { range: range(sheetId, top, bottom, timestamp, timestamp + 1), cell: { userEnteredFormat: { numberFormat: { type: 'DATE_TIME', pattern: 'mmm d, yyyy h:mm AM/PM' } } }, fields: 'userEnteredFormat.numberFormat' } },
+  ];
+}
+
 /** Same keyed preservation/version/seed/read-back contract as the Main tables. */
 export function planExcusalPublication(input: FrontendPublicationInput & { table: ExcusalPublicationTable }) {
   if (input.table.keyHeader !== 'request_id' || input.table.columns.filter(c => c.editable).some(c => c.header !== 'decision')) fail('Only the bound excusal decision may be edited.');
   for (const draft of input.drafts) if (draft.header !== 'decision' || !(EXCUSAL_DECISIONS as readonly unknown[]).includes(draft.value)) fail('A frozen decision draft must contain an explicit supported decision.');
-  return planFrontendPublication(input);
+  const plan = planFrontendPublication(input);
+  const top = Math.max(2, input.current.range.endRowIndex), bottom = plan.expectedAfter.range.endRowIndex;
+  if (plan.complete && bottom > top) {
+    const formats = excusalRowFormats(input.current.sheetId, top, bottom, plan.expectedAfter.headers);
+    plan.requests.push(...formats);
+    plan.batches.push(formats);
+  }
+  return plan;
 }
 
 export interface DashboardPublicationRead {
