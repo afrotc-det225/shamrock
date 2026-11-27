@@ -120,7 +120,7 @@ export async function answer(env, body, guide, send = fetch, readCharts) {
   route ??= await classify(env,history,send);
   const request={model,reasoning:{effort:"none"},max_output_tokens:700,input:JSON.stringify(history)};
   let maxBytes=16000, timeout=30000;
-  const area=route.type==="patch" ? patchSourceArea(question,route.areas?.[0]) : route.areas?.[0];
+  const area=route.type==="patch" ? patchSourceArea(question,route.areas?.[0],env.maintenanceSource?.files) : route.areas?.[0];
   const catalog=env.maintenanceSource;
   if(route.type==="report"){
     const summary=summaryOf(await readCharts());

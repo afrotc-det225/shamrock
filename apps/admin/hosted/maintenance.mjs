@@ -33,11 +33,16 @@ export const runnable = {
   "Excusal queue": "currentExcusalRequests",
   "Birthday agenda": "birthdayGroups",
 };
-export function patchSourceArea(question, classifiedArea) {
+export function patchSourceArea(question, classifiedArea, files = {}) {
   const identifiers = new Set(question.match(/[A-Za-z0-9_./-]+/g) ?? []);
   const named = Object.entries(areas).filter(([area, path]) =>
     identifiers.has(path) || identifiers.has(path.split("/").pop()) || identifiers.has(runnable[area]));
   if (named.length === 1) return named[0][0];
+  // Maintainers often identify a screen by the wording they see on it.
+  for (const phrase of question.matchAll(/["“‘']([^"”’'\n]{4,120})["”’']/g)) {
+    const matches=Object.keys(areas).filter(area=>files[area]?.includes(phrase[1]));
+    if(matches.length===1) return matches[0];
+  }
   return classifiedArea;
 }
 
