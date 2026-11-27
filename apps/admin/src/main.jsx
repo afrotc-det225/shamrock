@@ -59,6 +59,7 @@ function App() {
     [sessionInfo, setSessionInfo] = useState(null),
     [readOutage, setReadOutage] = useState(null),
     [sync, setSync] = useState("");
+  const [destination, setDestination] = useState(null);
   const [preview, setPreview] = useState(null), [previewName, setPreviewName] = useState("");
   const [readProgress, setReadProgress] = useState({stage: "Checking access"});
   const pendingAbort = useRef(null);
@@ -103,7 +104,7 @@ function App() {
     setSessionInfo(null); setData(null); setReadOutage(null); setSignIn(true);
   };
   live.current = { busy, proposal, data, preview, page, sessionInfo, readOutage };
-  const reload = async (force = false, profile) => {
+  const reload = async (force = false, profile, nextPage) => {
     if (!force && pendingRead.current) return pendingRead.current;
     const intent = ++readIntent.current;
     const currentSession = await initialize();
@@ -134,6 +135,7 @@ function App() {
         !(value.snapshot?.access || value.manifest.access).capabilities.fullSnapshot
       )
         setPage(profile === "excusals" ? "Excusals" : "Attendance");
+      else if (nextPage) setPage(nextPage);
       lastRead.current = Date.now();
       setSync("");
       return value;
@@ -266,13 +268,20 @@ function App() {
   const navigate = (value) => {
     readIntent.current++;
     if (pendingAbort.current) { pendingAbort.current.superseded = true; pendingAbort.current.abort(); }
-    setPage(value);
     setError("");
     setNotice("");
     // Navigation can supersede the post-save refresh while the old snapshot is still visible.
     const needsRefresh = !data?.snapshot || pendingRead.current || pendingActions.current > 0;
-    if (needsRefresh && (!["History", "Assistant", "System"].includes(value) || !data))
-      void run(() => reload(true, profileFor(value)));
+    if (needsRefresh && (!["History", "Assistant", "System"].includes(value) || !data)) {
+      const next = {page:value};
+      setDestination(next);
+      if (!data) setPage(value);
+      void run(() => reload(true, profileFor(value), value)).finally(() =>
+        setDestination(current => current === next ? null : current));
+    } else {
+      setDestination(null);
+      setPage(value);
+    }
   };
   const cancelRead = () => {
     readIntent.current++;
@@ -376,7 +385,7 @@ function App() {
     <div hidden={!!outageScreen} inert={outageScreen ? true : undefined}>
     <EditorSuspended.Provider value={!!outageScreen}>
     <EditorError.Provider value={error}>
-      <WorkspaceShell pages={visiblePages} page={page} navigate={navigate} account={<>
+      <WorkspaceShell pages={visiblePages} page={destination?.page ?? page} navigate={navigate} account={<>
             {sessionInfo?.cadetWorkspace && !preview && <a href="/?workspace=cadet">My cadet workspace</a>}
             {!preview && !scoped && data?.meta.viewAsEnabled &&
               <ViewAsSelector people={data.snapshot?.people ?? (["cadets","leadership","cadet-details","semester"].includes(data.browse?.profile) ? data.list.people : null)} onSelect={viewAs} busy={busy} />}
@@ -462,6 +471,8 @@ function App() {
                 {notice}
               </div>
             )}
+            {destination && data && <span role="status" className="page-transfer">Opening {destination.page}…</span>}
+            <div inert={destination && data ? true : undefined} aria-busy={!!destination}>
             {blockedPreview ? <div><p>{viewAsStatus[preview.status] || "This account cannot be previewed."}</p>
               {preview.status === "starting" && <button disabled={busy} onClick={()=>viewAs({personId:preview.personId})}>Retry view</button>}</div> : !data || (!data.snapshot && !browseReady && !["History", "Assistant", "System"].includes(page) && !(page === "Events" && data.eventsList)) ? (
               <section className="loading-panel" aria-busy={!error}>
@@ -508,6 +519,7 @@ function App() {
                 {preview && ["Semester planning", "System", "Assistant"].includes(page) && <p>Exit View as to use this page.</p>}
               </React.Fragment>
             )}
+            </div>
       </WorkspaceShell>
     </EditorError.Provider>
     </EditorSuspended.Provider>

@@ -215,6 +215,9 @@ test("OAuth state is browser-bound, single-use and PKCE-protected; only subject 
     .find((s) => s.startsWith("__Host-shamrock-v2="))
     .split(";")[0];
   assert.match(success.headers.getSetCookie()[0], /Secure; HttpOnly/);
+  const resume = await authRoute(new Request(origin + "/auth/login", { headers:{cookie:sessionCookie} }),env);
+  assert.equal(resume.headers.get("location"),origin + "/");
+  assert.deepEqual(resume.headers.getSetCookie(),[]);
   assert.equal(
     (
       await session(

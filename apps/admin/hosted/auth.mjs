@@ -142,10 +142,17 @@ export async function authRoute(
     now = Date.now();
   if (url.pathname === "/auth/login" && request.method === "GET") {
     const previous = cookie(request, "__Host-shamrock-v2");
-    if (/^[A-Za-z0-9_-]{43}$/.test(previous))
+    if (/^[A-Za-z0-9_-]{43}$/.test(previous)) {
+      try {
+        await session(request, env);
+        return redirect(env.APP_ORIGIN + "/");
+      } catch (error) {
+        if (error.code !== "SIGN_IN_REQUIRED") throw error;
+      }
       await env.PANEL_DB.prepare("DELETE FROM sessions WHERE token_hash=?")
         .bind(await sha(previous))
         .run();
+    }
     const bucket = await sha(
       `${env.APP_ORIGIN}|${request.headers.get("cf-connecting-ip") || "unknown"}|${Math.floor(now / 600000)}`,
     );

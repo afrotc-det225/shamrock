@@ -49,14 +49,17 @@ export default function Semester({
   const direction = currentSeason === "fall" && nextSeason === "spring" ? "fall-spring"
     : currentSeason === "spring" && nextSeason === "fall" ? "spring-fall" : "hold";
   const rules = groupRules[direction] || {};
-  const targetYear = year => rules[year] ?? semesterAsYear(year, direction);
+  const outcome = year => rules[year] ?? (year === "AS400" && direction === "spring-fall"
+    ? "Commissioned" : semesterAsYear(year, direction));
   const activeCounts = new Map();
   const planned = [];
   for (const p of s.people) {
     const active = operationallyActive(p);
     if (active) activeCounts.set(p.asYear, (activeCounts.get(p.asYear) || 0) + 1);
-    const entry = {personId:p.personId, expectedVersion:p.version, asYear:active ? targetYear(p.asYear) : p.asYear,
-      rank:p.rank, role:p.role, flightId:p.flightId, flightPathStatus:p.flightPathStatus, ...changes[p.personId]};
+    const next = active ? outcome(p.asYear) : p.asYear;
+    const commissioning = next === "Commissioned";
+    const entry = {personId:p.personId, expectedVersion:p.version, asYear:commissioning ? p.asYear : next,
+      rank:p.rank, role:p.role, flightId:p.flightId, flightPathStatus:commissioning ? "Commissioned" : p.flightPathStatus, ...changes[p.personId]};
     if (["asYear","flightId","flightPathStatus"].some(key => entry[key] !== p[key])) planned.push(entry);
   }
   const matches = search.trim() ? s.people.filter(p => !changes[p.personId] &&
@@ -265,7 +268,7 @@ export default function Semester({
           <Table headers={["Current AS year", "Active cadets", "Next AS year"]}>
             {years.filter(year => activeCounts.has(year)).map(year =>
               <tr key={year}><td>{year}</td><td>{activeCounts.get(year)}</td><td>
-                <Select label={`Next AS year for ${year}`} value={targetYear(year)} options={years}
+                <Select label={`Next AS year for ${year}`} value={outcome(year)} options={year === "AS400" ? [...years, "Commissioned"] : years}
                   onChange={value => setGroupRules({...groupRules, [direction]:{...rules, [year]:value}})} />
               </td></tr>)}
           </Table>
@@ -276,7 +279,8 @@ export default function Semester({
           <Field label="Find a cadet" type="search" value={search} onChange={e => setSearch(e.target.value)} />
           {search.trim() && !matches.length && <p>No matching cadets to add.</p>}
           {matches.map(p => <button key={p.personId} type="button" onClick={() => {
-            change(p, "asYear", p.asYear); setSearch(""); setDirty(true);
+            setChanges(previous => ({...previous, [p.personId]:{asYear:p.asYear, flightPathStatus:p.flightPathStatus}}));
+            setSearch(""); setDirty(true);
           }}>Add {name(p)} · {p.asYear} · {s.flights.find(f => f.flightId === p.flightId)?.label || "Unassigned"}</button>)}
           {Object.keys(changes).length > 0 && (
           <Table headers={["Cadet", "AS year", "Flight Path", "Flight", ""]}>

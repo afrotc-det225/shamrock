@@ -76,6 +76,39 @@ try{
  await page.clock.fastForward(61000);
  assert.equal((await(await refreshResponse).json()).captureUnchanged,true);
  await page.waitForTimeout(80);assert.equal(requests.length,beforeRefresh,'unchanged background refresh never reloads record pages');
+ let releaseSemester;
+ const semesterGate=new Promise(resolve=>{releaseSemester=resolve;});
+ const semester=await host.post('/v1/admin/panel/browse',{...host.identity(),profile:'semester'});
+ const tables=semester.tables;
+ tables.terms=JSON.stringify([['spring','Spring 2027',2,true]]);
+ tables.people=JSON.stringify([['senior',1,'Sample','Senior','C/Col','AS400','','alpha','Active 3/4']]);
+ await page.route('**/api/state?profile=semester',async route=>{
+   await semesterGate;
+   await route.fulfill({json:{manifest:await host.panelAuthority(),browse:semester,captureKey:host.binding,
+     transport:'paged-v1',reportingTime:Date.now(),history:[],meta:{hosted:true}}});
+ });
+ await page.getByRole('navigation').getByRole('button',{name:'Semester planning'}).click();
+ await page.getByText('Opening Semester planning…').waitFor();
+ assert.equal(await page.locator('[inert] h1').textContent(),'Leadership');
+ assert.equal(await page.locator('.loading-table').count(),0);
+ releaseSemester();
+ const cohort=page.getByLabel('Next AS year for AS400');
+ assert.equal(await cohort.inputValue(),'Commissioned');
+ await page.getByLabel('First training-week Sunday').fill('2027-08-22');
+ const proposals=[];
+ await page.route('**/api/proposals',async route=>{
+   proposals.push(route.request().postDataJSON().payload.plan);
+   await route.fulfill({status:400,json:{error:{message:'Test review captured'}}});
+ });
+ await page.getByRole('button',{name:'Review semester plan'}).click();
+ await page.getByRole('alert').filter({hasText:'Test review captured'}).waitFor();
+ assert.equal(proposals[0].people[0].asYear,'AS400');
+ assert.equal(proposals[0].people[0].flightPathStatus,'Commissioned');
+ await page.getByLabel('Find a cadet').fill('Senior');
+ await page.getByRole('button',{name:/Add Sample Senior/}).click();
+ assert.equal(await page.getByLabel('Status for Sample Senior').inputValue(),'Active 3/4');
+ await Promise.all([page.waitForResponse(response=>response.url().endsWith('/api/proposals')),page.getByRole('button',{name:'Review semester plan'}).click()]);
+ assert.deepEqual(proposals[1].people,[]);
  assert.deepEqual(errors,[]);
  console.log(`PASS: throttled desktop/mobile skeletons and editor status, rapid Cadets/Leadership navigation, late-result rejection, History cancels editor capture, delayed session bootstrap blocks all reads, unchanged refresh reloads no record pages, maximum concurrent page requests=${maximum}.`);
 }finally{await browser.close();await new Promise(resolve=>server.close(resolve));service.close();await local.dispose();}
