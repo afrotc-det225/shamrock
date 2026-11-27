@@ -507,35 +507,6 @@ summary {
   grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
   gap: 22px;
 }
-.metrics {
-  display: flex;
-  gap: 0;
-  border-top: 1px solid var(--border);
-  border-bottom: 1px solid var(--border);
-  padding: 24px 0;
-}
-.metrics > div {
-  flex: 1;
-  padding: 0 25px;
-  border-right: 1px solid var(--border);
-}
-.metrics > div:first-child {
-  padding-left: 0;
-}
-.metrics > div:last-child {
-  border: 0;
-}
-.metrics strong {
-  font-size: 32px;
-  font-weight: 650;
-  display: block;
-}
-.metrics span {
-  color: var(--muted);
-  font-size: 13px;
-  display: block;
-  margin-top: 6px;
-}
 .task-row {
   width: 100%;
   border: 0;
@@ -751,15 +722,6 @@ blockquote {
   }
   .form-grid {
     grid-template-columns: 1fr;
-  }
-  .metrics > div {
-    padding: 0 13px;
-  }
-  .metrics strong {
-    font-size: 25px;
-  }
-  .metrics span {
-    font-size: 11px;
   }
   .drawer {
     width: 100%;
@@ -1430,29 +1392,53 @@ html:has(dialog:modal) {
 .roster-bars li {display:grid;grid-template-columns:4.5rem 1fr 2rem;align-items:center;gap:.65rem;font-size:.82rem;margin:.55rem 0}
 .roster-bars i {display:block;height:.9rem;border-radius:0 3px 3px 0}
 .roster-bars li>div {border-left:1px solid #b7c2d0;background:#f4f6f8}
-.attendance-summary,.birthdays {min-width:0;align-self:start}
+.attendance-summary,.birthdays {min-width:0;container-type:inline-size}
 .attendance-summary h3,.birthdays h3 {color:#22344f;margin:0}
-.attendance-comparison {width:100%;min-width:0;margin:.65rem 0;font-variant-numeric:tabular-nums}
-.attendance-comparison :is(th,td) {position:static;padding:.48rem .2rem;background:transparent;text-align:right;letter-spacing:0;text-transform:none;border:0}
-.attendance-comparison th:first-child {text-align:left}
-.attendance-comparison thead th {font-weight:500;color:#526173;white-space:normal;border-bottom:1px solid var(--border)}
-.attendance-comparison tbody th {font-size:.88rem;color:#253950}
-.attendance-comparison tbody td:first-of-type {font-size:1.35rem;font-weight:650}
-.attendance-comparison .comparison-change {font-size:.85rem;font-weight:600;color:#526173}
-.comparison-change[data-direction="1"] {color:#216544}
-.comparison-change[data-direction="-1"] {color:#8b4733}
-.attendance-threshold {border-top:1px solid var(--border);margin:.25rem 0;padding:.65rem 0 .2rem;font-size:.88rem}
-.attendance-cohorts,.pending-total {color:#526173;font-size:.8rem}
+.attendance-rates {display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:clamp(.75rem,4cqi,2rem);margin:1rem 0 1.15rem}
+.attendance-rate + .attendance-rate {border-left:1px solid var(--border);padding-left:clamp(.75rem,3cqi,1.5rem)}
+.rate-value {display:flex;align-items:center;gap:.6rem}
+.rate-trend {width:clamp(2rem,9cqi,4rem);flex-shrink:1;min-width:0;color:#627c93}
+.attendance-rate dt {font-size:.88rem;font-weight:650;color:#354960}
+.attendance-rate dd {margin:0;font-variant-numeric:tabular-nums}
+.attendance-rate dt + dd {font-size:clamp(1.85rem,8cqi,2.85rem);line-height:1.2;font-weight:700;letter-spacing:-.05em}
+.attendance-rate .rate-comparison {display:flex;align-items:baseline;gap:.35rem;flex-wrap:wrap;margin-top:.25rem;font-size:.74rem;color:#506176}
+.comparison-change {display:inline-block;border-radius:3px;padding:.15rem .3rem;background:#eef1f4;color:#47576b;font-weight:650;white-space:nowrap}
+.comparison-change[data-direction="1"] {background:#e5f2e9;color:#216544}
+.comparison-change[data-direction="-1"] {background:#faebe4;color:#873e2c}
+.wing-roster-context {display:flex;gap:.65rem 1.6rem;flex-wrap:wrap;align-items:baseline;padding:.75rem 0;border-top:1px solid var(--border);font-size:.82rem;color:#364a60}
+.wing-roster-context strong {color:#172d47;font-size:1rem}
+.wing-roster-context small {display:block;color:#566479;margin-top:.2rem}
+.overview-queue {display:inline-block;color:#264f73;font-size:.82rem;text-underline-offset:.2em}
+.pending-total {color:#526173;font-size:.8rem}
 .birthdays header {flex-wrap:wrap}
 .birthdays header select {width:auto;max-width:100%;min-height:2rem;font-size:.8rem}
-.birthday-list {margin:.45rem 0 0;padding:0;list-style:none}
-.birthday-list li {display:grid;grid-template-columns:4.25rem 1fr;align-items:center;gap:.75rem;padding:.42rem 0;border-bottom:1px solid var(--border);font-size:.9rem}
-.birthday-list time {color:#344e69;font-size:.82rem;font-weight:650}
-.birthday-list small {display:block;color:#58687b;font-size:.67rem;font-weight:500}
-.birthday-list span {display:block;border-left:3px solid #c7cfd6;padding-left:.55rem;overflow-wrap:anywhere;font-weight:600}
-.birthday-pager {display:flex;align-items:center;justify-content:space-between;margin-top:.4rem}
-.birthday-pager button {display:inline-flex;align-items:center;gap:.2rem;background:transparent;border:0;padding:.35rem;min-height:2rem;font-size:.78rem}
-
+.birthday-body {display:grid;grid-template-columns:minmax(10.5rem,13rem) minmax(0,1fr);gap:clamp(.85rem,5cqi,2rem);margin-top:.55rem}
+.calendar-month {display:flex;justify-content:space-between;align-items:center;font-size:.82rem;color:#233850}
+.calendar-month button,.calendar-days button {border:0;background:transparent;min-width:0;min-height:0;color:inherit;padding:0}
+.calendar-month button {height:1.75rem;width:1.75rem;display:grid;place-items:center}
+.calendar-days {display:grid;grid-template-columns:repeat(7,minmax(0,1fr));text-align:center;align-items:center;row-gap:1px}
+.calendar-days abbr {font-size:.67rem;text-decoration:none;color:#52647a;padding:.25rem 0}
+.calendar-days > :is(button,span) {position:relative;display:grid;place-items:center;height:1.55rem;color:#536477;font-size:.78rem;font-variant-numeric:tabular-nums}
+.calendar-days > button {font-weight:700;background:color-mix(in srgb,var(--birthday-ink) 19%,white);color:#182f48;border-radius:4px}
+.calendar-days > button:hover,.calendar-month button:hover {background:#d6e4ef}
+.calendar-days > [aria-current="date"] {outline:1px solid #46647c;outline-offset:-2px;border-radius:4px}
+.calendar-days > button[aria-pressed="true"] {background:#233e5d;color:white}
+.birthday-dots {position:absolute;bottom:1px;display:flex;gap:1px}
+.birthday-dots i {width:4px;height:4px;border-radius:50%}
+.calendar-days [aria-pressed="true"] .birthday-dots i {box-shadow:0 0 0 1px white}
+.birthday-names {border-left:1px solid var(--border);padding-left:clamp(.75rem,3cqi,1.25rem);min-width:0}
+.birthday-names h4 {margin:.3rem 0 .55rem;font-size:.85rem;color:#344b65}
+.birthday-names ul {margin:0;padding:0;list-style:none;max-height:10rem;overflow-y:auto}
+.birthday-names li {display:flex;align-items:baseline;gap:.4rem;margin:.35rem 0;font-size:.86rem;overflow-wrap:anywhere;color:#172e48;font-weight:600}
+.birthday-names i {flex:none;width:.4rem;height:.4rem;border-radius:50%;background:#546579}
+.birthday-names time {font-size:.78rem;color:#546479;font-weight:500;white-space:nowrap}
+.birthday-names p,.agenda-reset {font-size:.79rem;color:#485c71}
+.agenda-reset {background:transparent;border:0;padding:.28rem 0;text-decoration:underline;text-underline-offset:.2em}
+@container (max-width:18rem) {
+  .birthday-body {grid-template-columns:minmax(0,1fr)}
+  .birthday-calendar {width:min(100%,13rem)}
+  .birthday-names {border:0;padding:0}
+}
 
 @media(max-width:640px) {
   .drawer.cell-editor {inset:auto 0 0;margin:0;width:100%;height:48dvh;max-height:48dvh;border:1px solid var(--border);border-radius:12px 12px 0 0}

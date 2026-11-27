@@ -336,6 +336,8 @@ When a feature changes, update only the sections that help an operator use, vali
 
 After sign-in, cadets use the same navigation layout as leadership. My requests shows excusals and attendance flags, and My profile opens the Directory record. Flight commanders also have My Flight, and squadron commanders have their Excusals queue. New cadets start with profile registration. On phones, page links run across the top.
 
+**Overview** shows Overall and LLAB attendance with the percentage-point change from the previous semester when available. The pending excusals link opens the decision queue. Wing birthdays lists cadets celebrating this week, or the next birthdays when the week is quiet. Choose a marked date to see everyone celebrating that day, browse months with the arrows, or filter by flight.
+
 **Excusals** opens to requests awaiting a decision. A squadron commander can choose **Approve**, **Deny**, **Withdraw**, or **Supersede** beside an eligible request and confirm the decision. The cadet’s name opens the full request and any previous decision note. A custom note is optional. The Flight and requested attendance code use the same colors as Attendance.
 
 In **My profile**, cadets manage contact information, academics and career details, and their Directory photo. The AFSC field wraps longer career names. A saved Google Drive photo displays when the browser can access it. Cadets can open the original HTTPS photo link, replace it, or clear it and save. Photo previews use the existing file permissions.
