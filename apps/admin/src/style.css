@@ -1577,3 +1577,5 @@ html:has(dialog:modal) {
 .attendance-matrix .matrix-active-row > th,.attendance-matrix thead .matrix-active-column {background:#dce8f3;color:#102c45}
 .attendance-matrix td[data-selected="true"] button {outline:2px solid #214e79;outline-offset:-2px;background:#ffffff35}
 .mark-cell button {user-select:none}
+
+.submission-status { display: block; margin-bottom: .5rem; font-weight: 600; }

@@ -143,6 +143,7 @@ export function Editor({
   onSubmit,
   busy,
   children,
+  submitLabel = "Review change",
   note = "",
   bottomSheet = false,
 }) {
@@ -170,7 +171,7 @@ export function Editor({
               Cancel
             </button>
             <button className="primary" disabled={busy}>
-              Review change
+              {submitLabel}
             </button>
           </div>
         </footer>

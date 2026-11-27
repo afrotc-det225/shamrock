@@ -293,6 +293,18 @@ try {
   assert.equal((await service.snapshot()).corrections[0].code, "P");
   const present = matrix.locator('[data-mark="P"]').first();
   assert.deepEqual(await colors(present), ["rgb(193, 225, 205)", "rgb(22, 74, 50)"]);
+  const pair=marks.filter({hasText:"Alexis Morgan"}).locator('button[data-event]').filter({hasNotText:"—"});
+  const targetEvents=await pair.evaluateAll(buttons=>buttons.slice(0,2).map(b=>b.dataset.event));
+  await pair.nth(0).click();
+  await pair.nth(1).click({modifiers:["Meta"]});
+  await page.getByRole("button",{name:"Correct attendance",exact:true}).click();
+  await page.getByLabel("Attendance code",{exact:true}).selectOption("T");
+  await page.getByLabel("Reason for this change").fill("Fixture bulk correction");
+  await page.getByRole("button",{name:"Review change",exact:true}).click();
+  await page.getByRole("button",{name:"Apply corrections",exact:true}).click();
+  await page.getByText("Attendance corrections saved.",{exact:true}).waitFor();
+  const corrected=(await service.snapshot()).corrections.filter(c=>c.code==="T");
+  for(const eventId of targetEvents)assert(corrected.some(c=>c.eventId===eventId));
   await navigate("Semester planning");
   const example = (await service.snapshot()).people.find(person => person.flightId && person.active);
   const fullName = example.firstName+" "+example.lastName;

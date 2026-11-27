@@ -2,13 +2,13 @@ import React, { useState } from "react";
 import { Heading, Select, Field, Editor, Empty, SearchBox } from "./components";
 import { AttendanceMatrix, AttendanceKey } from "./AttendanceMatrix";
 import { defaultRosterFilters, MatrixRosterFilters, selectRosterRows } from "./MatrixRosterFilters";
-import { name, eventTypes } from "./api";
+import { api, name, eventTypes } from "./api";
 export default function Attendance({
   snapshot,
   list,
   reporting,
   propose,
-  busy,
+  busy, run, refresh, notify, viewEntry,
   readOnly = false,
 }) {
   const s = snapshot || list;
@@ -39,14 +39,42 @@ export default function Attendance({
   );
   const roster = matrix?.rows || [];
   const rows = selectRosterRows(roster, query, filters);
-  const correction = (person, event, currentCode) => {
+  const [review,setReview] = useState(null);
+  const startCorrection = targets => {
     setReason("");
-    setCode(currentCode);
-    const base = s.attendanceVersions.find(
-      (v) => v.personId === person.personId && v.eventId === event.eventId,
-    );
-    setEdit({ person, event, baseVersion: base?.version || 0 });
+    const codes=new Set(targets.map(t=>t.cell.effectiveCode || ""));
+    setCode(codes.size===1 ? [...codes][0] : "choose");
+    const versions=new Map(s.attendanceVersions.map(v=>[JSON.stringify([v.personId,v.eventId]),v.version]));
+    setEdit(targets.map(({row,event})=>({
+      label:name(row)+" · "+event.label,
+      personId:row.personId,eventId:event.eventId,expectedEventVersion:event.version,
+      expectedBaseVersion:versions.get(JSON.stringify([row.personId,event.eventId])) || 0
+    })));
   };
+  function submit() {
+    const payloads=edit.map(({label,...target})=>({...target,code:code || null,reason}));
+    if(payloads.length===1) return propose("attendance.correct",payloads[0],()=>setEdit(null));
+    setReview({payloads,next:0,proposalId:null});
+  }
+  function applySelected() {
+    return run(async()=>{
+      const identity=viewEntry ? {viewEntry} : {};
+      while(review.next<review.payloads.length){
+        if(!review.proposalId){
+          const proposal=await api("/proposals",{operation:"attendance.correct",payload:review.payloads[review.next],...identity});
+          review.proposalId=proposal.id;
+        }
+        await api("/proposals/"+review.proposalId+"/apply",{approved:true,...identity});
+        review.next++;
+        review.proposalId=null;
+        setReview({...review});
+      }
+      setEdit(null);
+      setReview(null);
+      notify("Attendance corrections saved.");
+      await refresh(true);
+    });
+  }
   return (
     <>
       <section className="page-controls">
@@ -89,41 +117,28 @@ export default function Attendance({
         rows={rows}
         events={columns}
         canCorrect={canCorrect}
-        onEdit={correction}
+        onEdit={(row,event,code)=>startCorrection([{row,event,cell:{effectiveCode:code}}])}
+        onEditMany={startCorrection}
         readOnly={readOnly || busy}
       />
       {(!rows.length || !columns.length) && (
         <Empty>No attendance matches these filters.</Empty>
       )}
-      {edit && events.some((e) => e.eventId === edit.event.eventId) && (
-        <Editor
-          title="Correct attendance"
-          bottomSheet
-          busy={busy}
-          onClose={() => setEdit(null)}
-          onSubmit={() =>
-            propose(
-              "attendance.correct",
-              {
-                personId: edit.person.personId,
-                eventId: edit.event.eventId,
-                expectedBaseVersion: edit.baseVersion,
-                expectedEventVersion: edit.event.version,
-                code: code || null,
-                reason,
-              },
-              () => setEdit(null),
-            )
-          }
-        >
-          <p>
-            {name(edit.person)} · {edit.event.label}
-          </p>
+      {edit && (
+        <Editor title={review ? "Review corrections" : "Correct attendance"} bottomSheet
+          busy={busy || (!review && code==="choose")}
+          submitLabel={review ? "Apply corrections" : "Review change"}
+          onClose={()=>{if(!busy){setEdit(null);setReview(null);}}}
+          onSubmit={review ? applySelected : submit}>
+          <ul>{edit.map(t=><li key={JSON.stringify([t.personId,t.eventId])}>{t.label}</li>)}</ul>
+          {review ? <><p>{code || "Clear to blank"} · {reason}</p>
+            {review.next>0 && <p role="status">{review.next} of {edit.length} saved</p>}</> : <>
           <Select
             label="Attendance code"
             value={code}
             onChange={setCode}
             options={[
+              ...(code==="choose" ? [{value:"choose",label:"Choose a code"}] : []),
               { value: "", label: "Clear to blank" },
               "P",
               "T",
@@ -143,7 +158,7 @@ export default function Attendance({
               value={reason}
               onChange={(e) => setReason(e.target.value)}
             />
-          </Field>
+          </Field></>}
         </Editor>
       )}
     </>

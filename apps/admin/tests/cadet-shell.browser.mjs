@@ -21,7 +21,7 @@ try {
     for (const { role, tabs } of scenarios) {
       const preview = role === "View as";
       const page = await browser.newPage({ viewport: { width, height: 850 } });
-      const calls = [], errors = [];
+      const calls = [], errors = [], flags = [];
       page.on("pageerror", err => errors.push(err.message));
       await page.route("**/api/**", async route => {
         const path = new URL(route.request().url()).pathname;
@@ -29,10 +29,15 @@ try {
         if (path === "/api/session") return route.fulfill({ json: {
           csrf: "fixture", schoolLogin: !preview, viewAs: preview ? {status:"ready", personId:"one",entryAuditId:"entry"} : null,
         } });
+        if(path==="/api/cadet" && route.request().method()==="POST"){
+          const body=route.request().postDataJSON();
+          flags.push((preview ? body.action : body).fields.eventId);
+          return route.fulfill({json:{ok:true}});
+        }
         if (path !== "/api/cadet" || route.request().method() !== "GET") return route.abort();
         const section=new URL(route.request().url()).searchParams.get("section");
         return route.fulfill({ json: {
-          section,attendance:section==="attendance"?[{eventId:"llab",label:"TW-1 LLAB",eventType:"llab",version:1,baseVersion:0,code:"A"}]:[],
+          section,attendance:section==="attendance"?[{eventId:"llab",label:"TW-1 LLAB",eventType:"llab",version:1,baseVersion:0,code:"A"},{eventId:"lab2",label:"TW-2 LLAB",eventType:"llab",version:2,baseVersion:0,code:"A"}]:[],
           linked: true, writable: true, readOnly:false, registration: role === "Registration",
           profile: role === "Registration" ? null : {personId:"one", firstName:"Sample", lastName:"Cadet", flightId:"alpha",afsc:"13N – Nuclear and Missile Operations ".repeat(6).trim(),photoLink:"https://drive.google.com/file/d/fictional-photo/view"},
           flights: [{ flightId:"alpha", label:"Alpha" }], events: [], actions: [], queue: [],
@@ -79,9 +84,13 @@ try {
         await heading("My profile").waitFor();
         await nav.getByRole("link",{name:"My attendance",exact:true}).click();
         await page.getByRole("button",{name:/TW-1 LLAB.*A · Absent/}).click();
-        await page.getByRole("button",{name:"Review selected cell"}).click();
+        await page.getByRole("button",{name:/TW-2 LLAB.*A · Absent/}).click({modifiers:["Shift"]});
+        await page.getByRole("button",{name:"Request correction"}).click();
         await page.getByLabel("Requested code").selectOption("P");
-        assert(await page.getByRole("button",{name:"Request correction"}).isEnabled());
+        await page.getByLabel("Reason",{exact:true}).fill("Fixture review");
+        await page.getByRole("button",{name:"Send for Squadron review"}).click();
+        await page.getByText("Saved.",{exact:true}).waitFor();
+        assert.deepEqual(flags,["llab","lab2"]);
         await nav.getByRole("link",{name:"Submit attendance",exact:true}).click();
         const picker=page.getByLabel("Attendance event");
         await picker.waitFor();assert(await picker.isDisabled());
@@ -108,7 +117,7 @@ try {
       });
       assert(layout.fits && (width === 390 ? layout.stacked : layout.alongside), JSON.stringify(layout));
       assert.deepEqual(errors, []);
-      assert.deepEqual(calls, ["POST /api/session", "GET /api/cadet",...(tabs.length?["GET /api/cadet","GET /api/cadet","GET /api/cadet"]:[])]);
+      assert.deepEqual(calls, ["POST /api/session", "GET /api/cadet",...(tabs.length?["GET /api/cadet","POST /api/cadet","POST /api/cadet","GET /api/cadet","GET /api/cadet","GET /api/cadet"]:[])]);
       await page.close();
     }
   }

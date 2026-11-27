@@ -520,7 +520,7 @@ function App() {
                 {!scoped && page === "Leadership" && (
                   <People key="leadership" leadership {...common} />
                 )}{" "}
-                {page === "Attendance" && <Attendance {...common} />}
+                {page === "Attendance" && <Attendance {...common} viewEntry={preview?.entryAuditId} />}
                 {page === "Excusals" && <Excusals {...common} />}{" "}
                 {!scoped && page === "History" && <History key={JSON.stringify([data.captureKey, data.manifest?.revision?.access, preview?.entryAuditId])} />}
                 {!preview && !scoped && page === "Semester planning" && <Semester {...common} snapshot={data.snapshot || data.list} />}{" "}
