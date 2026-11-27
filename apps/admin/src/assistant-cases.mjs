@@ -17,8 +17,8 @@ export const regressionCases = {
     {name:"No current term",args:[{terms:[],events:[],requests:[active]}],expected:[]},
   ],
   "Birthday agenda": [
-    {name:"Empty flight",args:[[["A","B","02-29","alpha"]],"bravo","2026-02-28",1,true],expected:[]},
-    {name:"Leap-day birthday in a non-leap year",args:[[["A","B","02-29","alpha"]],"alpha","2026-02-28",1,true],
+    {name:"Empty flight",args:[[["A","B","02-29","alpha"]],"bravo","2026-02-28","2026-03-01"],expected:[]},
+    {name:"Leap-day birthday in a non-leap year",args:[[["A","B","02-29","alpha"]],"alpha","2026-02-28","2026-03-01"],
       expected:[{date:"2026-03-01",people:[{firstName:"A",lastName:"B",flightId:"alpha"}]}]},
   ],
 };

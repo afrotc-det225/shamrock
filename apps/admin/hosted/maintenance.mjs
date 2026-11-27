@@ -19,7 +19,7 @@ export const runnable = {
   "Sunday closeout": "closeoutCode",
   "Cadet sorting": "compareCadetsForDisplay",
   "Excusal queue": "currentExcusalRequests",
-  "Birthday agenda": "birthdayPage",
+  "Birthday agenda": "birthdayGroups",
 };
 export function maintenanceRequest(area, question, catalog) {
   if (!Object.hasOwn(areas, area) || !catalog?.commit || !catalog.files[area]) throw Error("Unknown source area");
