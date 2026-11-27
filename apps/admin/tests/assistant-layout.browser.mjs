@@ -78,6 +78,16 @@ try {
     await recent.click();
     await page.getByRole("complementary",{name:"Recent chats"}).getByRole("button",{name:/How is the detachment/}).click();
     await answer.getByRole("cell",{name:"98%"}).waitFor();
+    if(width===390){
+      await page.route("**/assets/AssistantResponse-*.js",route=>route.abort());
+      await page.reload();
+      await Promise.all([page.waitForEvent("requestfailed",r=>r.url().includes("AssistantResponse")),
+        page.getByRole("region",{name:"Recent conversations"}).getByRole("button",{name:/How is the detachment/}).click()]);
+      await page.locator(".plain-reply").filter({hasText:"Compared with prior terms"}).waitFor();
+      await page.getByRole("button",{name:"New chat"}).click();
+      await input.fill("Another question");
+      assert(await page.getByRole("button",{name:"Send question"}).isEnabled());
+    }
     assert.equal(paidCalls,1);
     await page.close();
   }

@@ -104,6 +104,15 @@ export function System({ snapshot, meta, history, receiptsDeferred, reportingTim
   );
 }
 const AssistantResponse = lazy(()=>import("./AssistantResponse"));
+// A missing formatting bundle or an invalid saved proposal must not unmount the workspace.
+class ReplyBoundary extends React.Component {
+  state={failed:false};
+  static getDerivedStateFromError(){return {failed:true};}
+  render(){return this.state.failed ? this.props.fallback : this.props.children;}
+}
+function PlainReply({text}){
+  return <div className="assistant-answer plain-reply">{text}</div>;
+}
 export function Assistant({meta}){
   if(!meta.assistantAvailable)return <section><Heading title="Assistant"/><p role="status">The assistant is currently unavailable.</p></section>;
   return <AssistantWorkspace meta={meta}/>;
@@ -188,7 +197,7 @@ function AssistantWorkspace({ meta }) {
     inFlight.current=true;setOpening(true);setError("");
     try{
       const saved=threads.current.get(chat.id) || (await api("/chat/history?id="+chat.id)).messages;
-      if(!saved.length)throw new Error("This conversation is unavailable. Try again shortly.");
+      if(!Array.isArray(saved) || !saved.length || saved.some(m=>!m || !["user","assistant"].includes(m.role) || typeof m.content!=="string"))throw new Error("This conversation is unavailable. Try again shortly.");
       setActive(chat);setMessages(saved);setText("");setShowChats(false);
     }catch(e){setError(e.message);}
     finally{inFlight.current=false;setOpening(false);}
@@ -240,12 +249,12 @@ function AssistantWorkspace({ meta }) {
       <h2>Recent chats</h2>{historyNotice}{chats.slice(0,3).map(chatLink)}
     </section>}
     <div ref={log} className="conversation" role="log" aria-label="Conversation">
-      {messages.map((m,i)=><article key={i} className={"message "+m.role}>
+      {messages.map((m,i)=><article key={(active?.id || "draft")+":"+i} className={"message "+m.role}>
         <span className="message-author">{m.role==="user" ? "You" : "SHAMROCK assistant"}</span>
-        {m.role==="user" ? <p>{m.content}</p> : <Suspense fallback={<p role="status">Formatting response…</p>}>
+        {m.role==="user" ? <p>{m.content}</p> : <ReplyBoundary fallback={<PlainReply text={m.content}/>}><Suspense fallback={<PlainReply text={m.content}/>}>
           <AssistantResponse text={m.content}/>
-        </Suspense>}
-        {m.proposal && <MaintenanceProposal proposal={m.proposal}/>}
+        </Suspense></ReplyBoundary>}
+        {m.proposal && <ReplyBoundary fallback={<p role="status">The saved proposal could not be displayed.</p>}><MaintenanceProposal proposal={m.proposal}/></ReplyBoundary>}
       </article>)}
       {busy && <p className="hint" role="status">Thinking…</p>}
     </div>
