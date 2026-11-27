@@ -3,6 +3,7 @@ import { api, logout } from "./api";
 import { Empty, Field, Heading, Select, Status, Table } from "./components";
 import Excusals from "./Excusals";
 import {pageFromUrl, writePageUrl} from "./page-url";
+import { directoryPhotoSource } from "./DirectoryPhoto";
 import WorkspaceShell from "./WorkspaceShell";
 import { ViewAsBanner } from "./ViewAs";
 import { ClipboardList, FileCheck2, Users, UserRound } from "lucide-react";
@@ -34,27 +35,8 @@ const required = new Set([
   "homeTown",
   "homeState",
 ]);
-function photoUrls(value) {
-  try {
-    const url = new URL(value);
-    if (url.protocol !== "https:" || url.username || url.password) return {};
-    let thumbnail;
-    if (url.origin === "https://drive.google.com") {
-      const id = url.pathname.match(/^\/file\/d\/([\w-]+)(?:\/|$)/)?.[1] || url.searchParams.get("id");
-      if (id && /^[\w-]+$/.test(id)) {
-        const image = new URL("https://drive.google.com/thumbnail");
-        image.searchParams.set("id", id);
-        image.searchParams.set("sz", "w256");
-        if (url.searchParams.has("resourcekey")) image.searchParams.set("resourcekey", url.searchParams.get("resourcekey"));
-        thumbnail = image.href;
-      }
-    } else if (url.hostname.endsWith(".googleusercontent.com")) thumbnail = url.href;
-    return {href:url.href, thumbnail};
-  } catch { return {}; }
-}
-
 function ProfilePhoto({profile}) {
-  const {href, thumbnail} = photoUrls(profile.photoLink);
+  const {href, src:thumbnail} = directoryPhotoSource(profile.photoLink, 256) || {};
   const [failed, setFailed] = useState("");
   const initials = [profile.firstName, profile.lastName].map(name => name?.trim()[0]).join("");
   return <div className="profile-identity">

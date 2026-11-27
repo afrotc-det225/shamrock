@@ -25,7 +25,7 @@ export async function decodeBrowse(data) {
   }};
   const flights=columns("flights","flightId label squadronId");
   if(profile==="cadets" || profile==="cadet-details" || profile==="leadership"){
-    const people=columns("people","personId version flightId lastName firstName rank asYear flightPathStatus email role"+(profile!=="leadership"?" afsc university classYear cipCode cipBroadArea":"")+(profile==="cadet-details"?" phone dorm homeTown homeState dateOfBirth photoLink":""))
+    const people=columns("people","personId version flightId lastName firstName rank asYear flightPathStatus email role"+(profile!=="leadership"?" afsc university classYear cipCode cipBroadArea":"")+(profile==="cadet-details"?" phone dorm homeTown homeState dateOfBirth photoLink":profile==="cadets"?" photoLink":""))
       .map(p=>({...p,active:operationallyActive(p)}));
     if(profile!=="leadership") return {...data,list:{flights,people,squadrons:t.squadrons ? columns("squadrons","squadronId label") : []}};
     const contacts=columns("contacts","contactId version personId lastName firstName rank role email officeLocation active reportsTo officePhone cellPhone")

@@ -1564,6 +1564,37 @@ html:has(dialog:modal) {
 .pending-rows i { height: .42rem; border-radius: .2rem; background: #e5ebe9; }
 .pending-rows i:first-child { width: 76%; }
 
+/* The sticky box starts at its pinned position; the inset belongs inside it. */
+@media (min-width: 641px) {
+  .workspace main:has(.page-controls, > .view-as-banner) {padding-top:0}
+  .page-controls {margin-top:0;padding-top:clamp(23px,2.1vw,36px)}
+  .view-as-banner {margin-bottom:0}
+  .table-scroll[data-horizontal="true"] {max-height:calc(100dvh - var(--topbar-height) - var(--controls-height, 0px))}
+}
+
+.cadet-roster, .leadership-roster {width:fit-content;max-width:100%}
+.cadet-roster table, .leadership-roster table {width:max-content}
+.cadet-roster :is(th,td):first-child, .leadership-roster :is(th,td):first-child {
+  width:clamp(12rem,16vw,15rem);max-width:15rem;white-space:normal;
+}
+.person-cell > span:last-child {min-width:0}
+.person-cell .text-button {white-space:normal;overflow-wrap:anywhere;text-align:left}
+.cadet-roster td:not(:first-child), .leadership-roster td:not(:first-child) {max-width:22rem;white-space:normal;overflow-wrap:anywhere}
+.directory-avatar {overflow:hidden}
+.directory-avatar img {display:block;width:100%;height:100%;object-fit:cover}
+.directory-photo {display:inline-flex;align-items:center;gap:.5rem;max-width:100%;font-size:.85rem}
+.directory-photo img {width:3.25rem;height:3.25rem;object-fit:cover;border-radius:.25rem}
+.cadet-form .directory-photo img,.drawer .directory-photo img {width:6rem;height:6rem}
+
+@media (min-width: 901px) {
+  .workspace .table-scroll[data-horizontal="false"] thead th {
+    top:calc(var(--topbar-height) + var(--controls-height, 0px) + 1px);
+  }
+}
+.directory-photo {flex-wrap:wrap}
+.directory-photo iframe {display:block;flex-basis:100%;width:100%;max-width:20rem;height:14rem;border:1px solid var(--border)}
+
+.table-scroll th.action-column {width:1%;white-space:nowrap}
 .profile-identity { display:flex; align-items:center; gap:1rem; margin-bottom:1.5rem; overflow-wrap:anywhere }
 .profile-identity h2,.profile-identity p { margin:0 0 .25rem }
 .profile-portrait { flex:none; width:5rem; height:5rem; border-radius:50%; overflow:hidden; display:grid; place-items:center; font-size:1.6rem; font-weight:650; background:#deece6; color:#234d3d }

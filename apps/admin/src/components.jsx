@@ -178,7 +178,7 @@ export function Editor({
     </Drawer>
   );
 }
-export function Table({ headers, children }) {
+export function Table({ headers, children, className = "" }) {
   const ref = useRef();
   useEffect(() => {
     const container = ref.current,
@@ -201,12 +201,12 @@ export function Table({ headers, children }) {
     return () => observer.disconnect();
   }, []);
   return (
-    <div ref={ref} className="table-scroll">
+    <div ref={ref} className={`table-scroll ${className}`}>
       <table>
         <thead>
           <tr>
             {headers.map((h, index) => (
-              <th key={`${index}:${h}`}>{h}</th>
+              <th key={`${index}:${h}`} className={h === "" && index === headers.length - 1 ? "action-column" : undefined}>{h}</th>
             ))}
           </tr>
         </thead>

@@ -73,7 +73,7 @@ export async function browsePanel(env:Env, identity:{environment:string;generati
     table('eligible',semesterQueries.eventRosters,'eventId,personId',recordId?'WHERE eventId=?2':'');
   } else if(profile==='cadets'||profile==='cadet-details'||profile==='leadership') {
     table('people',people,'personId,version,flightId,lastName,firstName,rank,asYear,flightPathStatus,email,role'+(profile!=='leadership'?',afsc,university,classYear,cipCode,cipBroadArea':'')+
-      (profile==='cadet-details'?',phone,dorm,homeTown,homeState,dateOfBirth,photoLink':''));
+      (profile==='cadet-details'?',phone,dorm,homeTown,homeState,dateOfBirth,photoLink':profile==='cadets'?',photoLink':''));
     table('flights',q.flights,'flightId,label,squadronId');
     table('squadrons',q.squadrons,'squadronId,label');
     if(profile==='leadership'){
