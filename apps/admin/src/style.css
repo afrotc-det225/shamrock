@@ -1630,17 +1630,34 @@ main:has(.matrix-scroll) { padding-bottom: 8px; }
 .assistant-toolbar,.history-drawer header,.history-new {display:flex;align-items:center;gap:.7rem}
 .assistant-toolbar {margin-bottom:.8rem}
 .assistant-toolbar :is(h1,.page-heading) {margin:0}
-.history-drawer {position:fixed;inset:0 auto 0 0;margin:0;width:min(21rem,88vw);height:100dvh;max-height:none;max-width:none;box-sizing:border-box;border:0;border-right:1px solid var(--border);padding:1.1rem;background:#f8faf9;color:inherit}
-.history-drawer[open] {display:flex;flex-direction:column;gap:.85rem}
-.history-drawer::backdrop {background:rgb(11 32 43 / .22)}
-.history-drawer header {justify-content:space-between}
-.history-drawer h2 {margin:0;font-size:1.1rem}
-.history-new {justify-content:flex-start;background:white}
-.history-entries {overflow-y:auto;min-height:0;display:flex;flex-direction:column;gap:.15rem}
-.history-entries .chat-link {display:flex;align-items:center;text-align:left;justify-content:space-between;gap:.75rem;min-height:2.75rem;padding:.55rem .65rem;border:0;border-radius:.45rem;background:transparent;font-weight:500}
-.history-entries .chat-link:hover,.history-entries .chat-link[aria-current=true] {background:#e5eee9}
-.history-entries .chat-link>span:first-child {overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.history-entries time,.history-entries small {font-size:.75rem;color:var(--muted)}
+.history-drawer {
+  position:fixed;inset:0 auto 0 0;margin:0;box-sizing:border-box;
+  width:min(350px,calc(100vw - 36px));height:100dvh;max-height:none;max-width:none;
+  padding:max(20px,env(safe-area-inset-top)) 16px max(16px,env(safe-area-inset-bottom));
+  border:0;border-right:1px solid #d7e0e5;background:#f9fafb;color:var(--navy);
+  box-shadow:6px 0 24px #0c234014;overflow:hidden;
+}
+.history-drawer[open] {display:flex;flex-direction:column;gap:12px}
+.history-drawer::backdrop {background:#0c234033}
+.history-drawer header {justify-content:space-between;padding-left:8px}
+.history-drawer h2 {margin:0;font-family:inherit;font-size:20px;font-weight:650;letter-spacing:-.035em}
+.history-drawer header .icon {width:40px;height:40px;border:0;border-radius:8px;background:transparent}
+.history-drawer .history-new {justify-content:flex-start;gap:10px;min-height:44px;padding:0 14px;border:0;border-radius:9px;background:var(--navy);color:white;font-weight:600}
+.history-drawer .history-new:hover {background:#193c60}
+.history-search {display:flex;align-items:center;gap:10px;padding:0 12px;border:1px solid #d7dfe6;border-radius:9px;background:white;color:var(--muted)}
+.history-search:focus-within {outline:2px solid #497c9f;outline-offset:1px}
+.history-search svg {flex:none}
+.history-search input[type=search] {width:100%;min-width:0;min-height:40px;padding:0;border:0;box-shadow:none;outline:none;background:transparent;font:inherit}
+.history-entries {min-height:0;overflow:auto;overscroll-behavior:contain;padding:0 2px 16px}
+.history-entries section {margin:12px 0 18px;padding:0;border:0;background:none}
+.history-entries h3 {margin:0 10px 5px;color:var(--muted);line-height:1.4;font-family:inherit;font-weight:600;font-size:12px}
+.history-entries .chat-link {position:relative;display:flex;align-items:center;justify-content:space-between;width:100%;min-height:42px;padding:9px 10px;gap:8px;border:0;border-radius:8px;text-align:left;background:transparent;color:var(--navy);font:inherit;line-height:1.4}
+.history-entries .chat-link:hover,.history-drawer header .icon:hover {background:#eaf0f3}
+.history-entries .chat-link[aria-current=true] {background:#e0ebe7;color:#174636;font-weight:600}
+.history-title {display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;overflow-wrap:anywhere}
+.history-entries .chat-loading-ring {position:static;flex:none}
+.history-entries small {display:block;padding:10px;color:var(--muted)}
+@media(prefers-reduced-motion:no-preference){.history-drawer[open]{animation:history-enter .16s ease-out}@keyframes history-enter{from{transform:translateX(-16px);opacity:.6}to{transform:translateX(0);opacity:1}}}
 .chat-main {min-width:0}
 .app:has(.chat-workspace) {height:100dvh;min-height:0}
 .workspace:has(.chat-workspace) main {height:100%;display:flex;flex-direction:column}

@@ -94,6 +94,7 @@ try {
       await page.waitForFunction(()=>{const r=document.querySelector(".chat-form textarea").getBoundingClientRect();return r.top>=0 && r.bottom<=460;},null,{timeout:4000});
     }
     await recent.click();
+    await drawer.getByRole("heading",{name:"Today",exact:true}).waitFor();
     await drawer.getByRole("button",{name:/How is the detachment/}).click();
     await answer.getByRole("cell",{name:"98%"}).waitFor();
     if(width===390){

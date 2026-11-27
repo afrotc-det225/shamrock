@@ -4,7 +4,7 @@ import React, { useLayoutEffect, useEffect, useRef, useState } from "react";
 import {overviewRoster} from "../../../packages/domain/src/frontend-reporting";
 import {operationallyActive} from "../../../packages/domain/src/admin";
 import OverviewInsights from "./OverviewInsights";
-import { ArrowUp, SquarePen, PanelLeft, X } from "lucide-react";
+import { ArrowUp, SquarePen, PanelLeft, Search, X } from "lucide-react";
 import { Heading, Table, Status, Empty } from "./components";
 import {readUsage} from "./read-usage";
 import { api, displayDate } from "./api";
@@ -143,7 +143,7 @@ function AssistantWorkspace({ meta }) {
   const historyMenu=useRef(null), historyToggle=useRef(null);
   useLayoutEffect(()=>{
     const drawer=historyMenu.current;
-    if(showChats && !drawer.open)drawer.showModal();
+    if(showChats && !drawer.open){setQuery("");drawer.showModal();}
     if(!showChats && drawer.open)drawer.close();
   },[showChats]);
   const hosted=meta.hosted && meta.assistantAvailable;
@@ -236,9 +236,20 @@ function AssistantWorkspace({ meta }) {
   const historyNotice=historyState==="loading" ? <small role="status">Loading recent chats…</small> :
     historyState==="failed" ? <button type="button" onClick={()=>retryHistory(n=>n+1)}>Retry loading recent chats</button> :
     !chats.length ? <small>No conversations yet.</small> : null;
+  const groups=new Map();
+  const today=new Date(), yesterday=new Date(today);
+  yesterday.setDate(today.getDate()-1);
+  for(const chat of chats){
+    if(!chat.title.toLowerCase().includes(query.trim().toLowerCase()))continue;
+    const date=new Date(chat.at);
+    const label=date.toDateString()===today.toDateString() ? "Today" : date.toDateString()===yesterday.toDateString() ? "Yesterday" :
+      date.toLocaleDateString(undefined,{month:"long",day:"numeric",...(date.getFullYear()!==today.getFullYear()?{year:"numeric"}:{})});
+    if(!groups.has(label))groups.set(label,[]);
+    groups.get(label).push(chat);
+  }
   function chatLink(row){
     return <button key={row.id} className="chat-link" aria-current={active?.id===row.id ? "true" : undefined} disabled={busy || !!opening} onClick={()=>openChat(row)}>
-      <span>{row.title}</span><span className="chat-date" data-loading={opening===row.id || undefined}><time dateTime={new Date(row.at).toISOString()}>{new Date(row.at).toLocaleDateString(undefined,{month:"short",day:"numeric"})}</time>{opening===row.id && <span role="status" aria-label="Loading chat" className="chat-loading-ring"/>}</span>
+      <span className="history-title" title={row.title}>{row.title}</span>{opening===row.id && <span role="status" aria-label="Loading chat" className="chat-loading-ring"/>}
     </button>;
   }
   return <section ref={page} className="assistant-page">
@@ -249,10 +260,11 @@ function AssistantWorkspace({ meta }) {
     <dialog ref={historyMenu} id="assistant-history" aria-label="Recent chats" className="history-drawer" onCancel={()=>setShowChats(false)} onClick={e=>{if(e.target===e.currentTarget){const r=e.currentTarget.getBoundingClientRect();if(e.clientX>r.right || e.clientX<r.left)setShowChats(false);}}}>
       <header><h2>Recent chats</h2><button className="icon" aria-label="Close recent chats" onClick={()=>setShowChats(false)}><X size={18}/></button></header>
       <button className="history-new" disabled={busy || !!opening} onClick={()=>{newChat();requestAnimationFrame(()=>input.current?.focus());}}><SquarePen size={17}/>New chat</button>
-      {chats.length>1 && <input type="search" aria-label="Search chat titles" placeholder="Search chats" value={query} onChange={e=>setQuery(e.target.value)}/>}
+      {chats.length>1 && <label className="history-search"><Search size={16} aria-hidden="true"/><input type="search" aria-label="Search chat titles" placeholder="Search chats" value={query} onChange={e=>setQuery(e.target.value)}/></label>}
       <div className="history-entries">{historyNotice}
-        {chats.filter(row=>row.title.toLowerCase().includes(query.trim().toLowerCase())).map(chatLink)}
-        {!!chats.length && !chats.some(row=>row.title.toLowerCase().includes(query.trim().toLowerCase())) && <small>No matching chats.</small>}
+        {[...groups].map(([label,rows])=><section key={label} aria-label={label}><h3>{label}</h3>{rows.map(chatLink)}</section>)}
+        {!!chats.length && !groups.size && <small>No matching chats.</small>}
+        {error && <p role="alert">{error}</p>}
       </div>
     </dialog>
     <div className="chat-workspace">
