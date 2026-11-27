@@ -85,8 +85,35 @@ const afscFills = new Map([
   ["5", "#59457c"], ["6", "#3d6270"], ["7", "#5d4633"], ["8", "#495566"],
   ["9", "#4c4c62"],
 ]);
+const campusKey = value => key(value).replace(/[’']/g,"").replace(/[^a-z0-9]+/g," ").trim();
+const universityPalette = new Map([
+  [["Notre Dame","University of Notre Dame","ND"],["#123254","#f4deb0"]],
+  [["St. Mary's","Saint Mary's College","St Mary's College","Saint Mary's","SMC"],["#ccdfef","#153c64"]],
+  [["Holy Cross","Holy Cross College","HCC"],["#742d40","#ffffff"]],
+  [["Trine","Trine University"],["#f0c165","#152b49"]],
+  [["Valparaiso","Valparaiso University","Valpo"],["#58351e","#ffe19b"]],
+].flatMap(([names,colors])=>names.map(name=>[campusKey(name),colors])));
+
+const hallKey = value => campusKey(value).replace(/ hall$/,"").replace(/ family$/,"");
+const mensHalls = new Set(["Alumni","Baumer","Carroll","Coyle","Dillon","Duncan","Dunne","Graham","Keenan","Keough","Knott","Morrissey","O'Neill","Siegfried","Sorin","Stanford","St. Edward's"].map(hallKey));
+const womensHalls = new Set(["Badin","Breen-Phillips","Cavanaugh","Farley","Flaherty","Grojean","Howard","Johnson","Lewis","Lyons","Lyons Community in Zahm Hall","McGlinn","Pasquerilla East","Pasquerilla West","Ryan","Walsh","Welsh"].map(hallKey));
+export function residenceCategory(value) {
+  const hall=hallKey(value);
+  if(mensHalls.has(hall))return "Men’s hall";
+  if(womensHalls.has(hall))return "Women’s hall";
+  return "Other residence";
+}
 export function profileColorStyle(field, value) {
   const label = String(value ?? "").trim();
+  if(field==="squadron"){
+    const group=key(label).replace(/ squadron$/,"");
+    return cellStyle(group==="blue" ? blue.alpha : group==="gold" ? gold.echo : neutral);
+  }
+  if(field==="university")return cellStyle(universityPalette.get(campusKey(value)) ?? neutral);
+  if(field==="dorm"){
+    const category=residenceCategory(value);
+    return cellStyle(category==="Men’s hall" ? ["#d4e6f4","#1f4764"] : category==="Women’s hall" ? ["#ecdaed","#573458"] : neutral);
+  }
   if (field === "cipBroadArea" || field === "cipCode") {
     const series = /^(\d{2})(?=$|\s|\.|[-–—])/.exec(label)?.[1];
     return cellStyle(cipColors.get(series) ?? neutral);

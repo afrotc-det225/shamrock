@@ -65,12 +65,14 @@ try {
       await page.getByRole("button",{name:"Columns",exact:true}).click();
       await page.getByRole("checkbox",{name:"Photo link",exact:true}).check();
       await page.keyboard.press("Escape");
-      assert.equal(await failedRow.getByRole("link",{name:"Open photo"}).getAttribute("href"),people[1].photoLink);
+      assert.equal(await failedRow.getByRole("link").count(),0);
       await page.route("https://drive.google.com/file/d/fixture1/preview?*",route => route.fulfill({contentType:"text/html",body:"Image preview"}));
-      await failedRow.getByRole("button",{name:"Preview photo"}).click();
-      await failedRow.frameLocator("iframe").getByText("Image preview").waitFor();
-      await failedRow.getByRole("button",{name:"Close preview"}).click();
-      assert.equal(await failedRow.locator("iframe").count(),0);
+      await failedRow.locator(".directory-avatar").click();
+      const preview=page.getByRole("dialog",{name:"Photo of Sample Cadet 1"});
+      assert.equal(await preview.getByRole("link",{name:"Open original photo"}).getAttribute("href"),people[1].photoLink);
+      await preview.frameLocator("iframe").getByText("Image preview").waitFor();
+      await preview.getByRole("button",{name:"Close preview"}).click();
+      assert.equal(await preview.count(),0);
     }
     await page.setViewportSize({width:390,height:844});await settle();
     assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));

@@ -76,7 +76,10 @@ try {
         if (width === 390) await page.getByLabel("Profile initials").waitFor();
         else await page.waitForFunction(() => document.querySelector(".profile-portrait img")?.naturalWidth > 0);
         assert.equal(await afsc.evaluate(el => el.tagName), "TEXTAREA");
+        assert.equal(await page.getByRole("link",{name:"Open original photo"}).count(),0);
+        await page.getByRole("button",{name:"Preview photo of Sample Cadet"}).click();
         assert.equal(await page.getByRole("link",{name:"Open original photo"}).getAttribute("href"), "https://drive.google.com/file/d/fictional-photo/view");
+        await page.getByRole("button",{name:"Close preview"}).click();
         assert.equal(new URL(page.url()).pathname,"/me/profile");
         await page.goBack();
         await heading("My requests").waitFor();

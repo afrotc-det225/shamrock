@@ -12,7 +12,7 @@ import {
 } from "./components";
 import { DirectoryPhoto } from "./DirectoryPhoto";
 import { ToolbarPopover } from "./ToolbarPopover";
-import { cellStyle, flightColors, flightPathColors, profileColorStyle, yearColors } from "./roster-colors";
+import { cellStyle, flightColors, flightPathColors, profileColorStyle, residenceCategory, yearColors } from "./roster-colors";
 import { LeadershipChart, textOrder, alphabetic } from "./RosterViews";
 import { api,name, label, years, statuses, profileFields } from "./api";
 import { DIRECTORY_FIELDS } from "../../../packages/domain/src/admin";
@@ -35,7 +35,7 @@ function DirectoryValue({ field, value, person }) {
   if (field === "photoLink") return value ? <DirectoryPhoto value={value} person={person} /> : "—";
   const style = profileColorStyle(field, value);
   const label = String(value || "—");
-  return style ? <span className="profile-tag" style={style}>{label}</span> : label;
+  return style ? <span className="profile-tag" style={style} title={field==="dorm" && value ? residenceCategory(value) : undefined}>{label}</span> : label;
 }
 
 export default function People({
