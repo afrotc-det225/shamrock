@@ -17,7 +17,8 @@ import { ProfileField } from "./ProfileField";
 import { DirectoryPhoto } from "./DirectoryPhoto";
 import { ToolbarPopover } from "./ToolbarPopover";
 import { cellStyle, flightColors, flightPathColors, profileColorStyle, residenceCategory, yearColors } from "./roster-colors";
-import { LeadershipChart, textOrder, alphabetic } from "./RosterViews";
+import LeadershipChart from "./LeadershipChart";
+import { textOrder, alphabetic } from "./RosterViews";
 import { api,name, label, years, statuses, profileFields } from "./api";
 import { DIRECTORY_FIELDS } from "../../../packages/domain/src/admin";
 import { compareAsYearsForDisplay, compareCadetsForDisplay, compareLeadershipForDisplay } from "../../../packages/domain/src/cadet-display-order";
@@ -246,10 +247,10 @@ export default function People({
         <Heading title={leadership ? "Leadership" : "Cadets"} />
         <div className="toolbar">
           <SearchBox
-            placeholder={leadership ? "Find a leader" : "Find a cadet"}
+            placeholder={leadership ? (view==="Organization" ? "Find a leader or office" : "Find a leader") : "Find a cadet"}
             value={query}
             onChange={setQuery}
-            resultCount={query || squadron || flight || year || match || !["current","all"].includes(status) ? rows.length : undefined}
+            resultCount={leadership && view==="Organization" ? undefined : query || squadron || flight || year || match || !["current","all"].includes(status) ? rows.length : undefined}
           />
           <ToolbarFilters active={Boolean(squadron || flight || year || status !== "current" || sort !== "seniority" || view !== "List")}>
             {leadership ? <Select label="View" value={view} onChange={setView} options={["List","Organization"]}/> : <>
@@ -261,7 +262,7 @@ export default function People({
               <Select label="Roster status" value={status} onChange={setStatus} options={[{value:"current",label:"Current roster"},{value:"all",label:"All statuses"},...statuses]}/>
               <Select label="Sort by" value={sort} onChange={key=>{setSort(key);setDescending(false);}} options={[{value:"seniority",label:"Default"},...columnKeys.map(k=>({value:k,label:columnLabel(k)}))]}/>
             </>}
-            {zoom.control}
+            {(!leadership || view!=="Organization") && zoom.control}
           </ToolbarFilters>
           <div className="toolbar-actions">
             {!leadership && (
@@ -293,7 +294,7 @@ export default function People({
       {waitingForField && (fieldError
         ? <p role="alert">{fieldError} <button onClick={()=>setRetry(retry+1)}>Retry</button></p>
         : <span className="page-transfer" role="status">Loading directory fields…</span>)}
-      {leadership && view==="Organization" ? <LeadershipChart records={rows} roster={s}/> : <Table zoom={zoom.scale}
+      {leadership && view==="Organization" ? <LeadershipChart roster={s} query={query}/> : <Table zoom={zoom.scale}
         className={leadership ? "leadership-roster" : hasCadet ? "cadet-roster with-cadet" : "cadet-roster"}
         headers={
           leadership

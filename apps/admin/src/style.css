@@ -1271,18 +1271,11 @@ html:has(dialog:modal) {
 .code-key div {display:flex;align-items:center;gap:.4rem}
 .code-key dt {background:var(--mark-bg,#f0f1f2);color:var(--mark-ink,#424a51);border-radius:3px;padding:.2rem .4rem;min-width:2.2em;text-align:center;font-weight:700}
 .code-key dd {margin:0}
-.insights-grid,.org-branches {display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:1rem;margin:1rem 0}
-.insight,.org-layout section {padding:1rem 1.15rem;border:1px solid var(--border);border-radius:7px;background:#fff}
-.insight h3,.org-layout h3 {margin:0 0 .9rem;font-size:1rem;color:#203f36}
+.insights-grid {display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:1rem;margin:1rem 0}
+.insight {padding:1rem 1.15rem;border:1px solid var(--border);border-radius:7px;background:#fff}
+.insight h3 {margin:0 0 .9rem;font-size:1rem;color:#203f36}
 .insight header {display:flex;justify-content:space-between;align-items:center;gap:.4rem}
-.org-branches ul {list-style:none;padding:0;margin:0}
-.org-layout dl div {display:flex;justify-content:space-between;gap:.5rem;font-size:.86rem;padding:.45rem 0;border-bottom:1px solid var(--border)}
-.org-layout {display:grid;gap:.75rem}.org-layout h3 {margin-bottom:.65rem}
-.org-cards {display:grid;grid-template-columns:repeat(auto-fit,minmax(12rem,1fr));gap:.4rem}
-.org-card {display:flex;flex-direction:column;gap:.23rem;padding:.55rem .75rem;background:#f4f7f6;border-left:3px solid #738d83;font-size:.85rem}
-.org-card span {color:#485c53}.org-branches {margin:0}.org-branches li {border-left:2px solid #bdcbc5;margin:0 0 0 .75rem;padding:.65rem 0 0 .65rem}
-.org-layout dt {font-weight:650}.org-layout dd {margin:0}
-@media(max-width:720px){.insights-grid,.org-branches {grid-template-columns:minmax(0,1fr)}.org-cards{grid-template-columns:1fr}.matrix-scroll{max-width:100%;max-height:65vh}}
+@media(max-width:720px){.insights-grid {grid-template-columns:minmax(0,1fr)}.matrix-scroll{max-width:100%;max-height:65vh}}
 .coverage {color:var(--muted);font-size:.78rem;margin:.8rem 0 0}
 
 .attendance-matrix {
