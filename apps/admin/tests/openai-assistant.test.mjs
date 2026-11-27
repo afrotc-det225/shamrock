@@ -162,10 +162,38 @@ test("administrator identity questions routed by meaning open the protected dire
   const reply=await answer(env,{messages:[{role:"user",content:"Who has the keys to manage SHAMROCK?"}]},"Guide",async(_,options)=>{
     requests++;
     const q=JSON.parse(options.body);
+    if(!q.questions){
+      assert.match(q.input,/permissionManager/);return respond("The live panel accounts are listed below.");
+    }
     assert.ok(q.questions.find(x=>x.name==="dataset").choices.some(x=>x.value==="administrators"));
-    return Response.json({answers:Object.entries({route:"report",source:"none",dataset:"administrators"})
+    return Response.json({answers:Object.entries({route:"report",dataset:"administrators"})
       .map(([name,choice])=>({type:"choice",name,choice}))});
-  });
-  assert.equal(requests,1);
-  assert.deepEqual(reply,{content:"SHAMROCK administrators",adminDirectory:true});
+  },null,null,null,async()=>({administrators:[{name:"Private fixture"}]}));
+  assert.equal(requests,2);
+  assert.ok(reply.adminDirectory);
+});
+
+test("access follow-ups explain the referenced accounts without listing the directory again",async()=>{
+  const history=[{role:"user",content:"Which users are administrators?"},{role:"assistant",content:"SHAMROCK administrators"},{role:"user",content:"Who is sample-reader?"}];
+  const result=await answer(env,{messages:history},"Guide",async(_,opts)=>{
+    const q=JSON.parse(opts.body);
+    if(q.questions)return Response.json({answers:["route:report","dataset:administrators"].map(pair=>{
+      const [name,choice]=pair.split(":");return {type:"choice",name,choice};
+    })});
+    const {access}=JSON.parse(q.input);
+    assert.deepEqual(access.panel[0].mentionedAs,["sample-reader"]);
+    assert.equal(access.panel[0].linkedDirectoryPerson,false);
+    assert.ok(!q.input.includes("private fixture"));
+    return respond("This panel account has no linked Directory person.");
+  },null,null,null,async()=>({administrators:[{principalId:"sample-reader",name:"private fixture"}]}));
+  assert.equal(result.adminDirectory,undefined);
+});
+
+test("an access change with a copied UI suffix resolves the named cadet without dispatching code",async()=>{
+  const result=await answer(env,{messages:[{role:"user",content:"make Sample Cadet an administratorsvg"}]},"Guide",async(_,opts)=>{
+    const q=JSON.parse(opts.body);assert.equal(q.model,model);
+    assert.equal(JSON.parse(q.input).matchingFullNamesInActiveDirectory,1);
+    return respond("Which access should Sample Cadet receive?");
+  },null,null,async()=>[{first:"Sample",last:"Cadet"}],async()=>({administrators:[]}));
+  assert.equal(result.proposal,undefined);
 });

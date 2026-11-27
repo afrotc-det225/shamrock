@@ -1,5 +1,16 @@
 import {effectiveAdminGrants} from "../../../.build/v3/apps/worker/src/permission-grants.js";
-export const administratorReply=()=>({content:"SHAMROCK administrators",adminDirectory:true});
+// Describe records to the model using only labels the owner already supplied in chat.
+export function accessEvidence({administrators,workbook},history){
+  const text=history.map(m=>m.content.toLowerCase()).join(" ");
+  const mentioned=(...labels)=>labels.filter(label=>label && text.includes(label.toLowerCase()));
+  return {
+    panel:administrators.map((r,i)=>({position:i+1,mentionedAs:mentioned(r.name,r.principalId,r.email),
+      linkedDirectoryPerson:Boolean(r.personLinked),linkedVerifiedEmail:Boolean(r.email),
+      permissionManager:Boolean(r.managesAccess),wingPanelAccess:true})),
+    workbookCheckedAt:workbook?.checkedAt ?? null,
+    workbook:workbook?.admins.map((r,i)=>({position:i+1,mentionedAs:mentioned(r.label,r.account),role:r.role})) ?? null
+  };
+}
 export function asksForAdministrators(message){
   return message?.role==="user" && /^(?:who (?:are|is)|which (?:users|accounts|people) are|(?:please )?(?:list|show|name)(?: me)?) (?:all )?(?:(?:the|our|current|currently|shamrock|system|panel|staging) )*admin(?:istrator)?s?(?: (?:of|for|in) (?:the )?(?:shamrock|system|panel))?[?.! ]*$/i.test(message.content?.trim() || "");
 }
@@ -9,7 +20,7 @@ export async function currentAdministrators(db){
     SELECT principal_id FROM admin_grants WHERE capability='frontend.read' AND scope_kind='wing' AND scope_key='*'
     UNION SELECT m.principal_id FROM permission_managers m JOIN ${effectiveAdminGrants} g ON g.principal_id=m.principal_id
     WHERE m.active=1 AND g.capability='frontend.read' AND g.scope_kind='wing' AND g.scope_key='*')
-    SELECT coalesce(nullif(trim(d.first_name||' '||d.last_name),''),nullif(trim(c.first_name||' '||c.last_name),''),nullif(pe.display_name,''),a.email,p.principal_id) AS name,
+    SELECT coalesce(nullif(trim(d.first_name||' '||d.last_name),''),nullif(trim(c.first_name||' '||c.last_name),''),nullif(pe.display_name,''),a.email,p.principal_id) AS name, p.principal_id AS principalId,p.person_id IS NOT NULL AS personLinked,a.email,
     EXISTS(SELECT 1 FROM permission_managers m WHERE m.active=1 AND m.principal_id=p.principal_id) AS managesAccess
     FROM wing JOIN principals p ON p.principal_id=wing.principal_id AND p.active=1
     LEFT JOIN people pe ON pe.person_id=p.person_id LEFT JOIN directory_profiles d ON d.person_id=p.person_id

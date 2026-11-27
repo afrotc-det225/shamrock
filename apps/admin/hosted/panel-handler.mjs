@@ -15,7 +15,7 @@ import { previewFromSession, previewResponse, changePreview } from "./view-as.mj
 import { browseState, browseProfiles } from "./browse.mjs";
 import {rosterDataset,cohortNames} from "./roster-query.mjs";
 import {rosterQuestion,rosterRows} from "./roster-questions.mjs";
-import {administratorReply,asksForAdministrators,currentAdministrators} from "./admin-directory.mjs";
+import {currentAdministrators} from "./admin-directory.mjs";
 import {reportTotals} from "./operational-reports.mjs";
 import {eventCancellationReply} from "./event-action.mjs";
 import { eventsState } from "./events-list.mjs";
@@ -318,12 +318,13 @@ export default {
           if(!rows)throw new PanelError("INVALID_REQUEST","Unknown roster filter.");
           return secure(json({rows}));
         }
-        if(adminDirectory){
+        const readAccessDirectory=async()=>{
           if(!isUnifiedSite(env))throw new PanelError("UNAVAILABLE","Administrator records are unavailable here.",503);
           const panel=await currentAdministrators(env.DB);
           const workbook=await env.HISTORY_FILES.get("assistant/admin-directory/v1","json");
-          return secure(json({...panel,workbook}));
-        }
+          return {...panel,workbook};
+        };
+        if(adminDirectory)return secure(json(await readAccessDirectory()));
         if(testJob){
           const approve=request.method==="POST";
           const id=checkChatId(approve?body?.id:url.searchParams.get("id"));
@@ -340,10 +341,10 @@ export default {
           return secure(json(history));
         }
         const id=checkChatId(body?.chatId ?? crypto.randomUUID());
-        const reply=asksForAdministrators(body?.messages?.at(-1)) ? administratorReply() : rosterQuestion(body?.messages) ?? await eventCancellationReply(body?.messages?.at(-1),backend,service) ?? await answer(env,body,env.operatorGuide,fetch,()=>wingCharts(backend),async profile=>{
+        const reply=rosterQuestion(body?.messages) ?? await eventCancellationReply(body?.messages?.at(-1),backend,service) ?? await answer(env,body,env.operatorGuide,fetch,()=>wingCharts(backend),async profile=>{
           const view=await browseState(backend,await backend.panelAuthority(),profile==="careers"?"cadets":profile);
           return reportTotals(profile,view.tables);
-        },readRoster);
+        },readRoster,readAccessDirectory);
         if(isUnifiedSite(env) && reply.proposal){
           const {area,path,commit,before,after,edits}=reply.proposal;
           reply.proposal.jobId=await env.PANEL_DB.repositoryJob({operation:"create",id:crypto.randomUUID(),patch:{area,path,commit,before,after,edits}});
