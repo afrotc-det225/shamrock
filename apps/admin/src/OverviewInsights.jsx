@@ -4,18 +4,7 @@ import { api } from "./api";
 import BirthdayAgenda from "./BirthdayAgenda";
 import { WingCharts, percent, archivedComparisons } from "./WingCharts";
 
-function RateTrend({points, floor}) {
-  if (points.length < 2 || points.some(p => !Number.isFinite(p.value))) return null;
-  const coords = points.map((p, i) => [3 + i * 58 / (points.length - 1), 29 - (p.value - floor) / (1 - floor) * 26]);
-  const summary = points.map(p => p.label + " " + percent(p.value)).join(", ");
-  return <svg className="rate-trend" viewBox="0 0 64 32" role="img" aria-label={summary}>
-    <title>{summary}</title>
-    <polyline points={coords.map(point => point.join(",")).join(" ")} fill="none" stroke="currentColor" strokeWidth="2"/>
-    {coords.map(([x,y], i) => <circle key={i} cx={x} cy={y} r={i === coords.length-1 ? 3 : 2} fill="currentColor"/>)}
-  </svg>;
-}
-
-function AttendanceRate({label, value, history, metric, term, floor}) {
+function AttendanceRate({label, value, history, metric}) {
   const previous = history.at(-1);
   const prior = previous?.[metric];
   const change = Number.isFinite(prior) && Number.isFinite(value)
@@ -23,9 +12,7 @@ function AttendanceRate({label, value, history, metric, term, floor}) {
   const delta = change != null && (change > 0 ? "+" : "") + change.toFixed(1);
   return <div className="attendance-rate">
     <dt>{label}</dt>
-    <dd className="rate-value">{percent(value)}
-      <RateTrend points={[...history.slice(-2).map(h => ({label:h.label,value:h[metric]})), {label:term,value}]} floor={floor}/>
-    </dd>
+    <dd className="rate-value">{percent(value)}</dd>
     {change != null && <dd className="rate-comparison">
       <span className="comparison-change" data-direction={Math.sign(change)}
         aria-label={delta + " percentage points"}>{delta} pp</span>
@@ -34,32 +21,27 @@ function AttendanceRate({label, value, history, metric, term, floor}) {
   </div>;
 }
 
-function AttendanceSummary({dashboard, history, term, activeCadets, pending, navigate, error, retry}) {
-  const rates = [dashboard?.averageOverall, dashboard?.averageLlab, ...history.slice(-2).flatMap(h => [h.overall, h.llab])];
-  // Give both trend lines the same percentage scale, with at least one point of range.
-  const floor = Math.floor(100 * Math.min(.99, ...rates.filter(Number.isFinite))) / 100;
+function AttendanceSummary({dashboard, history, pending, navigate, error, retry}) {
   return <section className="insight attendance-summary" aria-labelledby="wing-attendance">
     <h3 id="wing-attendance">Wing attendance</h3>
     {dashboard ? <dl className="attendance-rates">
-      <AttendanceRate label="Overall" value={dashboard.averageOverall} history={history} metric="overall" term={term} floor={floor}/>
-      <AttendanceRate label="LLAB" value={dashboard.averageLlab} history={history} metric="llab" term={term} floor={floor}/>
+      <AttendanceRate label="Overall" value={dashboard.averageOverall} history={history} metric="overall"/>
+      <AttendanceRate label="LLAB" value={dashboard.averageLlab} history={history} metric="llab"/>
     </dl> : error ? <p role="alert">{error} <button onClick={retry}>Retry</button></p>
       : <LoadingRows label="Loading Wing attendance" rows={2}/>}
     <div className="wing-roster-context">
-      <div><strong>{activeCadets}</strong> active cadets
-        {dashboard && <small>{dashboard.gmcCadets} GMC · {dashboard.pocCadets} POC</small>}</div>
       {dashboard && <div><strong>{dashboard.belowEighty}</strong> below 80% overall
         {dashboard.noCountedAttendanceCadets > 0 && <small>{dashboard.noCountedAttendanceCadets} with no counted attendance</small>}</div>}
-    </div>
     <a className="overview-queue" href="/excusals" onClick={e => {
       if (!e.metaKey && !e.ctrlKey && !e.shiftKey && !e.altKey) { e.preventDefault(); navigate("Excusals"); }
     }}>{pending} pending {pending === 1 ? "excusal" : "excusals"} <span aria-hidden="true">→</span></a>
+    </div>
   </section>;
 }
 
 export default function OverviewInsights({
   overview,
-  activeCadets, pending, navigate,
+  pending, navigate,
   snapshot,
   reporting,
   birthdayCalendar,
@@ -129,8 +111,8 @@ export default function OverviewInsights({
     [];
   return (
     <div className="insights-grid">
-      <AttendanceSummary dashboard={d} term={term} history={archivedComparisons(compiled?.history ?? [], term)}
-        activeCadets={activeCadets} pending={pending} navigate={navigate} error={error} retry={() => setRetry(retry + 1)}/>
+      <AttendanceSummary dashboard={d} history={archivedComparisons(compiled?.history ?? [], term)}
+        pending={pending} navigate={navigate} error={error} retry={() => setRetry(retry + 1)}/>
       <BirthdayAgenda
         squadrons={squadrons}
         flights={flights}

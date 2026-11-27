@@ -1,5 +1,7 @@
 import { MaintenanceProposal } from "./MaintenanceProposal";
 import React, { lazy, Suspense, useEffect, useRef, useState } from "react";
+import {overviewRoster} from "../../../packages/domain/src/frontend-reporting";
+import {operationallyActive} from "../../../packages/domain/src/admin";
 import OverviewInsights from "./OverviewInsights";
 import { Send } from "lucide-react";
 import { Heading, Table, Status, Empty } from "./components";
@@ -8,7 +10,7 @@ import { api } from "./api";
 import { currentExcusalRequests } from "./attendance-events.mjs";
 import { useReceipts, ReceiptStatus } from "./receipts";
 export function Overview({ snapshot: s, overview, reporting, history, receiptsDeferred, reportingTime, captureKey, navigate, readOnly = false, ...details }) {
-  const d = reporting?.dashboard;
+  const roster = overview || overviewRoster(s.people.filter(operationallyActive).map(p => [p.asYear,p.university,1]));
   const receipt = useReceipts({ history, receiptsDeferred, reportingTime, captureKey, enabled: !readOnly });
   return (
     <>
@@ -16,8 +18,11 @@ export function Overview({ snapshot: s, overview, reporting, history, receiptsDe
         title="Overview"
         description={`${overview?.term || s?.terms.find((t) => t.isCurrent)?.label || "Semester not configured"} · Detachment 225`}
       />
+      <dl className="overview-roster" aria-label="Active Wing roster">
+        {Object.entries({activeCadets:"Active cadets",gmcCadets:"GMC",pocCadets:"POC",crosstowns:"Crosstowns",farCrosstowns:"Far crosstowns"}).map(([key,label]) =>
+          <div key={key}><dt>{label}</dt><dd>{roster[key] ?? "—"}</dd></div>)}
+      </dl>
       <OverviewInsights {...details} overview={overview} snapshot={s} reporting={reporting} reportingTime={reportingTime} captureKey={captureKey}
-        activeCadets={overview?.activeCadets ?? d?.totalCadets ?? s.people.filter(p => p.active).length}
         pending={overview?.pending ?? currentExcusalRequests(s).filter(r => r.status === "Submitted").length}
         navigate={navigate}/>
       {!readOnly && <section className="form-section">

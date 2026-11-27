@@ -1,3 +1,4 @@
+import {overviewRoster} from "../../../packages/domain/src/frontend-reporting.js";
 import {DIRECTORY_FIELDS} from "../../../packages/domain/src/admin.js";
 import type {WingTableCache} from './panel-cache.js';
 // Read models for the browser. Commands and native publication retain their own contracts.
@@ -96,7 +97,9 @@ export async function browsePanel(env:Env, identity:{environment:string;generati
     const count=(name:string, query:Query, where:string)=>{
       selects.push(`SELECT '${name}' AS name, count(*) AS payload FROM (SELECT `+query.select+' '+query.from+') WHERE '+where);
     };
-    count('activeCadets',people,activePeople);count('activeEvents',q.events,"status='active'");
+    selects.push("SELECT 'rosterGroups' AS name,json_group_array(json_array(asYear,university,n)) AS payload FROM ("+
+      "SELECT asYear,university,count(*) AS n FROM (SELECT "+people.select+" "+people.from+") WHERE "+activePeople+" GROUP BY asYear,university)");
+    count('activeEvents',q.events,"status='active'");
     count('pending',q.requests,"status='Submitted' AND "+activeEvents);
     table('terms',q.terms,'termId,label');
     table('flights',q.flights,'flightId,label,squadronId');
@@ -144,6 +147,10 @@ export async function browsePanel(env:Env, identity:{environment:string;generati
     if (JSON.stringify(first)!==JSON.stringify(results.slice(0,fence.length).map(r=>r.results))) throw error('SNAPSHOT_CHANGED');
     const tables=Object.fromEntries(results.slice(fence.length).flatMap(r=>r.results).map(r=>[String(r.name),r.payload as string|number|null]));
     if (Object.values(tables).some(s=>s===null) || Object.values(tables).reduce<number>((n,s)=>n+String(s).length,0)>900000) throw error('BROWSE_TOO_LARGE');
+    if (profile === 'overview') {
+      Object.assign(tables, overviewRoster(JSON.parse(String(tables.rosterGroups))));
+      delete tables.rosterGroups;
+    }
     return tables;
   };
   const tables = wing && (profile === 'attendance' || profile === 'semester' || profile === 'leadership' || profile === 'view-as-people') && wingCache ? await wingCache({profile,termId:String(control.termId),principalId:identity.principalId,revision,authority},load) : await load();

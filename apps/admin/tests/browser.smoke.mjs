@@ -387,6 +387,12 @@ try {
   const birthdays = page.getByRole("region",{name:"Wing birthdays"});
   const month = birthdays.locator(".calendar-month strong");
   const originalMonth = await month.innerText();
+  const week = birthdays.getByRole("button",{name:/^Week [0-9]/}).first();
+  await week.click();
+  assert.equal(await week.getAttribute("aria-pressed"), "true");
+  await birthdays.getByRole("heading",{name:/^Week [0-9]/}).waitFor();
+  assert.deepEqual(await page.locator(".overview-roster dt").allTextContents(),["Active cadets","GMC","POC","Crosstowns","Far crosstowns"]);
+  assert.ok((await page.locator(".overview-roster dd").allTextContents()).every(v => /^\d+$/.test(v)));
   await birthdays.getByRole("button",{name:"Next month"}).click();
   assert.notEqual(await month.innerText(),originalMonth);
   await birthdays.getByRole("button",{name:"Reset calendar"}).click();
