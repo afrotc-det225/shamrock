@@ -1,3 +1,4 @@
+import {EventApproval} from "./EventApproval";
 import { MaintenanceProposal } from "./MaintenanceProposal";
 import React, { useLayoutEffect, useEffect, useRef, useState } from "react";
 import {overviewRoster} from "../../../packages/domain/src/frontend-reporting";
@@ -221,7 +222,7 @@ function AssistantWorkspace({ meta }) {
           messages:next.slice(-15).map(({role,content})=>({role,content})),
         }),
       ]);
-      const transcript=[...next,{role:"assistant",content:reply.content,proposal:reply.proposal,autoTest:true}];
+      const transcript=[...next,{role:"assistant",content:reply.content,proposal:reply.proposal,eventAction:reply.eventAction,autoTest:true}];
       setReply(()=>renderer);setMessages(transcript);setActive(chat);
       threads.current.set(chat.id,transcript);
       setChats(rows=>[{...chat,at:Date.now()},...rows.filter(row=>row.id!==chat.id)]);
@@ -263,6 +264,7 @@ function AssistantWorkspace({ meta }) {
         {m.role==="user" ? <p>{m.content}</p> : <ReplyBoundary fallback={<PlainReply text={m.content}/>}>
           <Reply text={m.content}/>
         </ReplyBoundary>}
+        {m.eventAction && <EventApproval action={m.eventAction}/>}
         {m.proposal && <ReplyBoundary fallback={<p role="status">The saved proposal could not be displayed.</p>}><MaintenanceProposal proposal={m.proposal} autoTest={m.autoTest}/></ReplyBoundary>}
       </article>)}
       {busy && <p className="hint" role="status">Thinking…</p>}

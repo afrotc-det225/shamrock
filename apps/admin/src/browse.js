@@ -60,12 +60,4 @@ export async function decodeBrowse(data) {
 }
 
 
-export function eventEditorData({tables}) {
-  const rows=(key,names)=>JSON.parse(tables[key]).map(values=>Object.fromEntries(names.split(" ").map((n,i)=>[n,values[i]])));
-  const events=rows("events","eventId version termId eventType trainingWeek displayOrder label columnLabel expectedGroup status startAt endAt location notes hasRoster");
-  const byId=new Map(events.map(e=>[e.eventId,e]));
-  for(const event of events) event.eligiblePersonIds=event.hasRoster ? [] : null;
-  for(const [event,person] of JSON.parse(tables.eligible)) byId.get(event).eligiblePersonIds.push(person);
-  return {events,people:rows("people","personId lastName firstName"),flights:rows("flights","flightId label"),
-    terms:rows("terms","termId label sortOrder isCurrent"),eventFlights:rows("eventFlights","eventId flightId")};
-}
+export {eventEditorData} from "../event-editor.mjs";

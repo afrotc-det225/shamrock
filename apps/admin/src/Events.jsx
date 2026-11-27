@@ -15,6 +15,7 @@ import { eventTypes, displayDate, name } from "./api";
 import { toEastern, fromEastern, zoneLabel } from "./time";
 import { eventEditorData } from "./browse";
 import { api } from "./api";
+import {existingEventPayload} from "../event-editor.mjs";
 import BulkSchedule from "./BulkSchedule";
 export default function Events({ snapshot, eventsList, propose, busy, refresh, readOnly = false, run }) {
   const [details,setDetails] = useState(null), [loading,setLoading] = useState(false);
@@ -38,30 +39,7 @@ export default function Events({ snapshot, eventsList, propose, busy, refresh, r
   const openFrom = (source, e) =>
     setEdit(
       e
-        ? {
-            ...Object.fromEntries(
-              [
-                "eventId",
-                "termId",
-                "eventType",
-                "trainingWeek",
-                "displayOrder",
-                "label",
-                "columnLabel",
-                "expectedGroup",
-                "status",
-                "startAt",
-                "endAt",
-                "location",
-                "notes",
-                "eligiblePersonIds",
-              ].map((k) => [k, e[k]]),
-            ),
-            expectedVersion: e.version,
-            flightIds: source.eventFlights
-              .filter((f) => f.eventId === e.eventId)
-              .map((f) => f.flightId),
-          }
+        ? existingEventPayload(source, e)
         : {
             eventId: crypto.randomUUID(),
             expectedVersion: 0,

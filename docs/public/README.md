@@ -371,3 +371,5 @@ On **Assistant**, type a question in the centered message box. During a conversa
 In Assistant, select **New chat** to start a separate conversation or open **Recent chats** in the page header to revisit one. The hosted panel retains completed exchanges for 90 days for the authorized account. Conversations from before history was enabled are unavailable.
 
 The Cadets table initially shows the combined Cadet column and all Directory details. **Columns** remembers your selection, including separate last name, first name, and rank when needed for export.
+
+In the staging Assistant, the owner can request “Cancel” followed by an exact current-semester event name. Review the event and semester, then select **Approve cancellation**. The Assistant uses the Events page’s reviewed change and checks the saved status. A missing or ambiguous event does not produce an approval.

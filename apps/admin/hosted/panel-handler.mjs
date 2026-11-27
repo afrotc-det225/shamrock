@@ -13,6 +13,7 @@ import { json, boundedJson, secure } from "./http.mjs";
 import { TRANSITION_POLICY } from "../../../packages/domain/src/transitions.ts";
 import { previewFromSession, previewResponse, changePreview } from "./view-as.mjs";
 import { browseState, browseProfiles } from "./browse.mjs";
+import {eventCancellationReply} from "./event-action.mjs";
 import { eventsState } from "./events-list.mjs";
 import { dailyLimitResponse } from "./provider-errors.mjs";
 import { wingCharts } from "./wing-charts.mjs";
@@ -308,7 +309,7 @@ export default {
           return secure(json(history));
         }
         const id=checkChatId(body?.chatId ?? crypto.randomUUID());
-        const reply=await answer(env,body,env.operatorGuide,fetch,()=>wingCharts(backend));
+        const reply=await eventCancellationReply(body?.messages?.at(-1),backend,service) ?? await answer(env,body,env.operatorGuide,fetch,()=>wingCharts(backend));
         if(isUnifiedSite(env) && reply.proposal){
           const {area,path,commit,before,after,edits}=reply.proposal;
           reply.proposal.jobId=await env.PANEL_DB.repositoryJob({operation:"create",id:crypto.randomUUID(),patch:{area,path,commit,before,after,edits}});
