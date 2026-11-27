@@ -8,8 +8,9 @@ import { ProfileField } from "./ProfileField";
 import { DirectoryPhoto } from "./DirectoryPhoto";
 import WorkspaceShell from "./WorkspaceShell";
 import { ViewAsAccount } from "./ViewAs";
-import { ClipboardList, FileCheck2, Users, UserRound } from "lucide-react";
-import { AttendanceMatrix } from "./AttendanceMatrix";
+import { ClipboardList, FileCheck2, Users, UserRound, ExternalLink } from "lucide-react";
+import { attendanceMeanings } from "./AttendanceMatrix";
+import { FlightHome } from "./FlightHome";
 import { calculateAttendanceCredit } from "../../../packages/domain/src/frontend-reporting";
 import { ATTENDANCE_CODES } from "../../../packages/domain/src/index";
 import { AS_YEARS } from "../../../packages/domain/src/admin";
@@ -131,23 +132,10 @@ function Profile({ state, save, disabled }) {
         })}
       </fieldset>
       {(!register || step === 1) && (
-        <p>
-          <a
-            href="https://nces.ed.gov/ipeds/cipcode/"
-            target="_blank"
-            rel="noreferrer"
-          >
-            Find your major’s CIP code
-          </a>{" "}
-          ·{" "}
-          <a
-            href="https://www.afrotc.com/career-opportunities/"
-            target="_blank"
-            rel="noreferrer"
-          >
-            Explore officer careers
-          </a>
-        </p>
+        <div className="profile-resources">
+          <a href="https://nces.ed.gov/ipeds/cipcode/" target="_blank" rel="noreferrer">Find your major’s CIP code <ExternalLink size={15}/></a>
+          <a href="https://tmd.texas.gov/Data/Sites/1/media/tmd-jobs/ang-dsg-vacancy/fy26/quarter-3/air-force-officer-classification-directory-afocd-30-april-2025.pdf" target="_blank" rel="noreferrer">Officer classification directory (DAFOCD) <ExternalLink size={15}/></a>
+        </div>
       )}
       {register && step === 1 && (
         <button type="button" onClick={() => setStep(0)}>
@@ -171,10 +159,10 @@ function EventPicker({events, label, choose, type, setType, eventId, typeLabel="
   return <>
     <Select label={typeLabel} value={type} onChange={value=>{setType(value);choose("");}} required
       options={[{value:"",label:"Select an event type"},...Object.entries(eventTypes).filter(([key])=>events.some(e=>e.eventType===key)).map(([value,label])=>({value,label}))]}/>
-    <Field label={label}><select name="event" value={eventId} onChange={e=>choose(e.target.value)} required disabled={!type}>
+    {type && <Field label={label}><select name="event" value={eventId} onChange={e=>choose(e.target.value)} required disabled={!type}>
       <option value="">Select an event</option>
       {events.filter(e=>e.eventType===type).map(e=><option key={e.eventId} value={e.eventId}>{e.label}</option>)}
-    </select></Field>
+    </select></Field>}
   </>;
 }
 function ExcusalEvent({events,number}) {
@@ -184,8 +172,8 @@ function ExcusalEvent({events,number}) {
 function Submission({ state, mode, save, disabled }) {
   const [count, setCount] = useState(1);
   return (
-    <details className="cadet-compose">
-      <summary>{mode === "flag" ? "Flag attendance" : "Request an excusal"}</summary>
+    <section className="cadet-compose">
+      <h3>{mode === "flag" ? "Flag attendance" : "Request an excusal"}</h3>
       <form
         className="cadet-form"
         onSubmit={(e) => {
@@ -244,16 +232,45 @@ function Submission({ state, mode, save, disabled }) {
           <button className="primary">Submit</button>
         </fieldset>
       </form>
-    </details>
+    </section>
   );
 }
 function PersonalAttendance({state, flags, save, disabled}) {
-  const [selected,setSelected]=useState([]), [generation,resetSelection]=useState(0);
-  function dismiss(){setSelected([]);resetSelection(n=>n+1);}
-  const cells=(state.attendance || []).map(e=>({...e,effectiveCode:e.code,eligible:true}));
-  const row={...state.profile,cells,overall:calculateAttendanceCredit(cells),llab:calculateAttendanceCredit(cells.filter(e=>e.eventType==="llab"))};
+  const [selected,setSelected]=useState([]);
+  const anchor=useRef(null);
+  function dismiss(){setSelected([]);anchor.current=null;}
+  const events=state.attendance || [];
+  const cells=events.map(e=>({effectiveCode:e.code,eligible:true}));
+  function credit(list){
+    const value=calculateAttendanceCredit(list);
+    return value.noCountedAttendance ? "—" : (value.percentage*100).toFixed(1)+"%";
+  }
+  function select(event,index,click){
+    if(click.shiftKey && anchor.current!==null){
+      setSelected(events.slice(Math.min(index,anchor.current),Math.max(index,anchor.current)+1));
+    }else if(click.ctrlKey || click.metaKey){
+      setSelected(old=>old.includes(event)?old.filter(e=>e!==event):[...old,event]);anchor.current=index;
+    }else{setSelected([event]);anchor.current=index;}
+  }
   return <section>
-    {cells.length ? <AttendanceMatrix key={generation} rows={[row]} events={state.attendance} canCorrect={()=>true} onSelection={targets=>{if(!disabled)setSelected(targets.map(t=>t.event));}}/> : <Empty>No attendance events for this semester.</Empty>}
+    {events.length ? <>
+      <dl className="personal-credit"><div><dt>Overall</dt><dd>{credit(cells)}</dd></div>
+        <div><dt>LLAB</dt><dd>{credit(cells.filter((_,i)=>events[i].eventType==="llab"))}</dd></div></dl>
+      <table className="personal-events" aria-label="Attendance"><thead><tr><th>Event</th><th>Attendance</th></tr></thead>
+      <tbody>{events.map((event,i)=><tr key={event.eventId}><th scope="row">{event.label}</th><td className="personal-mark" data-mark={event.code || ""}>
+        <button type="button" data-event={event.eventId} disabled={disabled} aria-pressed={selected.includes(event)}
+          aria-label={event.label+" · "+(event.code?event.code+" · ":"")+(attendanceMeanings[event.code] || "Unmarked")+", request correction"}
+          onKeyDown={key=>{
+            if(!["ArrowDown","ArrowUp"].includes(key.key))return;
+            const next=i+(key.key==="ArrowDown"?1:-1);
+            const button=key.currentTarget.closest("tbody").rows[next]?.querySelector("button");
+            if(!button)return;
+            key.preventDefault();button.focus();
+            if(key.shiftKey){if(anchor.current===null)anchor.current=i;select(events[next],next,key);}
+          }}
+          onClick={click=>select(event,i,click)}>{event.code && <strong>{event.code} </strong>}{attendanceMeanings[event.code] || "Unmarked"}</button>
+        {event.needsReview && <small>Needs review</small>}</td></tr>)}</tbody></table>
+    </> : <Empty>No attendance events for this semester.</Empty>}
     {selected.length>0 && <Drawer title="Request correction" bottomSheet onClose={dismiss}><form key={JSON.stringify(selected.map(e=>e.eventId))} className="cadet-form" onSubmit={e=>{
       e.preventDefault();
       const fields=new FormData(e.currentTarget), code=fields.get("code");
@@ -278,10 +295,11 @@ function FlightReport({ state, save, disabled }) {
   const [type,setType]=useState(""), [eventId,setEvent]=useState("");
   const [details,setDetails]=useState(null), [error,setError]=useState(""), [attempt,retry]=useState(0);
   const [present,setPresent]=useState([]), [complete,setComplete]=useState(false);
+  const [search,setSearch]=useState("");
   const events=state.reportEvents || [];
   const event=events.find(e=>e.eventId===eventId);
   function choose(id){
-    setEvent(id);setDetails(null);setError("");setPresent([]);setComplete(false);
+    setEvent(id);setDetails(null);setError("");setPresent([]);setComplete(false);setSearch("");
   }
   useEffect(()=>{
     if(!eventId)return;
@@ -294,6 +312,9 @@ function FlightReport({ state, save, disabled }) {
   const roster=[...(details?.reportRoster || [])].sort(compareCadetsForDisplay);
   const groups=new Map();
   for(const cadet of roster){
+    const words=search.trim().toLowerCase().split(/[\s,]+/);
+    const name=(cadet.firstName+" "+cadet.lastName).toLowerCase();
+    if(!words.every(word=>name.includes(word)))continue;
     const year=cadet.asYear || "Unassigned AS year";
     if(!groups.has(year))groups.set(year,[]);
     groups.get(year).push(cadet);
@@ -312,17 +333,21 @@ function FlightReport({ state, save, disabled }) {
     {error && <p role="alert">{error} <button type="button" onClick={()=>{setError("");retry(n=>n+1);}}>Retry</button></p>}
     {event && details && (roster.length ? <>
       <h2>{type==="secondary"?"All Flights":type==="mando" && campus ? campus+" · All Flights" : flight+" Flight"}</h2>
+      <Field label="Find a cadet"><input type="search" value={search} onChange={e=>setSearch(e.target.value)}/></Field>
+      {!groups.size && <Empty>No matching cadets.</Empty>}
       {Array.from(groups,([year,people])=><fieldset key={year}><legend>{year}</legend>{people.map(r=><label key={r.personId}>
         <input type="checkbox" checked={present.includes(r.personId)} onChange={e=>setPresent(e.target.checked?[...present,r.personId]:present.filter(p=>p!==r.personId))}/>
         {r.lastName}, {r.firstName}</label>)}</fieldset>)}
-      {!crossFlight && details.ownFlightCount===roster.length && <label><input type="checkbox" checked={complete} onChange={e=>setComplete(e.target.checked)}/> Complete Flight report</label>}
+      {!crossFlight && details.ownFlightCount===roster.length && <Field label="Report coverage"><select value={complete?"all":"selected"} onChange={e=>setComplete(e.target.value==="all")}>
+        <option value="selected">Selected cadets only</option><option value="all">Entire Flight accounted for</option></select></Field>}
+      {complete && <p role="status">{present.length} of {roster.length} marked present. Other attendance codes stay as recorded.</p>}
       <button className="primary" disabled={disabled || (!present.length && !complete)}>Submit attendance</button>
     </> : <Empty>No eligible cadets for this event.</Empty>)}
   </form></section>;
 }
 function Flight({ state, save, disabled }) {
   return (
-    <>
+    <FlightHome {...{state,save,disabled}}>
       {state.actions.some(a=>a.kind==="flag" && !a.change && !a.resolution) && <h2>Earlier Flight review requests</h2>}
       {state.actions
         .filter((a) => a.kind === "flag" && !a.change && !a.resolution)
@@ -348,45 +373,8 @@ function Flight({ state, save, disabled }) {
             <button disabled={disabled}>Mark reviewed</button>
           </form>
         ))}
-      {!state.actions.some((a) => a.kind === "flag" && !a.change && !a.resolution) && (
-        <p>No open attendance flags.</p>
-      )}
-      <h2>Flight duties</h2>
-      <Table headers={["Cadet", "Current duty"]}>
-        {state.roster.map((p) => (
-          <tr key={p.personId}>
-            <td>{p.name}</td>
-            <td>
-              {state.actions.find(
-                (a) => a.kind === "duty" && a.personId === p.personId,
-              )?.detail || "—"}
-            </td>
-          </tr>
-        ))}
-      </Table>
-      <form
-        className="cadet-form"
-        onSubmit={(e) => {
-          e.preventDefault();
-          const f = new FormData(e.currentTarget);
-          save("duty", { personId: f.get("person"), detail: f.get("duty") });
-        }}
-      >
-        <Field label="Cadet">
-          <select name="person" required>
-            {state.roster.map((p) => (
-              <option key={p.personId} value={p.personId}>
-                {p.name}
-              </option>
-            ))}
-          </select>
-        </Field>
-        <Field label="Flight duty">
-          <input name="duty" required maxLength={120} />
-        </Field>
-        <button disabled={disabled}>Assign duty</button>
-      </form>
-    </>
+
+    </FlightHome>
   );
 }
 export default function CadetWorkspace({ session }) {
@@ -560,7 +548,7 @@ export default function CadetWorkspace({ session }) {
       {page==="Attendance reviews" && <AttendanceReviews state={state} save={save} disabled={disabled}/>}
       {page==="My attendance" && (state.section==="attendance" ? <PersonalAttendance state={state} flags={flags} save={save} disabled={disabled}/> : <p role="status">Loading attendance…</p>)}
       {page==="Submit attendance" && (state.section==="report" ? <FlightReport state={state} save={save} disabled={disabled}/> : <p role="status">Loading Flight roster…</p>)}
-      {page === "My Flight" && (
+      {page === "My Flight" && !state.section && (
         <Flight state={state} save={save} disabled={disabled} />
       )}
       {(state?.registration || page === "My profile") && (
@@ -574,6 +562,12 @@ export default function CadetWorkspace({ session }) {
       {page === "My requests" && (
         <div className="cadet-requests">
           <section className="form-section">
+            <Submission
+              mode="excusal"
+              state={state}
+              save={save}
+              disabled={disabled}
+            />
             <h2>My excusals</h2>
             {!state.requests.length ? (
               <Empty>No requests this term.</Empty>
@@ -593,12 +587,7 @@ export default function CadetWorkspace({ session }) {
                 ))}
               </Table>
             )}
-            <Submission
-              mode="excusal"
-              state={state}
-              save={save}
-              disabled={disabled}
-            />
+
           </section>
 
         </div>

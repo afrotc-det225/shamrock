@@ -1432,10 +1432,26 @@ h1.page-title {position:absolute;width:1px;height:1px;margin:0;padding:0;overflo
 
 .account-name {display:block}
 .sidebar-bottom a {color:inherit;text-underline-offset:.2em}
+
+.flight-sections,.profile-resources,.personal-credit,.flight-roll header {display:flex;align-items:center;gap:.65rem;flex-wrap:wrap}
+.flight-sections {margin-bottom:1rem}
+.flight-sections [aria-pressed="true"] {background:var(--navy);color:white}
+.profile-resources a {display:inline-flex;align-items:center;gap:.5rem;border:1px solid var(--border,#cad4df);border-radius:.35rem;padding:.45rem .65rem;color:var(--navy);font-weight:600;text-decoration:none}
+.profile-resources a:hover,.profile-resources a:focus-visible {text-decoration:underline}
+.personal-credit {gap:2rem;margin:0 0 1rem}.personal-credit dt {font-size:.85rem}.personal-credit dd {margin:0;font-size:1.5rem;font-weight:700}
+.personal-events {width:100%;max-width:44rem;min-width:0;border-collapse:collapse}
+.personal-events th,.personal-events td {text-align:left;padding:.45rem .65rem;border-bottom:1px solid var(--border,#cad4df)}
+.personal-events td {padding:0;width:48%}
+.personal-mark,.personal-mark button {background:var(--mark-bg,#eef2f6);color:var(--mark-ink,#243951)}
+.personal-mark button {width:100%;text-align:left;border:0;border-radius:0;padding:.6rem .75rem}
+.personal-mark button[aria-pressed="true"] {outline:2px solid currentColor;outline-offset:-2px}
+.personal-mark button:disabled {opacity:1}
+.flight-roll {max-width:44rem}.flight-roll header {justify-content:space-between}
+
 .cadet-requests {display:grid;grid-template-columns:repeat(auto-fit,minmax(min(25rem,100%),1fr));gap:1rem;align-items:start}
 .cadet-requests .form-section {min-width:0;margin:0}
 .cadet-requests .cadet-form {margin-bottom:0}
-.cadet-compose summary {width:fit-content;padding:.4rem 0;color:var(--green);font-weight:600;cursor:pointer}
+.cadet-compose {margin-bottom:1.5rem}
 .cadet-form {max-width:48rem;margin:1rem 0 2rem}
 .cadet-form fieldset {min-width:0;border:0;padding:0;display:grid;gap:.75rem}
 .cadet-fields {display:grid;grid-template-columns:repeat(auto-fit,minmax(min(15rem,100%),1fr));gap:.8rem}

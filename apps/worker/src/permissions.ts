@@ -80,6 +80,32 @@ async function policyWrites(env: Env, f: Facts, commandId: string, actorId: stri
         stmt(env.DB, "INSERT INTO permission_refresh_jobs(job_id,command_id,version,state) VALUES(?,?,?,'pending')", `permissions.${version}`, commandId, version),
     ];
 }
+/** Preserve the existing policy and grants. Only the source version and non-command title of an already-bound member can change. */
+export async function flightRolePolicy(env:Env,personId:string,oldRole:string,oldVersion:number,role:string,commandId:string,actor:string,now:string){
+    const control=await env.DB.prepare("SELECT version,policy_hash AS hash,policy_json AS json FROM permission_policy_control WHERE singleton=1 AND enabled=1")
+        .first<{version:number;hash:string;json:string}>();
+    if(!control)throw conflict();
+    const policy=JSON.parse(control.json) as RolePermissionPolicy;
+    const member=policy.members.find(m=>m.sourceKind==="directory" && m.sourceId===personId);
+    const assertion={sql:"EXISTS(SELECT 1 FROM permission_policy_control WHERE singleton=1 AND enabled=1 AND version=? AND policy_hash=?)",values:[control.version,control.hash]};
+    if(!member){
+        assertion.sql+=" AND NOT EXISTS(SELECT 1 FROM role_permission_members WHERE policy_version=? AND source_kind='directory' AND source_id=?)";
+        assertion.values.push(control.version,personId);
+        return {assertion,writes:[]};
+    }
+    assertion.sql+=" AND EXISTS(SELECT 1 FROM role_permission_members WHERE policy_version=? AND source_kind='directory' AND source_id=? AND source_role=? AND source_version=?)";
+    assertion.values.push(control.version,personId,oldRole,oldVersion);
+    if(member.sourceRole!==oldRole || member.sourceVersion!==oldVersion || await sha(control.json)!==control.hash)throw conflict();
+    member.sourceRole=role;member.sourceVersion++;
+    const json=JSON.stringify(policy),hash=await sha(json),version=control.version+1;
+    return {assertion,writes:[
+        stmt(env.DB,"UPDATE role_permission_members SET source_role=?,source_version=? WHERE policy_version=? AND source_kind='directory' AND source_id=? AND source_role=? AND source_version=?",role,oldVersion+1,control.version,personId,oldRole,oldVersion),
+        stmt(env.DB,"UPDATE role_permission_members SET policy_version=? WHERE policy_version=?",version,control.version),
+        stmt(env.DB,"UPDATE permission_policy_control SET version=?,policy_json=?,policy_hash=?,last_command_id=? WHERE singleton=1",version,json,hash,commandId),
+        stmt(env.DB,"INSERT INTO permission_policy_audit VALUES(?,?,?,?,?,?,?)",version,commandId,actor,now,control.hash,hash,json),
+        stmt(env.DB,"INSERT INTO permission_refresh_jobs(job_id,command_id,version,state) VALUES(?,?,?,'pending')",`permissions.${version}`,commandId,version),
+    ]};
+}
 export interface PermissionMutation {
     managerRequired: boolean;
     assertion: {

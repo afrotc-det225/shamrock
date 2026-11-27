@@ -26,7 +26,7 @@ try {
       const flight = squadron === "Gold" ? "Delta" : "Alpha";
       let decision;
       const page = await browser.newPage({ viewport: { width, height: 850 } });
-      const calls = [], errors = [], flags = [];
+      const calls = [], errors = [], flags = [], submissions=[], assignments=[];
       page.on("pageerror", err => errors.push(err.message));
       await page.route("**/api/**", async route => {
         const path = new URL(route.request().url()).pathname;
@@ -41,11 +41,21 @@ try {
             assert.equal(decision,undefined);
             if (preview) assert.equal(body.entryAuditId,"entry");
             decision = action.fields;
-          } else flags.push(action.fields.eventId);
+          } else if(action.kind==="flightRole") assignments.push(action.fields);
+          else if(action.kind==="report") submissions.push(action.fields);
+          else flags.push(action.fields.eventId);
           return route.fulfill({json:{ok:true}});
         }
         if (path !== "/api/cadet" || route.request().method() !== "GET") return route.abort();
         const section=new URL(route.request().url()).searchParams.get("section");
+        if(section==="flight" && calls.filter(c=>c.endsWith("section=flight")).length===1){
+          const now=Date.now();
+          return route.fulfill({json:{asOf:new Date(now).toISOString(),refreshAt:new Date(now+1200).toISOString(),
+            flightEvent:{label:"Fixture roll call",startAt:new Date(now-10000).toISOString()},members:[
+              {personId:"member",lastName:"Cadet",firstName:"Test",code:"E"},
+              {personId:"second",lastName:"Sample",firstName:"Test",code:"P"}
+            ]}});
+        }
         return route.fulfill({ json: {
           section,attendance:section==="attendance"?[{eventId:"llab",label:"TW-1 LLAB",eventType:"llab",version:1,baseVersion:0,code:"A"},{eventId:"lab2",label:"TW-2 LLAB",eventType:"llab",version:2,baseVersion:0,code:"A"}]:[],
           linked: true, writable: true, readOnly:false, registration: role === "Registration",
@@ -53,7 +63,7 @@ try {
           flights: [{ flightId:"alpha", label:"Alpha" }], events: [], actions: [], queue: squadron ? [{requestId:"example",version:3,personId:"cadet",eventId:"llab",event:"TW-2 LLAB",
             personDisplayName:"Test Requester",requestedOutcome:"E",status:decision?.decision || "Submitted",
             submittedAt:"2026-10-10T13:20:00Z",reason:"Fixture scheduling conflict",flightId:"test-flight",capturedFlightLabel:flight,capturedSquadronLabel:squadron}] : [],
-          requests: [], roster: [], reportEvents:[{eventId:"lab16",eventType:"llab",label:"TW-16 LLAB"},{eventId:"sec16",eventType:"secondary",label:"TW-16 Secondary"}],
+          requests: [], roster: [{name:"Test Cadet",personId:"member",version:1,role:""}], ownFlightCount:4, reportEvents:[{eventId:"lab16",eventType:"llab",label:"TW-16 LLAB"},{eventId:"sec16",eventType:"secondary",label:"TW-16 Secondary"}],
           reportRoster:section==="report:lab16"?[["AS100","Able","Tom"],["AS400","Zed","Ron"],["AS400","Able","Zoe"],["AS400","Able","Amy"]].map(([asYear,lastName,firstName],i)=>({asYear,lastName,firstName,personId:"fixture"+i,flightId:"alpha",version:1})):[], flightCommander:role === "Flight",
           squadron,
         } });
@@ -71,6 +81,17 @@ try {
       await openNavigation(page);
       assert.deepEqual(await nav.getByRole("link").allTextContents(), tabs);
       if (width === 390) await page.keyboard.press("Escape");
+      if(role==="Flight"){
+        await page.getByRole("cell",{name:"Excused",exact:true}).waitFor();
+        await page.getByRole("cell",{name:"Present",exact:true}).waitFor();
+        await page.getByText("No scheduled Flight events remain this semester.").waitFor();
+        await page.getByRole("button",{name:"Flight roles"}).click();
+        await page.getByLabel("Cadet",{exact:true}).selectOption("member");
+        await page.getByLabel("Flight role",{exact:true}).selectOption("Alpha Flight Accountability Officer");
+        await page.getByRole("button",{name:"Save role"}).click();
+        await page.getByText("Saved.",{exact:true}).waitFor();
+        assert.deepEqual(assignments,[{personId:"member",role:"Alpha Flight Accountability Officer",version:1}]);
+      }
       if (squadron) {
         const row = page.locator(".excusal-queue tbody tr");
         await row.getByTitle(flight,{exact:true}).waitFor();
@@ -100,8 +121,8 @@ try {
         await openNavigation(page);
         await nav.getByRole("link", {name:"My requests"}).click();
         await heading("My requests").waitFor();
-        const compose = page.locator("details").filter({has:page.locator("summary", {hasText:"Request an excusal"})});
-        await compose.locator("summary").click();
+        const compose=page.locator(".cadet-compose");
+        assert(await compose.getByRole("heading",{name:"Request an excusal"}).isVisible());
         assert.equal(await compose.getByRole("button", {name:"Submit"}).isEnabled(), true);
         await openNavigation(page);
         await nav.getByRole("link", {name:"My profile"}).click();
@@ -145,7 +166,7 @@ try {
         await openNavigation(page);
         await nav.getByRole("link",{name:"Submit attendance",exact:true}).click();
         const picker=page.getByLabel("Attendance event");
-        await picker.waitFor();assert(await picker.isDisabled());
+        await page.getByLabel("Event type",{exact:true}).waitFor();assert.equal(await picker.count(),0);
         await page.getByLabel("Event type",{exact:true}).selectOption("llab");
         assert.deepEqual(await picker.locator("option").allTextContents(),["Select an event","TW-16 LLAB"]);
         await picker.selectOption("lab16");
@@ -154,6 +175,15 @@ try {
         assert.deepEqual(await seniors.locator("label").allTextContents(),["Able, Amy","Able, Zoe","Zed, Ron"]);
         assert.deepEqual(await page.locator(".cadet-form legend").allTextContents(),["AS400","AS100"]);
         await seniors.getByLabel("Able, Amy").check();
+        await page.getByLabel("Find a cadet").fill("Tom");
+        assert.equal(await seniors.count(),0);
+        await page.getByLabel("Find a cadet").fill("");
+        assert(await seniors.getByLabel("Able, Amy").isChecked());
+        await page.getByLabel("Find a cadet").fill("Tom");
+        await page.getByRole("button",{name:"Submit attendance",exact:true}).click();
+        await page.waitForFunction(()=>!document.querySelector('[name="event"]')?.value);
+        assert.deepEqual(submissions[0].present,["fixture3"]);
+        assert.equal(submissions[0].completeness,"partial");
         await page.getByLabel("Event type",{exact:true}).selectOption("secondary");
         assert.equal(await picker.inputValue(),"");
         assert.equal(await page.getByRole("checkbox").count(),0);
@@ -171,7 +201,7 @@ try {
       });
       assert(layout.fits && (width === 390 ? layout.stacked : layout.alongside), JSON.stringify(layout));
       assert.deepEqual(errors, []);
-      assert.deepEqual(calls, ["POST /api/session", "GET /api/cadet",...(squadron?["POST /api/cadet","GET /api/cadet"]:[]),...(tabs.length?["GET /api/cadet?section=profile","GET /api/cadet","GET /api/cadet?section=profile","GET /api/cadet?section=attendance","POST /api/cadet","POST /api/cadet","GET /api/cadet?section=attendance","GET /api/cadet?section=report","GET /api/cadet?section=report:lab16"]:[])]);
+      assert.deepEqual(calls, ["POST /api/session", "GET /api/cadet",...(role==="Flight"?["GET /api/cadet?section=flight","GET /api/cadet?section=flight","POST /api/cadet","GET /api/cadet"]:[]),...(squadron?["POST /api/cadet","GET /api/cadet"]:[]),...(tabs.length?["GET /api/cadet?section=profile","GET /api/cadet","GET /api/cadet?section=profile","GET /api/cadet?section=attendance","POST /api/cadet","POST /api/cadet","GET /api/cadet?section=attendance","GET /api/cadet?section=report","GET /api/cadet?section=report:lab16","POST /api/cadet","GET /api/cadet?section=report"]:[])]);
       await page.close();
     }
   }

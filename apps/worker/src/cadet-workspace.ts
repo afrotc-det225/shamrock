@@ -4,6 +4,8 @@ import {
   operationallyActive,
   type DirectoryRecord,
 } from "../../../packages/domain/src/admin.js";
+import { assignFlightRole } from "./flight-role-assignment.js";
+import { currentFlightEvent, flightAttendance, scheduledFlightEvents, type ScheduledFlightEvent } from "./flight-attendance.js";
 import { HttpError } from "./http-error.js";
 import { acceptAttendanceCorrection, pairRevisionSql } from "./corrections.js";
 import { ATTENDANCE_CODES, type AttendanceCode } from "../../../packages/domain/src/index.js";
@@ -99,7 +101,7 @@ export async function readCadetWorkspace(
     ORDER BY p.principal_id LIMIT 3`,
     )
     .bind(principal, email, email);
-  const personal=section==="profile" || section==="attendance";
+  const personal=section==="profile" || section==="attendance" || section==="flight";
   const flights = db.prepare(
     "SELECT u.unit_id AS flightId,u.label,u.roster_version AS rosterVersion,h.squadron_id AS squadronId,s.label AS squadron FROM organizational_units u JOIN flight_hierarchy h ON h.unit_id=u.unit_id JOIN squadrons s ON s.squadron_id=h.squadron_id " + (personal ? " WHERE u.unit_id=(SELECT flight_id FROM directory_profiles WHERE lower(email)=?)" : "") + " ORDER BY u.label",
   );
@@ -172,10 +174,23 @@ export async function readCadetWorkspace(
       String(owner.flight).toLowerCase() + " deputy flight commander",
     ].includes(title || "");
   if(personal){
+    let flightHome;
+    if(section==="flight"){
+      if(!flightCommander || !profile.flightId)throw denied();
+      const asOf=new Date().toISOString();
+      const schedule=scheduledFlightEvents(db,profile.flightId,asOf);
+      const [read]=await db.batch<ScheduledFlightEvent>([schedule]);
+      const {event,refreshAt}=currentFlightEvent(read.results,asOf);
+      const members=event ? await flightAttendance(db,event,profile.flightId) : [];
+      const verified=await db.batch([schedule,...fence]);
+      if(JSON.stringify(read.results)!==JSON.stringify(verified[0].results) ||
+        JSON.stringify(first)!==JSON.stringify(verified.slice(1).map(r=>r.results)))throw new HttpError(409,"SNAPSHOT_CHANGED","Reload your Flight attendance.");
+      flightHome={flightEvent:event ?? null,members,refreshAt,asOf};
+    }
     const personalData=section==="attendance" ? personalAttendance(profile.personId,capture.slice(fence.length).map(r=>r.results)) : {attendance:[],flags:[]};
     return {registration:false,profile,flights:flightList,writable,linked:accounts.length===1 && accounts[0].principal_id===actor && accounts[0].email===email,
       flightCommander:!!flightCommander,squadron:squadronCommander ? String(owner.squadron) : null,squadronId:squadronCommander ? owner.squadron_id : null,
-      section,attendance:personalData.attendance,actions:personalData.flags.map(workspaceAction),reportEvents:[],reportRoster:[],ownFlightCount:null,roster:[],requests:[],events:[],queue:[]};
+      section,...flightHome,attendance:personalData.attendance,actions:personalData.flags.map(workspaceAction),reportEvents:[],reportRoster:[],ownFlightCount:null,roster:[],requests:[],events:[],queue:[]};
   }
   const requests = (
     predicate: string,
@@ -219,7 +234,7 @@ export async function readCadetWorkspace(
     data.push(
       db
         .prepare(
-          `SELECT d.person_id AS personId,d.last_name || ', ' || d.first_name AS name FROM directory_profiles d
+          `SELECT d.person_id AS personId,d.last_name || ', ' || d.first_name AS name,d.role,d.version FROM directory_profiles d
     JOIN memberships m ON m.person_id=d.person_id AND m.unit_id=d.flight_id AND m.active=1 WHERE d.flight_id=?
     AND d.flight_path_status NOT IN ('Inactive','Dropped','Commissioned') ORDER BY d.last_name,d.first_name`,
         )
@@ -325,7 +340,7 @@ export async function cadetRoute(
       )
     : null;
   const section=object(a) ? (a.kind==="report" && object(a.fields) ? "report:"+a.fields.eventId : undefined) : input.section;
-  if(section!=null && !reportSection(section) && !["profile","attendance","report"].includes(String(section))) throw bad();
+  if(section!=null && !reportSection(section) && !["profile","attendance","report","flight"].includes(String(section))) throw bad();
   const state = await readCadetWorkspace(env, input.email, input.principalId, section);
   if (
     !state.linked &&
@@ -432,6 +447,13 @@ export async function cadetRoute(
       p.personId,
     ],
   };
+  if(a.kind==="flightRole"){
+    const target=state.roster?.find(r=>r.personId===f.personId);
+    const flight=state.flights.find(r=>r.flightId===p.flightId);
+    if(!state.flightCommander || !target || !flight || !p.flightId)throw denied();
+    return assignFlightRole(env,permissionGuard,input.principalId,commandId,p.flightId,String(flight.label),
+      {personId:target.personId,role:target.role,version:target.version},f);
+  }
   if (a.kind === "report") {
     if (
       !Array.isArray(f.present) ||
@@ -577,7 +599,7 @@ export async function cadetRoute(
     return {commandId,status:"committed"};
   }
   if (
-    !["flag", "resolve", "duty"].includes(a.kind) ||
+    !["flag", "resolve"].includes(a.kind) ||
     typeof f.detail !== "string" ||
     !f.detail.trim() ||
     f.detail.length > 500
@@ -588,12 +610,7 @@ export async function cadetRoute(
   );
   if (a.kind === "flag" && !state.events?.some((e) => e.eventId === f.eventId))
     throw bad();
-  if (
-    a.kind === "duty" &&
-    (!state.flightCommander ||
-      !state.roster?.some((r) => r.personId === f.personId))
-  )
-    throw denied();
+
   if (
     a.kind === "resolve" &&
     (!state.flightCommander || !flag || flag.change || flag.flightId !== p.flightId)
@@ -602,11 +619,9 @@ export async function cadetRoute(
   const person =
     a.kind === "flag"
       ? p.personId
-      : adminIdentifier(a.kind === "duty" ? f.personId : flag!.personId);
+      : adminIdentifier(flag!.personId);
   const event =
-    a.kind === "duty"
-      ? null
-      : adminIdentifier(a.kind === "flag" ? f.eventId : flag!.eventId);
+    adminIdentifier(a.kind === "flag" ? f.eventId : flag!.eventId);
   const parent = a.kind === "resolve" ? adminIdentifier(f.parentId) : null;
   let detail=f.detail.trim();
   if(a.kind==="flag" && Object.hasOwn(f,"code")){

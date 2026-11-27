@@ -527,7 +527,7 @@ test('campus enrollment, personal excusal, Flight review and duties use the veri
     const flag=action('flag',{eventId:'portal-event',detail:'Check recorded attendance.'});
     assert.equal((await route(flag)).status,200);assert.equal((await route(flag)).status,200);
     assert.equal((await route()).body.actions.length,1);
-    assert.equal((await route(action('duty',{personId:self.profile.personId,detail:'Cadet Wing Commander'}))).status,403);
+    assert.equal((await route(action('flightRole',{personId:self.profile.personId,role:'Cadet Wing Commander',version:1}))).status,403);
     await f.db.batch([
       f.db.prepare("INSERT INTO events VALUES('portal-second','Another fictional workshop',1)"),
       f.db.prepare("INSERT INTO event_details SELECT 'portal-second',1,'current','other',1,3,'Workshop','ALL','active',NULL,NULL,'','','2026-01-01','owner','2026-01-01'"),
@@ -539,19 +539,28 @@ test('campus enrollment, personal excusal, Flight review and duties use the veri
     assert.equal((await route()).body.requests.length,3);
     const captain={...identity,principalId:'flight',email:'flight@example.invalid'};
     const leader=(await route(null,captain)).body;assert(leader.flightCommander && leader.linked);
-    const duty=action('duty',{personId:self.profile.personId,detail:'Guide'});
-    assert.equal((await route(duty,captain)).status,200);
-    assert.equal((await route(action('duty',{personId:'other',detail:'Guide'}),captain)).status,403);
+    const assignment=action('flightRole',{personId:self.profile.personId,role:'Alpha Flight Accountability Officer',version:self.profile.version});
+    const assigned=await route(assignment,captain);
+    assert.equal(assigned.status,200,JSON.stringify(assigned));
+    assert.deepEqual((await route(assignment,captain)).body,assigned.body);
+    assert.equal((await route({...assignment,id:crypto.randomUUID()},captain)).status,409);
+    assert.equal((await route(action('flightRole',{...assignment.fields,personId:'other'}),captain)).status,403);
+    assert.equal((await route(action('flightRole',{...assignment.fields,role:'Alpha Flight Commander'}),captain)).status,400);
+    assert.equal((await route(action('flightRole',{...assignment.fields,personId:'deputy'}),captain)).status,409);
+    const updated=(await route()).body.profile;
+    assert.equal(updated.role,assignment.fields.role);
+    assert.equal(updated.version,self.profile.version+1);
+    assert.equal(await f.db.prepare("SELECT COUNT(*) AS n FROM admin_effects WHERE command_id=? AND kind='frontend.refresh'").bind(assigned.body.commandId).first('n'),1);
     assert.equal((await route(action('resolve',{parentId:'portal.'+flag.id,detail:'Reviewed with cadet.'}),captain)).status,200);
     const after=(await route()).body.actions;
     assert.equal(after.find(r=>r.kind==='flag').resolution,'Reviewed with cadet.');
-    assert.equal(after.find(r=>r.kind==='duty').detail,'Guide');
+
     const report=action('report',{eventId:'portal-event',version:1,rosterVersion:leader.flights.find(f=>f.flightId==='alpha').rosterVersion,present:[self.profile.personId],completeness:'partial'});
     assert.equal((await route({...report,id:crypto.randomUUID(),fields:{...report.fields,present:["other"]}})).status,400);
     const memberReport=await route(report);assert.equal(memberReport.status,200,JSON.stringify(memberReport));
     assert.equal((await route({...report,id:crypto.randomUUID()},captain)).status,200);
-    assert.equal((await route(action('profile',{version:self.profile.version,changes:{afsc:'Undecided after review'}}))).status,400);
-    const edit=action('profile',{version:self.profile.version,changes:{afsc:'Space Force'}});
+    assert.equal((await route(action('profile',{version:updated.version,changes:{afsc:'Undecided after review'}}))).status,400);
+    const edit=action('profile',{version:updated.version,changes:{afsc:'Space Force'}});
     assert.equal((await route(edit)).status,200);
     assert.equal((await route()).body.profile.afsc,'Space Force');
     await f.db.prepare('UPDATE principals SET active=0 WHERE principal_id=?').bind(principalId).run();
@@ -566,6 +575,12 @@ test('cadet cell requests preserve the mark until their Squadron Commander appro
     ...(section?{section}:{}),...(action?{action}:{})},'/v1/cadet/workspace');
   const action=(kind,fields)=>({id:crypto.randomUUID(),kind,fields});
   const cell=async()=>{const result=await call('cadet',null,'attendance');assert.equal(result.status,200,JSON.stringify(result));return result.body.attendance.find(e=>e.eventId==='event');};
+  const near=(minutes)=>new Date(Date.now()+minutes*60000).toISOString();
+  await f.db.prepare("UPDATE event_details SET start_at=?,end_at=? WHERE event_id='event'").bind(near(-10),near(20)).run();
+  const board=async()=>call('flight',null,'flight');
+  const live=await board();assert.equal(live.status,200,JSON.stringify(live));assert.equal(live.body.flightEvent.eventId,'event');
+  assert(live.body.members.some(r=>r.personId==='cadet' && r.code===null));assert(!live.body.members.some(r=>r.personId==='other'));
+  assert.equal((await call('cadet',null,'flight')).status,403);
   const first=await cell();
   const flag=action('flag',{eventId:first.eventId,eventVersion:first.version,baseVersion:first.baseVersion,code:'P',detail:'Fictional reason'});
   const submit=await call('cadet',flag);assert.equal(submit.status,200,JSON.stringify(submit));assert.equal((await cell()).code,null);
@@ -574,6 +589,12 @@ test('cadet cell requests preserve the mark until their Squadron Commander appro
   const second=await call('cadet',{...flag,id:crypto.randomUUID()});
   const ok=await call('blue',review);assert.equal(ok.status,200,JSON.stringify(ok));
   assert.equal((await call('blue',review)).status,200);assert.equal((await cell()).code,'P');
+  assert.equal((await board()).body.members.find(r=>r.personId==='cadet').code,'P');
+  await f.db.prepare("UPDATE event_details SET end_at=? WHERE event_id='event'").bind(near(-1)).run();
+  assert.equal((await board()).body.flightEvent,null);
+  await f.db.prepare("UPDATE event_details SET start_at=?,end_at=? WHERE event_id='event'").bind(near(5),near(20)).run();
+  const upcoming=(await board()).body;assert.equal(upcoming.flightEvent.eventId,'event');assert.equal(upcoming.refreshAt,upcoming.flightEvent.startAt);
+
   assert.equal((await call('blue',action('reviewFlag',{parentId:second.body.commandId,decision:'Approved'}))).status,409);
   assert.equal((await call('blue',action('reviewFlag',{parentId:second.body.commandId,decision:'Denied'}))).status,200);
   assert.equal((await cell()).code,'P');

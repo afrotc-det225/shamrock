@@ -230,7 +230,7 @@ export async function previewCadetWorkspace<E extends Env>(env:E, input:unknown,
   const req=identity(env,input);
   const action = Object.hasOwn(req,'action');
   const keys = 'entryAuditId,environment,generation,principalId,'+(Object.hasOwn(req,'section')?'section,':'')+'targetPersonId';
-  if(req.section!==undefined && !reportSection(req.section) && !['profile','report','attendance'].includes(String(req.section)))return fail(400,'INVALID_VIEW_AS_REQUEST');
+  if(req.section!==undefined && !reportSection(req.section) && !['profile','report','attendance','flight'].includes(String(req.section)))return fail(400,'INVALID_VIEW_AS_REQUEST');
   if(Object.keys(req).sort().join(',')!==(action?'action,'+keys:keys)
     || !id(req.entryAuditId) || !id(req.targetPersonId)) return fail(400,'INVALID_VIEW_AS_REQUEST');
   if (!action && (req.section==='profile' || req.section==='attendance')) {

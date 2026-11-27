@@ -3,7 +3,7 @@ import { List } from "lucide-react";
 import { ToolbarPopover } from "./ToolbarPopover";
 import { rateStyle } from "./roster-colors";
 
-const meanings = {
+export const attendanceMeanings = {
   P: "Present",
   T: "Tardy",
   A: "Absent, unresolved",
@@ -24,7 +24,7 @@ function AttendanceKey() {
       icon={List}
     >
       <dl className="code-key">
-        {Object.entries(meanings).map(([code, meaning]) => (
+        {Object.entries(attendanceMeanings).map(([code, meaning]) => (
           <div key={code}>
             <dt data-mark={code}>{code}</dt>
             <dd>{meaning}</dd>
@@ -174,7 +174,7 @@ function SelectableMatrix({rows, events, canCorrect, onSelection, readOnly}) {
               const description = [
                 row.firstName + " " + row.lastName,
                 e.label,
-                meanings[code] ? code + " · " + meanings[code] : label,
+                attendanceMeanings[code] ? code + " · " + attendanceMeanings[code] : label,
                 c?.needsReview ? "Needs review" : "",
               ]
                 .filter(Boolean)
