@@ -1,5 +1,5 @@
 import { MaintenanceProposal } from "./MaintenanceProposal";
-import React, { lazy, Suspense, useLayoutEffect, useEffect, useRef, useState } from "react";
+import React, { useLayoutEffect, useEffect, useRef, useState } from "react";
 import {overviewRoster} from "../../../packages/domain/src/frontend-reporting";
 import {operationallyActive} from "../../../packages/domain/src/admin";
 import OverviewInsights from "./OverviewInsights";
@@ -103,7 +103,7 @@ export function System({ snapshot, meta, history, receiptsDeferred, reportingTim
     </>
   );
 }
-const AssistantResponse = lazy(()=>import("./AssistantResponse"));
+const loadReplyRenderer = () => import("./AssistantResponse").then(module=>module.default,()=>PlainReply);
 // A missing formatting bundle or an invalid saved proposal must not unmount the workspace.
 class ReplyBoundary extends React.Component {
   state={failed:false};
@@ -122,7 +122,8 @@ function AssistantWorkspace({ meta }) {
     [busy,setBusy]=useState(false), [error,setError]=useState("");
   const input=useRef(null), inFlight=useRef(false);
   const [active,setActive]=useState(null), [chats,setChats]=useState([]), [showChats,setShowChats]=useState(false);
-  const [opening,setOpening]=useState(false), [query,setQuery]=useState("");
+  const [Reply,setReply]=useState(()=>PlainReply);
+  const [opening,setOpening]=useState(null), [query,setQuery]=useState("");
   const [historyState,setHistoryState]=useState("loading"), [historyAttempt,retryHistory]=useState(0);
   const page=useRef(null);
   const historyMenu=useRef(null), historyToggle=useRef(null);
@@ -194,13 +195,16 @@ function AssistantWorkspace({ meta }) {
   }
   async function openChat(chat){
     if(inFlight.current)return;
-    inFlight.current=true;setOpening(true);setError("");
+    inFlight.current=true;setOpening(chat.id);setError("");
     try{
-      const saved=threads.current.get(chat.id) || (await api("/chat/history?id="+chat.id)).messages;
+      const [renderer,saved]=await Promise.all([
+        loadReplyRenderer(),
+        threads.current.get(chat.id) ?? api("/chat/history?id="+chat.id).then(result=>result.messages),
+      ]);
       if(!Array.isArray(saved) || !saved.length || saved.some(m=>!m || !["user","assistant"].includes(m.role) || typeof m.content!=="string"))throw new Error("This conversation is unavailable. Try again shortly.");
-      setActive(chat);setMessages(saved);setText("");setShowChats(false);
+      setReply(()=>renderer);setActive(chat);setMessages(saved);setText("");setShowChats(false);
     }catch(e){setError(e.message);}
-    finally{inFlight.current=false;setOpening(false);}
+    finally{inFlight.current=false;setOpening(null);}
   }
   async function send(event){
     event.preventDefault();
@@ -210,9 +214,15 @@ function AssistantWorkspace({ meta }) {
     const chat=active || {id:crypto.randomUUID(),title:question.slice(0,90)};
     setMessages(next);setText("");setBusy(true);setError("");
     try{
-      const reply=await api("/chat",{...(hosted ? {chatId:chat.id,chatTitle:chat.title} : {}),messages:next.slice(-15).map(({role,content})=>({role,content}))});
+      const [renderer,reply]=await Promise.all([
+        loadReplyRenderer(),
+        api("/chat",{
+          ...(hosted ? {chatId:chat.id,chatTitle:chat.title} : {}),
+          messages:next.slice(-15).map(({role,content})=>({role,content})),
+        }),
+      ]);
       const transcript=[...next,{role:"assistant",content:reply.content,proposal:reply.proposal}];
-      setMessages(transcript);setActive(chat);
+      setReply(()=>renderer);setMessages(transcript);setActive(chat);
       threads.current.set(chat.id,transcript);
       setChats(rows=>[{...chat,at:Date.now()},...rows.filter(row=>row.id!==chat.id)]);
       if(reply.saved===false)setError("This reply could not be saved to chat history.");
@@ -224,8 +234,8 @@ function AssistantWorkspace({ meta }) {
     historyState==="failed" ? <button type="button" onClick={()=>retryHistory(n=>n+1)}>Retry loading recent chats</button> :
     !chats.length ? <small>No conversations yet.</small> : null;
   function chatLink(row){
-    return <button key={row.id} className="chat-link" aria-current={active?.id===row.id ? "true" : undefined} disabled={busy || opening} onClick={()=>openChat(row)}>
-      <span>{row.title}</span><time dateTime={new Date(row.at).toISOString()}>{new Date(row.at).toLocaleDateString(undefined,{month:"short",day:"numeric"})}</time>
+    return <button key={row.id} className="chat-link" aria-current={active?.id===row.id ? "true" : undefined} disabled={busy || !!opening} onClick={()=>openChat(row)}>
+      <span>{row.title}</span><span className="chat-date" data-loading={opening===row.id || undefined}><time dateTime={new Date(row.at).toISOString()}>{new Date(row.at).toLocaleDateString(undefined,{month:"short",day:"numeric"})}</time>{opening===row.id && <span role="status" aria-label="Loading chat" className="chat-loading-ring"/>}</span>
     </button>;
   }
   return <section ref={page} className="assistant-page">
@@ -239,21 +249,20 @@ function AssistantWorkspace({ meta }) {
             {chats.filter(row=>row.title.toLowerCase().includes(query.trim().toLowerCase())).map(chatLink)}
           </aside>
         </div>
-        <button disabled={busy || opening} onClick={newChat}><SquarePen size={16}/>New chat</button>
+        <button disabled={busy || !!opening} onClick={newChat}><SquarePen size={16}/>New chat</button>
       </div>
     <div className="chat-workspace">
 
-    <div className={"chat-main"+(messages.length ? "" : " empty-chat")} aria-busy={opening}>
-    {opening && <p role="status">Opening conversation…</p>}
+    <div className={"chat-main"+(messages.length ? "" : " empty-chat")} aria-busy={!!opening}>
     {hosted && !messages.length && !showChats && <section className="mobile-recent" aria-label="Recent conversations">
       <h2>Recent chats</h2>{historyNotice}{chats.slice(0,3).map(chatLink)}
     </section>}
     <div ref={log} className="conversation" role="log" aria-label="Conversation">
       {messages.map((m,i)=><article key={(active?.id || "draft")+":"+i} className={"message "+m.role}>
         <span className="message-author">{m.role==="user" ? "You" : "SHAMROCK assistant"}</span>
-        {m.role==="user" ? <p>{m.content}</p> : <ReplyBoundary fallback={<PlainReply text={m.content}/>}><Suspense fallback={<PlainReply text={m.content}/>}>
-          <AssistantResponse text={m.content}/>
-        </Suspense></ReplyBoundary>}
+        {m.role==="user" ? <p>{m.content}</p> : <ReplyBoundary fallback={<PlainReply text={m.content}/>}>
+          <Reply text={m.content}/>
+        </ReplyBoundary>}
         {m.proposal && <ReplyBoundary fallback={<p role="status">The saved proposal could not be displayed.</p>}><MaintenanceProposal proposal={m.proposal}/></ReplyBoundary>}
       </article>)}
       {busy && <p className="hint" role="status">Thinking…</p>}
