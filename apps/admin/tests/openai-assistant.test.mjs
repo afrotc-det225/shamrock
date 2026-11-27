@@ -55,7 +55,8 @@ test("maintenance charges three slots against existing reservations and binds th
   const messages=[{role:"user",content:"We are working on the excusal queue"},{role:"user",content:"Handle missing requests"}];
   const send=async (_,opts)=>{
     const q=JSON.parse(opts.body);
-    if(q.text?.format.name==="route")return respond(JSON.stringify({type:"patch",areas:[area]}));
+    if(q.questions){assert.equal(_,"https://api.openai.com/v1/decisions");return decision(q,"patch",area);}
+    assert.equal(q.model,"gpt-5.3-codex");
     assert.equal(q.reasoning.effort,"low");assert.equal(q.max_output_tokens,2200);
     assert.equal(JSON.parse(q.input).source,source);assert.ok(q.input.includes(messages.at(-1).content));
     return Response.json({output:[{type:"message",content:[{type:"output_text",text:JSON.stringify({
@@ -68,6 +69,11 @@ test("maintenance charges three slots against existing reservations and binds th
 });
 
 
+function decision(q,type,area){
+  assert.equal(q.model,"gpt-6-luna");
+  const source=q.questions[1].choices.find(c=>c.description===area);
+  return Response.json({answers:[{type:"choice",name:"route",choice:type},{type:"choice",name:"source",choice:source.value}]});
+}
 function respond(text){
   return Response.json({output:[{type:"message",content:[{type:"output_text",text}]}]});
 }
@@ -86,7 +92,7 @@ test("follow-up overhaul selects stronger reasoning and only reviewed release ex
   const area="Panel caching",cfg={...env,maintenanceSource:{commit:"fixture",files:{[area]:"export function cached() {}"}}};
   await answer(cfg,{area:"../../other",messages:[{role:"user",content:"Our cache is inefficient."},{role:"user",content:"Overhaul it."}]},"Guide",async(_,options)=>{
     const q=JSON.parse(options.body);calls++;
-    if(calls===1){assert.match(q.input,/inefficient/);return respond(JSON.stringify({type:"design",areas:[area]}));}
+    if(calls===1){assert.match(q.input,/inefficient/);return decision(q,"design",area);}
     assert.equal(q.reasoning.effort,"high");assert.match(q.model,/^gpt-5.4-2026/);
     assert.match(q.input,/cached/);assert(!q.input.includes("../../other"));return respond("Plan");
   },()=>{throw Error("unexpected records read");});assert.equal(calls,2);
@@ -105,4 +111,25 @@ test("commissioning forecasts get current and prior cohorts without exposing cad
   },async()=>({dashboard:{termLabel:"2026-Fall",rosterByYear:[{asYear:"AS400",cadets:21,person:"private-fixture"}]},
     history:[{label:"2025 Fall",rosterByYear:[{asYear:"AS400",cadets:13}]}]}));
   assert.equal(calls,1);
+});
+
+test("a Decisions refusal never dispatches a coding call; key scope denial uses bounded routing",async()=>{
+  const body={messages:[{role:"user",content:"Explain flight reporting"}]};
+  let calls=0;
+  await assert.rejects(answer(env,body,"Guide",async()=>{
+    calls++;
+    return Response.json({answers:[{type:"refusal",name:"route"}]});
+  }));
+  assert.equal(calls,1);
+  const endpoints=[];
+  await answer(env,body,"Guide",async(url,options)=>{
+    endpoints.push(url.split("/").pop());
+    if(endpoints.length===1)return new Response(null,{status:403});
+    if(endpoints.length===2){
+      assert.equal(JSON.parse(options.body).max_output_tokens,120);
+      return respond(JSON.stringify({type:"procedure",area:"none"}));
+    }
+    return respond("Guide response");
+  });
+  assert.deepEqual(endpoints,["decisions","responses","responses"]);
 });
