@@ -114,13 +114,6 @@ summary:focus-visible {
   white-space: nowrap;
   font-size: 14px;
 }
-.sidebar :is(button, .workspace-page-link):hover {
-  background: #223b50;
-}
-.sidebar :is(button, .workspace-page-link).selected {
-  background: #3d5b59;
-  font-weight: 650;
-}
 .sidebar-bottom {
   margin-top: auto;
   padding: 20px 9px 0;
@@ -741,9 +734,6 @@ h1 {
 .primary:hover {
   background: #143865;
 }
-.sidebar :is(button, .workspace-page-link).selected {
-  background: #203b59;
-}
 .sidebar :is(button, .workspace-page-link):hover {
   background: #193552;
 }
@@ -933,7 +923,7 @@ h1 {
   background: transparent;
   color: #fff;
 }
-.sidebar nav a.selected {
+.sidebar nav .workspace-page-link[aria-current="page"] {
   background: transparent;
   box-shadow: none;
   color: #fff;
