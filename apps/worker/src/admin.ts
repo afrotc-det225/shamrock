@@ -182,10 +182,10 @@ export async function acceptAdminCommand(env: AdminEnv, input: unknown): Promise
     scopes = [...new Set([existing?.flightId, ...memberships.filter(m => m.active).map(m => m.flightId), p.flightId].filter((v): v is string => !!v))].sort();
     // Guard both the profile version and membership topology captured before authorization.
     condition = `COALESCE((SELECT version FROM directory_profiles WHERE person_id=?),0)=? AND
-   (SELECT json_group_array(json_object('flightId',unit_id,'active',active)) FROM
+   (SELECT json_group_array(json_array(unit_id,active)) FROM
     (SELECT unit_id,active FROM memberships WHERE person_id=? ORDER BY unit_id))=?
    AND (? IS NULL OR EXISTS(SELECT 1 FROM flight_hierarchy WHERE unit_id=?))`;
-    conditionValues = [p.personId, p.expectedVersion, p.personId, JSON.stringify(memberships), p.flightId, p.flightId];
+    conditionValues = [p.personId, p.expectedVersion, p.personId, JSON.stringify(memberships.map(m => [m.flightId, m.active])), p.flightId, p.flightId];
     writes.push(stmt(env.DB, `INSERT INTO people(person_id,display_name) VALUES(?,?) ON CONFLICT(person_id) DO UPDATE SET display_name=excluded.display_name`, p.personId, `${p.profile.lastName}, ${p.profile.firstName}`));
     const columns = ['person_id', 'version', 'flight_id', ...profileColumns, 'updated_at'];
     writes.push(stmt(env.DB, `INSERT INTO directory_profiles(${columns.join(',')}) VALUES(${columns.map(() => '?').join(',')})

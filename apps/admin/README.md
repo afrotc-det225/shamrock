@@ -56,7 +56,7 @@ establish hosted authentication, Google publication, or production readiness.
   cadet's identity and role are edited under Cadets. Changing a title does not
   grant system access.
 - **Attendance:** filter the current matrix by flight, event type, or training week. Select an eligible cell to review a correction, enter a reason, and confirm the change.
-- **Excusals:** review the pending queue for your scope. Search by cadet or event, or filter by flight and decision status. Authorized reviewers can open a request and record a decision.
+- **Excusals:** review the pending queue for your scope. Search by cadet or event, or filter by flight and decision status. The table shows the event, full request reason, submission date, and status separately. Authorized reviewers choose a decision on the row, optionally enter a decision reason, and confirm. The request reason is preserved.
 - **Semester planning:** name the next semester, choose the first training-week Sunday and
   weekly schedule, explicitly review cadet changes, and prepare the plan. Cadets
   retain their status unless explicitly changed. Preparation does not activate

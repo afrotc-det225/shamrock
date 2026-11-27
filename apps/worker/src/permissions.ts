@@ -126,10 +126,16 @@ export async function preparePermissionMutation(env: Env, c: AdminCommand, now: 
         return null;
     const f = await facts(env);
     let managerRequired = false;
+    let statusOnly = false;
+    let priorGoogle: RolePermissionPolicy["google"] | undefined;
     const extra: D1PreparedStatement[] = [];
     if (c.operation === 'directory.upsert') {
         const p = c.payload, prior = f.people.find(x => x.personId === p.personId);
         managerRequired = !prior || prior.role !== p.profile.role || prior.email.toLowerCase() !== p.profile.email.toLowerCase() || prior.flightId !== p.flightId || prior.flightPathStatus !== p.profile.flightPathStatus;
+        statusOnly = !!prior && prior.flightPathStatus !== p.profile.flightPathStatus && prior.flightId === p.flightId &&
+            DIRECTORY_FIELDS.every(key => key === 'flightPathStatus' || prior[key] === p.profile[key]);
+        if (statusOnly && !operationallyActive(p.profile) && f.accounts.some(a => a.personId === targetId))
+            priorGoogle = buildRolePermissionPolicy({ ...f, operationalSquadronIds: f.config.operationalSquadronIds }).google;
         f.people = f.people.filter(x => x.personId !== p.personId);
         f.people.push({ ...p.profile, personId: p.personId, flightId: p.flightId, version: p.expectedVersion + 1, active: operationallyActive(p.profile) });
     }
@@ -158,6 +164,37 @@ export async function preparePermissionMutation(env: Env, c: AdminCommand, now: 
     if (managerRequired) {
         const manager = await stmt(env.DB, `SELECT (${permissionManagerSql}) AS allowed`, c.actor.principalId).first<{allowed:number}>();
         if (!manager?.allowed) throw new HttpError(403, 'NOT_AUTHORIZED', 'Current permission-manager authority is required.');
+        // A roster-only status change for an unbound person cannot affect the
+        // published policy. Check both current identities and retained policy
+        // membership so a pending turnover cannot be mistaken for an unbound row.
+        if (statusOnly && !f.accounts.some(account => account.personId === targetId)) {
+            const unbound = `NOT EXISTS(SELECT 1 FROM role_permission_members WHERE source_kind='directory' AND source_id=?) AND
+                NOT EXISTS(SELECT 1 FROM permission_policy_control, json_each(policy_json,'$.accounts') account
+                    WHERE singleton=1 AND json_extract(account.value,'$.personId')=?)`;
+            const args = [targetId, targetId];
+            if ((await stmt(env.DB, `SELECT (${unbound}) AS ok`, ...args).first<{ok:number}>())?.ok) {
+                assertion.sql += ` AND (${unbound})`;
+                assertion.values.push(...args);
+                return { managerRequired, assertion, writes: [stmt(env.DB, 'INSERT INTO permission_command_requirements VALUES(?)', c.commandId)] };
+            }
+        }
+        if (priorGoogle) {
+            // Retire a linked cadet's web grants atomically when the native
+            // publisher has no Drive membership or protected-cell change to make.
+            const next = buildRolePermissionPolicy({ ...f, operationalSquadronIds: f.config.operationalSquadronIds });
+            const applied = "NOT EXISTS(SELECT 1 FROM permission_refresh_jobs WHERE state<>'done')";
+            const stored = await stmt(env.DB, `SELECT policy_json AS json FROM permission_policy_control WHERE singleton=1 AND version=? AND ${applied}`, f.version).first<{json:string}>();
+            if (stored && await sha(stored.json) === f.hash &&
+                JSON.stringify(next.google) === JSON.stringify(priorGoogle) &&
+                JSON.stringify(next.google) === JSON.stringify(JSON.parse(stored.json).google)) {
+                assertion.sql += ` AND ${applied} AND EXISTS(SELECT 1 FROM permission_policy_control WHERE singleton=1 AND enabled=1 AND policy_hash=?)`;
+                assertion.values.push(f.hash);
+                return {managerRequired, assertion, writes:[
+                    ...await policyWrites(env, f, c.commandId, c.actor.principalId, now),
+                    stmt(env.DB, 'INSERT INTO permission_command_requirements VALUES(?)', c.commandId),
+                ]};
+            }
+        }
         const fence = await stmt(env.DB, `SELECT (${fenceSql}) AS allowed`, c.commandId, payloadHash, f.version, now).first<{
             allowed: number;
         }>();

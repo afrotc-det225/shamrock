@@ -141,7 +141,7 @@ try {
         }
         await row.getByRole("button",{name:"Approve",exact:true}).click();
         const confirm = page.getByRole("dialog",{name:"Approve excusal?"});
-        if (preview) await confirm.getByLabel("Decision note (optional)").fill("Reviewed conflict");
+        if (preview) await confirm.getByLabel("Decision reason (optional)").fill("Reviewed conflict");
         await confirm.getByRole("button",{name:"Confirm decision"}).click();
         await page.getByText("No requests match these filters.",{exact:true}).waitFor();
         assert.deepEqual(decision,{requestId:"example",version:3,decision:"Approved",

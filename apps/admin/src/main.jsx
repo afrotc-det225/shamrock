@@ -241,6 +241,20 @@ function App() {
       setProposal({...p, reviewContext});
       close?.();
     });
+  const decisionReceipt = useRef(null);
+  const decideExcusal = (payload, close) => run(async () => {
+    const context = preview ? {viewEntry:preview.entryAuditId} : {};
+    const key = JSON.stringify([context, payload]);
+    if (decisionReceipt.current?.key !== key) {
+      const receipt = await api("/proposals", {operation:"excusal.decide", payload, ...context});
+      decisionReceipt.current = {key, id:receipt.id};
+    }
+    const saved = await api(`/proposals/${decisionReceipt.current.id}/apply`, {approved:true, ...context});
+    decisionReceipt.current = null;
+    close();
+    setNotice(saved.message);
+    await reload(true);
+  });
   const apply = (id) =>
     run(async () => {
       let result = await api(`/proposals/${id}/apply`, { approved: true, ...(preview?{viewEntry:preview.entryAuditId}:{}) });
@@ -511,7 +525,7 @@ function App() {
                   {...common} viewEntry={preview?.entryAuditId} archivesAllowed={Boolean(access?.capabilities.fullSnapshot && data.meta.hosted)}
                   archiveVersion={page === "History" ? archiveVersion : null}
                   onSemester={version => navigate(version ? "History" : "Attendance", false, version)} />}
-                {page === "Excusals" && <Excusals {...common} />}{" "}
+                {page === "Excusals" && <Excusals {...common} onDecide={decideExcusal} />}{" "}
                 {!preview && !scoped && page === "Semester planning" && <Semester {...common} snapshot={data.snapshot || data.list} />}{" "}
                 {!scoped && page === "Overview" && (
                   <Overview key={JSON.stringify([data.captureKey,data.viewAsRevision])} {...common} />

@@ -44,7 +44,6 @@ function DecisionButtons({request, busy, onPick}) {
 export default function Excusals({
   snapshot,
   list,
-  propose,
   onDecide,
   busy,
   error,
@@ -98,12 +97,8 @@ export default function Excusals({
   function pick(request, decision, note = "") {
     if (!canDecide(request) || busy) return;
     const target = {requestId: request.requestId, version: request.version, decision};
-    if (onDecide) {
-      setReason(note);
-      setEdit(target);
-    } else {
-      propose("excusal.decide", payload(target, note), close);
-    }
+    setReason(note);
+    setEdit(target);
   }
   const stale = selected && selected.version !== edit.version;
   return (
@@ -148,7 +143,7 @@ export default function Excusals({
         </div>
       </section>
       <Table className={`excusal-queue${showActions ? " actionable" : ""}`}
-        headers={["Cadet", "Code", "Event / request", "Status", ...(showActions ? ["Decision"] : [])]}>
+        headers={["Cadet", "Code", "Event", "Reason", "Submitted", "Status", ...(showActions ? ["Decision"] : [])]}>
         {visible.map(r => <tr key={r.requestId}>
           <td className="excusal-cadet" style={cellStyle(flightColors(flightName(r), r.capturedSquadronLabel))}><button
             title={flightName(r)} className="text-button"
@@ -160,9 +155,10 @@ export default function Excusals({
           <td className="excusal-event">{events.get(r.eventId)}
             {sort !== "submission" && <small>{Number.isFinite(starts.get(r.eventId))
               ? <time dateTime={new Date(starts.get(r.eventId)).toISOString()}>{submissionTime.format(starts.get(r.eventId))}</time> : "Date to be determined"}</small>}
-            {r.reason && <small>{r.reason}</small>}
           </td>
-          <td className="excusal-status" data-status={r.status}><Status>{r.status}</Status><SubmittedAt value={r.submittedAt}/></td>
+          <td className="excusal-reason">{r.reason || "—"}</td>
+          <td className="excusal-submitted"><SubmittedAt value={r.submittedAt}/></td>
+          <td className="excusal-status" data-status={r.status}><Status>{r.status}</Status></td>
           {showActions && <td className="excusal-controls">{canDecide(r) &&
             <DecisionButtons request={r} busy={busy} onPick={d => pick(r,d)} />}
           </td>}
@@ -175,7 +171,7 @@ export default function Excusals({
           <RequestDetails request={selected} cadet={who(selected)} flight={flightName(selected)} event={events.get(selected.eventId)} />
           {(error || editorError) && <p className="error" role="alert">{error || editorError}</p>}
           {stale && <p role="alert">This request changed. Reopen it to review the latest decision.</p>}
-          {canDecide(selected) && !stale && <Field label="Decision note (optional)">
+          {canDecide(selected) && !stale && <Field label="Decision reason (optional)">
             <textarea maxLength={4000} value={reason} onChange={e => setReason(e.target.value)} />
           </Field>}
         </div>
