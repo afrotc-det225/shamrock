@@ -342,12 +342,6 @@ function App() {
     );
   }
 
-  if (!sessionInfo && !error) {
-    return <WorkspaceShell pages={[]}><section className="loading-panel" aria-busy="true">
-      <p role="status">Checking access…</p>
-    </section></WorkspaceShell>;
-  }
-
   let outageScreen = null;
   if(sessionInfo && (new URLSearchParams(location.search).get("workspace")==="cadet" ||
     !preview && (sessionInfo.schoolLogin || sessionInfo.cadetWorkspace && new URLSearchParams(location.search).get("workspace")!=="leadership")))
