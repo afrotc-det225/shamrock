@@ -118,7 +118,7 @@ function AdministratorList({lookup,cohort}){
   const recent=checked && Date.now()-checked.getTime()<86400000;
   return <div>
     <strong>Operational workbook</strong>
-    {checked ? <><p>{recent ? "Drive access checked" : "Last known access, checked"} {checked.toLocaleString()}.</p>
+    {checked ? <><p>{recent ? "Drive access checked" : "Last known access, checked"} {displayDate(checked)}.</p>
       <ul>{workbook.admins.map(a=><li key={a.account}>{a.label}{a.account!==a.label ? " ("+a.account+")" : ""} · {a.role}</li>)}</ul></> :
       <p>The workbook access list has not been verified.</p>}
     <strong>Staging panel</strong>
