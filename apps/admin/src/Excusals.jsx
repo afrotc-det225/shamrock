@@ -20,7 +20,7 @@ const decisions = { Approved: "Approve", Denied: "Deny", Withdrawn: "Withdraw", 
 
 const submissionTime = new Intl.DateTimeFormat("en-US", {
   timeZone:eventZone, month:"short", day:"numeric", year:"numeric",
-  hour:"numeric", minute:"2-digit", timeZoneName:"short",
+  hour:"2-digit", hourCycle:"h23", minute:"2-digit", timeZoneName:"short",
 });
 function SubmittedAt({value}) {
   if (!value || !Number.isFinite(Date.parse(value))) return null;
@@ -193,9 +193,11 @@ function payload(target, note) {
 }
 
 function RequestDetails({request, cadet, flight, event}) {
-  return <><strong>{cadet}</strong>{flight !== "—" && <span>{flight} Flight</span>}<div>{event} · {request.requestedOutcome}</div>
-    <Status>{request.status}</Status>
-    <SubmittedAt value={request.submittedAt}/>
-    <blockquote>{request.reason}</blockquote>
-    {request.decisionReason && <p>Decision reason · {request.decisionReason}</p>}</>;
+  return <section className="excusal-summary">
+    <div className="excusal-person"><strong>{cadet}</strong>{flight !== "—" && <span>{flight} Flight</span>}</div>
+    <div className="excusal-event-line"><b data-mark={request.requestedOutcome}>{request.requestedOutcome}</b>{event}</div>
+    <div className="excusal-meta"><Status>{request.status}</Status><SubmittedAt value={request.submittedAt}/></div>
+    <div className="excusal-request-reason"><h3>Reason</h3><p>{request.reason}</p></div>
+    {request.decisionReason && <p>Decision reason · {request.decisionReason}</p>}
+  </section>;
 }

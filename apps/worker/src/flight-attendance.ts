@@ -17,24 +17,23 @@ export type ScheduledFlightEvent = {
 export function scheduledFlightEvents(
   db: D1Database,
   flight: string,
-  now: string,
 ) {
   return db
     .prepare(
       `SELECT e.event_id AS eventId,e.label,d.term_id AS termId,d.start_at AS startAt,d.end_at AS endAt
     FROM event_units u JOIN events e USING(event_id) JOIN event_details d USING(event_id)
     WHERE u.unit_id=? AND e.active=1 AND d.status='active' AND d.term_id=(SELECT term_id FROM terms WHERE is_current=1)
-      AND julianday(COALESCE(d.end_at,d.start_at))>julianday(?)
+      AND d.start_at IS NOT NULL
     ORDER BY julianday(d.start_at), d.display_order,e.event_id`,
     )
-    .bind(flight, now);
+    .bind(flight);
 }
 export function currentFlightEvent(
   events: ScheduledFlightEvent[],
   now: string,
 ) {
   const started = events.filter(
-    (e) => Date.parse(e.startAt) <= Date.parse(now),
+    (e) => Date.parse(e.startAt) <= Date.parse(now) && Date.parse(e.endAt ?? e.startAt) > Date.parse(now),
   );
   const next = events.find((e) => Date.parse(e.startAt) > Date.parse(now));
   const event = started.at(-1) ?? next;

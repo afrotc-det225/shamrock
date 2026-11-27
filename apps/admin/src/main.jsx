@@ -374,7 +374,7 @@ function App() {
     return <CadetWorkspace session={{...sessionInfo,viewAs:preview}}/>;
   if (sessionInfo && readOutage) {
     const retryTime = new Intl.DateTimeFormat(undefined, {
-      hour:"numeric", minute:"2-digit", timeZoneName:"short",
+      hour:"2-digit", hourCycle:"h23", minute:"2-digit", timeZoneName:"short",
     }).format(new Date(readOutage.retryAt));
     outageScreen = <div className="login records-unavailable">
       <section className="login-brand"><Brand /></section>

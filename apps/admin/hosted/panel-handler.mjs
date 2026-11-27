@@ -20,7 +20,7 @@ import {reportTotals} from "./operational-reports.mjs";
 import {eventCancellationReply} from "./event-action.mjs";
 import { eventsState } from "./events-list.mjs";
 import { dailyLimitResponse } from "./provider-errors.mjs";
-import { wingCharts } from "./wing-charts.mjs";
+import { memberCharts, wingCharts } from "./wing-charts.mjs";
 import { semesterHistory } from "./semester-history.mjs";
 export default {
   async fetch(request, env, controlStoreFactory) {
@@ -146,8 +146,11 @@ export default {
       }
       if (url.pathname === "/api/cadet" && ["GET","POST"].includes(request.method)) {
         const section=url.searchParams.get("section");
-        if(section!==null && !/^report:[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/.test(section) && !["profile","report","attendance","flight","excusals","directory"].includes(section))throw new PanelError("INVALID_REQUEST","Unknown workspace section.");
+        if(section!==null && !/^(?:report|flight):[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/.test(section) && !["overview","profile","report","attendance","flight","excusals","directory"].includes(section))throw new PanelError("INVALID_REQUEST","Unknown workspace section.");
         const workspace=await cadetWorkspace(section);
+        if (section==="overview" && workspace.overview && request.method==="GET") {
+          workspace.compiled=await memberCharts(backend,workspace.stamp,()=>cadetWorkspace("overview-charts"));
+        }
         return secure(json(section==="profile" && request.method==="GET" ? await profileWithPortrait(env,workspace) : workspace));
       }
       if (user.principal_id.startsWith("school.")) throw new PanelError("CADET_WORKSPACE","Open your cadet workspace.",403);

@@ -9,7 +9,7 @@
   background: #fff;
   font-synthesis: none;
   font-size: 14px;
-  --sidebar-width: clamp(182px, 20vw, 244px);
+  --sidebar-width: 244px;
   --navy: #0c2340;
   --green: #21614a;
   --gold: #baa45c;
@@ -556,21 +556,6 @@ blockquote {
   }
 }
 @media (max-width: 950px) {
-  .sidebar {
-    padding-left: 8px;
-    padding-right: 8px;
-  }
-  .brand {
-    font-size: 19px;
-    gap: 8px;
-    margin-left: 6px;
-    margin-right: 6px;
-  }
-  .sidebar :is(button, .workspace-page-link) {
-    font-size: 12px;
-    gap: 9px;
-    padding: 12px 10px;
-  }
   main {
     padding: 23px;
   }
@@ -846,11 +831,11 @@ h1 {
   margin-bottom: 20px;
 }
 @media (max-width: 950px) {
-  .brand {
+  .login-brand .brand {
     font-size: 24px;
     gap: 8px;
   }
-  .brand .brand-mark {
+  .login-brand .brand .brand-mark {
     width: 26px;
     height: 31px;
   }
@@ -1483,7 +1468,9 @@ h1.page-title {position:absolute;width:1px;height:1px;margin:0;padding:0;overflo
 @media (min-width: 641px) {
   .workspace main:has(.page-controls) {padding-top:0}
   .workspace main:has(.cadet-roster[data-horizontal="true"]) {padding-bottom:0}
-  .page-controls {margin-top:0;padding-top:clamp(23px,2.1vw,36px)}
+  .workspace {--page-top-inset:clamp(23px,2.1vw,36px)}
+  .workspace main:has(.overview-roster) {padding-top:var(--page-top-inset)}
+  .page-controls {margin-top:0;padding-top:var(--page-top-inset)}
   .table-scroll[data-horizontal="true"] {max-height:calc(100dvh - var(--topbar-height) - var(--controls-height, 0px))}
 }
 
@@ -1511,13 +1498,14 @@ h1.page-title {position:absolute;width:1px;height:1px;margin:0;padding:0;overflo
 
 .table-scroll th.action-column {width:1%;white-space:nowrap}
 
-.event-schedule {width:100%;max-width:48rem;container-type:inline-size}
+.event-schedule {width:100%;container-type:inline-size}
 .event-schedule table {table-layout:fixed}
-.event-schedule th:nth-child(2) {width:14rem}
-.event-schedule th:nth-child(3) {width:8rem}
+.event-schedule th:first-child {width:min(42%,22rem)}
+.event-schedule th:nth-child(2) {width:min(35%,15rem)}
+.event-schedule th:nth-child(3) {width:auto}
 .event-schedule :is(th,td):nth-child(3) {padding-inline:.65rem}
 .event-schedule th.action-column {width:3.25rem}
-.event-schedule :is(th,td):last-child {padding-inline:.25rem;text-align:center}
+.event-schedule :is(th,td):last-child {padding-inline:.25rem;text-align:right}
 .event-schedule .icon {min-width:2.5rem;min-height:2.5rem}
 .event-schedule td:first-child :is(.text-button,small) {white-space:normal;overflow-wrap:anywhere}
 .compact-event-status {display:none}
@@ -1613,7 +1601,7 @@ main:has(.matrix-scroll) { padding-bottom: 8px; }
   .mobile-bar .brand-mark,.mobile-menu .brand-mark {height:1.55rem}
   .mobile-bar small {min-width:0;overflow-wrap:anywhere;font-size:.72rem}
   .mobile-bar button,.mobile-menu header button {display:inline-flex;align-items:center;justify-content:center;flex:none;gap:.4rem;min-height:44px;min-width:44px;width:auto;margin:0;padding:.4rem .55rem;color:white;background:transparent;border:0}
-  .mobile-menu.sidebar {position:fixed;inset:0 auto 0 0;margin:0;width:min(87vw,21rem);max-width:none;
+  .mobile-menu.sidebar {position:fixed;inset:0 auto 0 0;margin:0;width:var(--sidebar-width);max-width:100vw;
     height:100lvh;max-height:none;padding:0;border:0;overflow:hidden;overscroll-behavior:contain}
   .mobile-menu:not([open]) {display:none}
   .mobile-menu[open],.mobile-menu-screen,.mobile-menu .menu-links,.mobile-menu nav,.mobile-menu .sidebar-bottom {display:flex;flex-direction:column;align-items:stretch}
@@ -1702,7 +1690,7 @@ main:has(.matrix-scroll) { padding-bottom: 8px; }
   .search-count span {position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%)}
 }
 
-.workspace main:has(.overview-roster) {padding-top:1rem}
+
 .portrait-preview {background:#edf1f5;border:0;border-radius:12px;box-shadow:0 12px 54px #091a3580}
 .portrait-preview header {justify-content:flex-start;gap:.4rem;background:var(--navy);color:white}
 .portrait-preview header strong {flex:1}
@@ -1797,3 +1785,17 @@ main:has(.matrix-scroll) { padding-bottom: 8px; }
 .report-checklist label + label {border-top:1px solid var(--border)}
 .report-checklist input[type=checkbox] {flex:0 0 auto;width:1.2rem;height:1.2rem;min-height:0;margin:0}
 .report-checklist label:has(:checked) {background:#edf3f8}
+
+.flight-flags {margin-block-start:2rem}
+.flight-event-select {width:auto;max-width:100%;font-weight:650}
+.profile-section:last-child {padding-bottom:.25rem}
+.profile-section .profile-resources {margin-top:.8rem}
+.excusal-summary {display:grid;gap:.65rem;min-width:0}
+.excusal-person,.excusal-event-line,.excusal-meta {display:flex;align-items:center;gap:.55rem;flex-wrap:wrap}
+.excusal-person strong {font-size:1.15rem}
+.excusal-person span,.excusal-meta time {color:#4b5f75;font-size:.88rem}
+.excusal-event-line b {padding:.15rem .5rem;border-radius:.25rem;background:var(--mark-bg,#ebeff4);color:var(--mark-ink,#183553)}
+.excusal-request-reason {padding:.8rem 1rem;background:#f5f7fa;border-radius:.35rem}
+.excusal-request-reason h3 {margin:0 0 .35rem;font-size:.85rem}
+.excusal-request-reason p {margin:0;white-space:pre-wrap;overflow-wrap:anywhere}
+.drawer:has(.excusal-summary) > header h2 {font-size:1.35rem}

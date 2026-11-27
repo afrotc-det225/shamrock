@@ -67,14 +67,15 @@ try {
     }));
     assert(Math.max(...centers)-Math.min(...centers)<2,"Semester, search and Filters share one row");
     const sizes = await current.locator("thead th").evaluateAll(headers=>headers.map(h=>h.getBoundingClientRect().width));
-    assert(sizes[0]>=125 && sizes[0]<=160 && sizes[1]>=48 && sizes[1]<=50 && sizes[2]===sizes[1]);
+    assert.equal(await current.evaluate(table=>Number(getComputedStyle(table).zoom)),.5);
+    assert(sizes[0]>=62 && sizes[0]<=80 && sizes[1]>=24 && sizes[1]<=25 && sizes[2]===sizes[1],JSON.stringify(sizes));
     assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
   }
   const filters=page.getByRole("button",{name:"Filters",exact:true});
   const eventWidth=()=>current.locator("thead th").last().evaluate(th=>th.getBoundingClientRect().width);
   const normalWidth=await eventWidth();
   await filters.click(); await page.getByLabel("Table zoom").selectOption("75"); await filters.click();
-  assert(Math.abs(await eventWidth()-normalWidth*.75)<2);
+  assert(Math.abs(await eventWidth()-normalWidth*1.5)<2);
   const beforeFocus = await toolbar.boundingBox();
   const scale = await page.evaluate(() => visualViewport.scale);
   await search.tap();

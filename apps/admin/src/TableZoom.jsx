@@ -1,7 +1,7 @@
 import React, {useState} from "react";
 import {Select} from "./components";
 
-const levels = [60, 75, 85, 100, 115, 130];
+const levels = [40, 50, 60, 70, 75, 80, 85, 90, 100, 110, 115, 125, 130, 150];
 export function useTableZoom(table) {
   const key = "shamrock.tableZoom." + table;
   const [percent, setPercent] = useState(() => {
@@ -9,7 +9,7 @@ export function useTableZoom(table) {
       const saved = Number(localStorage.getItem(key));
       if (levels.includes(saved)) return saved;
     } catch {}
-    return 100;
+    return window.matchMedia("(max-width: 640px)").matches ? 50 : 100;
   });
   function update(value) {
     setPercent(Number(value));

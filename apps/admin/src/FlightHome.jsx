@@ -1,5 +1,4 @@
 import React, { useEffect, useState } from "react";
-import { RefreshCw } from "lucide-react";
 import { api, displayDate } from "./api";
 import { Empty, Table } from "./components";
 import { attendanceMeanings } from "./AttendanceMatrix";
@@ -8,17 +7,18 @@ import { compareCadetsForDisplay } from "../../../packages/domain/src/cadet-disp
 function RollCall() {
   const [board, setBoard] = useState(null),
     [error, setError] = useState(""),
+    [selected, select] = useState(""),
     [revision, refresh] = useState(0);
   useEffect(() => {
     const controller = new AbortController();
     let timer;
     async function read() {
       try {
-        const data = await api("/cadet?section=flight", undefined, {
+        const data = await api("/cadet?section="+encodeURIComponent(selected ? "flight:"+selected : "flight"), undefined, {
           signal: controller.signal,
         });
         if (controller.signal.aborted) return;
-        setBoard(data);
+        setBoard({...data,selection:selected});
         setError("");
         if (data.refreshAt)
           timer = setTimeout(
@@ -33,7 +33,6 @@ function RollCall() {
           );
       } catch (e) {
         if (!controller.signal.aborted) {
-          setBoard(null);
           setError(e.message);
         }
       }
@@ -43,32 +42,32 @@ function RollCall() {
       controller.abort();
       clearTimeout(timer);
     };
-  }, [revision]);
+  }, [revision, selected]);
   return (
     <section className="flight-roll">
       <header>
         <h2>Flight attendance</h2>
-        <button
-          type="button"
-          aria-label="Refresh Flight attendance"
-          onClick={() => refresh((n) => n + 1)}
-        >
-          <RefreshCw size={16} />
-        </button>
       </header>
+      {!!board?.eventsForFlight?.length && <select className="flight-event-select" aria-label="Flight attendance event"
+        value={selected} onChange={e=>select(e.target.value)}>
+        <option value="">{!selected && board.flightEvent ? board.flightEvent.label+" (automatic)" : "Follow current event"}</option>
+        {board.eventsForFlight.map(e=><option key={e.eventId} value={e.eventId}>{e.label}</option>)}
+      </select>}
       {error ? (
         <p role="alert">{error}</p>
       ) : !board ? (
+        <p role="status">Loading attendance…</p>
+      ) : board.selection !== selected ? (
         <p role="status">Loading attendance…</p>
       ) : !board.flightEvent ? (
         <Empty>No scheduled Flight events remain this semester.</Empty>
       ) : (
         <>
-          <h3>{board.flightEvent.label}</h3>
+          {!board.eventsForFlight && <h3>{board.flightEvent.label}</h3>}
           <p>
             {Date.parse(board.flightEvent.startAt) > Date.parse(board.asOf)
               ? "Up next"
-              : "In progress"}{" "}
+              : Date.parse(board.flightEvent.endAt ?? board.flightEvent.startAt) <= Date.parse(board.asOf) ? "Completed" : "In progress"}{" "}
             ·{" "}
             <time dateTime={board.flightEvent.startAt}>
               {displayDate(board.flightEvent.startAt)}

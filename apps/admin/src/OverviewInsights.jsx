@@ -34,6 +34,7 @@ function AttendanceSummary({dashboard, history, error, retry}) {
 
 export default function OverviewInsights({
   overview,
+  memberReport,
   snapshot,
   reporting,
   birthdayCalendar,
@@ -51,7 +52,7 @@ export default function OverviewInsights({
   const revision = JSON.stringify(manifest?.revision);
   const context = JSON.stringify([captureKey, viewAsRevision, revision]);
   useEffect(() => {
-    if (!overview && !meta?.hosted) return;
+    if (memberReport || (!overview && !meta?.hosted)) return;
     const controller = new AbortController();
     setLoaded(null);
     setError("");
@@ -78,14 +79,14 @@ export default function OverviewInsights({
     return () => controller.abort();
   }, [
     meta?.hosted,
-    !!overview,
+    !!overview, memberReport,
     captureKey,
     viewAsRevision,
     revision,
     retry,
     context,
   ]);
-  const compiled = loaded?.context === context ? loaded : null;
+  const compiled = memberReport ?? (loaded?.context === context ? loaded : null);
   const d =
     overview || meta?.hosted ? compiled?.dashboard : reporting?.dashboard;
   const term =

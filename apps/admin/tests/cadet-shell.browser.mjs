@@ -9,13 +9,14 @@ await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
 const browser = await chromium.launch(process.env.SHAMROCK_CHROMIUM_PATH
   ? { executablePath: process.env.SHAMROCK_CHROMIUM_PATH } : {});
 const origin = `http://127.0.0.1:${server.address().port}`;
-const requests = ["My requests","My attendance","Submit attendance","Cadets","My profile"];
+const selfService = ["My excusals","My attendance","Submit attendance"];
+const requests = ["Overview",...selfService,"Cadets","My profile"];
 const scenarios = [
   { role: "Cadet", tabs: requests },
-  { role: "Flight", tabs: ["My Flight", "Excusals", ...requests] },
-  { role: "Squadron", tabs: ["Excusals", ...requests.slice(0,-1),"Attendance reviews","My profile"] },
+  { role: "Flight", tabs: ["Overview","My Flight",...selfService,"Excusals","Cadets","My profile"] },
+  { role: "Squadron", tabs: ["Overview",...selfService,"Excusals","Attendance reviews","Cadets","My profile"] },
   { role: "Registration", tabs: [] },
-  { role: "View as Squadron", tabs: ["Excusals", ...requests.slice(0,-1),"Attendance reviews","My profile"] },
+  { role: "View as Squadron", tabs: ["Overview",...selfService,"Excusals","Attendance reviews","Cadets","My profile"] },
   { role: "View as", tabs: requests },
 ];
 try {
@@ -47,6 +48,7 @@ try {
         }
         if (path !== "/api/cadet" || route.request().method() !== "GET") return route.abort();
         const section=new URL(route.request().url()).searchParams.get("section");
+        if(section==="flight:other") return route.fulfill({json:{eventsForFlight:[{eventId:"other",label:"Earlier Mando"}],asOf:new Date().toISOString(),flightEvent:{eventId:"other",label:"Earlier Mando",startAt:"2026-01-01T14:00:00Z"},members:[{personId:"one",firstName:"Fixture",lastName:"Example",code:"P"}]}});
         if(section==="flight" && calls.filter(c=>c.endsWith("section=flight")).length===1){
           const now=Date.now();
           return route.fulfill({json:{asOf:new Date(now).toISOString(),refreshAt:new Date(now+1200).toISOString(),
@@ -56,7 +58,7 @@ try {
             ]}});
         }
         return route.fulfill({ json: {
-          section,directory:[{personId:"peer",rank:"C/AB",firstName:"Directory",lastName:"Peer",asYear:"AS100",flight:"Alpha",squadron:"Blue"}],attendance:section==="attendance"?[{eventId:"llab",label:"TW-1 LLAB",eventType:"llab",version:1,baseVersion:0,code:"A"},{eventId:"lab2",label:"TW-2 LLAB",eventType:"llab",version:2,baseVersion:0,code:"A"}]:[],
+          section,eventsForFlight:[{eventId:"other",label:"Earlier Mando"}],directory:[{personId:"peer",rank:"C/AB",firstName:"Directory",lastName:"Peer",asYear:"AS100",flight:"Alpha",squadron:"Blue"}],attendance:section==="attendance"?[{eventId:"llab",label:"TW-1 LLAB",eventType:"llab",version:1,baseVersion:0,code:"A"},{eventId:"lab2",label:"TW-2 LLAB",eventType:"llab",version:2,baseVersion:0,code:"A"}]:[],
           linked: true, writable: true, readOnly:false, registration: role === "Registration",
           profile: role === "Registration" ? null : {personId:"one", firstName:"Sample", lastName:"Cadet", flightId:"alpha",afsc:"13N – Nuclear and Missile Operations ".repeat(6).trim(),photoLink:"https://drive.google.com/file/d/fictional-photo/view"},
           flights: [{ flightId:"alpha", label:"Alpha" }], events: [], actions: [], queue: (squadron || role==="Flight") ? [{requestId:"example",version:3,personId:"cadet",eventId:"llab",event:"TW-2 LLAB",eventStartAt:"2026-10-14T14:00:00Z",
@@ -80,7 +82,7 @@ try {
       await page.goto(origin + (preview ? "/?workspace=cadet" : "/"));
       const nav = page.getByRole("navigation", { name:"Main navigation" });
       const heading = title => page.getByRole("heading", {name:title, level:1, exact:true});
-      await heading(tabs[0] || "Create profile").waitFor();
+      await heading(role==="Flight" ? "My Flight" : tabs.length ? "My excusals" : "Create profile").waitFor();
       await openNavigation(page);
       assert.deepEqual(await nav.getByRole("link").allTextContents(), tabs);
       if (width === 390) await page.keyboard.press("Escape");
@@ -88,10 +90,13 @@ try {
         await page.getByRole("cell",{name:"Excused",exact:true}).waitFor();
         await page.getByRole("cell",{name:"Present",exact:true}).waitFor();
         await page.getByText("No scheduled Flight events remain this semester.").waitFor();
+        assert.equal(await page.getByRole("button",{name:"Refresh",exact:true}).count(),0);
+        await page.getByLabel("Flight attendance event").selectOption("other");
+        await page.getByRole("cell",{name:"Present",exact:true}).waitFor();
         assert.equal(await page.getByRole("button",{name:"Flight roles"}).count(),0);
         await page.getByRole("heading",{name:"Flagged attendance"}).waitFor();
       }
-      if (role === "Flight") {
+      if (role === "Flight" || squadron) {
         await openNavigation(page);
         await nav.getByRole("link", {name:"Excusals",exact:true}).click();
       }
@@ -124,7 +129,7 @@ try {
         const row = page.locator(".excusal-queue tbody tr");
         await row.getByTitle(flight,{exact:true}).waitFor();
         assert.equal(await row.locator("td").nth(1).innerText(),"E");
-        assert.match(await row.locator("time").innerText(),/9:20 AM EDT/);
+        assert.match(await row.locator("time").innerText(),/09:20 EDT/);
         const bounds=await row.locator(".excusal-status").evaluate(cell=>{
           const pill=cell.firstElementChild.getBoundingClientRect(),box=cell.closest("tr").getBoundingClientRect();
           return {right:box.right-pill.right,left:pill.left-box.left};
@@ -152,8 +157,8 @@ try {
       }
       if (tabs.length) {
         await openNavigation(page);
-        await nav.getByRole("link", {name:"My requests"}).click();
-        await heading("My requests").waitFor();
+        await nav.getByRole("link", {name:"My excusals"}).click();
+        await heading("My excusals").waitFor();
         const personal=page.locator(".personal-excusals table");
         assert.deepEqual(await personal.locator("th").allTextContents(),["Event","Code","Excusal reason","Status","Decision reason"]);
         assert.deepEqual(await personal.locator("td").allTextContents(),["TW-3 LLAB","E","Conflicting lab","Approved","Reviewed schedule"]);
@@ -182,7 +187,7 @@ try {
         await page.getByRole("button",{name:"Close preview"}).click();
         assert.equal(new URL(page.url()).pathname,"/me/profile");
         await page.goBack();
-        await heading("My requests").waitFor();
+        await heading("My excusals").waitFor();
         await page.goForward();
         await heading("My profile").waitFor();
         await openNavigation(page);
@@ -230,9 +235,12 @@ try {
         await openNavigation(page);
         await nav.getByRole("link",{name:"Cadets",exact:true}).click();
         await page.getByRole("cell",{name:"C/AB Directory Peer"}).waitFor();
+        if(width===390) await page.evaluate(()=>window.scrollTo(0,document.documentElement.scrollHeight));
+
         await openNavigation(page);
         await nav.getByRole("link",{name:"Submit attendance",exact:true}).click();
         await page.getByText("Draft saved on this device.").waitFor();
+        assert.equal(await page.evaluate(()=>window.scrollY),0);
         assert.equal(await page.locator(".report-checklist input:checked").count(),3);
         await page.getByLabel("Find a cadet").fill("Tom");
         await page.getByRole("button",{name:"Submit attendance",exact:true}).click();
@@ -257,7 +265,7 @@ try {
       });
       assert(layout.fits && (width === 390 ? layout.stacked : layout.alongside), JSON.stringify(layout));
       assert.deepEqual(errors, []);
-      assert.deepEqual(calls, ["POST /api/session", "GET /api/cadet",...(role==="Flight"?["GET /api/cadet?section=flight","GET /api/cadet?section=flight","GET /api/cadet?section=excusals","GET /api/cadet"]:[]),...(squadron?["POST /api/cadet","GET /api/cadet"]:[]),...(tabs.length?["GET /api/cadet?section=profile","GET /api/cadet","GET /api/cadet?section=profile","GET /api/cadet?section=attendance","POST /api/cadet","POST /api/cadet","GET /api/cadet?section=attendance","GET /api/cadet?section=report","GET /api/cadet?section=report:lab16","GET /api/cadet?section=directory","GET /api/cadet?section=report","GET /api/cadet?section=report:lab16","POST /api/cadet","GET /api/cadet?section=report"]:[])]);
+      assert.deepEqual(calls, ["POST /api/session", "GET /api/cadet",...(role==="Flight"?["GET /api/cadet?section=flight","GET /api/cadet?section=flight","GET /api/cadet?section=flight:other","GET /api/cadet?section=excusals","GET /api/cadet"]:[]),...(squadron?["GET /api/cadet?section=excusals","POST /api/cadet","GET /api/cadet?section=excusals","GET /api/cadet"]:[]),...(tabs.length?["GET /api/cadet?section=profile","GET /api/cadet","GET /api/cadet?section=profile","GET /api/cadet?section=attendance","POST /api/cadet","POST /api/cadet","GET /api/cadet?section=attendance","GET /api/cadet?section=report","GET /api/cadet?section=report:lab16","GET /api/cadet?section=directory","GET /api/cadet?section=report","GET /api/cadet?section=report:lab16","POST /api/cadet","GET /api/cadet?section=report"]:[])]);
       await page.close();
     }
   }
@@ -290,16 +298,16 @@ try {
       await openNavigation(page);
       await nav.getByRole("link",{name:"My profile",exact:true}).waitFor();
       await nav.getByRole("link",{name:"Attendance",exact:true}).waitFor();
-      assert.deepEqual(await nav.getByRole("link").allTextContents(),["Attendance","Excusals","My Flight",...requests]);
+      assert.deepEqual(await nav.getByRole("link").allTextContents(),["Overview","My Flight",...selfService,"Attendance","Excusals","Cadets","My profile"]);
     };
-    await page.getByRole("heading",{name:"My excusals",exact:true}).waitFor();
+    await page.getByRole("heading",{name:"My excusals",level:1,exact:true}).waitFor();
     await checkMenu();
     await nav.getByRole("link",{name:"Excusals",exact:true}).click();
     await page.getByText("No requests match these filters.").waitFor();
     assert.equal(new URL(page.url()).pathname,"/excusals");
     await checkMenu();
-    await nav.getByRole("link",{name:"My requests",exact:true}).click();
-    await page.getByRole("heading",{name:"My excusals",exact:true}).waitFor();
+    await nav.getByRole("link",{name:"My excusals",exact:true}).click();
+    await page.getByRole("heading",{name:"My excusals",level:1,exact:true}).waitFor();
     await page.goBack();
     await page.getByText("No requests match these filters.").waitFor();
     assert.equal(sessions,1);

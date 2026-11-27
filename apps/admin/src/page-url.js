@@ -4,7 +4,7 @@ const pages = {
     Attendance:"attendance", Excusals:"excusals", History:"history",
     "Semester planning":"semester", System:"system", Assistant:"assistant",
   },
-  cadet: {Cadets:"cadets","My attendance":"attendance","Submit attendance":"submit-attendance","Attendance reviews":"attendance-reviews","My requests":"requests", "My profile":"profile", "My Flight":"flight", Excusals:"excusals"},
+  cadet: {Overview:"overview", Cadets:"cadets","My attendance":"attendance","Submit attendance":"submit-attendance","Attendance reviews":"attendance-reviews","My excusals":"requests", "My profile":"profile", "My Flight":"flight", Excusals:"excusals"},
 };
 
 export function pageHref(workspace, page, semester="latest") {
@@ -32,6 +32,7 @@ export function workspaceFromUrl(url = new URL(location.href)) {
 export function pageFromUrl(workspace, url = new URL(location.href)) {
   const route = pathRoute(url.pathname);
   if (workspace === "leadership" && route?.page === "Attendance" && url.searchParams.get("semester")) return "History";
+  if (workspace === "cadet" && route?.page === "Overview") return "Overview";
   if (route) return route.workspace === workspace ? route.page : null;
   if (url.pathname !== "/" || workspaceFromUrl(url) !== workspace) return null;
   const slug = url.searchParams.get("page");

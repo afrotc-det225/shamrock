@@ -393,7 +393,22 @@ try {
   await page.goForward();
   await page.reload();
   await page.getByRole("button", {name:"Edit Veterans Day ceremony",exact:true}).waitFor();
+  const toolbarInset = await page.locator(".page-controls").evaluate(el=>parseFloat(getComputedStyle(el).paddingTop));
   await navigate("Overview");
+  await page.locator(".overview-roster").waitFor();
+  assert(Math.abs((await page.locator(".overview-roster").boundingBox()).y-toolbarInset)<1);
+  for(const width of [1440,1024,800,641,640,390]){
+    await page.setViewportSize({width,height:850});
+    if(width>640) assert.equal((await page.locator("aside.sidebar").boundingBox()).width,244);
+    else {
+      await page.getByRole("button",{name:"Open navigation"}).waitFor();
+      assert.equal(await page.locator("aside.sidebar").count(),0);
+      await page.getByRole("button",{name:"Open navigation"}).click();
+      assert.equal((await page.locator("dialog.mobile-menu").boundingBox()).width,244);
+      await page.getByRole("button",{name:"Close navigation"}).click();
+    }
+  }
+  await page.setViewportSize({width:1488,height:1056});
   const flightChart = page.getByRole("group", {name:"Overall attendance by flight"});
   const mark = flightChart.locator(".chart-target").first();
   await mark.hover();

@@ -7,11 +7,10 @@ import OverviewInsights from "./OverviewInsights";
 import { ArrowUp, SquarePen, MessagesSquare } from "lucide-react";
 import { Heading, Table, Status, Empty } from "./components";
 import {readUsage} from "./read-usage";
-import { api } from "./api";
+import { api, displayDate } from "./api";
 import { useReceipts, ReceiptStatus } from "./receipts";
-export function Overview({ snapshot: s, overview, reporting, history, receiptsDeferred, reportingTime, captureKey, readOnly = false, ...details }) {
+export function Overview({ snapshot: s, overview, reporting, reportingTime, captureKey, ...details }) {
   const roster = overview || overviewRoster(s.people.filter(operationallyActive).map(p => [p.asYear,p.university,1]));
-  const receipt = useReceipts({ history, receiptsDeferred, reportingTime, captureKey, enabled: !readOnly });
   return (
     <>
       <Heading title="Overview" />
@@ -20,15 +19,7 @@ export function Overview({ snapshot: s, overview, reporting, history, receiptsDe
           <div key={key}><dt>{label}</dt><dd>{roster[key] ?? "—"}</dd></div>)}
       </dl>
       <OverviewInsights {...details} overview={overview} snapshot={s} reporting={reporting} reportingTime={reportingTime} captureKey={captureKey}/>
-      {!readOnly && <section className="form-section">
-        <h2>Recent changes</h2>
-        <ReceiptStatus receipt={receipt} />
-        {receipt.rows === null ? null : receipt.rows.length ? (
-          <History rows={receipt.rows.slice(0, 5)} />
-        ) : (
-          <Empty>No changes yet.</Empty>
-        )}
-      </section>}
+
     </>
   );
 }
@@ -43,7 +34,7 @@ export function History({ rows, retry, busy }) {
             {r.summary.title}
             <small>{r.summary.target}</small>
           </td>
-          <td>{new Date(r.created).toLocaleString()}</td>
+          <td>{displayDate(r.created)}</td>
           <td>
             <Status>{r.state === "complete" ? "Saved" : r.state}</Status>
           </td>

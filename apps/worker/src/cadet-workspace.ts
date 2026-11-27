@@ -4,6 +4,7 @@ import {
   operationallyActive,
   type DirectoryRecord,
 } from "../../../packages/domain/src/admin.js";
+import {memberOverview} from "./member-overview.js";
 import { assignFlightRole } from "./flight-role-assignment.js";
 import { currentFlightEvent, flightAttendance, scheduledFlightEvents, type ScheduledFlightEvent } from "./flight-attendance.js";
 import { HttpError } from "./http-error.js";
@@ -52,6 +53,7 @@ export const eligibleSchoolSql =
   schoolDomains.map((x) => "'" + x + "'").join(",") +
   ")";
 
+export const flightSection = (section: unknown): section is string => typeof section === "string" && /^flight(?::[A-Za-z0-9][A-Za-z0-9_.:-]{0,127})?$/.test(section);
 export const reportSection = (value:unknown) => typeof value==="string" && /^report:[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/.test(value);
 // Match the Directory school aliases used by the operational attendance Form.
 const campus = (alias:string) => `CASE WHEN lower(${alias}.university) LIKE '%trine%' THEN 'Trine'
@@ -101,7 +103,7 @@ export async function readCadetWorkspace(
     ORDER BY p.principal_id LIMIT 3`,
     )
     .bind(principal, email, email);
-  const personal=section==="directory" || section==="profile" || section==="attendance" || section==="flight";
+  const personal=section==="directory" || section==="profile" || section==="attendance" || flightSection(section) || section==="overview" || section==="overview-charts";
   const flights = db.prepare(
     "SELECT u.unit_id AS flightId,u.label,u.roster_version AS rosterVersion,h.squadron_id AS squadronId,s.label AS squadron FROM organizational_units u JOIN flight_hierarchy h ON h.unit_id=u.unit_id JOIN squadrons s ON s.squadron_id=h.squadron_id " + (personal ? " WHERE u.unit_id=(SELECT flight_id FROM directory_profiles WHERE lower(email)=?)" : "") + " ORDER BY u.label",
   );
@@ -193,10 +195,16 @@ export async function readCadetWorkspace(
         throw new HttpError(409, "SNAPSHOT_CHANGED", "Your assignment changed. Reload SHAMROCK.");
       queue = rows.results;
     }
+    let overviewData;
+    if(section==="overview" || section==="overview-charts") {
+      overviewData=await memberOverview(db,section==="overview-charts");
+      const checked=await db.batch(fence);
+      if(JSON.stringify(first)!==JSON.stringify(checked.map(r=>r.results)))throw denied();
+    }
     let directory;
     if (section==="directory") {
       const [peers,...checked] = await db.batch<Row>([db.prepare(`SELECT d.person_id AS personId,d.first_name AS firstName,
-    d.last_name AS lastName,d.as_year AS asYear,d.rank,d.role,u.label AS flight,s.label AS squadron
+    d.last_name AS lastName,d.as_year AS asYear,d.rank,d.role,d.university,d.email,d.class_year AS classYear,d.afsc,d.cip_broad_area AS cipBroadArea,d.cip_code AS cipCode,d.flight_path_status AS flightPathStatus,u.label AS flight,s.label AS squadron
     FROM directory_profiles d JOIN memberships m ON m.person_id=d.person_id AND m.unit_id=d.flight_id AND m.active=1
     JOIN organizational_units u ON u.unit_id=d.flight_id
     LEFT JOIN flight_hierarchy h ON h.unit_id=u.unit_id LEFT JOIN squadrons s ON s.squadron_id=h.squadron_id
@@ -206,22 +214,25 @@ export async function readCadetWorkspace(
       directory = peers.results;
     }
     let flightHome;
-    if(section==="flight"){
+    if(flightSection(section)){
       if(!flightCommander || !profile.flightId)throw denied();
       const asOf=new Date().toISOString();
-      const schedule=scheduledFlightEvents(db,profile.flightId,asOf);
+      const schedule=scheduledFlightEvents(db,profile.flightId);
       const [read]=await db.batch<ScheduledFlightEvent>([schedule]);
-      const {event,refreshAt}=currentFlightEvent(read.results,asOf);
+      const automatic=currentFlightEvent(read.results,asOf);
+      const selected=section.startsWith("flight:") ? section.slice(7) : null;
+      const event=selected ? read.results.find(e=>e.eventId===selected) : automatic.event;
+      if(selected && !event)throw denied();
       const members=event ? await flightAttendance(db,event,profile.flightId) : [];
       const verified=await db.batch([schedule,...fence]);
       if(JSON.stringify(read.results)!==JSON.stringify(verified[0].results) ||
         JSON.stringify(first)!==JSON.stringify(verified.slice(1).map(r=>r.results)))throw new HttpError(409,"SNAPSHOT_CHANGED","Reload your Flight attendance.");
-      flightHome={flightEvent:event ?? null,members,refreshAt,asOf};
+      flightHome={flightEvent:event ?? null,members,eventsForFlight:read.results,refreshAt:selected ? null : automatic.refreshAt,asOf};
     }
     const personalData=section==="attendance" ? personalAttendance(profile.personId,capture.slice(fence.length).map(r=>r.results)) : {attendance:[],flags:[]};
     return {registration:false,profile,flights:flightList,writable,linked:accounts.length===1 && accounts[0].principal_id===actor && accounts[0].email===email,
       flightCommander:!!flightCommander,squadron:squadronCommander ? String(owner.squadron) : null,squadronId:squadronCommander ? owner.squadron_id : null,
-      section,...(section==="directory" ? {directory} : {}),...flightHome,attendance:personalData.attendance,actions:personalData.flags.map(workspaceAction),reportEvents:[],reportRoster:[],ownFlightCount:null,roster:[],requests:[],events:[],queue};
+      section,...overviewData,...(section==="directory" ? {directory} : {}),...flightHome,attendance:personalData.attendance,actions:personalData.flags.map(workspaceAction),reportEvents:[],reportRoster:[],ownFlightCount:null,roster:[],requests:[],events:[],queue};
   }
   const reporting=section==="report" || reportSection(section);
   const data = reporting ? [] : [
@@ -363,7 +374,7 @@ export async function cadetRoute(
       )
     : null;
   const section=object(a) ? (a.kind==="report" && object(a.fields) ? "report:"+a.fields.eventId : undefined) : input.section;
-  if(section!=null && !reportSection(section) && !["profile","attendance","report","flight","excusals","directory"].includes(String(section))) throw bad();
+  if(section!=null && !reportSection(section) && !flightSection(section) && !["overview","overview-charts","profile","attendance","report","flight","excusals","directory"].includes(String(section))) throw bad();
   const state = await readCadetWorkspace(env, input.email, input.principalId, section);
   if (
     !state.linked &&

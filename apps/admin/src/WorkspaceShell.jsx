@@ -1,4 +1,4 @@
-import React, {useContext, useEffect, useRef, useState} from "react";
+import React, {useContext, useEffect, useLayoutEffect, useRef, useState} from "react";
 import {Menu, Sparkles, UserRound, X} from "lucide-react";
 import Brand from "./Brand";
 import {usePhone} from "./use-phone";
@@ -8,6 +8,8 @@ import {api} from "./api";
 import {leadershipPages, personalPages} from "./site-navigation";
 import {ViewAsSelector} from "./ViewAs";
 import {pageHref,writePageUrl} from "./page-url";
+
+const navigationOrder = ["Overview","My Flight","My excusals","My attendance","Submit attendance","Events","Attendance","Excusals","Attendance reviews","Cadets","Leadership","My profile","Semester planning","System"];
 
 export function PageLink({workspace, title, navigate, children, className="", ...props}) {
   return <a {...props} className={`workspace-page-link ${className}`} href={pageHref(workspace,title)} onClick={event => {
@@ -20,6 +22,16 @@ export function PageLink({workspace, title, navigate, children, className="", ..
 export default function WorkspaceShell({ workspace="leadership", pages, page, navigate, account, children, drawer, mobileContext, session, preview }) {
   const mobile = usePhone();
   const menu = useRef(null);
+  const content = useRef(null);
+  useLayoutEffect(() => {
+    const reset = () => {
+      window.scrollTo({top:0, behavior:"instant"});
+      content.current?.scrollTo({top:0, behavior:"instant"});
+    };
+    reset();
+    const frame = requestAnimationFrame(reset);
+    return () => cancelAnimationFrame(frame);
+  }, [workspace,page]);
   const [open, setOpen] = useState(false);
   const [accountError,setAccountError] = useState("");
   const suspended = useContext(EditorSuspended);
@@ -53,7 +65,9 @@ export default function WorkspaceShell({ workspace="leadership", pages, page, na
       {[
         ...leadership.map(([title,Icon]) => [title,Icon,"leadership"]),
         ...personal.filter(([title]) => !leadership.some(([name]) => name===title)).map(([title,Icon]) => [title,Icon,"cadet"]),
-      ].map(([title, Icon, source]) => (
+      ].sort(([left],[right]) => {
+        return navigationOrder.indexOf(left)-navigationOrder.indexOf(right);
+      }).map(([title, Icon, source]) => (
         <PageLink workspace={source} title={title} navigate={source===workspace ? navigate : name=>openPage(source,name)} key={title} className={page === title ? "selected" : ""}
           aria-current={page === title ? "page" : undefined}>
           <Icon size={19} aria-hidden="true" />
@@ -98,7 +112,7 @@ export default function WorkspaceShell({ workspace="leadership", pages, page, na
           </div>
         </dialog>
       </> : <aside className="sidebar"><Brand/>{links}</aside>}
-      <div className="workspace"><main>{children}</main></div>
+      <div className="workspace" ref={content}><main>{children}</main></div>
       {drawer}
     </div>
   );

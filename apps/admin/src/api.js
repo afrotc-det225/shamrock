@@ -194,11 +194,11 @@ export const profileFields = [
 export const displayDate = (value, timeZone = eventZone) =>
   value
     ? new Intl.DateTimeFormat("en-US", {
-        month: "short",
+        year: "numeric", month: "short",
         day: "numeric",
         hour: "2-digit",
         minute: "2-digit",
-        hour12: false,
+        hourCycle: "h23",
         timeZone, timeZoneName: "short",
       }).format(new Date(value))
     : "Not scheduled";

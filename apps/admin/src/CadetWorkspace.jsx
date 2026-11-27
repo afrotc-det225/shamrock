@@ -12,6 +12,7 @@ import {personalPages} from "./site-navigation";
 import { ExternalLink } from "lucide-react";
 import { attendanceMeanings } from "./AttendanceMatrix";
 import {loadReportDraft, restoreSelections, rosterSignature} from "./report-draft";
+import {Overview} from "./Secondary";
 import CadetDirectory from "./CadetDirectory";
 import { FlightHome } from "./FlightHome";
 import { calculateAttendanceCredit } from "../../../packages/domain/src/frontend-reporting";
@@ -96,9 +97,8 @@ function Profile({ state, save, disabled }) {
       {!register && <ProfilePhoto profile={state.profile} />}
       {register && <h2>{step === 0 ? "Directory information" : "Academic and career information"}</h2>}
       <fieldset disabled={disabled && !register}>
-        <div className="cadet-fields">
-          {register && step === 0 && (
-            <>
+        {register && step === 0 && (
+          <div className="cadet-fields">
               <ProfileField field="university" label="University" required value={form.university} onChange={v=>pick("university",v)}/>
               <Select
                 label="AS year"
@@ -120,9 +120,8 @@ function Profile({ state, save, disabled }) {
                   })),
                 ]}
               />
-            </>
-          )}
           </div>
+        )}
         {groups.map(([title, keys]) => {
           const members = visible.filter(([key]) => keys.includes(key));
           return members.length > 0 && <section key={title} className="profile-section"><h3>{title}</h3><div className="cadet-fields">
@@ -131,15 +130,16 @@ function Profile({ state, save, disabled }) {
             broadArea={key === "cipCode" ? form.cipBroadArea : undefined} originalBroadArea={key === "cipCode" ? state.profile?.cipBroadArea : undefined}
             original={state.profile?.[key]} required={required.has(key) && (register || !!state.profile?.[key])}
             value={form[key] || ""} onChange={value=>pick(key,value)}/>)}
-        </div></section>;
-        })}
-      </fieldset>
-      {(!register || step === 1) && (
+        </div>
+      {title === "Academics and career" && (
         <div className="profile-resources">
           <a href="https://nces.ed.gov/ipeds/cipcode/" target="_blank" rel="noreferrer">Find your major’s CIP code <ExternalLink size={15}/></a>
           <a href="https://tmd.texas.gov/Data/Sites/1/media/tmd-jobs/ang-dsg-vacancy/fy26/quarter-3/air-force-officer-classification-directory-afocd-30-april-2025.pdf" target="_blank" rel="noreferrer">Officer classification directory (DAFOCD) <ExternalLink size={15}/></a>
         </div>
       )}
+        </section>;
+        })}
+      </fieldset>
       {register && step === 1 && (
         <button type="button" onClick={() => setStep(0)}>
           Back
@@ -409,7 +409,7 @@ function FlightReport({ state, save, disabled, previewId }) {
 function Flight({ state, save, disabled }) {
   return (
     <FlightHome>
-      <h2>Flagged attendance</h2>
+      <section className="flight-flags"><h2>Flagged attendance</h2>
       {!state.actions.some(a=>a.kind==="flag" && a.flightId===state.profile.flightId && !a.resolution) && <Empty>No open Flight flags.</Empty>}
       {state.actions
         .filter((a) => a.kind === "flag" && a.flightId===state.profile.flightId && !a.resolution)
@@ -437,6 +437,7 @@ function Flight({ state, save, disabled }) {
           </form>
         ))}
 
+      </section>
     </FlightHome>
   );
 }
@@ -449,7 +450,7 @@ export default function CadetWorkspace({ session }) {
   const pending = useRef(null),
     active = useRef(false),
     preview = !!session.viewAs;
-  const section = tab==="Cadets" ? "directory" : tab==="Excusals" ? "excusals" : tab==="My profile" ? "profile" : tab==="Submit attendance" ? "report" : tab==="My attendance" ? "attendance" : "";
+  const section = tab==="Overview" ? "overview" : tab==="Cadets" ? "directory" : tab==="Excusals" ? "excusals" : tab==="My profile" ? "profile" : tab==="Submit attendance" ? "report" : tab==="My attendance" ? "attendance" : "";
   const currentSection=useRef(section);
   currentSection.current=section;
   const load = async () => {
@@ -553,7 +554,7 @@ export default function CadetWorkspace({ session }) {
       </p>
     </>}>
 
-      {page !== "Excusals" && <Heading title={state?.registration ? "Create profile" : page || "My workspace"} />}
+      {page !== "Excusals" && page !== "Overview" && <Heading title={state?.registration ? "Create profile" : page || "My workspace"} />}
       {error && (
         <p className="error" role="alert">
           {error}{" "}
@@ -599,6 +600,8 @@ export default function CadetWorkspace({ session }) {
           }
         />
       )}
+      {page==="Overview" && (state?.overview ? <Overview overview={state.overview} memberReport={state.compiled}
+        birthdayCalendar={state.birthdayCalendar} birthdayFlights={state.birthdayFlights} birthdaySquadrons={state.birthdaySquadrons}/> : <p role="status">Loading Overview…</p>)}
       {page==="Cadets" && (state.section==="directory" ? <CadetDirectory rows={state.directory}/> : <p role="status">Loading Directory…</p>)}
       {page==="Attendance reviews" && <AttendanceReviews state={state} save={save} disabled={disabled}/>}
       {page==="My attendance" && (state.section==="attendance" ? <PersonalAttendance state={state} flags={flags} save={save} disabled={disabled}/> : <p role="status">Loading attendance…</p>)}
@@ -614,7 +617,7 @@ export default function CadetWorkspace({ session }) {
           disabled={disabled}
         />
       )}
-      {page === "My requests" && (
+      {page === "My excusals" && (
         <div className="cadet-requests">
           <section className="form-section">
             <h2>My excusals</h2>

@@ -14,9 +14,9 @@ export function personalPages(state) {
   if (!state || state.registration) return [];
   return [
     ...(state.flightCommander ? [["My Flight", Users]] : []),
+    ["My excusals", ClipboardList], ["My attendance", ClipboardList], ["Submit attendance", ClipboardList],
     ...(state.squadron || state.flightCommander ? [["Excusals", FileCheck2]] : []),
-    ["My requests", ClipboardList], ["My attendance", ClipboardList], ["Submit attendance", ClipboardList],
-    ["Cadets", Users],
+    ["Cadets", Users], ["Overview", Home],
     ...(state.squadron ? [["Attendance reviews", FileCheck2]] : []),
     ["My profile", UserRound],
   ];

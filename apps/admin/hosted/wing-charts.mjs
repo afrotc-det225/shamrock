@@ -49,7 +49,7 @@ export function chartFields(dashboard) {
 
 const recent = new Map();
 const pending = new Map();
-async function currentDashboard(backend, authority, key) {
+async function currentDashboard(backend, key, compileDashboard) {
   const cached = recent.get(key);
   if (cached && cached.until > Date.now()) return cached.value;
   if (pending.has(key)) return pending.get(key);
@@ -57,13 +57,7 @@ async function currentDashboard(backend, authority, key) {
     const store = backend.env.HISTORY_FILES;
     let value = await store?.get(key, "json");
     if (!value) {
-      const browse = await browseState(backend, authority, "attendance");
-      const { reporting,list } = await decodeBrowse({
-        browse,
-        manifest: authority,
-        reportingTime: Date.now(),
-      });
-      value = {...chartFields(reporting.dashboard),termLabel:list?.terms?.find(t=>t.isCurrent)?.label ?? null};
+      value = await compileDashboard();
       // Cache failure must not prevent delivery of an already compiled report.
       if (store) {
         try {
@@ -99,7 +93,11 @@ export async function wingCharts(backend) {
   const key = currentChartsKey(backend, authority);
   const viewRevision = backend.viewRevision;
   const [dashboard, history] = await Promise.all([
-    currentDashboard(backend, authority, key),
+    currentDashboard(backend, key, async () => {
+      const browse = await browseState(backend, authority, "attendance");
+      const {reporting,list} = await decodeBrowse({browse, manifest:authority, reportingTime:Date.now()});
+      return {...chartFields(reporting.dashboard),termLabel:list?.terms?.find(t=>t.isCurrent)?.label ?? null};
+    }),
     backend.env.HISTORY_FILES?.get(
       historyChartsKey(backend.generation),
       "json",
@@ -125,4 +123,21 @@ export async function wingCharts(backend) {
     revision: authority.revision,
     viewAsRevision: viewRevision,
   };
+}
+
+// The signed member workspace has already checked enrollment. Read the same aggregate
+// as the Wing panel without granting access to its underlying roster or attendance API.
+export async function memberCharts(backend, stamp, compile) {
+  const authority={scope:{termId:stamp.termId,currentTermId:stamp.termId},revision:stamp};
+  const key=currentChartsKey(backend,authority);
+  const [dashboard,history] = await Promise.all([
+    currentDashboard(backend,key,async () => {
+      const result=await compile();
+      if(!result.dashboard || ["operations","administration","termId"].some(k=>result.stamp?.[k]!==stamp[k]))
+        throw new PanelError("SNAPSHOT_CHANGED","The Wing roster changed. Reload Overview.",409);
+      return {...chartFields(result.dashboard),termLabel:result.termLabel ?? null};
+    }),
+    backend.env.HISTORY_FILES?.get(historyChartsKey(backend.generation),"json"),
+  ]);
+  return {dashboard,history:history ?? [],awaitingHistory:backend.dataset==="real" && history==null};
 }

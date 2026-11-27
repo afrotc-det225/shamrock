@@ -519,7 +519,7 @@ test('campus enrollment, personal excusal, Flight review and duties use the veri
     assert.equal((await route(register)).body.commandId,saved.body.commandId);
     const peers=(await directory()).body.directory;
     assert(peers.length>1);
-    for (const peer of peers) assert.deepEqual(Object.keys(peer).sort(),["asYear","firstName","flight","lastName","personId","rank","role","squadron"]);
+    for (const peer of peers) assert.deepEqual(Object.keys(peer).sort(),["afsc","asYear","cipBroadArea","cipCode","classYear","email","firstName","flight","flightPathStatus","lastName","personId","rank","role","squadron","university"]);
     const self=(await route()).body;assert(self.linked);assert.equal(self.squadron,null);assert.equal(self.queue.length,0);
     await f.db.batch([
       f.db.prepare("INSERT INTO events VALUES('portal-event','Fictional workshop',1)"),
@@ -546,6 +546,14 @@ test('campus enrollment, personal excusal, Flight review and duties use the veri
     assert.equal((await route()).body.requests.length,3);
     const captain={...identity,principalId:'flight',email:'flight@example.invalid'};
     const leader=(await route(null,captain)).body;assert(leader.flightCommander && leader.linked);
+    await f.db.prepare("UPDATE event_details SET start_at='2026-02-03T14:00:00Z' WHERE event_id='portal-event'").run();
+    const chosen=await route(null,{...captain,section:"flight:portal-event"});
+    assert.equal(chosen.status,200);
+    assert.equal(chosen.body.flightEvent.eventId,"portal-event");
+    assert.equal(chosen.body.refreshAt,null);
+    assert(chosen.body.eventsForFlight.some(e=>e.eventId==="portal-event"));
+    assert.equal((await route(null,{...identity,section:"flight:portal-event"})).status,403);
+    assert.equal((await route(null,{...captain,section:"flight:missing"})).status,403);
     const assignment=action('flightRole',{personId:self.profile.personId,role:'Alpha Flight Accountability Officer',version:self.profile.version});
     const assigned=await route(assignment,captain);
     assert.equal(assigned.status,200,JSON.stringify(assigned));
