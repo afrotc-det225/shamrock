@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from "react";
+import React, { useState, useEffect } from "react";
 import { Eye } from "lucide-react";
 import { Drawer, SearchBox, Empty, LoadingRows } from "./components";
 import { name,api } from "./api";
@@ -38,16 +38,9 @@ export const viewAsStatus = {
   "no-verified-login": "This person does not have a verified sign-in linked to SHAMROCK.",
   "no-panel-access": "This person does not currently have access to the panel.",
 };
-export function ViewAsBanner({ label, onExit, busy, acting = false }) {
-  const ref = useRef(null);
-  useEffect(() => {
-    const element = ref.current, workspace = element.closest(".workspace");
-    const measure = () => workspace.style.setProperty("--topbar-height", `${element.getBoundingClientRect().height}px`);
-    const observer = new ResizeObserver(measure); observer.observe(element); measure();
-    return () => { observer.disconnect(); workspace.style.removeProperty("--topbar-height"); };
-  }, []);
-  return <div ref={ref} className="view-as-banner" role="status">
-    <span><strong>{acting ? "Acting as" : "Viewing as"} {label}</strong><small>{acting ? "Changes use their permissions and record you as the administrator." : "Read-only view"}</small></span>
-    <button disabled={busy} onClick={onExit}>Exit view</button>
+export function ViewAsAccount({ label, onExit, busy, acting = false }) {
+  return <div className="view-as-account">
+    <span>{acting ? "Acting as" : "Viewing as"} {label}</span>
+    <button className="sign-out" disabled={busy} onClick={onExit}>Exit view</button>
   </div>;
 }

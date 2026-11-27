@@ -338,8 +338,10 @@ After sign-in, cadets use the same navigation layout as leadership. My requests 
 
 In **My profile**, cadets manage contact information, academics and career details, and their Directory photo. The AFSC field wraps longer career names. A saved Google Drive photo displays when the browser can access it. Cadets can open the original HTTPS photo link, replace it, or clear it and save. Photo previews use the existing file permissions.
 
-**My attendance** displays the cadet’s current-semester attendance matrix. Select a cell, choose the requested code, and enter a reason. The recorded code stays in place until the Squadron Commander approves the request in **Attendance reviews**. Approval checks the original cell and roster versions and queues a spreadsheet refresh. Denial leaves the cell as recorded. Earlier free-text flags remain available for Flight review.
+**My attendance** displays the cadet’s current-semester attendance matrix. Select a cell, choose **Review selected cell**, choose the requested code, and enter a reason. The recorded code stays in place until the Squadron Commander approves the request in **Attendance reviews**. Approval checks the original cell and roster versions and queues a spreadsheet refresh. Denial leaves the cell as recorded. Earlier free-text flags remain available for Flight review.
 
 **Submit attendance** is a separate cadet workspace tab. Any linked cadet may submit for eligible members of their own Flight, including secondary events. Use a partial report for a subset of the Flight.
 
 In **View as**, a permission manager can act in a linked cadet workspace and submit authorized attendance, excusal and directory edits. Receipts identify the effective account and reference the administrator’s audited entry. An account without a verified link can be inspected before first sign-in. The normal write pause applies.
+
+On Attendance and My attendance, hover or focus a mark to highlight the cadet and event. Click to select one cell, Shift-click for a rectangle, and Command-click (Mac) or Ctrl-click to toggle individual cells. Shift with an arrow key extends the range. Escape clears it. Use the single-cell action or double-click to open an authorized correction or personal review. Multi-cell selection is local to the page.

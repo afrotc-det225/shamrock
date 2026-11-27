@@ -30,7 +30,7 @@ import "@fontsource/barlow-condensed/latin-600.css";
 import Brand from "./Brand";
 import {workspaceFromUrl, pageFromUrl, writePageUrl, rememberSignInPage, restoreSignInPage} from "./page-url";
 import WorkspaceShell, {PageLink} from "./WorkspaceShell";
-import { ViewAsSelector, ViewAsBanner, viewAsStatus } from "./ViewAs";
+import { ViewAsSelector, ViewAsAccount, viewAsStatus } from "./ViewAs";
 import "./style.css";
 const pages = [
   ["Overview", Home],
@@ -403,6 +403,9 @@ function App() {
     <EditorSuspended.Provider value={!!outageScreen}>
     <EditorError.Provider value={error}>
       <WorkspaceShell pages={visiblePages} page={destination?.page ?? page} navigate={navigate} account={<>
+      {preview && <ViewAsAccount acting={data?.meta.delegatedEdits} busy={busy} onExit={() => viewAs(null)}
+              label={previewName || [data?.snapshot?.people.find(p => p.personId === preview.personId)?.firstName,
+                data?.snapshot?.people.find(p => p.personId === preview.personId)?.lastName].filter(Boolean).join(" ") || "selected cadet"} />}
             {sessionInfo?.cadetWorkspace && !preview && <a href="/me">My cadet workspace</a>}
             {!preview && !scoped && data?.meta.viewAsEnabled &&
               <ViewAsSelector people={data.snapshot?.people ?? (["cadets","leadership","cadet-details","semester"].includes(data.browse?.profile) ? data.list.people : null)} onSelect={viewAs} busy={busy} />}
@@ -468,9 +471,7 @@ function App() {
             </footer>
           </Drawer>
         )}>
-            {preview && <ViewAsBanner acting={data?.meta.delegatedEdits} busy={busy} onExit={() => viewAs(null)}
-              label={previewName || [data?.snapshot?.people.find(p => p.personId === preview.personId)?.firstName,
-                data?.snapshot?.people.find(p => p.personId === preview.personId)?.lastName].filter(Boolean).join(" ") || "selected cadet"} />}
+
             {sync && (
               <small className="sync-status" role="status">
                 {sync}

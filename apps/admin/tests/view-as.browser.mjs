@@ -41,7 +41,8 @@ try {
  await page.getByLabel('Find a cadet',{exact:true}).fill(person.lastName);
  assert((await page.locator('tbody tr').count())>0);
  await page.getByRole('navigation').getByRole('link',{name:'Attendance',exact:true}).click();
- assert.equal(await page.locator('.mark-cell button:enabled').count(),0);
+ await page.locator('.mark-cell button').first().click();
+ assert.equal(await page.getByRole('button',{name:'Correct attendance',exact:true}).count(),0);
  await page.getByRole('navigation').getByRole('link',{name:'Excusals',exact:true}).click();
  for(const button of await page.getByRole('button',{name:'Review',exact:true}).all())assert(await button.isDisabled());
  await page.reload();await page.getByRole('button',{name:'Exit view',exact:true}).waitFor();

@@ -5,7 +5,7 @@ import Excusals from "./Excusals";
 import {pageFromUrl, writePageUrl} from "./page-url";
 import { directoryPhotoSource } from "./DirectoryPhoto";
 import WorkspaceShell from "./WorkspaceShell";
-import { ViewAsBanner } from "./ViewAs";
+import { ViewAsAccount } from "./ViewAs";
 import { ClipboardList, FileCheck2, Users, UserRound } from "lucide-react";
 import { AttendanceKey, AttendanceMatrix } from "./AttendanceMatrix";
 import { calculateAttendanceCredit } from "../../../packages/domain/src/frontend-reporting";
@@ -278,7 +278,7 @@ function PersonalAttendance({state, flags, save, disabled}) {
   const cells=(state.attendance || []).map(e=>({...e,effectiveCode:e.code,eligible:true}));
   const row={...state.profile,cells,overall:calculateAttendanceCredit(cells),llab:calculateAttendanceCredit(cells.filter(e=>e.eventType==="llab"))};
   return <section><p>Select an event to request a correction from your Squadron Commander.</p><AttendanceKey/>
-    {cells.length ? <AttendanceMatrix rows={[row]} events={state.attendance} canCorrect={()=>true} onEdit={(_,e)=>setSelected(e.eventId)}/> : <Empty>No attendance events for this semester.</Empty>}
+    {cells.length ? <AttendanceMatrix actionLabel="Review selected cell" rows={[row]} events={state.attendance} canCorrect={()=>true} onEdit={(_,e)=>setSelected(e.eventId)}/> : <Empty>No attendance events for this semester.</Empty>}
     {cell && <form key={selected} className="cadet-form" onSubmit={e=>{
       e.preventDefault();const fields=new FormData(e.currentTarget);
       save("flag",{eventId:selected,eventVersion:cell.version,baseVersion:cell.baseVersion,code:fields.get("code"),detail:fields.get("reason")},()=>setSelected(null));
@@ -565,19 +565,20 @@ export default function CadetWorkspace({ session }) {
   };
   return (
     <WorkspaceShell workspace="cadet" pages={pages} page={page} navigate={navigate} account={<>
-      {!preview && !session.schoolLogin && <a className="workspace-switch" href="/events">Leadership workspace</a>}
-      <p>
-        {name && <strong className="account-name">{name}</strong>}
-        {role}
-        {!preview && <button className="sign-out" onClick={() => logout().catch((e) => setError(e.message))}>Sign out</button>}
-      </p>
-    </>}>
-      {preview && <ViewAsBanner acting={state?.readOnly === false} label={name || "selected cadet"} busy={busy} onExit={async () => {
+      {preview && <ViewAsAccount acting={state?.readOnly === false} label={name || "selected cadet"} busy={busy} onExit={async () => {
         try {
           await api("/view-as", { personId: null });
           location.assign("/");
         } catch (e) { setError(e.message); }
       }} />}
+      {!preview && !session.schoolLogin && <a className="workspace-switch" href="/events">Leadership workspace</a>}
+      <p>
+        {name && !preview && <strong className="account-name">{name}</strong>}
+        {role}
+        {!preview && <button className="sign-out" onClick={() => logout().catch((e) => setError(e.message))}>Sign out</button>}
+      </p>
+    </>}>
+
       {page !== "Excusals" && <Heading title={state?.registration ? "Create profile" : page || "My workspace"} />}
       {error && (
         <p className="error" role="alert">

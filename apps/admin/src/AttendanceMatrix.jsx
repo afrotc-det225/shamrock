@@ -1,4 +1,4 @@
-import React, { useRef } from "react";
+import React, { useRef, useState } from "react";
 import { List } from "lucide-react";
 import { ToolbarPopover } from "./ToolbarPopover";
 import { rateStyle } from "./roster-colors";
@@ -58,7 +58,7 @@ function eventHeading(event) {
   return [words.slice(0, cut).join(" "), words.slice(cut).join(" ")];
 }
 
-function moveFocus(e) {
+function moveFocus(e, select) {
   const direction = {
     ArrowRight: [0, 1],
     ArrowLeft: [0, -1],
@@ -80,22 +80,80 @@ function moveFocus(e) {
     const next = rows[r].cells[c].querySelector("button");
     if (next) {
       next.focus();
+      if (e.shiftKey) select(next,e,cell);
       return;
     }
   }
 }
-export function AttendanceMatrix({
-  rows,
-  events,
-  canCorrect,
-  onEdit,
-  readOnly,
-}) {
-  const focused = useRef(null);
-  let first = true;
-  return (
-    <MatrixTable events={events} label="Attendance" onKeyDown={moveFocus}>
-      {rows.map((row) => {
+export function AttendanceMatrix(props) {
+  // A different visible roster or event order starts a fresh selection.
+  const key=JSON.stringify([props.rows.map(r=>r.personId),props.events.map(e=>e.eventId)]);
+  return <SelectableMatrix key={key} {...props}/>;
+}
+
+function SelectableMatrix({rows, events, canCorrect, onEdit, readOnly, actionLabel="Correct attendance"}) {
+  const focused = useRef(null), anchor=useRef(null), activeAxis=useRef(null);
+  const [selection,setSelection]=useState(()=>new Set());
+  const cols=events.length;
+  const only=selection.size===1 ? [...selection][0] : -1;
+  const currentRow=only<0 ? null : rows[Math.floor(only/cols)];
+  const currentEvent=only<0 ? null : events[only%cols];
+  const currentCell=currentRow?.cells.find(c=>c.eventId===currentEvent.eventId);
+  const editable=currentCell?.eligible===true && !readOnly && canCorrect(currentRow);
+  function select(button,event,origin) {
+    const td=button.closest("td"), row=td.parentElement.sectionRowIndex, col=td.cellIndex-3;
+    const toggle=event.ctrlKey || event.metaKey, pos=row*cols+col;
+    if(event.shiftKey && anchor.current===null && origin)
+      anchor.current=origin.parentElement.sectionRowIndex*cols+origin.cellIndex-3;
+    if(event.shiftKey && anchor.current!==null) {
+      const start=anchor.current, r=Math.floor(start/cols), c=start%cols;
+      setSelection(previous=>{
+        const next=toggle?new Set(previous):new Set();
+        for(let y=Math.min(row,r);y<=Math.max(row,r);y++)
+          for(let x=Math.min(col,c);x<=Math.max(col,c);x++) next.add(y*cols+x);
+        return next;
+      });
+    } else {
+      anchor.current=pos;
+      setSelection(previous=>{
+        if(!toggle)return new Set([pos]);
+        const next=new Set(previous);
+        if(next.has(pos))next.delete(pos);else next.add(pos);
+        return next;
+      });
+    }
+  }
+  // Pointer movement touches only the old and new axes, without rerendering the matrix.
+  function highlight(cell) {
+    if(activeAxis.current===cell)return;
+    const previous=activeAxis.current;
+    if(previous?.parentElement !== cell?.parentElement){
+      previous?.parentElement.classList.remove("matrix-active-row");
+      cell?.parentElement.classList.add("matrix-active-row");
+    }
+    if(previous?.cellIndex !== cell?.cellIndex){
+      const table=(cell || previous)?.closest("table");
+      for(const row of table?.rows || []){
+        if(previous)row.cells[previous.cellIndex]?.classList.remove("matrix-active-column");
+        if(cell)row.cells[cell.cellIndex]?.classList.add("matrix-active-column");
+      }
+    }
+    activeAxis.current=cell;
+  }
+  function clear(){anchor.current=null;setSelection(new Set());}
+  return <div onPointerOver={e=>highlight(e.target.closest("td.mark-cell"))}
+    onPointerLeave={()=>highlight(null)} onFocus={e=>highlight(e.target.closest("td.mark-cell"))}
+    onBlur={e=>{if(!e.currentTarget.contains(e.relatedTarget))highlight(null);}}>
+    <div className="matrix-selection">
+      <span aria-live="polite">{selection.size ? selection.size+" "+(selection.size===1?"cell":"cells")+" selected" : "Shift-click a range. Ctrl or ⌘-click to toggle cells."}</span>
+      {selection.size>0 && <button onClick={clear}>Clear selection</button>}
+      {editable && <button onClick={()=>onEdit(currentRow,currentEvent,currentCell.effectiveCode || "")}>{actionLabel}</button>}
+    </div>
+    <MatrixTable events={events} label="Attendance" onKeyDown={e=>{
+      if(e.key==="Escape"){clear();return;}
+      moveFocus(e,select);
+    }}>
+      {rows.map((row,rowIndex) => {
         const byEvent = new Map(row.cells.map((c) => [c.eventId, c]));
         return (
           <tr key={row.personId}>
@@ -110,7 +168,7 @@ export function AttendanceMatrix({
                 </td>
               );
             })}
-            {events.map((e) => {
+            {events.map((e,colIndex) => {
               const c = byEvent.get(e.eventId),
                 editable =
                   !readOnly && c?.eligible === true && canCorrect(row);
@@ -131,23 +189,23 @@ export function AttendanceMatrix({
                 .filter(Boolean)
                 .join(", ");
               const content = code || (c?.eligible === true ? "·" : "—");
-              const tabStop = first && editable;
-              if (editable) first = false;
+              const selected=selection.has(rowIndex*cols+colIndex);
               return (
                 <td
                   key={e.eventId}
                   className="mark-cell"
+                  data-selected={selected || undefined}
                   data-mark={
                     code || (c?.eligible === true ? "blank" : "excluded")
                   }
                   data-review={c?.needsReview ? "true" : undefined}
                   title={description}
                 >
-                  {editable ? (
-                    <button
+                  <button
                       type="button"
                       data-event={e.eventId}
-                      tabIndex={tabStop ? 0 : -1}
+                      tabIndex={focused.current ? (focused.current.dataset.person===row.personId && focused.current.dataset.event===e.eventId?0:-1) : (rowIndex===0 && colIndex===0?0:-1)}
+                      data-person={row.personId} aria-pressed={selected}
                       aria-label={description}
                       onFocus={(ev) => {
                         if (focused.current?.isConnected)
@@ -155,21 +213,23 @@ export function AttendanceMatrix({
                         ev.currentTarget.tabIndex = 0;
                         focused.current = ev.currentTarget;
                       }}
-                      onClick={() => onEdit(row, e, code)}
+                      onClick={ev=>select(ev.currentTarget,ev)}
+                      onContextMenu={ev=>{
+                        // macOS delivers Control-click as a contextual click.
+                        if(ev.ctrlKey && ev.button===0){ev.preventDefault();select(ev.currentTarget,ev);}
+                      }}
+                      onDoubleClick={ev=>{if(editable && !(ev.shiftKey || ev.metaKey || ev.ctrlKey))onEdit(row,e,code);}}
+                      onKeyDown={ev=>{if(ev.key==="Enter" && editable && !ev.shiftKey && !ev.ctrlKey && !ev.metaKey){ev.preventDefault();onEdit(row,e,code);}}}
                     >
                       {content}
                     </button>
-                  ) : (
-                    <span aria-label={description}>{content}</span>
-                  )}
                 </td>
               );
             })}
           </tr>
         );
       })}
-    </MatrixTable>
-  );
+    </MatrixTable></div>;
 }
 
 export function MatrixTable({events, label, onKeyDown, children}) {

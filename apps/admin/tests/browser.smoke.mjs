@@ -267,7 +267,21 @@ try {
     [...new Set(headers.map(h=>h.getBoundingClientRect().width))]),[68]);
   const layout = () => page.locator("main").evaluate(el=>[el.offsetLeft,el.offsetWidth]);
   const beforeDrawer = await layout();
+  const marks=matrix.locator("tbody tr");
+  const matrixCell=(y,x)=>marks.nth(y).locator("button[data-event]").nth(x);
+  await matrixCell(0,0).hover();
+  assert.equal(await marks.nth(0).getAttribute("class"),"matrix-active-row");
+  assert.equal(await matrix.locator("thead .matrix-active-column").count(),1);
+  await matrixCell(0,0).click();
+  await matrixCell(1,1).click({modifiers:["Shift"]});
+  assert.equal(await matrix.locator('[aria-pressed="true"]').count(),4);
+  await matrixCell(0,0).click({modifiers:["Meta"]});
+  assert.equal(await matrix.locator('[aria-pressed="true"]').count(),3);
+  await matrixCell(0,0).click({modifiers:["Control"]});
+  assert.equal(await matrix.locator('[aria-pressed="true"]').count(),4);
+  await page.getByRole("button",{name:"Clear selection",exact:true}).click();
   await page.locator('button[data-event="veterans"]').and(page.getByRole("button",{name:/Alexis Morgan/})).click();
+  await page.getByRole("button",{name:"Correct attendance",exact:true}).click();
   await page.getByRole("dialog",{name:"Correct attendance"}).waitFor();
   assert.equal(await page.locator("dialog:modal").count(),0);
   assert.deepEqual(await layout(),beforeDrawer);
@@ -397,7 +411,7 @@ try {
     2,
   );
   assert.equal(
-    await page.locator(".mark-cell button").count(),
+    await page.getByRole("button",{name:"Correct attendance",exact:true}).count(),
     0,
   );
   await navigate("Excusals");

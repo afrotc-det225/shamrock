@@ -60,7 +60,7 @@ try {
         await nav.getByRole("link", {name:"My profile"}).click();
         assert.equal(await nav.locator('[aria-current="page"]').innerText(), "My profile");
         await page.getByLabel("First name", {exact:true}).waitFor();
-        if (preview) await page.getByText("Acting as Sample Cadet").waitFor();
+        if (preview) await page.locator(".sidebar-bottom").getByText("Acting as Sample Cadet").waitFor();
         const afsc = page.getByLabel("Air Force Specialty Code (AFSC)");
         assert.equal(await afsc.inputValue(),"13N – Nuclear and Missile Operations ".repeat(6).trim());
         assert(await afsc.evaluate(el => el.scrollWidth <= el.clientWidth && el.scrollHeight <= el.clientHeight + 1));
@@ -75,6 +75,7 @@ try {
         await heading("My profile").waitFor();
         await nav.getByRole("link",{name:"My attendance",exact:true}).click();
         await page.getByRole("button",{name:/TW-1 LLAB.*A · Absent/}).click();
+        await page.getByRole("button",{name:"Review selected cell"}).click();
         await page.getByLabel("Requested code").selectOption("P");
         assert(await page.getByRole("button",{name:"Request correction"}).isEnabled());
         await nav.getByRole("link",{name:"Submit attendance",exact:true}).click();
