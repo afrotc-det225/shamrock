@@ -66,3 +66,9 @@ test("a tested website update can only go live from its own release and runner",
   assert.deepEqual(await send("finish",{run:"website",passed:true}),{state:"live"});
   assert.deepEqual(await send("release",{currentCommit:"base"}),{state:"live"});
 });
+
+test("a maintainer can identify a change by the chart title visible on screen",async()=>{
+  const {patchSourceArea}=await import("../hosted/maintenance.mjs");
+  const files={"Wing overview":"<WingCharts />","Wing charts":'title="Attendance by semester"'};
+  assert.equal(patchSourceArea("Rename the Overview chart from ‘Attendance by semester’ to ‘Wing attendance by semester’","Wing overview",files),"Wing charts");
+});
