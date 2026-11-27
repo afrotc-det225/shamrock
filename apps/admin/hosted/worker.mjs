@@ -30,7 +30,11 @@ export default {
       return result;
     }};
     const response=await handler.fetch(request,{...env,operatorGuide,maintenanceSource:typeof __MAINTENANCE_SOURCE__ === "undefined" ? null : __MAINTENANCE_SOURCE__,BACKEND:backend},panelControlStore);
-    if(response.ok) response.headers.set("X-Shamrock-D1-Rows-Read",measured?String(rows):"unknown");
+    if(response.ok) {
+      const direct = response.headers.get("X-Shamrock-D1-Rows-Read");
+      if (direct !== null && !/^\d+$/.test(direct)) measured=false;
+      response.headers.set("X-Shamrock-D1-Rows-Read",measured ? String(rows+Number(direct)) : "unknown");
+    }
     return response;
   },
   scheduled: (event, env) => handler.scheduled(event, env, panelControlStore),

@@ -3,7 +3,7 @@ import { api, logout } from "./api";
 import { Empty, Field, Heading, Select, Status, Table } from "./components";
 import Excusals from "./Excusals";
 import {pageFromUrl, writePageUrl} from "./page-url";
-import { directoryPhotoSource } from "./DirectoryPhoto";
+import { useDirectoryPhoto } from "./DirectoryPhoto";
 import WorkspaceShell from "./WorkspaceShell";
 import { ViewAsAccount } from "./ViewAs";
 import { ClipboardList, FileCheck2, Users, UserRound } from "lucide-react";
@@ -36,17 +36,16 @@ const required = new Set([
   "homeState",
 ]);
 function ProfilePhoto({profile}) {
-  const {href, src:thumbnail} = directoryPhotoSource(profile.photoLink, 256) || {};
-  const [failed, setFailed] = useState("");
+  const {source, src:thumbnail, onError} = useDirectoryPhoto(profile.photoLink, 256, null);
   const initials = [profile.firstName, profile.lastName].map(name => name?.trim()[0]).join("");
   return <div className="profile-identity">
-    <div className="profile-portrait">{thumbnail && failed !== thumbnail
-      ? <img src={thumbnail} alt="Directory portrait" referrerPolicy="no-referrer" onError={() => setFailed(thumbnail)} />
+    <div className="profile-portrait">{thumbnail
+      ? <img src={thumbnail} alt="Directory portrait" referrerPolicy="no-referrer" onError={onError} />
       : <span aria-label="Profile initials">{initials || "–"}</span>}</div>
     <div><h2>{[profile.firstName,profile.lastName].filter(Boolean).join(" ")}</h2>
       <p>{[profile.rank,profile.asYear,profile.university].filter(Boolean).join(" · ")}</p>
       {profile.email && <p>{profile.email}</p>}
-      {href && <a href={href} target="_blank" rel="noreferrer">Open original photo</a>}
+      {source?.href && <a href={source.href} target="_blank" rel="noreferrer">Open original photo</a>}
     </div>
   </div>;
 }

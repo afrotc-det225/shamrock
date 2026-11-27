@@ -299,7 +299,7 @@ export default function People({
                   })),
                 ]}
               />
-              <DirectoryPhoto value={edit.profile.photoLink} person={edit.profile} />
+              <DirectoryPhoto value={edit.profile.photoLink} person={edit.profile} personId={edit.personId} />
               <details>
                 <summary>Academic, personal & photo details</summary>
                 {profileFields.filter((k) => !basic.includes(k)).map(input)}
