@@ -1,11 +1,6 @@
-# SHAMROCK administrator panel
+# SHAMROCK web panel
 
-Hosted staging is deployed at [SHAMROCK staging](https://shamrock-admin-staging.det225.workers.dev),
-with Google sign-in and D1 session/proposal storage. A separate loopback fixture
-supports local development with fictional cadets and events. Neither surface
-changes production. The intended production address, `shamrock.det225.workers.dev`,
-has not been switched over. Provider setup and live verification follow the
-[hosted staging runbook](hosted/README.md), coordinated with the main D1 migration.
+Cadets and staff use Google sign-in at [SHAMROCK](https://shamrock.det225.workers.dev/). One Worker serves the web panel and the signed records API. D1 holds cadet records, and the existing SQLite Durable Object holds sessions and proposals. The local development fixture uses fictional cadets and events. See the [site release guide](hosted/README.md) for configuration and verification.
 
 ## Try the panel
 
