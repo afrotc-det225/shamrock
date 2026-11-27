@@ -21,7 +21,7 @@ function AttendanceRate({label, value, history, metric}) {
   </div>;
 }
 
-function AttendanceSummary({dashboard, history, pending, navigate, error, retry}) {
+function AttendanceSummary({dashboard, history, error, retry}) {
   return <section className="insight attendance-summary" aria-labelledby="wing-attendance">
     <h3 id="wing-attendance">Wing attendance</h3>
     {dashboard ? <dl className="attendance-rates">
@@ -29,19 +29,11 @@ function AttendanceSummary({dashboard, history, pending, navigate, error, retry}
       <AttendanceRate label="LLAB" value={dashboard.averageLlab} history={history} metric="llab"/>
     </dl> : error ? <p role="alert">{error} <button onClick={retry}>Retry</button></p>
       : <LoadingRows label="Loading Wing attendance" rows={2}/>}
-    <div className="wing-roster-context">
-      {dashboard && <div><strong>{dashboard.belowEighty}</strong> below 80% overall
-        {dashboard.noCountedAttendanceCadets > 0 && <small>{dashboard.noCountedAttendanceCadets} with no counted attendance</small>}</div>}
-    <a className="overview-queue" href="/excusals" onClick={e => {
-      if (!e.metaKey && !e.ctrlKey && !e.shiftKey && !e.altKey) { e.preventDefault(); navigate("Excusals"); }
-    }}>{pending} pending {pending === 1 ? "excusal" : "excusals"} <span aria-hidden="true">→</span></a>
-    </div>
   </section>;
 }
 
 export default function OverviewInsights({
   overview,
-  pending, navigate,
   snapshot,
   reporting,
   birthdayCalendar,
@@ -112,7 +104,7 @@ export default function OverviewInsights({
   return (
     <div className="insights-grid">
       <AttendanceSummary dashboard={d} history={archivedComparisons(compiled?.history ?? [], term)}
-        pending={pending} navigate={navigate} error={error} retry={() => setRetry(retry + 1)}/>
+        error={error} retry={() => setRetry(retry + 1)}/>
       <BirthdayAgenda
         squadrons={squadrons}
         flights={flights}

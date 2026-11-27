@@ -110,10 +110,14 @@ try {
         if (preview) await page.locator(width === 390 ? ".mobile-bar" : ".sidebar-bottom").getByText("Acting as Sample Cadet").waitFor();
         const afsc = page.getByLabel("Air Force Specialty Code (AFSC)");
         assert.equal(await afsc.inputValue(),"13N – Nuclear and Missile Operations ".repeat(6).trim());
-        assert(await afsc.evaluate(el => el.scrollWidth <= el.clientWidth && el.scrollHeight <= el.clientHeight + 1));
+        assert(await afsc.evaluate(el => el.validity.valid && el.list.options.length > 10));
+        await afsc.fill("Typo");
+        assert.equal(await afsc.evaluate(el=>el.checkValidity()),false);
+        await afsc.fill("Undecided");
+        assert(await afsc.evaluate(el=>el.checkValidity()));
         if (width === 390) await page.getByLabel("Profile initials").waitFor();
         else await page.waitForFunction(() => document.querySelector(".profile-portrait img")?.naturalWidth > 0);
-        assert.equal(await afsc.evaluate(el => el.tagName), "TEXTAREA");
+        assert.equal(await afsc.evaluate(el => el.tagName), "INPUT");
         assert.equal(await page.getByRole("link",{name:"Open original photo"}).count(),0);
         await page.getByRole("button",{name:"Preview photo of Sample Cadet"}).click();
         assert.equal(await page.getByRole("link",{name:"Open original photo"}).getAttribute("href"), "https://drive.google.com/file/d/fictional-photo/view");

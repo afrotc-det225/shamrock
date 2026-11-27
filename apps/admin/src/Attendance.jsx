@@ -1,7 +1,7 @@
 import { ToolbarFilters } from "./ToolbarFilters";
 import React, { useState } from "react";
 import { Heading, Select, Field, Editor, Empty, SearchBox } from "./components";
-import { AttendanceMatrix, AttendanceKey } from "./AttendanceMatrix";
+import { AttendanceMatrix } from "./AttendanceMatrix";
 import { defaultRosterFilters, MatrixRosterFilters, selectRosterRows } from "./MatrixRosterFilters";
 import { api, name, eventTypes } from "./api";
 export default function Attendance({
@@ -116,9 +116,6 @@ export default function Attendance({
             />
             <MatrixRosterFilters rows={roster} value={filters} onChange={value=>{setFilters(value);if(edit)dismiss();}} />
           </ToolbarFilters>
-          <div className="toolbar-actions">
-            <AttendanceKey />
-          </div>
         </div>
       </section>
       <AttendanceMatrix

@@ -1,7 +1,7 @@
 import {ToolbarFilters} from "./ToolbarFilters";
 import React, { useEffect, useState } from "react";
 import { rateStyle } from "./roster-colors";
-import { AttendanceKey, MatrixTable } from "./AttendanceMatrix";
+import { MatrixTable } from "./AttendanceMatrix";
 import { Heading, SearchBox, Empty, LoadingRows } from "./components";
 import { api } from "./api";
 import { loadHistory } from "../history-client";
@@ -40,7 +40,6 @@ export default function HistoricalAttendance({item, initialReport, semesterPicke
         <ToolbarFilters active={Boolean(filters.year || filters.flight || filters.sort !== "seniority")}>
           <MatrixRosterFilters rows={roster} value={filters} onChange={setFilters} />
         </ToolbarFilters>
-        <div className="toolbar-actions"><AttendanceKey /></div>
       </div>
     </section>
     {error && <div className="error" role="alert">{error} <button onClick={() => setAttempt(value=>value+1)}>Retry</button></div>}

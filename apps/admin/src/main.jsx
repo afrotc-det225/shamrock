@@ -14,7 +14,7 @@ import {
 import { api, startSession, label, logout } from "./api";
 import { Drawer, EditorError, EditorSuspended } from "./components";
 import Events from "./Events";
-import People from "./People";
+import People, {cadetBrowseProfile} from "./People";
 import CadetWorkspace from "./CadetWorkspace";
 import Excusals from "./Excusals";
 import AttendancePage from "./AttendancePage";
@@ -40,8 +40,8 @@ const pages = [
   ["Semester planning", Layers],
   ["System", Settings],
 ];
-const profileFor = page => ({
-  Cadets:"cadets", Leadership:"leadership", Attendance:"attendance", Excusals:"excusals",
+const profileFor = page => page === "Cadets" ? cadetBrowseProfile() : ({
+  Leadership:"leadership", Attendance:"attendance", Excusals:"excusals",
   "Semester planning":"semester", Overview:"overview", Events:"events",
   History:"access", Assistant:"access", System:"access",
 }[page] || "full");
@@ -325,7 +325,7 @@ function App() {
   const blockedPreview = preview && preview.status !== "ready";
   const access = data?.snapshot?.access || data?.manifest?.access;
   const scoped = access && !access.capabilities.fullSnapshot;
-  const browseReady = data?.browse?.profile === profileFor(page);
+  const browseReady = page === "Cadets" ? ["cadets","cadet-details"].includes(data?.browse?.profile) : data?.browse?.profile === profileFor(page);
   const visiblePages = blockedPreview ? [] : scoped
     ? pages.filter(([title]) => ["Attendance", "Excusals"].includes(title))
     : pages;
@@ -529,7 +529,7 @@ function App() {
                 {page === "Excusals" && <Excusals {...common} />}{" "}
                 {!preview && !scoped && page === "Semester planning" && <Semester {...common} snapshot={data.snapshot || data.list} />}{" "}
                 {!scoped && page === "Overview" && (
-                  <Overview key={JSON.stringify([data.captureKey,data.viewAsRevision])} {...common} navigate={navigate} />
+                  <Overview key={JSON.stringify([data.captureKey,data.viewAsRevision])} {...common} />
                 )}{" "}
                 {!preview && !scoped && page === "System" && (
                   <System {...common} retry={apply} />

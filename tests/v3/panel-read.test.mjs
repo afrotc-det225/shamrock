@@ -505,8 +505,12 @@ test('campus enrollment, personal excusal, Flight review and duties use the veri
     const action=(kind,fields)=>({kind,fields,id:crypto.randomUUID()});
     assert((await route()).body.registration);
     const register=action('register',{firstName:'Fictional',lastName:'Applicant',asYear:'AS100',flightId:'alpha',university:'Notre Dame',
-      classYear:'2030',phone:'555-0100',dateOfBirth:'2006-01-01',homeTown:'Fictional',homeState:'IN',cipCode:'11.0101',afsc:'Undecided'});
+      classYear:'2030',phone:'2025550100',dateOfBirth:'2006-01-01',homeTown:'Fictional',homeState:'Indiana',cipCode:'11.0101',afsc:'Undecided'});
     assert.equal((await route({...register,fields:{...register.fields,role:'Blue Squadron Commander'}})).status,400);
+    for (const fields of [{phone:"555-0100"},{homeState:"Indinaa"},{dorm:"Imaginary Hall"}]) {
+      const rejected=await route({...register,fields:{...register.fields,...fields}});
+      assert.equal(rejected.body.error.code,"INVALID_PROFILE_FIELD");
+    }
     const saved=await route(register);assert.equal(saved.status,200,JSON.stringify(saved));
     assert.equal((await route(register)).body.commandId,saved.body.commandId);
     const self=(await route()).body;assert(self.linked);assert.equal(self.squadron,null);assert.equal(self.queue.length,0);
@@ -546,9 +550,10 @@ test('campus enrollment, personal excusal, Flight review and duties use the veri
     assert.equal((await route({...report,id:crypto.randomUUID(),fields:{...report.fields,present:["other"]}})).status,400);
     const memberReport=await route(report);assert.equal(memberReport.status,200,JSON.stringify(memberReport));
     assert.equal((await route({...report,id:crypto.randomUUID()},captain)).status,200);
-    const edit=action('profile',{version:self.profile.version,changes:{afsc:'Undecided after review'}});
+    assert.equal((await route(action('profile',{version:self.profile.version,changes:{afsc:'Undecided after review'}}))).status,400);
+    const edit=action('profile',{version:self.profile.version,changes:{afsc:'Space Force'}});
     assert.equal((await route(edit)).status,200);
-    assert.equal((await route()).body.profile.afsc,'Undecided after review');
+    assert.equal((await route()).body.profile.afsc,'Space Force');
     await f.db.prepare('UPDATE principals SET active=0 WHERE principal_id=?').bind(principalId).run();
     assert.equal((await route()).status,403);
 });

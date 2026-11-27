@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 
 import { createPortal } from "react-dom";
-import { X } from "lucide-react";
+import { ExternalLink, Image as PhotoIcon, X } from "lucide-react";
 import { drivePhoto } from "../drive-photo.mjs";
 
 function directoryPhotoSource(value, size, personId, portrait) {
@@ -39,6 +39,8 @@ export function useDirectoryPhoto(value, size, personId, portrait) {
 
 function PhotoPreview({source, src, onError, name, onClose}) {
   const ref=useRef(null);
+  const previewSrc = src && src === source.direct ? new URL(src) : null;
+  previewSrc?.searchParams.set("sz","w960");
   useEffect(()=>{
     const dialog=ref.current;
     dialog.showModal();
@@ -46,11 +48,10 @@ function PhotoPreview({source, src, onError, name, onClose}) {
   },[]);
   return createPortal(<dialog ref={ref} className="portrait-preview" aria-label={"Photo of "+name}
     onCancel={e=>{e.preventDefault();onClose();}}>
-    <header><strong>{name}</strong><button type="button" aria-label="Close preview" onClick={onClose}><X size={18}/></button></header>
-    {src ? <img src={src} alt={name} referrerPolicy="no-referrer" onError={onError}/> :
+    <header><strong>{name}</strong><a className="photo-original" href={source.href} target="_blank" rel="noreferrer" aria-label="Open original photo" title="Open original photo"><ExternalLink size={16}/></a><button type="button" aria-label="Close preview" onClick={onClose}><X size={18}/></button></header>
+    {src ? <img src={previewSrc?.href || src} alt={name} referrerPolicy="no-referrer" onError={onError}/> :
       source.preview ? <iframe title="Directory photo preview" src={source.preview} referrerPolicy="no-referrer"/> :
       <p>Preview unavailable.</p>}
-    <footer><a href={source.href} target="_blank" rel="noreferrer">Open original photo</a></footer>
   </dialog>,document.body);
 }
 
@@ -63,7 +64,7 @@ export function DirectoryPhoto({ value, person, avatar = false, portrait = false
   const appearance=portrait ? "profile-portrait" : avatar ? "initials directory-avatar" : "directory-photo";
   if(!source)return avatar || portrait ? <span className={appearance}>{content}</span> : null;
   return <>
-    <button type="button" className={appearance+" photo-trigger"} aria-label={"Preview photo of "+name} aria-haspopup="dialog" onClick={()=>setOpened(source.href)}>{content}</button>
+    <button type="button" className={appearance+" photo-trigger"} aria-label={"Preview photo of "+name} aria-haspopup="dialog" onClick={()=>setOpened(source.href)}>{avatar || portrait ? content : <><PhotoIcon size={16}/>View photo</>}</button>
     {opened===source.href && <PhotoPreview source={source} src={src} name={name} onError={onError} onClose={()=>setOpened(null)}/>}
   </>;
 }

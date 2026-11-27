@@ -12,6 +12,7 @@ import {
 
 } from "./components";
 import { rosterText } from "./roster-export.mjs";
+import { ProfileField } from "./ProfileField";
 import { DirectoryPhoto } from "./DirectoryPhoto";
 import { ToolbarPopover } from "./ToolbarPopover";
 import { cellStyle, flightColors, flightPathColors, profileColorStyle, residenceCategory, yearColors } from "./roster-colors";
@@ -20,9 +21,10 @@ import { api,name, label, years, statuses, profileFields } from "./api";
 import { DIRECTORY_FIELDS } from "../../../packages/domain/src/admin";
 import { compareAsYearsForDisplay, compareCadetsForDisplay, compareLeadershipForDisplay } from "../../../packages/domain/src/cadet-display-order";
 
-const defaultColumns = ["cadet","asYear","flight","squadron","flightPathStatus"];
+const coreColumns = ["cadet","asYear","flight","squadron","flightPathStatus"];
 const columnKeys = ["cadet","lastName","firstName","rank","asYear","flight","squadron","flightPathStatus",
-  ...profileFields.filter(k => !["lastName","firstName","rank",...defaultColumns].includes(k))];
+  ...profileFields.filter(k => !["lastName","firstName","rank",...coreColumns].includes(k))];
+const defaultColumns = columnKeys.filter(key => !["lastName","firstName","rank"].includes(key));
 const columnLabel = k=>({cadet:"Cadet",lastName:"Last name",firstName:"First name",flight:"Flight",squadron:"Squadron",flightPathStatus:"Status",classYear:"Graduation year"}[k] || label(k));
 const detailFields = new Set(["phone","dorm","homeTown","homeState","dateOfBirth"]);
 const preferenceKey = "shamrock.cadets.columns.v2";
@@ -38,6 +40,10 @@ function initialColumns(){
   return defaultColumns;
 }
 
+export function cadetBrowseProfile() {
+  return initialColumns().some(key => detailFields.has(key)) ? "cadet-details" : "cadets";
+}
+
 function DirectoryValue({ field, value, person }) {
   if (field === "photoLink") return value ? <DirectoryPhoto value={value} person={person} /> : "—";
   const style = profileColorStyle(field, value);
@@ -46,7 +52,7 @@ function DirectoryValue({ field, value, person }) {
 }
 
 export default function People({
-  snapshot, list, run, captureKey, manifest, viewAsRevision,
+  snapshot, list, browse, run, captureKey, manifest, viewAsRevision,
   propose,
   busy,
   leadership = false,
@@ -55,12 +61,15 @@ export default function People({
   const s = snapshot || list;
   const [query, setQuery] = useState(""),
     [flight, setFlight] = useState(""),
+    [squadron, setSquadron] = useState(""),
     [edit, setEdit] = useState(null);
   const set = (k, v) => setEdit({ ...edit, [k]: v }),
     profile = (k, v) =>
       setEdit({ ...edit, profile: { ...edit.profile, [k]: v } });
+  const [original,setOriginal] = useState(null);
+  const complete = snapshot || browse?.profile === "cadet-details";
   const open = (row) => {
-    if (!row || snapshot || leadership) return openRecord(row);
+    if (!row || complete || leadership) return openRecord(row);
     const detailed = extended?.binding===binding && extended.people.find(p=>p.personId===row.personId);
     if (detailed) return openRecord(detailed);
     return run(async () => {
@@ -72,6 +81,7 @@ export default function People({
     });
   };
   const openRecord = (p) => {
+    setOriginal(p);
     if (leadership)
       setEdit({
         contactId: p?.contactId || crypto.randomUUID(),
@@ -118,6 +128,11 @@ export default function People({
     [field,setField]=useState(""), [match,setMatch]=useState(""), [view,setView]=useState("List");
   const flightOf = p => s.flights.find(f=>f.flightId===p.flightId);
   const squadronOf = f => s.squadrons?.find(q=>q.squadronId===f?.squadronId)?.label;
+  const rosterFlights = s.flights.filter(f => !squadron || f.squadronId === squadron);
+  function changeSquadron(id) {
+    setSquadron(id);
+    if (id && !s.flights.some(f => f.flightId === flight && f.squadronId === id)) setFlight("");
+  }
   const [columns,setColumns]=useState(initialColumns), [descending,setDescending]=useState(false);
   const [transferMessage,setTransferMessage]=useState("");
   const hasCadet = columns.includes("cadet");
@@ -147,7 +162,7 @@ export default function People({
     </button>;
   }
   const [extended,setExtended]=useState(null),[fieldError,setFieldError]=useState(""),[retry,setRetry]=useState(0);
-  const extra = !leadership && !snapshot && [...columns,sort,field].some(k=>detailFields.has(k));
+  const extra = !leadership && !complete && [...columns,sort,field].some(k=>detailFields.has(k));
   const binding=JSON.stringify([captureKey,manifest?.revision,viewAsRevision]);
   useEffect(()=>{
     if(!extra || extended?.binding===binding)return;
@@ -162,7 +177,7 @@ export default function People({
   const waitingForField = extra && extended?.binding !== binding;
   const directory = extra && !waitingForField ? extended.people : s.people;
   const rows = (leadership ? s.leadership : directory).filter(p=>{
-    if (!leadership && (flight && p.flightId!==flight || year && p.asYear!==year ||
+    if (!leadership && (squadron && flightOf(p)?.squadronId !== squadron || flight && p.flightId!==flight || year && p.asYear!==year ||
       status==="current" && ["Dropped","Commissioned"].includes(p.flightPathStatus) ||
       !["current","all"].includes(status) && p.flightPathStatus!==status ||
       field && match && !waitingForField && !String(valueOf(p,field) ?? "").toLowerCase().includes(match.toLowerCase()))) return false;
@@ -216,19 +231,10 @@ export default function People({
         options={k === "asYear" ? years : statuses}
       />
     ) : (
-      <Field
-        key={k}
-        label={label(k)}
-        required={["firstName", "lastName"].includes(k)}
-        type={k === "email" ? "email" : k === "dateOfBirth" ? "date" : "text"}
-        value={edit.profile[k] ?? ""}
-        onChange={(e) =>
-          profile(
-            k,
-            k === "dateOfBirth" && !e.target.value ? null : e.target.value,
-          )
-        }
-      />
+      <ProfileField key={k} field={k} label={label(k)} original={original?.[k]}
+        broadArea={k === "cipCode" ? edit.profile.cipBroadArea : undefined} originalBroadArea={k === "cipCode" ? original?.cipBroadArea : undefined}
+        required={["firstName","lastName"].includes(k)} value={edit.profile[k] ?? ""}
+        onChange={value => profile(k,k === "dateOfBirth" && !value ? null : value)}/>
     );
   }
   const dataColumns = columns.filter(key => key !== "cadet");
@@ -241,11 +247,14 @@ export default function People({
             placeholder={leadership ? "Find a leader" : "Find a cadet"}
             value={query}
             onChange={setQuery}
-            resultCount={query || flight || year || match || !["current","all"].includes(status) ? rows.length : undefined}
+            resultCount={query || squadron || flight || year || match || !["current","all"].includes(status) ? rows.length : undefined}
           />
-          <ToolbarFilters active={Boolean(flight || year || status !== "current" || sort !== "seniority" || view !== "List")}>
+          <ToolbarFilters active={Boolean(squadron || flight || year || status !== "current" || sort !== "seniority" || view !== "List")}>
             {leadership ? <Select label="View" value={view} onChange={setView} options={["List","Organization"]}/> : <>
-              <Select label="Flight" value={flight} onChange={setFlight} options={[{value:"",label:"All flights"},...s.flights.map(f=>({value:f.flightId,label:f.label})).sort((a,b)=>textOrder(a.label,b.label))]}/>
+              <Select label="Squadron" value={squadron} onChange={changeSquadron} options={[
+                {value:"",label:"Entire wing"},...(s.squadrons || []).map(q=>({value:q.squadronId,label:q.label})).sort((a,b)=>textOrder(a.label,b.label))
+              ]}/>
+              <Select label="Flight" value={flight} onChange={setFlight} options={[{value:"",label:"All flights"},...rosterFlights.map(f=>({value:f.flightId,label:f.label})).sort((a,b)=>textOrder(a.label,b.label))]}/>
               <Select label="AS year" value={year} onChange={setYear} options={[{value:"",label:"All AS years"},...years]}/>
               <Select label="Roster status" value={status} onChange={setStatus} options={[{value:"current",label:"Current roster"},{value:"all",label:"All statuses"},...statuses]}/>
               <Select label="Sort by" value={sort} onChange={key=>{setSort(key);setDescending(false);}} options={[{value:"seniority",label:"Default"},...columnKeys.map(k=>({value:k,label:columnLabel(k)}))]}/>
@@ -379,11 +388,11 @@ export default function People({
           {leadership && (
             <>
               {["reportsTo", "officePhone", "officeLocation"].map((k) => (
-                <Field
+                <ProfileField field={k} original={original?.[k]}
                   key={k}
                   label={label(k)}
                   value={edit[k]}
-                  onChange={(e) => set(k, e.target.value)}
+                  onChange={value => set(k, value)}
                 />
               ))}
               <label className="check">

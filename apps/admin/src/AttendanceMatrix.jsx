@@ -15,11 +15,12 @@ const meanings = {
   MED: "Medical",
   "N/A": "Not applicable",
 };
-export function AttendanceKey() {
+function AttendanceKey() {
   return (
     <ToolbarPopover
       label="Attendance code key"
-      shortLabel="Code key"
+      iconOnly
+      portal
       icon={List}
     >
       <dl className="code-key">
@@ -141,6 +142,7 @@ function SelectableMatrix({rows, events, canCorrect, onSelection, readOnly}) {
     onPointerLeave={()=>highlight(null)} onFocus={e=>highlight(e.target.closest("td.mark-cell"))}
     onBlur={e=>{if(!e.currentTarget.contains(e.relatedTarget))highlight(null);}}>
     <MatrixTable events={events} label="Attendance" onKeyDown={e=>{
+      if (!e.target.closest("button[data-event]")) return;
       if(e.key==="Escape"){clear();return;}
       moveFocus(e,select);
     }}>
@@ -257,7 +259,7 @@ export function MatrixTable({events, label, onKeyDown, children}) {
           <tr>
             {["Cadet", "Overall", "LLAB"].map((h) => (
               <th scope="col" key={h}>
-                {h}
+                {h === "Cadet" ? <div className="matrix-name-heading">{h}<AttendanceKey /></div> : h}
               </th>
             ))}
             {events.map((e) => (
