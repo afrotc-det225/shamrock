@@ -1,3 +1,4 @@
+import {splitMigrationSql} from '../../scripts/lib/v3-migrations.mjs';
 import assert from 'node:assert/strict';
 import { createHash, createHmac } from 'node:crypto';
 import { readFile, readdir } from 'node:fs/promises';
@@ -11,7 +12,7 @@ const secret = 'fictional-test-secret-not-for-deployment-0001';
 const keyId = 'fixture-key';
 const migrationDirectory = new URL('../../database/migrations/', import.meta.url);
 const migration = (await Promise.all((await readdir(migrationDirectory)).filter(name => /^\d{4}_.+\.sql$/.test(name)).sort()
-  .map(name => readFile(new URL(name, migrationDirectory), 'utf8')))).join('\n');
+  .map(name => readFile(new URL(name, migrationDirectory), 'utf8')))).flatMap(splitMigrationSql);
 
 async function fixture(t) {
   const mf = new Miniflare({
@@ -22,7 +23,7 @@ async function fixture(t) {
   });
   t.after(() => mf.dispose());
   const db = await mf.getD1Database('DB');
-  const statements = migration.replace(/^\s*--.*$/gm, '').split(';').map(s => s.trim()).filter(Boolean);
+  const statements = migration;
   await db.batch(statements.map(sql => db.prepare(sql)));
   await db.batch([
     db.prepare("INSERT INTO system_control VALUES(1,'local',1,1)"),

@@ -54,6 +54,7 @@ export function splitMigrationSql(sql) {
     if (ch === '/' && next === '*') { comment = 'block'; i++; continue; }
     if (ch === "'" || ch === '"' || ch === '`') { quote = ch; current += ch; continue; }
     if (ch === '[' || ch === ']') throw new Error('Bracket-quoted identifiers are outside the reviewed migration syntax.');
+    if (ch === ';' && /^\s*CREATE TRIGGER /i.test(current) && !/;\s*END\s*$/i.test(current)) {current += ch;continue;}
     if (ch === ';') { if (current.trim()) statements.push(current.trim()); current = ''; }
     else current += ch;
   }
@@ -82,7 +83,7 @@ function normalizeSql(sql) {
   return result.trim();
 }
 
-function schemaObjects(inventory) {
+export function schemaObjects(inventory) {
   if (!Array.isArray(inventory)) throw new Error('Schema inventory must be an array.');
   return inventory.filter(row => !isEngineObject(String(row.name))).map(row => ({
     type: row.type, name: row.name, sqlSha256: typeof row.sql === 'string' ? sha256(normalizeSql(row.sql)) : null,
@@ -97,6 +98,11 @@ function reviewedStatements(sql, version) {
     const create = statement.match(/^CREATE (?:UNIQUE )?(TABLE|INDEX) ([a-z][a-z0-9_]*)\s*(?=\(|ON\s)/i);
     const alter = statement.match(/^ALTER TABLE ([a-z][a-z0-9_]*) ADD COLUMN [a-z][a-z0-9_]*\s/i);
     const insert = statement.match(/^INSERT INTO ([a-z][a-z0-9_]*)\s*(?:\([^)]*\))?\s+SELECT\s/i);
+    // Only the cadet source-index triggers may write the derived table, never business records.
+    if (version===18 && /^CREATE TRIGGER cadet_index_\w+ AFTER (?:INSERT|UPDATE OF [a-z_,]+|DELETE) ON [a-z_]+ BEGIN\s/i.test(statement)) {
+      const body=statement.slice(statement.indexOf(' BEGIN')+6).replace(/;\s*END$/i,'');
+      if(body.split(';').every(part=>/^\s*(?:UPDATE cadet_attendance_index SET entries=json_remove\(|INSERT INTO cadet_attendance_index VALUES\()/i.test(part)) && !/\b(?:SELECT|RETURNING)\b/i.test(body))continue;
+    }
     const name = (create?.[2] || alter?.[1] || insert?.[1] || '').toLowerCase();
     if (!name || /^(?:shamrock_|sqlite_|_cf_)/.test(name) || (version > 1 && name === 'system_control')
       || (version === 1 && !create) || (insert && !created.has(name))) {
@@ -186,7 +192,7 @@ export function createFreshDatabaseBatch(plan) {
     { sql: "INSERT INTO system_control(singleton,environment,generation,accepting_commands) VALUES(1,'staging',?,0)", params: [plan.generation] },
     { sql: `DROP TABLE ${bootstrapGuard}` },
   ];
-  if (batch.length > 164 || Buffer.byteLength(JSON.stringify(batch)) > 512 * 1024) throw new Error('Fresh schema exceeds its reviewed atomic bootstrap bound.');
+  if (batch.length > 210 || Buffer.byteLength(JSON.stringify(batch)) > 512 * 1024) throw new Error('Fresh schema exceeds its reviewed atomic bootstrap bound.');
   return { environment: 'staging', generation: plan.generation, version: plan.version, sourceCommit: plan.sourceCommit, batch };
 }
 

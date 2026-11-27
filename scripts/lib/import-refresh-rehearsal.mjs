@@ -10,11 +10,12 @@ import { backupHash, backupObjectHash, restoreBackupSql, readBackupEvidence, fin
 
 const check = (ok, code) => { if (!ok) throw Error(code); };
 const writable = new Set([...INCREMENTAL_IMPORT_TABLES, 'legacy_import_assertions', 'legacy_import_runs', 'legacy_import_batches']);
-const functions = new Set(['count', 'json_array', 'json_extract', 'json_type', 'json_valid', 'length', 'lower']);
+const functions = new Set(['count', 'json_array', 'json_extract', 'json_type', 'json_valid', 'length', 'lower', 'hex', 'json_object', 'json_remove', 'json_set', 'instr']);
 
 /** Restrict reviewed plan SQL to refresh writes; no filesystem escape or schema execution. */
 export function applyRefreshRehearsalStatements(db, statements) {
-    db.setAuthorizer((action, a, b) => {
+    db.setAuthorizer((action, a, b, _database, trigger) => {
+        if (trigger?.startsWith("cadet_index_") && a === "cadet_attendance_index" && [constants.SQLITE_INSERT, constants.SQLITE_UPDATE].includes(action)) return constants.SQLITE_OK;
         if ([constants.SQLITE_READ, constants.SQLITE_SELECT].includes(action)) return constants.SQLITE_OK;
         if ([constants.SQLITE_INSERT, constants.SQLITE_UPDATE].includes(action) && writable.has(a)) return constants.SQLITE_OK;
         if (action === constants.SQLITE_FUNCTION && functions.has(String(b ?? a).toLowerCase())) return constants.SQLITE_OK;

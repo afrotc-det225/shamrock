@@ -4,7 +4,7 @@ import { PanelError } from "../errors.mjs";
 import { boundedJson } from "./http.mjs";
 const paths = new Set([
   "/v1/admin/panel/view-as/action", "/v1/cadet/known","/v1/cadet/workspace","/v1/cadet/preview",
-  "/v1/admin/panel/view-as/authorize",
+  "/v1/admin/panel/view-as/authorize", "/v1/admin/panel/view-as/people",
   "/v1/admin/panel/view-as/page",
   "/v1/admin/panel/view-as/access",
   "/v1/admin/history/list",

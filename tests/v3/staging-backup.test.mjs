@@ -25,7 +25,7 @@ function dump(db) {
         for (const row of db.prepare(`SELECT ${expr} AS row FROM ${quote(table.name)}`).all())
             sql.push(`INSERT INTO ${quote(table.name)} VALUES(${row.row})`);
     }
-    sql.push(...db.prepare("SELECT sql FROM sqlite_schema WHERE type='index' AND sql IS NOT NULL ORDER BY name").all().map(r => r.sql));
+    sql.push(...db.prepare("SELECT sql FROM sqlite_schema WHERE type IN ('index','trigger') AND sql IS NOT NULL ORDER BY type,name").all().map(r => r.sql));
     return sql.join(';\n') + ';\n';
 }
 test('current migration catalog exports and restores exact schema, typed rows, sequence values and paused state', async (t) => {

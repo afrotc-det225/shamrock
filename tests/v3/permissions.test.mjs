@@ -1,3 +1,4 @@
+import {splitMigrationSql} from '../../scripts/lib/v3-migrations.mjs';
 import assert from 'node:assert/strict';
 import {createHash,createHmac} from 'node:crypto';
 import {readFile,readdir} from 'node:fs/promises';
@@ -11,14 +12,14 @@ import {permissionCommand} from '../../.build/v3/apps/worker/src/permissions.js'
 import {effectiveAccessGrants,effectiveAdminGrants} from '../../.build/v3/apps/worker/src/permission-grants.js';
 const secret='fictional-permission-secret-never-for-deployment',keyId='fixture';
 const dir=new URL('../../database/migrations/',import.meta.url);
-const sql=(await Promise.all((await readdir(dir)).sort().map(n=>readFile(new URL(n,dir),'utf8')))).join('\n');
+const sql=(await Promise.all((await readdir(dir)).sort().map(n=>readFile(new URL(n,dir),'utf8')))).flatMap(splitMigrationSql);
 const hash=v=>createHash('sha256').update(JSON.stringify(v)).digest('hex');
 const profile=()=>({lastName:'Example',firstName:'Cadet',asYear:'AS200',rank:'C/SSgt',role:'Flight Commander',university:'Notre Dame',email:'cadet@example.invalid',phone:'',dorm:'',cipBroadArea:'14 - Engineering',cipCode:'14.0901',afsc:'',homeTown:'',homeState:'',classYear:'2030',dateOfBirth:null,flightPathStatus:'Active 3/4',photoLink:''});
 const admin=(id='profile-one',version=0,p=profile())=>({commandId:id,contractVersion:1,environment:'local',generation:1,actor:{principalId:'manager',evidence:'authenticated-confirmation'},source:{kind:'test',resourceKey:'console',submissionId:id,revision:1},operation:'directory.upsert',payload:{personId:'cadet-person',expectedVersion:version,flightId:'alpha',profile:p}});
 const envelope=(principalId='manager')=>({environment:'local',generation:1,principalId});
 async function fixture(t){
  const mf=new Miniflare({modules:true,scriptPath:resolve('.build/v3-artifacts/worker.mjs'),compatibilityDate:'2026-07-01',d1Databases:{DB:'permissions'},bindings:{ENVIRONMENT:'local',GENERATION:'1',BRIDGE_KEY_ID:keyId,BRIDGE_SECRET:secret},log:new Log(LogLevel.NONE)});t.after(()=>mf.dispose());const db=await mf.getD1Database('DB');
- await db.batch(sql.replace(/^\s*--.*$/gm,'').split(';').map(s=>s.trim()).filter(Boolean).map(s=>db.prepare(s)));
+ await db.batch(sql.map(s=>db.prepare(s)));
  await db.batch([
   db.prepare("INSERT INTO system_control VALUES(1,'local',1,1)"),db.prepare("INSERT INTO people VALUES('cadet-person','Cadet')"),
   db.prepare("INSERT INTO principals VALUES('manager',NULL,1),('publisher',NULL,1),('cadet','cadet-person',1),('contact',NULL,1)"),

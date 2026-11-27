@@ -50,7 +50,7 @@ export function matchRefreshContacts(existing,incoming){
 }
 /** No deletes, no key replacement, no initial-import replay, no notification effects. */
 export function createIncrementalImportPlan({before,desired,evidence,context,review}){
-  check(context?.environment==='staging'&&Number.isSafeInteger(context.generation)&&context.generation>0&&[16,17].includes(context.schemaVersion),'REFRESH_CONTEXT');
+  check(context?.environment==='staging'&&Number.isSafeInteger(context.generation)&&context.generation>0&&[16,17,18].includes(context.schemaVersion),'REFRESH_CONTEXT');
   check(/^[a-f0-9]{64}$/.test(context.backupSha256??'')&&/^[a-f0-9]{40,64}$/.test(context.sourceCommit??'')&&Number.isSafeInteger(context.administrationRevision)&&context.administrationRevision>=0&&new Date(context.importedAt).toISOString()===context.importedAt,'REFRESH_BACKUP');
   check(review?.reviewReference&&review.preserveCanonicalKeys===true&&review.preserveOriginalEvidence===true&&review.suppressNotifications===true&&Array.isArray(review.sourceSnapshots)&&review.sourceSnapshots.length>0&&review.sourceSnapshots.every(s=>/^[a-f0-9]{64}$/.test(s.snapshotSha256)&&s.consistent===true),'REFRESH_REVIEW');
   check(evidence?.run&&Array.isArray(evidence.groups)&&evidence.groups.length>0&&/^[a-f0-9]{64}$/.test(evidence.run.snapshot_sha256??''),'REFRESH_EVIDENCE');
