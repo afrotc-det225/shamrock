@@ -295,8 +295,8 @@ export default {
         if(testJob){
           const approve=request.method==="POST";
           const id=checkChatId(approve?body?.id:url.searchParams.get("id"));
-          if(approve && body.publishPublicBranch!==true)throw new PanelError("INVALID_REQUEST","Confirm the public review branch.");
-          const result=await env.PANEL_DB.repositoryJob({operation:approve?"approve":"status",id});
+          if(approve && body.publishWebsite!==true)throw new PanelError("INVALID_REQUEST","Confirm that you want to update the website.");
+          const result=await env.PANEL_DB.repositoryJob({operation:approve?"release":"status",id,currentCommit:env.maintenanceSource?.commit});
           if(approve && result?.state==="approved")await wakeRunner(env);
           return secure(json(result ?? {state:"expired"}));
         }

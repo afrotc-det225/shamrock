@@ -52,3 +52,17 @@ test("a uniquely named reviewed source resolves a mistaken Decisions file select
     assert.equal(patchSourceArea(question,"Google adapter entry points"),"Excusal queue");
   assert.equal(patchSourceArea("Improve attendance processing","Sheet edits"),"Sheet edits");
 });
+
+test("a tested website update can only go live from its own release and runner",async()=>{
+  const rows=new Map(),storage={transaction:f=>f({get:k=>rows.get(k),list:()=>structuredClone(rows),put:(k,v)=>rows.set(k,structuredClone(v))})};
+  const send=(operation,extra={})=>repositoryJob(storage,{operation,id:"web",...extra},0);
+  await send("create",{patch:{commit:"base",path:"apps/admin/src/FlightHome.jsx"}});
+  assert.deepEqual(await send("release",{currentCommit:"base"}),{state:"queued"});
+  await send("claim",{run:"check"});await send("finish",{run:"check",passed:true});
+  assert.deepEqual(await send("release",{currentCommit:"next"}),{state:"outdated"});
+  await send("release",{currentCommit:"base"});
+  assert.equal((await send("claim",{run:"website"})).operation,"release");
+  assert.deepEqual(await send("finish",{run:"check",passed:true}),{state:"publishing"});
+  assert.deepEqual(await send("finish",{run:"website",passed:true}),{state:"live"});
+  assert.deepEqual(await send("release",{currentCommit:"base"}),{state:"live"});
+});

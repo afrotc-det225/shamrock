@@ -34,6 +34,10 @@ export async function repositoryJob(storage,input,now){
       const job=await tx.get(prefix+id);
       if(!job || now-job.at>7*day)return null;
       if(["running","publishing"].includes(job.state) && now-job.started>35*60000 || job.state==="queued" && now-job.at>day)return {state:"expired"};
+      if(job.state==="passed" && input.currentCommit){
+        if((job.patch.edits ?? [job.patch]).some(edit=>edit.path.startsWith("apps/google-adapter/")))return {state:"native"};
+        if(job.patch.commit!==input.currentCommit)return {state:"outdated"};
+      }
       return {state:job.state};
     }
     const records=await tx.list({prefix});
@@ -56,15 +60,22 @@ export async function repositoryJob(storage,input,now){
       if(["queued","approved"].includes(job.state)){
         Object.assign(job,{run,state:job.state==="approved"?"publishing":"running",started:now});await tx.put(prefix+job.id,job);
       }
-      return {id:job.id,patch:job.patch,operation:job.state==="publishing"?"publish":"test"};
+      return {id:job.id,patch:job.patch,operation:job.state==="publishing"?(job.websiteRelease?"release":"publish"):"test"};
     }
     const job=jobs.find(j=>j.id===id);
     if(!job)return null;
+    if(operation==="release" && job.state==="passed" && job.patch){
+      const edits=job.patch.edits ?? [job.patch];
+      if(edits.some(edit=>edit.path.startsWith("apps/google-adapter/")))return {state:"native"};
+      if(job.patch.commit!==input.currentCommit)return {state:"outdated"};
+      job.websiteRelease=true;
+      job.state="approved";await tx.put(prefix+id,job);
+    }
     if(operation==="approve" && job.state==="passed" && job.patch){
       job.state="approved";await tx.put(prefix+id,job);
     }
     if(operation==="finish" && job.run===run && job.state==="publishing"){
-      job.state=input.passed?"published":"passed";await tx.put(prefix+id,job);
+      job.state=input.passed?(job.websiteRelease?"live":"published"):(job.websiteRelease?"release_failed":"passed");await tx.put(prefix+id,job);
     }else if(operation==="finish" && job.run===run && job.state==="running"){
       job.state=input.passed?"passed":"failed";if(!input.passed)delete job.patch;await tx.put(prefix+id,job);
     }

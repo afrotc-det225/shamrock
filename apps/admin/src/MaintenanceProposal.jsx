@@ -26,7 +26,7 @@ export function MaintenanceProposal({proposal:p,autoTest=false}) {
   const [refreshKey,setRefreshKey]=useState(0);
   async function publish(){
     try{
-      const result=await api("/chat/repository-test",{id:p.jobId,publishPublicBranch:true});
+      const result=await api("/chat/repository-test",{id:p.jobId,publishWebsite:true});
       setTestState(result.state);setRefreshKey(k=>k+1);
     }catch(e){setStatus(e.message);}
   }
@@ -43,16 +43,29 @@ export function MaintenanceProposal({proposal:p,autoTest=false}) {
     }
     refresh();return ()=>{stopped=true;clearTimeout(timer);};
   },[p.jobId,refreshKey]);
-  const download = () => {
-    const url = URL.createObjectURL(new Blob([p.source.replace(p.before,()=>p.after)],{type:"text/plain"}));
-    const a = document.createElement("a"); a.href=url; a.download=p.path.split("/").pop(); a.click();
-    setTimeout(()=>URL.revokeObjectURL(url),1000);
+  const where = {
+    "Wing overview":"/overview","Wing charts":"/overview","Wing reporting and historical comparisons":"/overview",
+    "Birthday agenda":"/overview","Excusal queue":"/excusals","Excusals page":"/excusals","Excusal permissions":"/excusals",
+    "Cadet profile fields":"/me/profile","Cadet profile and submissions":"/me/profile","Cadet sorting":"/cadets",
+    "Cadet directory and Leadership":"/cadets","Directory roster views":"/cadets","Attendance matrix":"/attendance",
+    "Attendance page":"/attendance","Attendance corrections":"/attendance","Event management page":"/events",
+    "Semester planner":"/semester","Semester transitions":"/semester",
   };
-  return <section><strong>{p.path} · {p.commit.slice(0,12)}</strong>
-    <details><summary>Review proposed edit</summary>{p.routing && <p>Routed by {p.routing} · GPT-5.3-Codex</p>}{(p.edits ?? [p]).map(edit=><div key={edit.path}><strong>{edit.path}</strong><p>Current</p><pre>{edit.before}</pre><p>Proposed</p><pre>{edit.after || "(remove)"}</pre></div>)}</details>
-    {(!p.edits || p.edits.length===1) && <button onClick={download}>Download proposed file</button>}
-    {p.jobId && <p role="status">Repository tests · {testState}{testState==="queued" && p.dispatch?.startsWith("scheduled") ? " · "+p.dispatch : ""}</p>}
-    {testState==="passed" && <button onClick={publish}>Publish tested change to a public review branch</button>}
+  const labels={
+    queued:"Waiting to check your change",running:"Checking your change",passed:"Checks passed",
+    approved:"Preparing your update",publishing:"Updating the website",live:"Your change is live",
+    failed:"Checks failed. Ask the assistant to revise this change.",expired:"This change has expired.",
+    native:"This change needs a separate Google Sheets or Forms update.",
+    outdated:"The website has changed since these checks. Ask for a fresh version.",
+    release_failed:"The update could not be verified. Check the website before trying again.",
+    published:"Saved for review",unavailable:"Checking update status",
+  };
+  return <section>
+    <details><summary>See proposed changes</summary>{p.routing && <p>Routed by {p.routing} · GPT-5.3-Codex</p>}{(p.edits ?? [p]).map(edit=><div key={edit.path}><strong>{edit.path}</strong><p>Current</p><pre>{edit.before}</pre><p>Proposed</p><pre>{edit.after || "(remove)"}</pre></div>)}</details>
+
+    {p.jobId && <p role="status">{labels[testState] ?? "Checking update status"}</p>}
+    {testState==="passed" && <button onClick={publish}>Approve and publish</button>}
+    {testState==="live" && <a href={where[p.area] ?? "/overview"}>Open updated page</a>}
     {testState==="published" && <a href={"https://github.com/afrotc-det225/shamrock-staging-runner/tree/proposals/"+p.jobId} target="_blank" rel="noreferrer">Open tested branch</a>}
     {p.jobId===null && <p>The daily repository test allowance has been used.</p>}
     {Object.hasOwn(runnable,p.area) ? <button disabled={status==="Running…"} onClick={run}>Test with fictional data</button>
