@@ -1744,3 +1744,5 @@ main:has(.matrix-scroll) { padding-bottom: 8px; }
   .chat-form {margin-bottom:env(safe-area-inset-bottom)}
   .chat-library {z-index:10;width:100%;max-height:min(22rem,50dvh)}
 }
+
+.plain-reply {white-space:pre-wrap;overflow-wrap:anywhere}
