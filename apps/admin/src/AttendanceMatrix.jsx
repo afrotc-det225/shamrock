@@ -245,14 +245,14 @@ export function MatrixTable({events, label, onKeyDown, children}) {
       <table
         className="attendance-matrix"
         aria-label={label}
-        style={{ width: 282 + 68 * events.length }}
+        style={{ "--event-count": events.length }}
         onKeyDown={onKeyDown}
       >
         <colgroup>
-          <col style={{ width: 152 }} />
-          <col span="2" style={{ width: 65 }} />
+          <col style={{ width: "var(--name-width)" }} />
+          <col span="2" style={{ width: "var(--rate-width)" }} />
           {events.length > 0 && (
-            <col span={events.length} style={{ width: 68 }} />
+            <col span={events.length} style={{ width: "var(--event-width)" }} />
           )}
         </colgroup>
         <thead>
@@ -266,7 +266,7 @@ export function MatrixTable({events, label, onKeyDown, children}) {
               <th scope="col" key={e.eventId} title={e.label}>
                 {eventHeading(e).map((line, i) => (
                   <span className="event-line" key={i}>
-                    {line}
+                    {line === "Secondary" ? <><span className="full-event-label">{line}</span><abbr className="short-event-label" title={line}>Sec.</abbr></> : line}
                   </span>
                 ))}
               </th>

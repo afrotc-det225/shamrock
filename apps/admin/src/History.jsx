@@ -34,7 +34,7 @@ export default function HistoricalAttendance({item, initialReport, semesterPicke
   return <>
     <section className="page-controls">
       <Heading title="Attendance" />
-      <div className="toolbar">
+      <div className="toolbar attendance-toolbar">
         {semesterPicker}
         <SearchBox placeholder="Find a cadet" value={query} onChange={setQuery} />
         <ToolbarFilters active={Boolean(filters.year || filters.flight || filters.sort !== "seniority")}>

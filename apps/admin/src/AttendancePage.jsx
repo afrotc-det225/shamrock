@@ -1,10 +1,12 @@
 import React, {useEffect, useState} from "react";
+import {usePhone} from "./use-phone";
 import Attendance from "./Attendance";
 import HistoricalAttendance from "./History";
 import {api} from "./api";
 import {Empty, LoadingRows} from "./components";
 
 export default function AttendancePage({archivesAllowed, archiveVersion, onSemester, ...current}) {
+  const phone = usePhone();
   const [catalog, setCatalog] = useState(null);
   const [error, setError] = useState("");
   const [attempt, retry] = useState(0);
@@ -37,7 +39,7 @@ export default function AttendancePage({archivesAllowed, archiveVersion, onSemes
     <select aria-label="Semester" disabled={current.busy && !archiveVersion}
       value={archiveVersion ? item?.value || "unavailable" : ""}
       onChange={event => onSemester(event.target.value)}>
-      <option value="">Current semester</option>
+      <option value="">{phone ? "This semester" : "Current semester"}</option>
       {archiveVersion && !item && <option disabled value="unavailable">{catalog ? "Unavailable archive" : "Archived semester"}</option>}
       {!!catalog?.options.length && <optgroup label="Archived semesters">
         {catalog.options.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}

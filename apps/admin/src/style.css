@@ -1311,8 +1311,13 @@ html:has(dialog:modal) {
 @media(max-width:720px){.insights-grid,.org-branches {grid-template-columns:minmax(0,1fr)}.org-cards{grid-template-columns:1fr}.matrix-scroll{max-width:100%;max-height:65vh}}
 .coverage {color:var(--muted);font-size:.78rem;margin:.8rem 0 0}
 
-.attendance-matrix {table-layout:fixed;min-width:0}
+.attendance-matrix {
+  --name-width:152px;--rate-width:65px;--event-width:68px;
+  table-layout:fixed;min-width:0;
+  width:calc(var(--name-width) + 2 * var(--rate-width) + var(--event-count) * var(--event-width));
+}
 .attendance-matrix thead th {max-width:none;line-height:1.22;padding:.42rem .3rem;font-size:.76rem}
+.short-event-label {display:none}
 .event-line {display:block;min-height:1.22em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-align:center}
 .attendance-matrix .matrix-percent,.formation {font-weight:650;text-align:center;font-variant-numeric:tabular-nums}
 .drawer:not(:modal) {box-shadow:-5px 0 20px #182b4524}
@@ -1692,3 +1697,40 @@ main:has(.matrix-scroll) { padding-bottom: 8px; }
 }
 .matrix-name-heading {display:flex;align-items:center;justify-content:space-between;gap:.25rem}
 .matrix-name-heading .toolbar-tool {min-width:32px;min-height:32px;padding:.25rem}
+
+@media (max-width:640px) {
+  .page-controls .event-toolbar {
+    display:grid;
+    grid-template-columns:auto minmax(0,1fr);
+    align-items:center;
+  }
+  .event-toolbar > .search {grid-column:1 / -1;width:100%;max-width:none}
+  .event-toolbar .filter-fields {grid-template-columns:minmax(0,1fr)}
+  .event-toolbar .toolbar-actions > button {padding-inline:.5rem}
+  .drawer .event-date-time {min-width:0;width:min(100%,16em);align-self:flex-start}
+}
+
+@media (max-width:640px) {
+  .page-controls .attendance-toolbar {display:flex;flex-wrap:nowrap;align-items:center;margin-bottom:.65rem}
+  .page-controls .attendance-toolbar > .search {min-width:0;flex:1 1 0;padding-inline:.55rem;gap:.35rem}
+  .attendance-toolbar > .semester-picker > span,.attendance-toolbar > .toolbar-tool > span {display:none}
+  .page-controls .attendance-toolbar > .semester-picker {min-width:0;max-width:45%}
+  .attendance-toolbar .semester-picker {position:relative}
+  .semester-picker select {appearance:none;min-width:0;height:39px;padding:.3rem 1.65rem .3rem .55rem}
+  .attendance-toolbar .semester-picker::after {
+    content:"";position:absolute;right:.65rem;top:calc(50% - 4px);width:6px;height:6px;
+    border:solid currentColor;border-width:0 1.5px 1.5px 0;transform:rotate(45deg);pointer-events:none;
+  }
+  .attendance-toolbar > .toolbar-tool {min-width:40px}
+  .attendance-matrix {--name-width:108px;--rate-width:49px;--event-width:49px}
+  .attendance-matrix th:first-child {min-width:0;overflow-wrap:anywhere}
+  .attendance-matrix :is(.matrix-percent,.formation) {font-size:.85rem;padding-inline:1px}
+  .attendance-matrix thead th {padding-inline:1px}
+  .full-event-label {display:none}
+  .short-event-label {display:inline;text-decoration:none}
+}
+
+@media (max-width:360px) {
+  .event-toolbar > .toolbar-tool {min-width:40px}
+  .event-toolbar > .toolbar-tool > span {display:none}
+}

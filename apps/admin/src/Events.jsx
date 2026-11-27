@@ -111,7 +111,7 @@ export default function Events({ snapshot, eventsList, propose, busy, refresh, r
     <>
       <section className="page-controls">
         <Heading title="Events" />
-        <div className="toolbar">
+        <div className="toolbar event-toolbar">
           <SearchBox
             value={query}
             onChange={setQuery}
@@ -223,12 +223,14 @@ export default function Events({ snapshot, eventsList, propose, busy, refresh, r
           />
           <Field
             label={`Starts (${zoneLabel(edit.startAt)})`}
+            className="event-date-time"
             type="datetime-local"
             value={toEastern(edit.startAt)}
             onChange={(e) => setTime("startAt", e.target.value)}
           />
           <Field
             label={`Ends (${zoneLabel(edit.endAt)})`}
+            className="event-date-time"
             type="datetime-local"
             value={toEastern(edit.endAt)}
             onChange={(e) => setTime("endAt", e.target.value)}

@@ -54,6 +54,18 @@ try {
   const fieldFont = el => parseFloat(getComputedStyle(el).fontSize);
   assert(await search.evaluate(fieldFont) >= 16);
   const toolbar = page.locator(".page-controls .toolbar");
+  for (const width of [320,375,390]) {
+    await page.setViewportSize({width,height:844});
+    const fields = [picker,search,page.getByRole("button",{name:"Filters",exact:true})];
+    const centers = await Promise.all(fields.map(async field => {
+      const box = await field.boundingBox();
+      return box.y + box.height/2;
+    }));
+    assert(Math.max(...centers)-Math.min(...centers)<2,"Semester, search and Filters share one row");
+    const sizes = await current.locator("thead th").evaluateAll(headers=>headers.map(h=>h.getBoundingClientRect().width));
+    assert(sizes[0]<=110 && sizes[1]>=48 && sizes[1]<=50 && sizes[2]===sizes[1]);
+    assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
+  }
   const beforeFocus = await toolbar.boundingBox();
   const scale = await page.evaluate(() => visualViewport.scale);
   await search.tap();
