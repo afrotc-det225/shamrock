@@ -1,5 +1,5 @@
 import { MaintenanceProposal } from "./MaintenanceProposal";
-import React, { useEffect, useState } from "react";
+import React, { lazy, Suspense, useEffect, useRef, useState } from "react";
 import OverviewInsights from "./OverviewInsights";
 import { Send } from "lucide-react";
 import { Heading, Table, Status, Empty } from "./components";
@@ -104,76 +104,49 @@ export function System({ snapshot, meta, history, receiptsDeferred, reportingTim
     </>
   );
 }
+const AssistantResponse = lazy(()=>import("./AssistantResponse"));
 export function Assistant({ meta }) {
-  const [messages, setMessages] = useState([]),
-    [text, setText] = useState(""),
-    [busy, setBusy] = useState(false),
-    [error, setError] = useState("");
-  const send = async (e) => {
-    e.preventDefault();
-    if (busy || !text.trim()) return;
-    const next = [...messages, { role: "user", content: text.trim() }].slice(
-      -15,
-    );
-    setMessages(next);
-    setText("");
-    setBusy(true);
-    setError("");
-    try {
-      const r = await api("/chat", { messages: next.map(({role,content})=>({role,content})) });
-      setMessages([...next, { role: "assistant", content: r.content, proposal:r.proposal }]);
-    } catch (e) {
-      setError(e.message);
-    } finally {
-      setBusy(false);
-    }
-  };
-  return (
-    <>
-      <Heading
-        title="Assistant"
-      />
-      <div className="notice">
-        {meta.hosted ? "Questions, relevant release source, and Wing totals may be sent to OpenAI. Keep personal details and secrets out of chat." : <>CRC access and usage limits may change, and this feature may be retired.
-        Administrator tools work independently. This version can explain
-        procedures; it cannot change records, modify code or repair bugs.</>}
-      </div>
-      <p className="hint">
-        {meta.assistantAvailable
-          ? "Connected"
-          : "The assistant is currently unavailable. All administrator tools remain available."}
-      </p>
-      <div className="conversation" aria-live="polite">
-        {messages.map((m, i) => (
-          <article key={i} className={`message ${m.role}`}>
-            <strong>{m.role === "user" ? "You" : "SHAMROCK assistant"}</strong>
-            <p>{m.content}</p>{m.proposal && <MaintenanceProposal proposal={m.proposal}/>}
-          </article>
-        ))}
-        {busy && <span className="page-transfer" role="status">Thinking…</span>}
-        {error && (
-          <p role="alert" className="error">
-            {error}
-          </p>
-        )}
-      </div>
-      <form className="chat-form" onSubmit={send}>
-        <textarea
-          aria-label="Ask SHAMROCK"
-          placeholder="How do I prepare the next semester?"
-          maxLength={meta.hosted ? 1000 : 6000}
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-          disabled={!meta.assistantAvailable}
-        />
-        <button
-          className="primary"
-          disabled={busy || !meta.assistantAvailable || !text.trim()}
-        >
-          <Send size={18} />
-          Ask
-        </button>
-      </form>
-    </>
-  );
+  const [messages,setMessages]=useState([]), [text,setText]=useState(""),
+    [busy,setBusy]=useState(false), [error,setError]=useState("");
+  const input=useRef(null), inFlight=useRef(false);
+  async function send(event){
+    event.preventDefault();
+    if(inFlight.current || !meta.assistantAvailable || !text.trim())return;
+    inFlight.current=true;
+    const question=text.trim(), next=[...messages,{role:"user",content:question}].slice(-15);
+    setMessages(next);setText("");setBusy(true);setError("");
+    try{
+      const reply=await api("/chat",{messages:next.map(({role,content})=>({role,content}))});
+      setMessages([...next,{role:"assistant",content:reply.content,proposal:reply.proposal}]);
+    }catch(e){
+      setMessages(messages);setText(draft=>draft || question);setError(e.message);
+    }finally{inFlight.current=false;setBusy(false);}
+  }
+  return <section className="assistant-page">
+    <Heading title="Assistant"/>
+    {!meta.assistantAvailable && <p role="status">The assistant is currently unavailable.</p>}
+    <div className="conversation" role="log" aria-label="Conversation">
+      {messages.map((m,i)=><article key={i} className={"message "+m.role}>
+        <span className="message-author">{m.role==="user" ? "You" : "SHAMROCK assistant"}</span>
+        {m.role==="user" ? <p>{m.content}</p> : <Suspense fallback={<p role="status">Formatting response…</p>}>
+          <AssistantResponse text={m.content}/>
+        </Suspense>}
+        {m.proposal && <MaintenanceProposal proposal={m.proposal}/>}
+      </article>)}
+      {busy && <p className="hint" role="status">Thinking…</p>}
+    </div>
+    {error && <p className="error" role="alert">{error}</p>}
+    <form className="chat-form" onSubmit={send}>
+      <textarea ref={input} aria-label="Ask SHAMROCK" aria-describedby="assistant-privacy"
+        rows={2} placeholder={messages.length ? "Ask a follow-up…" : "Ask about the wing or SHAMROCK…"}
+        maxLength={meta.hosted ? 1000 : 6000} value={text} onChange={e=>setText(e.target.value)}
+        onKeyDown={e=>{if(e.key==="Enter" && !e.shiftKey && !e.nativeEvent.isComposing){e.preventDefault();e.currentTarget.form.requestSubmit();}}}
+        disabled={!meta.assistantAvailable}/>
+      <button className="primary" aria-label="Send question" title="Send question" disabled={busy || !meta.assistantAvailable || !text.trim()}><Send size={18}/></button>
+    </form>
+    {!messages.length && meta.assistantAvailable && <div className="assistant-prompts">
+      {["How is the detachment doing?","How do corrections work?"].map(prompt=><button type="button" key={prompt} onClick={()=>{setText(prompt);input.current?.focus();}}>{prompt}</button>)}
+    </div>}
+    <small id="assistant-privacy">{meta.hosted ? "OpenAI may receive your question, relevant code, and Wing totals. Omit personal details and secrets." : "Questions are sent to the CRC. Omit personal details and secrets."}</small>
+  </section>;
 }

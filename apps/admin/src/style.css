@@ -541,35 +541,30 @@ summary {
   border-left: 2px solid var(--border);
   padding-left: 12px;
 }
-.conversation {
-  min-height: 180px;
-  max-width: 850px;
-}
-.message {
-  padding: 18px 0;
-  border-bottom: 1px solid var(--border);
-}
-.message strong {
-  font-size: 12px;
-  color: var(--green);
-}
-.message.user strong {
-  color: #516173;
-}
-.message p {
-  white-space: pre-wrap;
-}
-.chat-form {
-  display: flex;
-  gap: 14px;
-  margin-top: 25px;
-  align-items: end;
-  max-width: 850px;
-}
-.chat-form textarea {
-  flex: 1;
-  min-height: 82px;
-}
+.assistant-page {max-width:52rem;margin-inline:auto}
+.assistant-page .heading {margin-bottom:1rem}
+.conversation {min-width:0}
+.message {margin:0 0 1rem;line-height:1.55;overflow-wrap:anywhere}
+.message-author {display:block;font-size:.8rem;font-weight:650;color:var(--green)}
+.message.user {background:#eef3f5;padding:.7rem 1rem;border-radius:.75rem;max-width:88%;width:fit-content;margin-left:auto}
+.message.user p {white-space:pre-wrap;margin:.2rem 0 0}
+.assistant-answer {max-width:76ch}
+.assistant-answer :is(p,ul,ol,pre,blockquote) {margin:.55rem 0}
+.assistant-answer :is(h2,h3,h4,h5,h6) {margin:1.15rem 0 .35rem;line-height:1.25}
+.assistant-answer :is(ul,ol) {padding-left:1.45rem}
+.assistant-answer li :is(ul,ol) {margin:.15rem 0}
+.assistant-answer pre {max-width:100%;overflow:auto;padding:.75rem;background:#f1f4f6;border-radius:.4rem}
+.answer-table {max-width:100%;overflow:auto}
+.answer-table table {width:auto;min-width:0}
+.answer-table :is(td,th) {position:static;padding:.4rem .65rem;text-transform:none}
+.chat-form {display:flex;align-items:flex-end;gap:.5rem;padding:.55rem;background:white;border:1px solid #a7b6be;border-radius:.75rem}
+.chat-form:focus-within {outline:2px solid var(--green);outline-offset:1px}
+.chat-form textarea {flex:1;min-width:0;min-height:2.75rem;max-height:12rem;resize:vertical;border:0;outline:0;padding:.45rem;background:transparent;font:inherit}
+.chat-form textarea:focus-visible {outline:0;box-shadow:none}
+.chat-form button {width:2.75rem;height:2.75rem;padding:0;justify-content:center}
+.assistant-prompts {display:flex;flex-wrap:wrap;gap:.45rem;margin-top:.7rem}
+.assistant-prompts button {font-size:.85rem;padding:.4rem .65rem;border-radius:1rem}
+#assistant-privacy {display:block;color:var(--muted);line-height:1.45;margin-top:.65rem}
 blockquote {
   margin: 0 0 18px;
   padding: 12px 16px;
@@ -726,10 +721,7 @@ blockquote {
   .drawer {
     width: 100%;
   }
-  .chat-form {
-    flex-direction: column;
-    align-items: stretch;
-  }
+
   td,
   th {
     padding: 12px;

@@ -357,3 +357,5 @@ On **Cadets**, use **Columns** to show or hide Directory fields. The browser rem
 Squadron and university labels have distinct colors. Residence colors identify men’s halls, women’s halls, and other housing. Select a Directory portrait or its initials to preview it. **Open original photo** is available inside the preview.
 
 The maintainer Assistant chooses its context from the question. Ask about Wing performance for a semester comparison, describe a bug for a source-backed proposal, or request a redesign for a plan and staging tests.
+
+On **Assistant**, select a suggested question to edit it, or write your own. Enter sends and Shift+Enter inserts a new line. Replies support headings, lists, tables and code blocks.
