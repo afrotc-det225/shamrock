@@ -34,12 +34,12 @@ import { ViewAsSelector, ViewAsBanner, viewAsStatus } from "./ViewAs";
 import "./style.css";
 const pages = [
   ["Overview", Home],
-  ["Cadets", Users],
-  ["Leadership", ChevronsUp],
   ["Events", CalendarDays],
   ["Attendance", ClipboardList],
   ["Excusals", FileCheck2],
   ["History", HistoryIcon],
+  ["Cadets", Users],
+  ["Leadership", ChevronsUp],
   ["Semester planning", Layers],
   ["System", Settings],
 ];

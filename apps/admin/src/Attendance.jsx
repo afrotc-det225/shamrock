@@ -1,8 +1,7 @@
 import React, { useState } from "react";
 import { Heading, Select, Field, Editor, Empty, SearchBox } from "./components";
-import { AttendanceMatrix, AttendanceKey, AttendanceRateKey } from "./AttendanceMatrix";
-import { compareCadetsForDisplay } from "../../../packages/domain/src/cadet-display-order";
-import { alphabetic, textOrder } from "./RosterViews";
+import { AttendanceMatrix, AttendanceKey } from "./AttendanceMatrix";
+import { defaultRosterFilters, MatrixRosterFilters, selectRosterRows } from "./MatrixRosterFilters";
 import { name, eventTypes } from "./api";
 export default function Attendance({
   snapshot,
@@ -16,8 +15,7 @@ export default function Attendance({
   const [eventType, setEventType] = useState(""),
     [week, setWeek] = useState(""),
     [query, setQuery] = useState(""),
-    [sort, setSort] = useState("seniority"),
-    [flight, setFlight] = useState(""),
+    [filters, setFilters] = useState(defaultRosterFilters),
     [edit, setEdit] = useState(null),
     [reason, setReason] = useState(""),
     [code, setCode] = useState("P");
@@ -39,22 +37,8 @@ export default function Attendance({
       (!eventType || e.eventType === eventType) &&
       (!week || String(e.trainingWeek) === week),
   );
-  const search = (text) =>
-    text.toLowerCase().includes(query.trim().toLowerCase());
-  const rows = (matrix?.rows || [])
-    .filter((p) => (!flight || p.flightId === flight) && search(name(p)))
-    .sort((a, b) => {
-      if (sort === "name") return alphabetic(a, b);
-      if (sort === "overall")
-        return (
-          (a.overall.noCountedAttendance ? Infinity : a.overall.percentage) -
-            (b.overall.noCountedAttendance ? Infinity : b.overall.percentage) ||
-          alphabetic(a, b)
-        );
-      if (sort === "flight")
-        return textOrder(a.flight, b.flight) || compareCadetsForDisplay(a, b);
-      return compareCadetsForDisplay(a, b);
-    });
+  const roster = matrix?.rows || [];
+  const rows = selectRosterRows(roster, query, filters);
   const correction = (person, event, currentCode) => {
     setReason("");
     setCode(currentCode);
@@ -98,26 +82,7 @@ export default function Attendance({
               ...weeks.map((w) => ({ value: String(w), label: "TW-" + w })),
             ]}
           />
-          <Select
-            label="Sort by"
-            value={sort}
-            onChange={setSort}
-            options={[
-              { value: "seniority", label: "AS year, then name" },
-              { value: "name", label: "Last name" },
-              { value: "flight", label: "Flight" },
-              { value: "overall", label: "Lowest overall" },
-            ]}
-          />
-          <Select
-            label="Flight"
-            value={flight}
-            onChange={setFlight}
-            options={[
-              { value: "", label: "All Flights" },
-              ...s.flights.map((f) => ({ value: f.flightId, label: f.label })),
-            ]}
-          />
+          <MatrixRosterFilters rows={roster} value={filters} onChange={setFilters} />
         </div>
       </section>
       <AttendanceMatrix
@@ -127,7 +92,6 @@ export default function Attendance({
         onEdit={correction}
         readOnly={readOnly || busy}
       />
-      {rows.length > 0 && <AttendanceRateKey />}
       {(!rows.length || !columns.length) && (
         <Empty>No attendance matches these filters.</Empty>
       )}

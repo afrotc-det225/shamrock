@@ -55,7 +55,6 @@ export const cellStyle = ([background, color]) => ({
   color,
 });
 const rateStops = ["#de887d", "#ecaf76", "#e8cc78", "#b5cd86", "#82ba91"];
-export const rateGradient = `linear-gradient(90deg in oklab, ${rateStops.join(", ")})`;
 export function rateStyle(value) {
   if (!Number.isFinite(value)) return cellStyle(neutral);
   const step = Math.min(4, Math.max(0, (value * 100 - 80) / 5));

@@ -1,7 +1,7 @@
 import React, { useRef } from "react";
 import { List } from "lucide-react";
 import { ToolbarPopover } from "./ToolbarPopover";
-import { cellStyle, flightColors, rateGradient, rateStyle } from "./roster-colors";
+import { rateStyle } from "./roster-colors";
 
 const meanings = {
   P: "Present",
@@ -15,18 +15,6 @@ const meanings = {
   MED: "Medical",
   "N/A": "Not applicable",
 };
-const rateLabels = ["80% or below", "85%", "90%", "95%", "100%"];
-export function AttendanceRateKey() {
-  return (
-    <div className="attendance-rate-key" aria-label="Overall and LLAB attendance scale">
-      <span>Overall and LLAB</span>
-      <div className="attendance-rate-bar" style={{ background: rateGradient }} aria-hidden="true" />
-      <div className="attendance-rate-ticks">
-        {rateLabels.map((label) => <span key={label}>{label}</span>)}
-      </div>
-    </div>
-  );
-}
 export function AttendanceKey() {
   return (
     <ToolbarPopover
@@ -57,6 +45,8 @@ function eventHeading(event) {
       "TW-" + event.trainingWeek,
       { llab: "LLAB", secondary: "Secondary", mando: "Mando" }[event.eventType],
     ];
+  const weekly = /^(?:TW[ -]?(\d+)\s+(Mando|Secondary|LLAB)|(Mando|Secondary|LLAB)\s+TW[ -]?(\d+))$/i.exec(label.trim());
+  if (weekly) return ["TW-" + (weekly[1] || weekly[4]), weekly[2] || weekly[3]];
   const words = label.split(/\s+/);
   let cut = 1;
   for (let i = 2; i < words.length; i++)
@@ -85,7 +75,8 @@ function moveFocus(e) {
   while (true) {
     r += direction[0];
     c += direction[1];
-    if (r < 0 || r >= rows.length || c < 4 || c >= rows[r].cells.length) return;
+    if (r < 0 || r >= rows.length || c < 0 || c >= rows[r].cells.length) return;
+    if (!rows[r].cells[c].hasAttribute("data-mark")) return;
     const next = rows[r].cells[c].querySelector("button");
     if (next) {
       next.focus();
@@ -103,20 +94,99 @@ export function AttendanceMatrix({
   const focused = useRef(null);
   let first = true;
   return (
+    <MatrixTable events={events} label="Attendance" onKeyDown={moveFocus}>
+      {rows.map((row) => {
+        const byEvent = new Map(row.cells.map((c) => [c.eventId, c]));
+        return (
+          <tr key={row.personId}>
+            <th scope="row">
+              {[row.firstName, row.lastName].filter(Boolean).join(" ")}
+            </th>
+            {[row.overall, row.llab].map((r, i) => {
+              const v = r?.noCountedAttendance ? null : r?.percentage;
+              return (
+                <td key={i} className="matrix-percent" style={rateStyle(v)}>
+                  {Number.isFinite(v) ? (100 * v).toFixed(1) + "%" : "—"}
+                </td>
+              );
+            })}
+            {events.map((e) => {
+              const c = byEvent.get(e.eventId),
+                editable =
+                  !readOnly && c?.eligible === true && canCorrect(row);
+              const code = c?.effectiveCode || "",
+                label =
+                  code ||
+                  (c?.eligible === true
+                    ? "Blank"
+                    : c?.eligible === false
+                      ? "Not eligible"
+                      : "Eligibility unknown");
+              const description = [
+                row.firstName + " " + row.lastName,
+                e.label,
+                meanings[code] ? code + " · " + meanings[code] : label,
+                c?.needsReview ? "Needs review" : "",
+              ]
+                .filter(Boolean)
+                .join(", ");
+              const content = code || (c?.eligible === true ? "·" : "—");
+              const tabStop = first && editable;
+              if (editable) first = false;
+              return (
+                <td
+                  key={e.eventId}
+                  className="mark-cell"
+                  data-mark={
+                    code || (c?.eligible === true ? "blank" : "excluded")
+                  }
+                  data-review={c?.needsReview ? "true" : undefined}
+                  title={description}
+                >
+                  {editable ? (
+                    <button
+                      type="button"
+                      data-event={e.eventId}
+                      tabIndex={tabStop ? 0 : -1}
+                      aria-label={description}
+                      onFocus={(ev) => {
+                        if (focused.current?.isConnected)
+                          focused.current.tabIndex = -1;
+                        ev.currentTarget.tabIndex = 0;
+                        focused.current = ev.currentTarget;
+                      }}
+                      onClick={() => onEdit(row, e, code)}
+                    >
+                      {content}
+                    </button>
+                  ) : (
+                    <span aria-label={description}>{content}</span>
+                  )}
+                </td>
+              );
+            })}
+          </tr>
+        );
+      })}
+    </MatrixTable>
+  );
+}
+
+export function MatrixTable({events, label, onKeyDown, children}) {
+  return (
     <div
       className="matrix-scroll"
       tabIndex={0}
-      aria-label="Scrollable attendance matrix"
+      aria-label={label + " matrix"}
     >
       <table
         className="attendance-matrix"
-        aria-label="Attendance"
-        style={{ width: 356 + 68 * events.length }}
-        onKeyDown={moveFocus}
+        aria-label={label}
+        style={{ width: 282 + 68 * events.length }}
+        onKeyDown={onKeyDown}
       >
         <colgroup>
           <col style={{ width: 152 }} />
-          <col style={{ width: 74 }} />
           <col span="2" style={{ width: 65 }} />
           {events.length > 0 && (
             <col span={events.length} style={{ width: 68 }} />
@@ -124,7 +194,7 @@ export function AttendanceMatrix({
         </colgroup>
         <thead>
           <tr>
-            {["Cadet", "Flight", "Overall", "LLAB"].map((h) => (
+            {["Cadet", "Overall", "LLAB"].map((h) => (
               <th scope="col" key={h}>
                 {h}
               </th>
@@ -141,85 +211,7 @@ export function AttendanceMatrix({
           </tr>
         </thead>
         <tbody>
-          {rows.map((row) => {
-            const byEvent = new Map(row.cells.map((c) => [c.eventId, c]));
-            return (
-              <tr key={row.personId}>
-                <th scope="row">
-                  {row.lastName}, {row.firstName}
-                </th>
-                <td
-                  className="formation"
-                  style={cellStyle(flightColors(row.flight, row.squadron))}
-                >
-                  {row.flight || "—"}
-                </td>
-                {[row.overall, row.llab].map((r, i) => {
-                  const v = r?.noCountedAttendance ? null : r?.percentage;
-                  return (
-                    <td key={i} className="matrix-percent" style={rateStyle(v)}>
-                      {Number.isFinite(v) ? (100 * v).toFixed(1) + "%" : "—"}
-                    </td>
-                  );
-                })}
-                {events.map((e) => {
-                  const c = byEvent.get(e.eventId),
-                    editable =
-                      !readOnly && c?.eligible === true && canCorrect(row);
-                  const code = c?.effectiveCode || "",
-                    label =
-                      code ||
-                      (c?.eligible === true
-                        ? "Blank"
-                        : c?.eligible === false
-                          ? "Not eligible"
-                          : "Eligibility unknown");
-                  const description = [
-                    row.firstName + " " + row.lastName,
-                    e.label,
-                    meanings[code] ? code + " · " + meanings[code] : label,
-                    c?.needsReview ? "Needs review" : "",
-                  ]
-                    .filter(Boolean)
-                    .join(", ");
-                  const content = code || (c?.eligible === true ? "·" : "—");
-                  const tabStop = first && editable;
-                  if (editable) first = false;
-                  return (
-                    <td
-                      key={e.eventId}
-                      className="mark-cell"
-                      data-mark={
-                        code || (c?.eligible === true ? "blank" : "excluded")
-                      }
-                      data-review={c?.needsReview ? "true" : undefined}
-                      title={description}
-                    >
-                      {editable ? (
-                        <button
-                          type="button"
-                          data-event={e.eventId}
-                          tabIndex={tabStop ? 0 : -1}
-                          aria-label={description}
-                          onFocus={(ev) => {
-                            if (focused.current?.isConnected)
-                              focused.current.tabIndex = -1;
-                            ev.currentTarget.tabIndex = 0;
-                            focused.current = ev.currentTarget;
-                          }}
-                          onClick={() => onEdit(row, e, code)}
-                        >
-                          {content}
-                        </button>
-                      ) : (
-                        <span aria-label={description}>{content}</span>
-                      )}
-                    </td>
-                  );
-                })}
-              </tr>
-            );
-          })}
+          {children}
         </tbody>
       </table>
     </div>

@@ -254,7 +254,14 @@ try {
   await page.keyboard.press("Escape");
   await page.getByRole("button",{name:"Attendance code key", expanded:false}).waitFor();
   const matrix = page.locator(".attendance-matrix");
-  await page.locator(".attendance-rate-key").getByText("100%", {exact:true}).waitFor();
+  assert.deepEqual(await matrix.locator("thead th:not([title])").allTextContents(), ["Cadet","Overall","LLAB"]);
+  assert.equal(await page.locator(".attendance-rate-key").count(), 0);
+  const yearFilter = page.getByLabel("AS year", {exact:true});
+  const unfiltered = await matrix.locator("tbody tr").count();
+  await yearFilter.selectOption({index:1});
+  assert(await matrix.locator("tbody tr").count() > 0);
+  assert(await matrix.locator("tbody tr").count() <= unfiltered);
+  await yearFilter.selectOption("");
   assert.deepEqual(await colors(matrix.locator('[data-mark="blank"]').first()), ["rgb(240, 241, 242)", "rgb(66, 74, 81)"]);
   assert.deepEqual(await matrix.locator("thead th[title]").evaluateAll(headers=>
     [...new Set(headers.map(h=>h.getBoundingClientRect().width))]),[68]);

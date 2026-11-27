@@ -1402,10 +1402,12 @@ html:has(dialog:modal) {
 .search-count {white-space:nowrap;font-variant-numeric:tabular-nums}
 .matrix-scroll {overflow:auto;max-height:70vh;border:1px solid var(--border);border-radius:6px;isolation:isolate}
 .attendance-matrix {border-spacing:0;border-collapse:separate;width:max-content;min-width:100%;font-variant-numeric:tabular-nums}
-.attendance-matrix thead th {position:sticky;top:0;z-index:2;padding:.5rem .45rem;background:#244f40;color:white;white-space:normal;max-width:6.5rem;text-transform:none;letter-spacing:normal}
+.attendance-matrix thead th {position:sticky;top:0;z-index:2;padding:.5rem .45rem;background:#edf2f7;color:var(--navy);white-space:normal;max-width:6.5rem;text-transform:none;letter-spacing:normal}
 .attendance-matrix th:first-child {position:sticky;left:0;text-align:left;min-width:9rem}
 .attendance-matrix thead th:first-child {z-index:3}
 .attendance-matrix tbody th {z-index:1;background:white;text-transform:none;font-size:.82rem;letter-spacing:normal;border-top:1px solid var(--border);padding:.25rem .5rem}
+.attendance-matrix tbody th {color:var(--navy);font-weight:600}
+.attendance-matrix .history-code {height:1.85rem}
 .attendance-matrix td {text-align:center;padding:.18rem .35rem}
 .attendance-matrix .mark-cell {padding:0;border:1px solid white;border-width:1px 1px 0 0;min-width:3.5rem;background:#f8f9fa;font-weight:700}
 .mark-cell button,.mark-cell>span {display:block;box-sizing:border-box;width:100%;min-height:1.85rem;padding:.23rem;border:0;border-radius:0;background:transparent;color:inherit;font:inherit;text-align:center}
@@ -1423,9 +1425,6 @@ html:has(dialog:modal) {
 .attendance-matrix .mark-cell[data-mark],.history-code[data-mark] {
   background-color:var(--mark-bg,#f0f1f2); color:var(--mark-ink,#424a51); font-weight:750;
 }
-.attendance-rate-key {padding:.55rem 0 .3rem;color:#344963;font-size:.8rem}
-.attendance-rate-bar {height:.5rem;border-radius:2px;margin:.25rem 0}
-.attendance-rate-ticks {display:flex;justify-content:space-between;gap:.35rem;font-variant-numeric:tabular-nums}
 .code-key {display:grid;gap:.45rem;margin:0;font-size:.85rem}
 .code-key div {display:flex;align-items:center;gap:.4rem}
 .code-key dt {background:var(--mark-bg,#f0f1f2);color:var(--mark-ink,#424a51);border-radius:3px;padding:.2rem .4rem;min-width:2.2em;text-align:center;font-weight:700}
@@ -1445,7 +1444,7 @@ html:has(dialog:modal) {
 .coverage {color:var(--muted);font-size:.78rem;margin:.8rem 0 0}
 
 .attendance-matrix {table-layout:fixed;min-width:0}
-.attendance-matrix thead th {max-width:none;line-height:1.22;padding:.42rem .18rem;font-size:.76rem}
+.attendance-matrix thead th {max-width:none;line-height:1.22;padding:.42rem .3rem;font-size:.76rem}
 .event-line {display:block;min-height:1.22em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-align:center}
 .attendance-matrix .matrix-percent,.formation {font-weight:650;text-align:center;font-variant-numeric:tabular-nums}
 .drawer:not(:modal) {box-shadow:-5px 0 20px #182b4524}
