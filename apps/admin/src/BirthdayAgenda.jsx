@@ -7,7 +7,7 @@ import { birthdayAgenda, birthdayGroups, calendarWeeks } from "./birthday-agenda
 const formatter = options => new Intl.DateTimeFormat("en-US", {timeZone:"UTC", ...options});
 const monthTitle = formatter({month:"long", year:"numeric"});
 const shortDate = formatter({month:"short", day:"numeric"});
-const weekday = formatter({weekday:"short"});
+const numericDate = formatter({month:"numeric", day:"numeric"});
 const midnight = date => new Date(date + "T00:00Z");
 
 export default function BirthdayAgenda({calendar, flights, squadrons, now}) {
@@ -68,10 +68,8 @@ export default function BirthdayAgenda({calendar, flights, squadrons, now}) {
       </div>
       <section className="birthday-names" aria-live="polite">
         <h4>{heading}</h4>
-        {list.length ? list.map(({date,people}) => <div className="birthday-group" key={date}>
-          <time dateTime={date}>{weekday.format(midnight(date))} · {shortDate.format(midnight(date))}</time>
-          <ul>{people.map((p,i) => <li key={i} style={{"--birthday-flight":flightInks.get(p.flightId)}}>C/{surnames.get(p.lastName)>1 && p.firstName ? p.firstName + " " : ""}{p.lastName}</li>)}</ul>
-        </div>) : <p>{selected ? "No birthdays this week." : month ? "No birthdays this month." : "No birthdays recorded."}</p>}
+        {list.length ? <ul>{list.flatMap(({date,people}) => people.map((p,i) =>
+          <li key={date+"-"+i} style={{"--birthday-flight":flightInks.get(p.flightId)}}>C/{surnames.get(p.lastName)>1 && p.firstName ? p.firstName + " " : ""}{p.lastName} <time dateTime={date}>({numericDate.format(midnight(date))})</time></li>))}</ul> : <p>{selected ? "No birthdays this week." : month ? "No birthdays this month." : "No birthdays recorded."}</p>}
       </section>
     </div>
   </section>;

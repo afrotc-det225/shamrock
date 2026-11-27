@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef } from "react";
+import React, { useEffect, useState, useRef, useMemo } from "react";
 import { compareCadetsForDisplay } from "../../../packages/domain/src/cadet-display-order";
 import { api, logout, eventTypes } from "./api";
 import { Drawer, Empty, Field, Heading, Select, Status, Table } from "./components";
@@ -11,6 +11,8 @@ import { ViewAsAccount } from "./ViewAs";
 import {personalPages} from "./site-navigation";
 import { ExternalLink } from "lucide-react";
 import { attendanceMeanings } from "./AttendanceMatrix";
+import {loadReportDraft, restoreSelections, rosterSignature} from "./report-draft";
+import CadetDirectory from "./CadetDirectory";
 import { FlightHome } from "./FlightHome";
 import { calculateAttendanceCredit } from "../../../packages/domain/src/frontend-reporting";
 import { ATTENDANCE_CODES } from "../../../packages/domain/src/index";
@@ -202,6 +204,7 @@ function Submission({ state, mode, save, disabled }) {
           {Array.from({ length: count }, (_, i) => (
             <ExcusalEvent key={i} number={count===1?null:i+1} events={state.events}/>
           ))}
+          <div className="cadet-inline-actions">
           {mode === "excusal" && count < Math.min(state.events.length, 25) && (
             <button type="button" onClick={() => setCount(count + 1)}>
               Add event
@@ -212,6 +215,7 @@ function Submission({ state, mode, save, disabled }) {
               Remove last event
             </button>
           )}
+          </div>
           {mode === "excusal" && (
             <Field label="Requested code">
               <select name="outcome" defaultValue="E">
@@ -292,28 +296,47 @@ function AttendanceReviews({state,save,disabled}) {
     <p>{a.event} · Requested code: <strong>{a.change.code}</strong></p><p>{a.detail}</p>
     {["Approved","Denied"].map(decision=><button key={decision} disabled={disabled} onClick={()=>save("reviewFlag",{parentId:a.actionId,decision})}>{decision==="Approved"?"Approve correction":"Deny request"}</button>)}</section>) : <Empty>No attendance corrections awaiting Squadron review.</Empty>;
 }
-function FlightReport({ state, save, disabled }) {
-  const [type,setType]=useState(""), [eventId,setEvent]=useState("");
+function FlightReport({ state, save, disabled, previewId }) {
+  const key = "shamrock.reportDraft.v1." + (previewId ? "preview."+previewId+"." : "") + state.profile.personId;
+  const storage = () => previewId ? sessionStorage : localStorage;
+  const [draft,setDraft] = useState(()=>loadReportDraft(storage,key));
+  const events=state.reportEvents || [];
+  const initialEvent=events.find(event=>event.eventId===draft?.eventId);
+  const [type,setType]=useState(initialEvent?.eventType || ""), [eventId,setEvent]=useState(initialEvent?.eventId || "");
+  const [draftNotice,setDraftNotice]=useState("");
+  const restore=useRef(draft);
   const [details,setDetails]=useState(null), [error,setError]=useState(""), [attempt,retry]=useState(0);
   const [present,setPresent]=useState([]), [complete,setComplete]=useState(false);
   const [search,setSearch]=useState("");
-  const events=state.reportEvents || [];
   const event=events.find(e=>e.eventId===eventId);
   function choose(id){
+    restore.current=id===draft?.eventId ? draft : null;setDraftNotice("");
     setEvent(id);setDetails(null);setError("");setPresent([]);setComplete(false);setSearch("");
   }
   useEffect(()=>{
     if(!eventId)return;
     const controller=new AbortController();
     api("/cadet?section="+encodeURIComponent("report:"+eventId),undefined,{signal:controller.signal})
-      .then(v=>{if(!controller.signal.aborted)setDetails(v);})
+      .then(v=>{
+        if(controller.signal.aborted)return;
+        const saved=restore.current;
+        if(saved?.eventId===eventId){
+          const selection=restoreSelections(saved,v);
+          setPresent(selection.present);
+          setComplete(selection.complete);
+          if(selection.changed)setDraftNotice("The event roster changed. Review your selections before submitting.");
+          restore.current=null;
+        }
+        setDetails(v);
+      })
       .catch(e=>{if(!controller.signal.aborted)setError(e.message);});
     return ()=>controller.abort();
   },[eventId,attempt]);
-  const roster=[...(details?.reportRoster || [])].sort(compareCadetsForDisplay);
+  const roster=useMemo(()=>[...(details?.reportRoster || [])].sort(compareCadetsForDisplay),[details]);
+  const signature=useMemo(()=>details ? rosterSignature(details) : "",[details]);
   const groups=new Map();
+  const words=search.trim().toLowerCase().split(/[\s,]+/);
   for(const cadet of roster){
-    const words=search.trim().toLowerCase().split(/[\s,]+/);
     const name=(cadet.firstName+" "+cadet.lastName).toLowerCase();
     if(!words.every(word=>name.includes(word)))continue;
     const year=cadet.asYear || "Unassigned AS year";
@@ -323,12 +346,41 @@ function FlightReport({ state, save, disabled }) {
   const campus=roster[0]?.campus;
   const flight=state.flights.find(f=>f.flightId===state.profile.flightId)?.label;
   const crossFlight=type==="secondary" || (type==="mando" && !!campus);
+  function currentDraft(){
+    return {eventId,present:[...present].sort(),complete,roster:signature};
+  }
+  function storeDraft(){
+    const next={...currentDraft(),id:crypto.randomUUID()};
+    try {
+      storage().setItem(key,JSON.stringify(next));
+      setDraft(next);setDraftNotice("");
+    } catch {setDraftNotice("This browser could not save the draft.");}
+  }
+  function forgetDraft(expected){
+    try {
+      if(JSON.stringify(loadReportDraft(storage,key))===JSON.stringify(expected))storage().removeItem(key);
+      setDraft(loadReportDraft(storage,key));setDraftNotice("");
+    } catch {setDraftNotice("This browser could not clear the saved draft.");}
+  }
+  const savedHere=draft && draft.eventId===eventId;
+  const matches=savedHere && details && draft.roster===signature && draft.complete===complete
+    && JSON.stringify(draft.present)===JSON.stringify([...present].sort());
   return <section><form className="cadet-form" onSubmit={e=>{
     e.preventDefault();
     if(!event || !roster.length)return;
     save("report",{eventId,version:roster[0].version,rosterVersions:Object.fromEntries(details.flights.map(f=>[f.flightId,f.rosterVersion])),
-      present,completeness:complete?"complete":"partial"},()=>choose(""));
+      present:[...present].sort(),completeness:complete?"complete":"partial"},()=>{
+        if(savedHere)forgetDraft(draft);
+        choose(""); setType("");
+      }, matches ? draft.id : undefined);
   }}>
+    {draft && !savedHere && <div className="draft-banner">
+      <span>{events.find(e=>e.eventId===draft.eventId)?.label || "Unavailable event"} · Saved draft</span>
+      {events.some(e=>e.eventId===draft.eventId) && <button type="button" onClick={()=>{
+        setType(events.find(e=>e.eventId===draft.eventId).eventType);choose(draft.eventId);
+      }}>Resume draft</button>}
+      <button type="button" onClick={()=>forgetDraft(draft)}>Discard draft</button>
+    </div>}
     <EventPicker label="Attendance event" {...{events,type,setType,eventId,choose}}/>
     {event && !details && !error && <p role="status">Loading event roster…</p>}
     {error && <p role="alert">{error} <button type="button" onClick={()=>{setError("");retry(n=>n+1);}}>Retry</button></p>}
@@ -336,22 +388,31 @@ function FlightReport({ state, save, disabled }) {
       <h2>{type==="secondary"?"All Flights":type==="mando" && campus ? campus+" · All Flights" : flight+" Flight"}</h2>
       <Field label="Find a cadet"><input type="search" value={search} onChange={e=>setSearch(e.target.value)}/></Field>
       {!groups.size && <Empty>No matching cadets.</Empty>}
-      {Array.from(groups,([year,people])=><fieldset key={year}><legend>{year}</legend>{people.map(r=><label key={r.personId}>
-        <input type="checkbox" checked={present.includes(r.personId)} onChange={e=>setPresent(e.target.checked?[...present,r.personId]:present.filter(p=>p!==r.personId))}/>
+      {Array.from(groups,([year,people])=><fieldset className="report-checklist" key={year}><legend>{year}</legend>{people.map(r=><label key={r.personId}>
+        <input type="checkbox" checked={present.includes(r.personId)} onChange={e=>{
+          const checked=e.currentTarget.checked;
+          setPresent(ids=>checked ? [...new Set([...ids,r.personId])] : ids.filter(id=>id!==r.personId));
+        }}/>
         {r.lastName}, {r.firstName}</label>)}</fieldset>)}
       {!crossFlight && details.ownFlightCount===roster.length && <Field label="Report coverage"><select value={complete?"all":"selected"} onChange={e=>setComplete(e.target.value==="all")}>
         <option value="selected">Selected cadets only</option><option value="all">Entire Flight accounted for</option></select></Field>}
       {complete && <p role="status">{present.length} of {roster.length} marked present. Other attendance codes stay as recorded.</p>}
-      <button className="primary" disabled={disabled || (!present.length && !complete)}>Submit attendance</button>
+      <div className="cadet-inline-actions">
+        <button className="primary" disabled={disabled || (!present.length && !complete)}>Submit attendance</button>
+        <button type="button" disabled={disabled || matches} onClick={storeDraft}>{draft && !savedHere ? "Replace saved draft" : "Save for later"}</button>
+      </div>
+      {savedHere && <small role="status">{matches ? "Draft saved on this device." : "Draft has unsaved changes."}</small>}
     </> : <Empty>No eligible cadets for this event.</Empty>)}
+    {draftNotice && <p role="status">{draftNotice}</p>}
   </form></section>;
 }
 function Flight({ state, save, disabled }) {
   return (
-    <FlightHome {...{state,save,disabled}}>
-      {state.actions.some(a=>a.kind==="flag" && !a.change && !a.resolution) && <h2>Earlier Flight review requests</h2>}
+    <FlightHome>
+      <h2>Flagged attendance</h2>
+      {!state.actions.some(a=>a.kind==="flag" && a.flightId===state.profile.flightId && !a.resolution) && <Empty>No open Flight flags.</Empty>}
       {state.actions
-        .filter((a) => a.kind === "flag" && !a.change && !a.resolution)
+        .filter((a) => a.kind === "flag" && a.flightId===state.profile.flightId && !a.resolution)
         .map((a) => (
           <form
             key={a.actionId}
@@ -368,10 +429,11 @@ function Flight({ state, save, disabled }) {
               {a.person} · {a.event}
             </strong>
             <p>{a.detail}</p>
+            {a.change ? <p>Requested {a.change.code} · Awaiting Squadron review</p> : <>
             <Field label="Resolution">
               <input name="resolution" required maxLength={500} />
             </Field>
-            <button disabled={disabled}>Mark reviewed</button>
+            <button disabled={disabled}>Mark reviewed</button></>}
           </form>
         ))}
 
@@ -387,7 +449,7 @@ export default function CadetWorkspace({ session }) {
   const pending = useRef(null),
     active = useRef(false),
     preview = !!session.viewAs;
-  const section = tab==="Excusals" ? "excusals" : tab==="My profile" ? "profile" : tab==="Submit attendance" ? "report" : tab==="My attendance" ? "attendance" : "";
+  const section = tab==="Cadets" ? "directory" : tab==="Excusals" ? "excusals" : tab==="My profile" ? "profile" : tab==="Submit attendance" ? "report" : tab==="My attendance" ? "attendance" : "";
   const currentSection=useRef(section);
   currentSection.current=section;
   const load = async () => {
@@ -398,7 +460,7 @@ export default function CadetWorkspace({ session }) {
   useEffect(() => {
     load().catch((e) => {if(currentSection.current===section)setError(e.message);});
   }, [section]);
-  async function save(kind, fields, done) {
+  async function save(kind, fields, done, savedId) {
     if (active.current || !state?.writable || (preview && state?.readOnly !== false)) return;
     active.current = true;
     setBusy(true);
@@ -406,7 +468,7 @@ export default function CadetWorkspace({ session }) {
     setNotice("");
     const signature = JSON.stringify([kind, fields]);
     if (pending.current?.signature !== signature)
-      pending.current = { signature, actions: (Array.isArray(fields) ? fields : [fields]).map(item=>({kind,fields:item,id:crypto.randomUUID()})), next:0 };
+      pending.current = { signature, actions: (Array.isArray(fields) ? fields : [fields]).map(item=>({kind,fields:item,id:savedId || crypto.randomUUID()})), next:0 };
     const batch=pending.current;
     try {
       while(batch.next<batch.actions.length){
@@ -537,9 +599,10 @@ export default function CadetWorkspace({ session }) {
           }
         />
       )}
+      {page==="Cadets" && (state.section==="directory" ? <CadetDirectory rows={state.directory}/> : <p role="status">Loading Directory…</p>)}
       {page==="Attendance reviews" && <AttendanceReviews state={state} save={save} disabled={disabled}/>}
       {page==="My attendance" && (state.section==="attendance" ? <PersonalAttendance state={state} flags={flags} save={save} disabled={disabled}/> : <p role="status">Loading attendance…</p>)}
-      {page==="Submit attendance" && (state.section==="report" ? <FlightReport state={state} save={save} disabled={disabled}/> : <p role="status">Loading Flight roster…</p>)}
+      {page==="Submit attendance" && (state.section==="report" ? <FlightReport key={(session.viewAs?.entryAuditId || "self")+state.profile.personId} previewId={session.viewAs?.entryAuditId} state={state} save={save} disabled={disabled}/> : <p role="status">Loading Flight roster…</p>)}
       {page === "My Flight" && !state.section && (
         <Flight state={state} save={save} disabled={disabled} />
       )}

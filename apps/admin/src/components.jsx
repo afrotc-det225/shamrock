@@ -174,7 +174,7 @@ export function Editor({
     </Drawer>
   );
 }
-export function Table({ headers, children, className = "" }) {
+export function Table({ zoom, headers, children, className = "" }) {
   const ref = useRef();
   useEffect(() => {
     const container = ref.current,
@@ -182,7 +182,7 @@ export function Table({ headers, children, className = "" }) {
     const controls = container.closest("main")?.querySelector(".page-controls");
     const measure = () => {
       container.dataset.horizontal = String(
-        table.scrollWidth > container.clientWidth + 1,
+        table.getBoundingClientRect().width > container.clientWidth + 1,
       );
       container.style.setProperty(
         "--controls-height",
@@ -197,8 +197,8 @@ export function Table({ headers, children, className = "" }) {
     return () => observer.disconnect();
   }, []);
   return (
-    <div ref={ref} className={`table-scroll ${className}`}>
-      <table>
+    <div ref={ref} className={`table-scroll ${className}`} style={{"--table-scale":zoom || 1}}>
+      <table style={{zoom}}>
         <thead>
           <tr>
             {headers.map((h, index) => (

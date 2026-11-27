@@ -70,6 +70,11 @@ try {
     assert(sizes[0]>=125 && sizes[0]<=160 && sizes[1]>=48 && sizes[1]<=50 && sizes[2]===sizes[1]);
     assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
   }
+  const filters=page.getByRole("button",{name:"Filters",exact:true});
+  const eventWidth=()=>current.locator("thead th").last().evaluate(th=>th.getBoundingClientRect().width);
+  const normalWidth=await eventWidth();
+  await filters.click(); await page.getByLabel("Table zoom").selectOption("75"); await filters.click();
+  assert(Math.abs(await eventWidth()-normalWidth*.75)<2);
   const beforeFocus = await toolbar.boundingBox();
   const scale = await page.evaluate(() => visualViewport.scale);
   await search.tap();
@@ -91,7 +96,6 @@ try {
   assert.equal(await page.locator("nav a[aria-current=page]").innerText(),"Attendance");
   await page.getByRole("button",{name:"Close navigation"}).click();
   assert.deepEqual(await canvasColors(),whiteCanvas);
-  const filters = page.getByRole("button",{name:"Filters",exact:true});
   const flight = page.getByLabel("Flight",{exact:true});
   assert.equal(await flight.isVisible(),false);
   await filters.click();
@@ -102,6 +106,7 @@ try {
   await archive.getByRole("cell",{name:"P",exact:true}).waitFor();
   assert.equal(await archive.locator("tbody button").count(),0);
   await archive.getByRole("button",{name:"Attendance code key"}).waitFor();
+  assert.equal(await archive.evaluate(table=>Number(getComputedStyle(table).zoom)),.75);
   await picker.selectOption("spring");
   await archive.getByRole("cell",{name:"E",exact:true}).waitFor();
   await page.goBack();

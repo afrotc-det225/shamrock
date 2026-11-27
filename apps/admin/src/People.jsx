@@ -1,3 +1,4 @@
+import {useTableZoom} from "./TableZoom";
 import { ToolbarFilters } from "./ToolbarFilters";
 import React, { useState,useEffect } from "react";
 import { Plus, Pencil, Columns3 } from "lucide-react";
@@ -133,6 +134,7 @@ export default function People({
     setSquadron(id);
     if (id && !s.flights.some(f => f.flightId === flight && f.squadronId === id)) setFlight("");
   }
+  const zoom = useTableZoom("cadets");
   const [columns,setColumns]=useState(initialColumns), [descending,setDescending]=useState(false);
   const [transferMessage,setTransferMessage]=useState("");
   const hasCadet = columns.includes("cadet");
@@ -259,6 +261,7 @@ export default function People({
               <Select label="Roster status" value={status} onChange={setStatus} options={[{value:"current",label:"Current roster"},{value:"all",label:"All statuses"},...statuses]}/>
               <Select label="Sort by" value={sort} onChange={key=>{setSort(key);setDescending(false);}} options={[{value:"seniority",label:"Default"},...columnKeys.map(k=>({value:k,label:columnLabel(k)}))]}/>
             </>}
+            {zoom.control}
           </ToolbarFilters>
           <div className="toolbar-actions">
             {!leadership && (
@@ -290,7 +293,7 @@ export default function People({
       {waitingForField && (fieldError
         ? <p role="alert">{fieldError} <button onClick={()=>setRetry(retry+1)}>Retry</button></p>
         : <span className="page-transfer" role="status">Loading directory fields…</span>)}
-      {leadership && view==="Organization" ? <LeadershipChart records={rows} roster={s}/> : <Table
+      {leadership && view==="Organization" ? <LeadershipChart records={rows} roster={s}/> : <Table zoom={zoom.scale}
         className={leadership ? "leadership-roster" : hasCadet ? "cadet-roster with-cadet" : "cadet-roster"}
         headers={
           leadership

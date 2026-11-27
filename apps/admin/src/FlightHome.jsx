@@ -1,9 +1,8 @@
 import React, { useEffect, useState } from "react";
 import { RefreshCw } from "lucide-react";
 import { api, displayDate } from "./api";
-import { Empty, Field, Table } from "./components";
+import { Empty, Table } from "./components";
 import { attendanceMeanings } from "./AttendanceMatrix";
-import { flightRoleOptions } from "../../../packages/domain/src/flight-roles";
 import { compareCadetsForDisplay } from "../../../packages/domain/src/cadet-display-order";
 
 function RollCall() {
@@ -98,111 +97,6 @@ function RollCall() {
   );
 }
 
-function FlightRoles({ state, save, disabled }) {
-  const flight = state.flights.find(
-    (f) => f.flightId === state.profile.flightId,
-  );
-  const roles = flightRoleOptions(flight.label);
-  const [person, setPerson] = useState(""),
-    [role, setRole] = useState("");
-  const editable = state.roster.filter(
-    (r) => !r.role || roles.includes(r.role),
-  );
-  const target = editable.find((r) => r.personId === person);
-  return (
-    <section>
-      <h2>Flight roles</h2>
-      <form
-        className="cadet-form"
-        onSubmit={(e) => {
-          e.preventDefault();
-          if (target)
-            save(
-              "flightRole",
-              { personId: person, version: target.version, role },
-              () => {
-                setPerson("");
-                setRole("");
-              },
-            );
-        }}
-      >
-        <Field label="Cadet">
-          <select
-            aria-label="Cadet"
-            required
-            value={person}
-            onChange={(e) => {
-              setPerson(e.target.value);
-              setRole(
-                editable.find((r) => r.personId === e.target.value)?.role || "",
-              );
-            }}
-          >
-            <option value="">Choose a cadet</option>
-            {editable.map((r) => (
-              <option key={r.personId} value={r.personId}>
-                {r.name}
-              </option>
-            ))}
-          </select>
-        </Field>
-        {target && (
-          <Field label="Flight role">
-            <select aria-label="Flight role" value={role} onChange={(e) => setRole(e.target.value)}>
-              <option value="">Unassigned</option>
-              {roles.map((title) => (
-                <option key={title}>{title}</option>
-              ))}
-            </select>
-          </Field>
-        )}
-        <button
-          className="primary"
-          disabled={disabled || !target || role === (target?.role || "")}
-        >
-          Save role
-        </button>
-      </form>
-      <Table headers={["Cadet", "Directory role"]}>
-        {state.roster.map((r) => (
-          <tr key={r.personId}>
-            <td>{r.name}</td>
-            <td>{r.role || "Unassigned"}</td>
-          </tr>
-        ))}
-      </Table>
-    </section>
-  );
-}
-
-export function FlightHome({ state, save, disabled, children }) {
-  const [view, setView] = useState("attendance");
-  return (
-    <>
-      <div className="flight-sections" role="group" aria-label="My Flight">
-        {[
-          ["attendance", "Attendance"],
-          ["roles", "Flight roles"],
-        ].map(([key, text]) => (
-          <button
-            key={key}
-            type="button"
-            aria-pressed={view === key}
-            onClick={() => setView(key)}
-          >
-            {text}
-          </button>
-        ))}
-      </div>
-      {view === "roles" ? (
-        <FlightRoles {...{ state, save, disabled }} />
-      ) : (
-        <>
-          <RollCall />
-          {children}
-        </>
-      )}
-    </>
-  );
+export function FlightHome({children}) {
+  return <><RollCall />{children}</>;
 }

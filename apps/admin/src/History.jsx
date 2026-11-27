@@ -1,3 +1,4 @@
+import {useTableZoom} from "./TableZoom";
 import {ToolbarFilters} from "./ToolbarFilters";
 import React, { useEffect, useState } from "react";
 import { rateStyle } from "./roster-colors";
@@ -13,6 +14,7 @@ const percentage = (value) => typeof value === "number" && Number.isFinite(value
   ? `${(value * 100).toFixed(1)}%` : value === null || value === undefined ? "—" : String(value);
 
 export default function HistoricalAttendance({item, initialReport, semesterPicker}) {
+  const zoom = useTableZoom("attendance");
   const [report, setReport] = useState(null), [error, setError] = useState(""),
     [query, setQuery] = useState(""), [filters, setFilters] = useState(defaultRosterFilters),
     [attempt,setAttempt] = useState(0);
@@ -39,7 +41,8 @@ export default function HistoricalAttendance({item, initialReport, semesterPicke
         <SearchBox placeholder="Find a cadet" value={query} onChange={setQuery} />
         <ToolbarFilters active={Boolean(filters.year || filters.flight || filters.sort !== "seniority")}>
           <MatrixRosterFilters rows={roster} value={filters} onChange={setFilters} />
-        </ToolbarFilters>
+          {zoom.control}
+          </ToolbarFilters>
       </div>
     </section>
     {error && <div className="error" role="alert">{error} <button onClick={() => setAttempt(value=>value+1)}>Retry</button></div>}
@@ -49,7 +52,7 @@ export default function HistoricalAttendance({item, initialReport, semesterPicke
         <p className="notice">{current.summary.unresolvedRows > 0 ? `${current.summary.unresolvedRows} historical identities are not linked to the current Directory. ` : ""}
           {current.summary.formulaMismatches > 0 ? `${current.summary.formulaMismatches} saved percentages differ from their recorded formulas. ` : ""}
           Original values are retained.</p>}
-      <MatrixTable label="History" events={events}>
+      <MatrixTable zoom={zoom.scale} label="History" events={events}>
         {rows.map(row => <tr key={row.rowId}>
           <th scope="row">{[row.firstName, row.lastName].filter(Boolean).join(" ")}
             {row.identityStatus === "unresolved" && <small className="history-unlinked">Historical record</small>}</th>

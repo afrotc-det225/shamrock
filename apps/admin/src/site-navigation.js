@@ -16,6 +16,7 @@ export function personalPages(state) {
     ...(state.flightCommander ? [["My Flight", Users]] : []),
     ...(state.squadron || state.flightCommander ? [["Excusals", FileCheck2]] : []),
     ["My requests", ClipboardList], ["My attendance", ClipboardList], ["Submit attendance", ClipboardList],
+    ["Cadets", Users],
     ...(state.squadron ? [["Attendance reviews", FileCheck2]] : []),
     ["My profile", UserRound],
   ];

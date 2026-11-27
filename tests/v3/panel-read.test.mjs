@@ -506,6 +506,8 @@ test('campus enrollment, personal excusal, Flight review and duties use the veri
     const route=(action,who=identity)=>f.send({...who,...(action?{action}:{})},'/v1/cadet/workspace');
     const action=(kind,fields)=>({kind,fields,id:crypto.randomUUID()});
     assert((await route()).body.registration);
+    const directory=()=>route(null,{...identity,section:"directory"});
+    assert.equal((await directory()).body.directory,undefined);
     const register=action('register',{firstName:'Fictional',lastName:'Applicant',asYear:'AS100',flightId:'alpha',university:'Notre Dame',
       classYear:'2030',phone:'2025550100',dateOfBirth:'2006-01-01',homeTown:'Fictional',homeState:'Indiana',cipCode:'11.0101',afsc:'Undecided'});
     assert.equal((await route({...register,fields:{...register.fields,role:'Blue Squadron Commander'}})).status,400);
@@ -515,6 +517,9 @@ test('campus enrollment, personal excusal, Flight review and duties use the veri
     }
     const saved=await route(register);assert.equal(saved.status,200,JSON.stringify(saved));
     assert.equal((await route(register)).body.commandId,saved.body.commandId);
+    const peers=(await directory()).body.directory;
+    assert(peers.length>1);
+    for (const peer of peers) assert.deepEqual(Object.keys(peer).sort(),["asYear","firstName","flight","lastName","personId","rank","role","squadron"]);
     const self=(await route()).body;assert(self.linked);assert.equal(self.squadron,null);assert.equal(self.queue.length,0);
     await f.db.batch([
       f.db.prepare("INSERT INTO events VALUES('portal-event','Fictional workshop',1)"),
@@ -586,6 +591,9 @@ test('cadet cell requests preserve the mark until their Squadron Commander appro
   const first=await cell();
   const flag=action('flag',{eventId:first.eventId,eventVersion:first.version,baseVersion:first.baseVersion,code:'P',detail:'Fictional reason'});
   const submit=await call('cadet',flag);assert.equal(submit.status,200,JSON.stringify(submit));assert.equal((await cell()).code,null);
+  const seesFlag=async who=>(await call(who)).body.actions.some(row=>row.actionId===submit.body.commandId);
+  assert.equal(await seesFlag('flight'),true);
+  assert.equal(await seesFlag('gold'),false);
   const review=action('reviewFlag',{parentId:submit.body.commandId,decision:'Approved'});
   for(const who of ['gold','cadet','flight'])assert.equal((await call(who,review)).status,403);
   const second=await call('cadet',{...flag,id:crypto.randomUUID()});

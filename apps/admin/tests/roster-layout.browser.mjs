@@ -139,6 +139,8 @@ try {
       await filters.waitFor();
       if (path==="cadets" && width===320) {
         await filters.click();
+        await page.getByLabel("Table zoom").selectOption("85");
+        assert.equal(await page.locator(".cadet-roster table").evaluate(el=>Number(getComputedStyle(el).zoom)),.85);
         await page.getByRole("combobox",{name:"Squadron",exact:true}).selectOption("blue");
         await filters.click();
         await page.getByLabel("Find a cadet",{exact:true}).fill("Sample");

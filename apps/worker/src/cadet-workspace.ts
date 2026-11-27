@@ -101,7 +101,7 @@ export async function readCadetWorkspace(
     ORDER BY p.principal_id LIMIT 3`,
     )
     .bind(principal, email, email);
-  const personal=section==="profile" || section==="attendance" || section==="flight";
+  const personal=section==="directory" || section==="profile" || section==="attendance" || section==="flight";
   const flights = db.prepare(
     "SELECT u.unit_id AS flightId,u.label,u.roster_version AS rosterVersion,h.squadron_id AS squadronId,s.label AS squadron FROM organizational_units u JOIN flight_hierarchy h ON h.unit_id=u.unit_id JOIN squadrons s ON s.squadron_id=h.squadron_id " + (personal ? " WHERE u.unit_id=(SELECT flight_id FROM directory_profiles WHERE lower(email)=?)" : "") + " ORDER BY u.label",
   );
@@ -193,6 +193,18 @@ export async function readCadetWorkspace(
         throw new HttpError(409, "SNAPSHOT_CHANGED", "Your assignment changed. Reload SHAMROCK.");
       queue = rows.results;
     }
+    let directory;
+    if (section==="directory") {
+      const [peers,...checked] = await db.batch<Row>([db.prepare(`SELECT d.person_id AS personId,d.first_name AS firstName,
+    d.last_name AS lastName,d.as_year AS asYear,d.rank,d.role,u.label AS flight,s.label AS squadron
+    FROM directory_profiles d JOIN memberships m ON m.person_id=d.person_id AND m.unit_id=d.flight_id AND m.active=1
+    JOIN organizational_units u ON u.unit_id=d.flight_id
+    LEFT JOIN flight_hierarchy h ON h.unit_id=u.unit_id LEFT JOIN squadrons s ON s.squadron_id=h.squadron_id
+    WHERE d.flight_path_status NOT IN ('Inactive','Dropped','Commissioned')`),...fence]);
+      if (JSON.stringify(first)!==JSON.stringify(checked.map(r=>r.results)))
+        throw new HttpError(409,"SNAPSHOT_CHANGED","Your assignment changed. Reload the Directory.");
+      directory = peers.results;
+    }
     let flightHome;
     if(section==="flight"){
       if(!flightCommander || !profile.flightId)throw denied();
@@ -209,7 +221,7 @@ export async function readCadetWorkspace(
     const personalData=section==="attendance" ? personalAttendance(profile.personId,capture.slice(fence.length).map(r=>r.results)) : {attendance:[],flags:[]};
     return {registration:false,profile,flights:flightList,writable,linked:accounts.length===1 && accounts[0].principal_id===actor && accounts[0].email===email,
       flightCommander:!!flightCommander,squadron:squadronCommander ? String(owner.squadron) : null,squadronId:squadronCommander ? owner.squadron_id : null,
-      section,...flightHome,attendance:personalData.attendance,actions:personalData.flags.map(workspaceAction),reportEvents:[],reportRoster:[],ownFlightCount:null,roster:[],requests:[],events:[],queue};
+      section,...(section==="directory" ? {directory} : {}),...flightHome,attendance:personalData.attendance,actions:personalData.flags.map(workspaceAction),reportEvents:[],reportRoster:[],ownFlightCount:null,roster:[],requests:[],events:[],queue};
   }
   const reporting=section==="report" || reportSection(section);
   const data = reporting ? [] : [
@@ -234,7 +246,7 @@ export async function readCadetWorkspace(
     a.flight_id AS flightId,a.subject_person_id AS personId,p.display_name AS person,a.event_id AS eventId,e.label AS event,resolved.detail AS resolution
     FROM cadet_workspace_actions a JOIN people p ON p.person_id=a.subject_person_id LEFT JOIN events e ON e.event_id=a.event_id
     LEFT JOIN cadet_workspace_actions resolved ON resolved.parent_id=a.action_id WHERE a.kind IN ('flag','duty')
-    AND (a.subject_person_id=? OR (a.flight_id=? AND a.action_id NOT LIKE 'cell.%') OR (a.kind='flag' AND a.action_id LIKE 'cell.%' AND CASE WHEN json_valid(a.detail) THEN json_extract(a.detail,'$.squadronId') END=?)) AND (a.kind!='duty' OR NOT EXISTS(
+    AND (a.subject_person_id=? OR a.flight_id=? OR (a.kind='flag' AND a.action_id LIKE 'cell.%' AND CASE WHEN json_valid(a.detail) THEN json_extract(a.detail,'$.squadronId') END=?)) AND (a.kind!='duty' OR NOT EXISTS(
       SELECT 1 FROM cadet_workspace_actions newer WHERE newer.kind='duty' AND newer.subject_person_id=a.subject_person_id
       AND newer.flight_id=a.flight_id AND newer.rowid>a.rowid)) ORDER BY a.accepted_at DESC`,
       )
@@ -351,7 +363,7 @@ export async function cadetRoute(
       )
     : null;
   const section=object(a) ? (a.kind==="report" && object(a.fields) ? "report:"+a.fields.eventId : undefined) : input.section;
-  if(section!=null && !reportSection(section) && !["profile","attendance","report","flight","excusals"].includes(String(section))) throw bad();
+  if(section!=null && !reportSection(section) && !["profile","attendance","report","flight","excusals","directory"].includes(String(section))) throw bad();
   const state = await readCadetWorkspace(env, input.email, input.principalId, section);
   if (
     !state.linked &&

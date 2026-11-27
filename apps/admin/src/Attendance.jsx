@@ -1,3 +1,4 @@
+import {useTableZoom} from "./TableZoom";
 import { ToolbarFilters } from "./ToolbarFilters";
 import React, { useState } from "react";
 import { Heading, Select, Field, Editor, Empty, SearchBox } from "./components";
@@ -13,6 +14,7 @@ export default function Attendance({
   busy, run, refresh, notify, viewEntry,
   readOnly = false,
 }) {
+  const zoom = useTableZoom("attendance");
   const s = snapshot || list;
   const [eventType, setEventType] = useState(""),
     [week, setWeek] = useState(""),
@@ -115,10 +117,11 @@ export default function Attendance({
               ]}
             />
             <MatrixRosterFilters rows={roster} value={filters} onChange={value=>{setFilters(value);if(edit)dismiss();}} />
+            {zoom.control}
           </ToolbarFilters>
         </div>
       </section>
-      <AttendanceMatrix
+      <AttendanceMatrix zoom={zoom.scale}
         rows={rows}
         events={columns}
         canCorrect={canCorrect}

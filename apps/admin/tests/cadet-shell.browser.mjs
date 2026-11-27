@@ -9,7 +9,7 @@ await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
 const browser = await chromium.launch(process.env.SHAMROCK_CHROMIUM_PATH
   ? { executablePath: process.env.SHAMROCK_CHROMIUM_PATH } : {});
 const origin = `http://127.0.0.1:${server.address().port}`;
-const requests = ["My requests","My attendance","Submit attendance","My profile"];
+const requests = ["My requests","My attendance","Submit attendance","Cadets","My profile"];
 const scenarios = [
   { role: "Cadet", tabs: requests },
   { role: "Flight", tabs: ["My Flight", "Excusals", ...requests] },
@@ -25,8 +25,8 @@ try {
       const squadron = role === "Squadron" ? "Blue" : role === "View as Squadron" ? "Gold" : null;
       const flight = squadron === "Gold" ? "Delta" : "Alpha";
       let decision;
-      const page = await browser.newPage({ viewport: { width, height: 850 } });
-      const calls = [], errors = [], flags = [], submissions=[], assignments=[];
+      const page = await browser.newPage({ viewport: { width, height: 850 }, hasTouch:width===390 });
+      const calls = [], errors = [], flags = [], submissions=[];
       page.on("pageerror", err => errors.push(err.message));
       await page.route("**/api/**", async route => {
         const path = new URL(route.request().url()).pathname;
@@ -41,8 +41,7 @@ try {
             assert.equal(decision,undefined);
             if (preview) assert.equal(body.entryAuditId,"entry");
             decision = action.fields;
-          } else if(action.kind==="flightRole") assignments.push(action.fields);
-          else if(action.kind==="report") submissions.push(action.fields);
+          } else if(action.kind==="report") submissions.push(action.fields);
           else flags.push(action.fields.eventId);
           return route.fulfill({json:{ok:true}});
         }
@@ -57,7 +56,7 @@ try {
             ]}});
         }
         return route.fulfill({ json: {
-          section,attendance:section==="attendance"?[{eventId:"llab",label:"TW-1 LLAB",eventType:"llab",version:1,baseVersion:0,code:"A"},{eventId:"lab2",label:"TW-2 LLAB",eventType:"llab",version:2,baseVersion:0,code:"A"}]:[],
+          section,directory:[{personId:"peer",rank:"C/AB",firstName:"Directory",lastName:"Peer",asYear:"AS100",flight:"Alpha",squadron:"Blue"}],attendance:section==="attendance"?[{eventId:"llab",label:"TW-1 LLAB",eventType:"llab",version:1,baseVersion:0,code:"A"},{eventId:"lab2",label:"TW-2 LLAB",eventType:"llab",version:2,baseVersion:0,code:"A"}]:[],
           linked: true, writable: true, readOnly:false, registration: role === "Registration",
           profile: role === "Registration" ? null : {personId:"one", firstName:"Sample", lastName:"Cadet", flightId:"alpha",afsc:"13N – Nuclear and Missile Operations ".repeat(6).trim(),photoLink:"https://drive.google.com/file/d/fictional-photo/view"},
           flights: [{ flightId:"alpha", label:"Alpha" }], events: [], actions: [], queue: (squadron || role==="Flight") ? [{requestId:"example",version:3,personId:"cadet",eventId:"llab",event:"TW-2 LLAB",eventStartAt:"2026-10-14T14:00:00Z",
@@ -89,12 +88,8 @@ try {
         await page.getByRole("cell",{name:"Excused",exact:true}).waitFor();
         await page.getByRole("cell",{name:"Present",exact:true}).waitFor();
         await page.getByText("No scheduled Flight events remain this semester.").waitFor();
-        await page.getByRole("button",{name:"Flight roles"}).click();
-        await page.getByLabel("Cadet",{exact:true}).selectOption("member");
-        await page.getByLabel("Flight role",{exact:true}).selectOption("Alpha Flight Accountability Officer");
-        await page.getByRole("button",{name:"Save role"}).click();
-        await page.getByText("Saved.",{exact:true}).waitFor();
-        assert.deepEqual(assignments,[{personId:"member",role:"Alpha Flight Accountability Officer",version:1}]);
+        assert.equal(await page.getByRole("button",{name:"Flight roles"}).count(),0);
+        await page.getByRole("heading",{name:"Flagged attendance"}).waitFor();
       }
       if (role === "Flight") {
         await openNavigation(page);
@@ -130,6 +125,11 @@ try {
         await row.getByTitle(flight,{exact:true}).waitFor();
         assert.equal(await row.locator("td").nth(1).innerText(),"E");
         assert.match(await row.locator("time").innerText(),/9:20 AM EDT/);
+        const bounds=await row.locator(".excusal-status").evaluate(cell=>{
+          const pill=cell.firstElementChild.getBoundingClientRect(),box=cell.closest("tr").getBoundingClientRect();
+          return {right:box.right-pill.right,left:pill.left-box.left};
+        });
+        assert(bounds.right>=5 && bounds.left>=0);
         const actions = row.getByRole("button");
         for (const verb of ["Approve","Deny","Withdraw","Supersede"]) {
           if (verb === "Withdraw" || verb === "Supersede") await row.getByLabel("More decisions").selectOption({label:verb});
@@ -216,11 +216,30 @@ try {
         assert.equal(await seniors.count(),0);
         await page.getByLabel("Find a cadet").fill("");
         assert(await seniors.getByLabel("Able, Amy").isChecked());
+        const target=seniors.locator("label");
+        if(width===390){
+          await target.last().scrollIntoViewIfNeeded();
+          const taps=await target.evaluateAll(labels=>labels.slice(1).map(label=>{
+            const box=label.getBoundingClientRect();
+            return [box.right-8,box.y+box.height/2,box.height];
+          }));
+          for(const [x,y,height] of taps){assert(height>=44);await page.touchscreen.tap(x,y);}
+        } else {await target.nth(1).click();await target.nth(2).click();}
+        await page.getByRole("button",{name:"Save for later"}).click();
+        await page.getByText("Draft saved on this device.").waitFor();
+        await openNavigation(page);
+        await nav.getByRole("link",{name:"Cadets",exact:true}).click();
+        await page.getByRole("cell",{name:"C/AB Directory Peer"}).waitFor();
+        await openNavigation(page);
+        await nav.getByRole("link",{name:"Submit attendance",exact:true}).click();
+        await page.getByText("Draft saved on this device.").waitFor();
+        assert.equal(await page.locator(".report-checklist input:checked").count(),3);
         await page.getByLabel("Find a cadet").fill("Tom");
         await page.getByRole("button",{name:"Submit attendance",exact:true}).click();
         await page.waitForFunction(()=>!document.querySelector('[name="event"]')?.value);
-        assert.deepEqual(submissions[0].present,["fixture3"]);
+        assert.deepEqual(submissions[0].present.sort(),["fixture1","fixture2","fixture3"]);
         assert.equal(submissions[0].completeness,"partial");
+        assert(await page.evaluate(()=>[localStorage,sessionStorage].every(store=>Object.keys(store).every(k=>!k.startsWith("shamrock.reportDraft.")))));
         await page.getByLabel("Event type",{exact:true}).selectOption("secondary");
         assert.equal(await picker.inputValue(),"");
         assert.equal(await page.getByRole("checkbox").count(),0);
@@ -238,7 +257,7 @@ try {
       });
       assert(layout.fits && (width === 390 ? layout.stacked : layout.alongside), JSON.stringify(layout));
       assert.deepEqual(errors, []);
-      assert.deepEqual(calls, ["POST /api/session", "GET /api/cadet",...(role==="Flight"?["GET /api/cadet?section=flight","GET /api/cadet?section=flight","POST /api/cadet","GET /api/cadet","GET /api/cadet?section=excusals","GET /api/cadet"]:[]),...(squadron?["POST /api/cadet","GET /api/cadet"]:[]),...(tabs.length?["GET /api/cadet?section=profile","GET /api/cadet","GET /api/cadet?section=profile","GET /api/cadet?section=attendance","POST /api/cadet","POST /api/cadet","GET /api/cadet?section=attendance","GET /api/cadet?section=report","GET /api/cadet?section=report:lab16","POST /api/cadet","GET /api/cadet?section=report"]:[])]);
+      assert.deepEqual(calls, ["POST /api/session", "GET /api/cadet",...(role==="Flight"?["GET /api/cadet?section=flight","GET /api/cadet?section=flight","GET /api/cadet?section=excusals","GET /api/cadet"]:[]),...(squadron?["POST /api/cadet","GET /api/cadet"]:[]),...(tabs.length?["GET /api/cadet?section=profile","GET /api/cadet","GET /api/cadet?section=profile","GET /api/cadet?section=attendance","POST /api/cadet","POST /api/cadet","GET /api/cadet?section=attendance","GET /api/cadet?section=report","GET /api/cadet?section=report:lab16","GET /api/cadet?section=directory","GET /api/cadet?section=report","GET /api/cadet?section=report:lab16","POST /api/cadet","GET /api/cadet?section=report"]:[])]);
       await page.close();
     }
   }

@@ -92,7 +92,7 @@ export function AttendanceMatrix(props) {
   return <SelectableMatrix key={key} {...props}/>;
 }
 
-function SelectableMatrix({rows, events, canCorrect, onSelection, readOnly}) {
+function SelectableMatrix({zoom, rows, events, canCorrect, onSelection, readOnly}) {
   const focused = useRef(null), anchor=useRef(null), activeAxis=useRef(null);
   const [selection,setSelection]=useState(()=>new Set());
   const cols=events.length;
@@ -141,7 +141,7 @@ function SelectableMatrix({rows, events, canCorrect, onSelection, readOnly}) {
   return <div onPointerOver={e=>highlight(e.target.closest("td.mark-cell"))}
     onPointerLeave={()=>highlight(null)} onFocus={e=>highlight(e.target.closest("td.mark-cell"))}
     onBlur={e=>{if(!e.currentTarget.contains(e.relatedTarget))highlight(null);}}>
-    <MatrixTable events={events} label="Attendance" onKeyDown={e=>{
+    <MatrixTable zoom={zoom} events={events} label="Attendance" onKeyDown={e=>{
       if (!e.target.closest("button[data-event]")) return;
       if(e.key==="Escape"){clear();return;}
       moveFocus(e,select);
@@ -222,7 +222,7 @@ function SelectableMatrix({rows, events, canCorrect, onSelection, readOnly}) {
   </div>;
 }
 
-export function MatrixTable({events, label, onKeyDown, children}) {
+export function MatrixTable({zoom, events, label, onKeyDown, children}) {
   const viewport=useRef(null);
   useLayoutEffect(()=>{
     const el=viewport.current;
@@ -245,7 +245,7 @@ export function MatrixTable({events, label, onKeyDown, children}) {
       <table
         className="attendance-matrix"
         aria-label={label}
-        style={{ "--event-count": events.length }}
+        style={{ zoom, "--event-count": events.length }}
         onKeyDown={onKeyDown}
       >
         <colgroup>
