@@ -49,7 +49,11 @@ try {
   await page.evaluate(() => document.fonts.ready);
   assert.equal(await page.locator(".mobile-page strong").innerText(),"Attendance");
   assert.equal(await page.locator(".mobile-bar").evaluate(el=>getComputedStyle(el).position),"sticky");
-  assert.equal(await page.evaluate(()=>getComputedStyle(document.documentElement).backgroundColor),"rgb(12, 35, 64)");
+  // Safari can expose the document canvas below its floating address bar.
+  const canvasColors = () => page.evaluate(() => [document.documentElement, document.body]
+    .map(el => getComputedStyle(el).backgroundColor));
+  const whiteCanvas = ["rgb(255, 255, 255)", "rgb(255, 255, 255)"];
+  assert.deepEqual(await canvasColors(),whiteCanvas);
   const search = page.getByRole("textbox",{name:"Find a cadet"});
   const fieldFont = el => parseFloat(getComputedStyle(el).fontSize);
   assert(await search.evaluate(fieldFont) >= 16);
@@ -86,6 +90,7 @@ try {
   assert.deepEqual(await page.locator(".mobile-menu .brand").evaluate(markPositions),before);
   assert.equal(await page.locator("nav a[aria-current=page]").innerText(),"Attendance");
   await page.getByRole("button",{name:"Close navigation"}).click();
+  assert.deepEqual(await canvasColors(),whiteCanvas);
   const filters = page.getByRole("button",{name:"Filters",exact:true});
   const flight = page.getByLabel("Flight",{exact:true});
   assert.equal(await flight.isVisible(),false);
