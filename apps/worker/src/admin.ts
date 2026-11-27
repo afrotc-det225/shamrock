@@ -29,12 +29,12 @@ function permission(principal: string, capability: string, scopes: string[]): {
    SELECT 1 FROM ${effectiveAdminGrants} WHERE principal_id=? AND capability=? AND scope_kind='flight' AND scope_key=s.value))))`,
     values: [principal, principal, capability, JSON.stringify(scopes), JSON.stringify(scopes), principal, capability] };
 }
-function commandAuth(env: AdminEnv, c: AdminCommand, capability: string, scopes: string[], targetId: string) {
+function commandAuth(env: AdminEnv, c: AdminCommand, capability: string, scopes: string[], targetId: string, directoryDelegation: boolean) {
   const p = c.operation === 'directory.selfUpdate'
     ? { sql: 'EXISTS(SELECT 1 FROM principals WHERE principal_id=? AND person_id=? AND active=1)', values: [c.actor.principalId, c.payload.personId] }
     : c.operation === 'directory.enroll' ? { sql: '(NOT EXISTS(SELECT 1 FROM principals WHERE principal_id=?) OR EXISTS(SELECT 1 FROM principals WHERE principal_id=? AND person_id=? AND active=1))', values: [c.actor.principalId, c.actor.principalId, targetId] }
     : permission(c.actor.principalId, capability, scopes);
-  if (c.operation === 'directory.selfUpdate' && c.source.resourceKey === 'admin-staging-web') {
+  if (!directoryDelegation && c.operation === 'directory.selfUpdate' && c.source.resourceKey === 'admin-staging-web') {
     p.sql += ` AND EXISTS(SELECT 1 FROM principals p JOIN principal_accounts a USING(principal_id)
       JOIN directory_profiles d ON d.person_id=p.person_id AND lower(d.email)=a.email
       JOIN memberships m ON m.person_id=p.person_id AND m.unit_id=d.flight_id AND m.active=1
@@ -97,7 +97,7 @@ async function priorReceipt(env: AdminEnv, c: AdminCommand, hash: string): Promi
 const profileColumns = ['last_name', 'first_name', 'as_year', 'rank', 'role', 'university', 'email', 'phone', 'dorm', 'cip_broad_area', 'cip_code', 'afsc', 'home_town', 'home_state', 'class_year', 'date_of_birth', 'flight_path_status', 'photo_link'];
 const profileSelect = profileColumns.map((column, i) => `d.${column} AS ${DIRECTORY_FIELDS[i]}`).join(',');
 const profileProjection = `SELECT d.person_id AS personId,d.version,d.flight_id AS flightId,${profileSelect} FROM directory_profiles d`;
-export async function acceptAdminCommand(env: AdminEnv, input: unknown): Promise<Receipt> {
+export async function acceptAdminCommand(env: AdminEnv, input: unknown, directoryDelegation=false): Promise<Receipt> {
   const c = parseAdminCommand(input);
   if (c.environment !== env.ENVIRONMENT || c.generation !== Number(env.GENERATION))
     throw new HttpError(409, 'WRONG_GENERATION', 'Reload the current environment before submitting.');
@@ -282,7 +282,7 @@ export async function acceptAdminCommand(env: AdminEnv, input: unknown): Promise
   }
   if(rosterFlights.length)writes.push(markManagedFutureRosters(env.DB,c.commandId,now,[...new Set(rosterFlights)]));
   const permissionChange = await preparePermissionMutation(env, c, now, targetId, hash);
-  const auth = commandAuth(env, c, capability, scopes, targetId);
+  const auth = commandAuth(env, c, capability, scopes, targetId, directoryDelegation);
   if (permissionChange?.managerRequired) { auth.sql += ` AND ${permissionManagerSql}`; auth.values.push(c.actor.principalId); }
   if (permissionChange) { condition += ` AND (${permissionChange.assertion.sql})`; conditionValues.push(...permissionChange.assertion.values); }
 

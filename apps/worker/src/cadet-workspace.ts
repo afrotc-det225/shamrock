@@ -359,6 +359,7 @@ export async function cadetRoute(
     guard: { reportBatch?:D1PreparedStatement[]; memberReport?:true; sql: string; values: (string | number | null)[] },
   ) => Promise<unknown>,
   viewEntry?: string,
+  directoryDelegation=false,
 ) {
   if (
     !object(input) ||
@@ -484,7 +485,7 @@ export async function cadetRoute(
       },
     });
   }
-  if (!p || !state.linked)
+  if (!p || (!state.linked && !directoryDelegation))
     throw new HttpError(
       409,
       "LINK_REQUIRED",
@@ -500,6 +501,10 @@ export async function cadetRoute(
       p.personId,
     ],
   };
+  if(directoryDelegation){
+    permissionGuard.sql=`(${permissionSourceRevisionSql})=? AND EXISTS(SELECT 1 FROM principals p
+      JOIN directory_profiles d USING(person_id) WHERE p.principal_id=? AND p.active=1 AND lower(d.email)=? AND p.person_id=?)`;
+  }
   if(a.kind==="flightRole"){
     const target=state.roster?.find(r=>r.personId===f.personId);
     const flight=state.flights.find(r=>r.flightId===p.flightId);
@@ -562,7 +567,7 @@ export async function cadetRoute(
         expectedVersion: f.version,
         changes: f.changes,
       },
-    });
+    }, directoryDelegation);
   }
   if (a.kind === "excusal" && Array.isArray(f.events)) {
     if (!f.events.length || f.events.length > 25) throw bad();

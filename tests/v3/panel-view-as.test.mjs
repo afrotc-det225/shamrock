@@ -208,7 +208,7 @@ test('historical previews preserve the original source/hash pages and stop when 
   const closed=await f.page(preview('administrator','history','entry',rows,head.body.viewRevision),racing);assert.equal(closed.status,409,JSON.stringify(closed));assert.equal(closed.body.error.code,'VIEW_AS_CHANGED');assert.equal(JSON.stringify(closed.body).includes('Archive Cadet'),false);
 });
 
-test('an active Directory assignment supports a read-only admin preview before first login',async t=>{
+for (const hasSchoolAccount of [false,true]) test('delegated edits before first cadet login, school account present: '+hasSchoolAccount,async t=>{
   const f=await fixture(t),email='fictional-unbound@nd.edu';
   await f.db.batch([
     f.db.prepare("INSERT INTO directory_profiles SELECT 'unmapped',1,'alpha',last_name,first_name,as_year,rank,'Blue Squadron Commander',university,?,phone,dorm,cip_broad_area,cip_code,afsc,home_town,home_state,class_year,date_of_birth,flight_path_status,photo_link,updated_at FROM directory_profiles WHERE person_id='lead'").bind(email),
@@ -220,7 +220,7 @@ test('an active Directory assignment supports a read-only admin preview before f
   const entry=await f.send(enter('unmapped'));assert.equal(entry.body.directoryWorkspace,true);
   const target={...base,targetPersonId:'unmapped',entryAuditId:'entry'};
   const preview=await f.send(target,'/v1/cadet/preview');
-  assert.equal(preview.status,200);assert.equal(preview.body.readOnly,true);
+  assert.equal(preview.status,200);assert.equal(preview.body.readOnly,false);
   const principalId='google.'+createHash('sha256').update(email).digest('hex');
   const actual=await f.send({...base,email,principalId},'/v1/cadet/workspace');
   const {readOnly,...same}=preview.body;assert.deepEqual(same,actual.body);
@@ -229,11 +229,11 @@ test('an active Directory assignment supports a read-only admin preview before f
     const direct=await f.send({...base,email,principalId,section},'/v1/cadet/workspace');
     assert.equal(personal.status,200);
     const {readOnly,...visible}=personal.body;
-    assert.equal(readOnly,true);assert.deepEqual(visible,direct.body);
+    assert.equal(readOnly,false);assert.deepEqual(visible,direct.body);
   }
   // A school sign-in record may exist before the cadet has linked a personal workspace.
   const school='school.'+principalId.slice('google.'.length);
-  await f.db.batch([
+  if (hasSchoolAccount) await f.db.batch([
     f.db.prepare("INSERT INTO principals VALUES(?,'unmapped',1)").bind(school),
     f.db.prepare("INSERT INTO principal_accounts VALUES(?,?,'authenticated-confirmation','binding')").bind(school,email),
   ]);
@@ -241,7 +241,14 @@ test('an active Directory assignment supports a read-only admin preview before f
   assert.equal(schoolEntry.body.status,'ready');
   const schoolProfile=await f.send({...target,entryAuditId:'school-entry',section:'profile'},'/v1/cadet/preview');
   assert.equal(schoolProfile.status,200);
-  assert.equal(schoolProfile.body.readOnly,true);
+  assert.equal(schoolProfile.body.readOnly,false);
+  await f.db.prepare("INSERT INTO adapter_sources VALUES('test','admin-staging-web',1)").run();
+  const edit={...target,entryAuditId:'school-entry',action:{kind:'profile',id:crypto.randomUUID(),fields:{version:1,changes:{dorm:'Off-Campus'}}}};
+  assert.equal((await f.send(edit,'/v1/cadet/preview')).body.error.code,'WRITES_PAUSED');
+  await f.db.prepare('UPDATE system_control SET accepting_commands=1').run();
+  const saved=await f.send(edit,'/v1/cadet/preview');assert.equal(saved.status,200,JSON.stringify(saved));
+  assert.equal((await f.send(edit,'/v1/cadet/preview')).status,200);
+  assert.equal(await f.db.prepare('SELECT COUNT(*) AS n FROM principal_accounts WHERE principal_id=?').bind(principalId).first('n'),0);
   const picker='/v1/admin/panel/view-as/people';
   assert.equal((await f.send(base,picker)).status,200);
   assert.equal((await f.send({...base,principalId:'outsider'},picker)).status,403);

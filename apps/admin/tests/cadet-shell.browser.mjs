@@ -66,7 +66,7 @@ try {
           section,leadership:[{contactId:"linked-peer",personId:"peer",firstName:"Stale",lastName:"Contact",cellPhone:"obsolete"}],eventsForFlight:[{eventId:"other",label:"Earlier Mando"}],directory:[{personId:"peer",rank:"C/AB",phone:"202-555-0199",role:"Alpha Flight Commander",photoLink:"https://example.org/fictional-photo",firstName:"Directory",lastName:"Peer",asYear:"AS100",flight:"Alpha",squadron:"Blue",flightPathStatus:"Active 3/4",afsc:"13N",university:"Notre Dame"},
             {personId:"senior",rank:"C/Capt",firstName:"Senior",lastName:"Sample",asYear:"AS400",flight:"Delta",squadron:"Gold",afsc:"17S",flightPathStatus:"Ready 4/4"}],attendance:section==="attendance"?[{eventId:"llab",label:"TW-1 LLAB",eventType:"llab",version:1,baseVersion:0,code:"A"},{eventId:"lab2",label:"TW-2 LLAB",eventType:"llab",version:2,baseVersion:0,code:"A"}]:[],
           linked: true, writable: true, readOnly:false, registration: role === "Registration",
-          profile: role === "Registration" ? null : {personId:"one", firstName:"Sample", lastName:"Cadet", flightId:"alpha",afsc:"13N – Nuclear and Missile Operations ".repeat(6).trim(),photoLink:"https://drive.google.com/file/d/fictional-photo/view"},
+          profile: role === "Registration" ? null : {personId:"one", email:role==="Cadet"?"cadet@example.invalid":"cadet@"+"nd.edu", firstName:"Sample", lastName:"Cadet", flightId:"alpha",afsc:"13N – Nuclear and Missile Operations ".repeat(6).trim(),photoLink:"https://drive.google.com/file/d/fictional-photo/view"},
           flights: [{ flightId:"alpha", label:"Alpha" }], events: [], actions: [], queue: (squadron || role==="Flight") ? [{requestId:"example",version:3,personId:"cadet",eventId:"llab",event:"TW-2 LLAB",eventStartAt:"2026-10-14T14:00:00Z",
             personDisplayName:"Test Requester",requestedOutcome:"E",status:decision?.decision || "Submitted",
             submittedAt:"2026-10-10T13:20:00Z",reason:"Fixture scheduling conflict",flightId:"test-flight",capturedFlightLabel:flight,capturedSquadronLabel:squadron},
@@ -206,6 +206,7 @@ try {
         await nav.getByRole("link", {name:"My profile"}).click();
         assert.equal(await page.locator('nav [aria-current="page"]').textContent(), "My profile");
         await page.getByLabel("First name", {exact:true}).waitFor();
+        assert.equal(await page.getByText(/Have your school email/).count(),role==="Cadet"?1:0);
         if (preview) assert.equal(await page.getByText("Acting as Sample Cadet").count(),0);
         for (const field of ["First name","Last name","AS year","Rank","Role","University","Contact email"])
           assert(await page.getByLabel(field,{exact:true}).isVisible());

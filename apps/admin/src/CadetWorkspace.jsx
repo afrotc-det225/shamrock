@@ -8,6 +8,7 @@ import { ProfileField } from "./ProfileField";
 import { DirectoryPhoto } from "./DirectoryPhoto";
 import WorkspaceShell from "./WorkspaceShell";
 import { ViewAsAccount } from "./ViewAs";
+import {schoolForEmail} from "../../../packages/domain/src/school-account";
 import {personalPages} from "./site-navigation";
 import { ExternalLink } from "lucide-react";
 import { attendanceMeanings } from "./AttendanceMatrix";
@@ -142,7 +143,9 @@ function Profile({ state, save, disabled }) {
               original={state.profile?.[key]} required={required.has(key) && (register || !!state.profile?.[key])}
               value={form[key] || ""} onChange={value=>pick(key,value)}/>}
             {key === "role" && <small>Command assignments are managed by the Directory manager.</small>}
-            {key === "contactEmail" && <small>Shown in the cadet Directory. Leave blank to use your school email.</small>}
+            {key === "contactEmail" && <small>{state.profile?.email && !schoolForEmail(state.profile.email)
+              ? (schoolForEmail(state.profile.contactEmail || "") ? "Your school email is on file. Ask a Directory administrator to update your sign-in email." : "Have your school email? Enter it here and save. Continue signing in with your current address until a Directory administrator updates your sign-in email.")
+              : "Shown in the cadet Directory. Leave blank to use your school email."}</small>}
             {key === "cipCode" && <a className="field-resource" href="https://nces.ed.gov/ipeds/cipcode/" target="_blank" rel="noreferrer">Find your major’s CIP code <ExternalLink size={14}/></a>}
             {key === "afsc" && <a className="field-resource" href="https://tmd.texas.gov/Data/Sites/1/media/tmd-jobs/ang-dsg-vacancy/fy26/quarter-3/air-force-officer-classification-directory-afocd-30-april-2025.pdf" target="_blank" rel="noreferrer">Officer classification directory (DAFOCD) <ExternalLink size={14}/></a>}
           </div>)}
@@ -534,7 +537,7 @@ export default function CadetWorkspace({ session }) {
   const readOnly =
     (preview && state?.readOnly !== false) ||
     !state?.writable ||
-    (!state?.linked && !state?.registration);
+    (!preview && !state?.linked && !state?.registration);
   const disabled = busy || readOnly;
   const flags = (state?.actions || []).filter(a => a.kind === "flag" && a.personId === state.profile?.personId);
   const queue = state?.queue || [];
@@ -586,7 +589,6 @@ export default function CadetWorkspace({ session }) {
       )}
       {notice && <div className="success" role="status">{notice}</div>}
       {!state && !error && !readError && <p role="status">Loading your workspace…</p>}
-      {preview && state?.profile && !state.linked && <p className="notice">This cadet must connect their school account before you can act on their behalf.</p>}
       {state?.profile && !state.linked && !preview && (
         <button
           disabled={busy || !state.writable}

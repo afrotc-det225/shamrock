@@ -1,6 +1,6 @@
 import {wingAdministratorGrants} from "../../../packages/domain/src/panel-read.js";
 import {flightSection} from "./cadet-workspace.js";
-import { cadetRoute, reportSection, eligibleSchoolSql, readCadetWorkspace } from "./cadet-workspace.js";
+import { canonicalPrincipal, cadetRoute, reportSection, eligibleSchoolSql, readCadetWorkspace } from "./cadet-workspace.js";
 import type {WingTableCache} from './panel-cache.js';
 import {browsePanel, profiles, type Profile} from "./panel-browse.js";
 import { PANEL_VIEW_AS_PAGE_MAX_BYTES, type PanelViewAsAuthorization, type PanelViewAsKind, type PanelViewAsPage, type PanelViewAsStatus } from '../../../packages/domain/src/panel-view-as.js';
@@ -66,7 +66,7 @@ export async function viewAsPeople(env: Env, input: unknown) {
   if(people.length>2000 || packed.length>900000)return fail(409,'BROWSE_TOO_LARGE');
   return {tables:{people:packed}};
 }
-interface Binding { schoolEmail: string | null; schoolCadetPrincipal: string | null; directoryEmail: string | null; raw: string; targetPrincipalId: string | null; status: PanelViewAsStatus; fullSnapshot: boolean }
+interface Binding { hasRosterPrincipal: boolean; schoolEmail: string | null; schoolCadetPrincipal: string | null; directoryEmail: string | null; raw: string; targetPrincipalId: string | null; status: PanelViewAsStatus; fullSnapshot: boolean }
 /** Small private capture repeated inside every data batch. Email evidence stays in the capture, never the response. */
 function bindingQuery(env: Env, actor: string, person: string, entry: string | null) {
   const sql = `WITH actor AS (SELECT ? AS id), target AS (
@@ -89,9 +89,12 @@ function bindingQuery(env: Env, actor: string, person: string, entry: string | n
 }
 async function decodeBinding(raw: unknown, actor: string, person: string, entry: string | null): Promise<Binding> {
   if (typeof raw !== 'string') return fail(409, 'VIEW_AS_CHANGED');
-  const [valid, actorFull, exists, targets, targetFull, saved, email] = JSON.parse(raw);
+  const [valid, actorFull, exists, capturedTargets, targetFull, saved, email] = JSON.parse(raw);
   if (valid !== 1 || actorFull !== 1) fail(403, 'NOT_AUTHORIZED');
   if (exists !== 1) fail(404, 'NOT_FOUND');
+  // A Directory principal created for delegated edits carries no Google verification.
+  const canonical=typeof email==='string' ? await canonicalPrincipal(email) : null;
+  const targets=capturedTargets.filter((row:unknown[])=>!(row[0]===canonical && row[1]===null));
   const school = targets.find((row:unknown[])=>String(row[0]).startsWith('school.'));
   let sameSchoolIdentity = false, schoolCadetPrincipal:string|null=null;
   if (school && typeof email === 'string' && (!school[1] || school[1]===email)) {
@@ -108,7 +111,7 @@ async function decodeBinding(raw: unknown, actor: string, person: string, entry:
   const status: PanelViewAsStatus = directoryEmail || schoolWing ? 'ready' : targets.length === 0 ? 'no-active-principal' : targets.length !== 1 ? 'ambiguous-principal'
     : school || typeof targets[0][1] !== 'string' || !targets[0][1].trim() || !['google-form', 'authenticated-confirmation'].includes(targets[0][2]) ? 'no-verified-login' : 'ready';
   if (entry && (!saved || saved[0] !== entry || saved[1] !== actor || saved[2] !== person || saved[3] !== targetPrincipalId || saved[4] !== 'ready' || saved[5] !== 0 || status !== 'ready')) fail(403, 'VIEW_AS_UNAVAILABLE');
-  return { raw, schoolEmail:schoolWing ? email : null, schoolCadetPrincipal, directoryEmail, targetPrincipalId, status, fullSnapshot: targetFull === 1 };
+  return { raw, hasRosterPrincipal:capturedTargets.length !== targets.length, schoolEmail:schoolWing ? email : null, schoolCadetPrincipal, directoryEmail, targetPrincipalId, status, fullSnapshot: targetFull === 1 };
 }
 function guardedEnvironment(env: Env, query: ReturnType<typeof bindingQuery>, expected: string): Env {
   // Only existing read implementations receive this wrapper. Authority/mapping and data are one D1 snapshot.
@@ -278,21 +281,40 @@ export async function previewCadetWorkspace<E extends Env>(env:E, input:unknown,
         if(!binding.directoryEmail || binding.directoryEmail!==email || binding.targetPrincipalId!==principal)fail(403,'VIEW_AS_UNAVAILABLE');
         return results.slice(1) as D1Result<T>[];
       }} as D1Database;
-      return {...await readCadetWorkspace({...env,DB:db},email,principal ?? undefined,req.section),readOnly:!principal};
+      return {...await readCadetWorkspace({...env,DB:db},email,principal ?? undefined,req.section),readOnly:false};
     }
   }
   const {query,binding}=await readBinding(env,req.principalId,req.targetPersonId,req.entryAuditId);
   const email=binding.schoolEmail ?? binding.directoryEmail;
   const principal=binding.schoolEmail ? binding.schoolCadetPrincipal : binding.targetPrincipalId;
   if(!email) return fail(403,'VIEW_AS_UNAVAILABLE');
-  if(!action) return {...await readCadetWorkspace(guardedEnvironment(env,query,binding.raw),email,principal ?? undefined,req.section),readOnly:!principal};
+  if(!action) return {...await readCadetWorkspace(guardedEnvironment(env,query,binding.raw),email,principal ?? undefined,req.section),readOnly:false};
   if(!object(req.action) || !object(req.action.fields) || !id(req.action.id)) return fail(400,'INVALID_VIEW_AS_REQUEST');
-  // Only the owner of a school account can establish its verified sign-in link.
-  if(!principal || ['register','link'].includes(String(req.action.kind))) return fail(403,'VIEW_AS_UNAVAILABLE');
-  const entry=req.entryAuditId;
-  const guarded=writeEnvironment(env,query,binding.raw);
-  return cadetRoute(guarded,{environment:req.environment,generation:req.generation,principalId:principal,
-    email:email,action:req.action},(c,g)=>submit(guarded,c,g),entry);
+  if (['register','link'].includes(String(req.action.kind))) return fail(403,'VIEW_AS_UNAVAILABLE');
+  const effective = principal ?? await canonicalPrincipal(email);
+  let expected=binding.raw;
+  if(!principal && !binding.hasRosterPrincipal){
+    const state=await readCadetWorkspace(guardedEnvironment(env,query,expected),email,effective,'profile');
+    if(!state.writable)throw new HttpError(409,'WRITES_PAUSED','Submissions are paused.');
+    if(state.profile?.personId!==req.targetPersonId)return fail(403,'VIEW_AS_UNAVAILABLE');
+    // Provision only the roster identity and its self-service grant. Google verification
+    // is recorded separately when the cadet actually authenticates.
+    const db=env.DB;
+    await writeEnvironment(env,query,expected).DB.batch([
+      db.prepare(`SELECT CASE WHEN EXISTS(SELECT 1 FROM system_control WHERE singleton=1 AND environment=? AND generation=? AND accepting_commands=1)
+        THEN 1 ELSE json('writes paused') END`).bind(req.environment,req.generation),
+      db.prepare('INSERT INTO principals(principal_id,person_id,active) VALUES(?,?,1) ON CONFLICT DO NOTHING').bind(effective,req.targetPersonId),
+      db.prepare(`INSERT INTO access_grants(principal_id,capability,unit_id,subject_scope) SELECT ?, 'excusal.submit', ?, 'self' WHERE EXISTS(
+        SELECT 1 FROM principals WHERE principal_id=? AND person_id=? AND active=1) ON CONFLICT DO NOTHING`).bind(effective,state.profile.flightId,effective,req.targetPersonId),
+    ]);
+    const fresh=(await readBinding(env,req.principalId,req.targetPersonId,req.entryAuditId)).binding;
+    if((fresh.schoolEmail ?? fresh.directoryEmail)!==email || fresh.targetPrincipalId!==binding.targetPrincipalId)return fail(409,'VIEW_AS_CHANGED');
+    expected=fresh.raw;
+  }
+  const guarded=writeEnvironment(env,query,expected);
+  return cadetRoute(guarded,{environment:req.environment,generation:req.generation,principalId:effective,
+    email,action:req.action},(c,g)=>submit(guarded,c,g),req.entryAuditId,!principal);
+
 }
 
 function writeEnvironment<E extends Env>(env:E,query:ReturnType<typeof bindingQuery>,expected:string):E {
