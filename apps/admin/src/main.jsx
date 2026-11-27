@@ -504,7 +504,7 @@ function App() {
                   </button>
                 ) : (
                   <>
-                    <h1>{page}</h1>
+                    <h1 className="page-title">{page}</h1>
                     <div className="loading-status"><span role="status">{readProgress.stage}…</span>
                       <button onClick={cancelRead}>Cancel</button></div>
                     {readProgress.total && <progress aria-label="Record groups loaded" value={readProgress.completed} max={readProgress.total} />}

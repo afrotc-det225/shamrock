@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import {readFile} from "node:fs/promises";
 import { chromium } from "playwright";
 import { createLocalBackend } from "../backend.mjs";
 import { AdminService } from "../service.mjs";
@@ -21,6 +22,7 @@ try {
   assert.equal(row.at(-1), photoUrl);
   const people = Array.from({length:55}, (_, i) => ({
     ...snapshot.people[0], personId:"test-"+i, firstName:"Sample", lastName:"Cadet "+i,
+    afsc:i === 0 ? "14N, Intelligence" : "13N",
     flightPathStatus:"Active 3/4", photoLink:i < 2 ? "https://drive.google.com/open?id=fixture"+i+"&resourcekey=test" : "",
   }));
   const leadership = people.map(p => ({...snapshot.leadership[0], ...p, contactId:"contact-"+p.personId}));
@@ -48,7 +50,7 @@ try {
       await page.setViewportSize({width,height:850});
       const measure = () => page.evaluate(() => {
         const rect = s => document.querySelector(s).getBoundingClientRect();
-        return [rect(".page-controls").top,rect(".heading").top,rect("thead th").top,rect("thead th").width];
+        return [rect(".page-controls").top,rect(".toolbar-actions").top,rect("thead th").top,rect("thead th").width];
       });
       await page.evaluate(() => scrollTo(0,0));await settle();const start = await measure();
       await page.evaluate(() => scrollTo(0,300));await settle();const end = await measure();
@@ -73,6 +75,38 @@ try {
       await preview.frameLocator("iframe").getByText("Image preview").waitFor();
       await preview.getByRole("button",{name:"Close preview"}).click();
       assert.equal(await preview.count(),0);
+      assert.deepEqual((await page.locator(".cadet-roster thead th").allTextContents()).slice(0,5),["Cadet","AS year","Flight","Squadron","Status"]);
+      const columns=page.getByRole("button",{name:"Columns",exact:true});
+      await columns.click();
+      const picker=page.getByRole("region",{name:"Columns"});
+      for(const field of ["Last name","AFSC"])await picker.getByRole("checkbox",{name:field,exact:true}).check();
+      for(const field of ["Cadet","AS year","Flight","Squadron","Status","Photo link"])
+        await picker.getByRole("checkbox",{name:field,exact:true}).uncheck();
+      const table=page.locator(".cadet-roster");
+      assert.deepEqual(await table.locator("thead th").allTextContents(),["Last name","AFSC"]);
+      await page.keyboard.press("Escape");
+      await page.getByLabel("Find a cadet",{exact:true}).fill("Sample Cadet 0");
+      assert.equal(await table.locator("tbody tr").count(),1);
+      await columns.click();
+      await page.context().grantPermissions(["clipboard-read","clipboard-write"]);
+      await picker.getByRole("button",{name:"Copy table"}).click();
+      await picker.getByText("Copied to clipboard.").waitFor();
+      assert.equal((await page.evaluate(()=>navigator.clipboard.readText())).replaceAll("\r\n","\n"),"Last name\tAFSC\nCadet 0\t14N, Intelligence");
+      const download=page.waitForEvent("download");
+      await picker.getByRole("button",{name:"Download CSV"}).click();
+      assert.equal(await readFile(await (await download).path(),"utf8"),'Last name,AFSC\r\nCadet 0,"14N, Intelligence"');
+      await page.reload();
+      await table.locator("tbody tr").first().waitFor();
+      assert.deepEqual(await table.locator("thead th").allTextContents(),["Last name","AFSC"]);
+      assert.equal(await table.locator(".directory-avatar").count(),0);
+      await page.evaluate(()=>{
+        localStorage.removeItem("shamrock.cadets.columns.v2");
+        localStorage.setItem("shamrock.cadets.columns.v1", JSON.stringify(["afsc","rank"]));
+      });
+      await page.reload();
+      await table.locator("tbody tr").first().waitFor();
+      assert.deepEqual(await table.locator("thead th").allTextContents(),["Cadet","Rank","AFSC",""]);
+
     }
     await page.setViewportSize({width:390,height:844});await settle();
     assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));

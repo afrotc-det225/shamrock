@@ -82,11 +82,7 @@ export default function Attendance({
   return (
     <>
       <section className="page-controls">
-        <Heading title="Attendance">
-          <div className="heading-tools">
-            <AttendanceKey />
-          </div>
-        </Heading>
+        <Heading title="Attendance" />
         <div className="toolbar">
           <SearchBox
             placeholder="Find a cadet"
@@ -115,6 +111,9 @@ export default function Attendance({
             ]}
           />
           <MatrixRosterFilters rows={roster} value={filters} onChange={value=>{setFilters(value);if(edit)dismiss();}} />
+          <div className="toolbar-actions">
+            <AttendanceKey />
+          </div>
         </div>
       </section>
       <AttendanceMatrix

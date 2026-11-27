@@ -230,7 +230,7 @@ export function MatrixTable({events, label, onKeyDown, children}) {
     };
     resize();
     const observer=new ResizeObserver(resize);
-    for(const control of el.closest("main")?.querySelectorAll(".page-controls,.notice,.heading") || [])observer.observe(control);
+    for(const control of el.closest("main")?.querySelectorAll(".page-controls,.notice") || [])observer.observe(control);
     window.addEventListener("resize",resize);
     return ()=>{observer.disconnect();window.removeEventListener("resize",resize);};
   },[]);
