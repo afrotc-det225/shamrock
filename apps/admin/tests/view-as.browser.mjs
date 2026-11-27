@@ -1,3 +1,4 @@
+import { openNavigation } from "./navigation.mjs";
 import assert from 'node:assert/strict';
 import {chromium} from 'playwright';
 import {createLocalBackend} from '../backend.mjs';
@@ -53,7 +54,13 @@ try {
  await page.setViewportSize({width:390,height:844});
  assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
  await page.screenshot({path:'/tmp/shamrock-view-as-mobile.png'});
+ await openNavigation(page);
  await page.getByRole('button',{name:'Exit view',exact:true}).click();
+ await openNavigation(page);
+ await page.getByRole('button',{name:'View as',exact:true}).click();
+ await page.getByRole('dialog',{name:'View as',exact:true}).waitFor();
+ await page.getByRole('button',{name:'Close editor'}).click();
+ await page.setViewportSize({width:1440,height:900});
  await page.getByRole('button',{name:'View as',exact:true}).waitFor();
  assert(await page.getByRole('button',{name:'Add event',exact:true}).isEnabled());
  nextStatus='no-panel-access';await enter();

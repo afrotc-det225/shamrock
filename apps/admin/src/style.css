@@ -1406,7 +1406,6 @@ html:has(dialog:modal) {
 .wing-roster-context strong {color:#172d47;font-size:1rem}
 .wing-roster-context small {display:block;color:#566479;margin-top:.2rem}
 .overview-queue {display:inline-block;color:#264f73;font-size:.82rem;text-underline-offset:.2em}
-.pending-total {color:#526173;font-size:.8rem}
 .birthdays header {flex-wrap:wrap}
 .birthdays header select {width:auto;max-width:100%;min-height:2rem;font-size:.8rem}
 .birthday-body {display:grid;grid-template-columns:minmax(12rem,15rem) minmax(0,1fr);gap:clamp(.85rem,5cqi,2rem);margin-top:.55rem}
@@ -1433,7 +1432,6 @@ html:has(dialog:modal) {
 .birthday-names h4 {margin:.3rem 0 .55rem;font-size:.85rem;color:#344b65}
 .birthday-names ul {margin:0;padding:0;list-style:none;max-height:10rem;overflow-y:auto}
 .birthday-names li {display:flex;align-items:baseline;gap:.4rem;margin:.35rem 0;font-size:.86rem;overflow-wrap:anywhere;color:#172e48;font-weight:600}
-.birthday-names i {flex:none;width:.4rem;height:.4rem;border-radius:50%;background:#546579}
 .birthday-names time {font-size:.78rem;color:#546479;font-weight:500;white-space:nowrap}
 .birthday-names p {font-size:.79rem;color:#485c71}
 @container (max-width:18rem) {
@@ -1600,42 +1598,70 @@ main:has(.matrix-scroll) { padding-bottom: 8px; }
 .portrait-preview header,.portrait-preview footer {display:flex;align-items:center;justify-content:space-between;padding:.65rem 1rem}
 .portrait-preview header button {display:grid;place-items:center;border:0;background:transparent}
 .portrait-preview img,.portrait-preview iframe {display:block;width:100%;height:min(56dvh,30rem);object-fit:contain;border:0}
-.excusal-queue {container-type:inline-size;width:100%;max-width:73rem}
+.excusal-queue {container-type:inline-size;width:100%}
 .excusal-queue table {table-layout:fixed}
-.excusal-queue :is(td,th) {padding:.55rem .7rem}
-.excusal-queue th:nth-child(1) {width:22%}
-.excusal-queue th:nth-child(2) {width:5.4rem}
-.excusal-queue th:nth-child(4) {width:3.4rem}
-.excusal-queue th:nth-child(5) {width:8rem}
-.excusal-queue.actionable th:last-child {width:12.25rem}
-.excusal-cadet button,.excusal-event {white-space:normal;overflow-wrap:anywhere}
-.excusal-event small {display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden}
-.excusal-flight,.excusal-code {text-align:center;font-weight:700}
+.excusal-queue :is(td,th) {padding:.65rem .75rem}
+.excusal-queue th:first-child {width:17%}
+.excusal-queue th:nth-child(2) {width:3.6rem}
+.excusal-queue th:nth-child(4) {width:10.6rem}
+.excusal-queue.actionable th:last-child {width:13.4rem}
+.excusal-cadet .text-button {color:inherit;text-align:left;white-space:normal;overflow-wrap:anywhere;font-weight:650}
+.excusal-event {white-space:normal;overflow-wrap:anywhere;font-weight:650}
+.excusal-event small {display:block;margin-top:.25rem;white-space:pre-wrap;line-height:1.45;font-size:.86rem;font-weight:400;color:#42556a}
+.excusal-code {text-align:center;font-weight:700}
 .excusal-queue .excusal-code {background-color:var(--mark-bg,#f0f1f2);color:var(--mark-ink,#424a51)}
+.excusal-status time {display:block;margin-top:.4rem;color:#526479;font-size:.76rem;line-height:1.35;white-space:normal}
 .excusal-status[data-status="Withdrawn"] .status {background:#f4e5bc;color:#5b4115}
 .excusal-status[data-status="Superseded"] .status {background:#e6dff1;color:#493366}
-.excusal-actions {display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:.2rem}
-.excusal-actions button {min-width:0;min-height:1.95rem;padding:.2rem .4rem;font-size:.81rem}
-.excusal-actions [data-decision="Approved"] {color:#18523a;background:#e8f3ec;border-color:#a7c9b6}
-.excusal-actions [data-decision="Denied"] {color:#7c2835;background:#fcf0f0;border-color:#d9b0b4}
-.excusal-actions :is([data-decision="Withdrawn"],[data-decision="Superseded"]) {color:#405369;background:transparent;border-color:transparent}
+.excusal-actions {display:flex;align-items:center;gap:.3rem}
+.excusal-actions :is(button,select) {min-width:0;min-height:2.2rem;width:auto;padding:.29rem .45rem;font-size:.81rem;font-weight:600;border-radius:.35rem}
+.excusal-actions select {width:3.75rem;background-color:white;color:#415468}
+.excusal-actions [data-decision="Approved"] {color:#175838;background:#e8f4ed;border-color:#a7c9b6}
+.excusal-actions [data-decision="Denied"] {color:#802f39;background:#fff;border-color:#d7bac0}
 .excusal-actions button:hover:enabled {text-decoration:underline}
 .excusal-actions button:disabled {opacity:.55}
 @container (max-width:51rem) {
   .excusal-queue thead {position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%)}
   .excusal-queue :is(table,tbody) {display:block}
-  .excusal-queue tbody tr {display:grid;grid-template-columns:minmax(0,1fr) auto auto;align-items:center;
-    gap:.4rem .55rem;padding:.7rem;border-bottom:1px solid var(--border)}
+  .excusal-queue tbody tr {display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;
+    gap:.55rem .5rem;padding:.85rem;border-bottom:1px solid var(--border)}
   .excusal-queue tbody tr:last-child {border-bottom:0}
   .excusal-queue tbody td {position:static;background:transparent;border:0;padding:0}
-  .excusal-queue .excusal-cadet {grid-column:1;grid-row:1}
-  .excusal-queue .excusal-flight {grid-column:2;grid-row:1;padding:.25rem .45rem}
-  .excusal-queue td.excusal-code {grid-column:3;grid-row:1;padding:.25rem .45rem;background:var(--mark-bg,#f0f1f2)}
-  .excusal-queue .excusal-event {grid-column:1/-1;grid-row:2}
-  .excusal-queue .excusal-status {grid-column:1/-1;grid-row:3}
-  .excusal-queue .excusal-controls {grid-column:1/-1;grid-row:4}
-  .excusal-queue .excusal-actions {grid-template-columns:repeat(4,minmax(0,1fr))}
-  .excusal-queue .excusal-actions button {min-height:44px}
+  .excusal-queue .excusal-cadet {padding:.25rem .55rem;border-radius:.25rem}
+  .excusal-queue td.excusal-code {padding:.25rem .55rem;border-radius:.25rem;background:var(--mark-bg,#f0f1f2)}
+  .excusal-queue :is(.excusal-event,.excusal-status,.excusal-controls) {grid-column:1/-1}
+  .excusal-status time {display:inline-block;margin:.15rem 0 .15rem .6rem}
+  .excusal-actions :is(button,select) {min-height:44px}
+}
+
+@media (max-width:640px) {
+  .mobile-bar,.mobile-menu header {display:flex;align-items:center;justify-content:space-between;gap:.65rem}
+  .mobile-bar {background:var(--navy);color:white;padding:.2rem max(.75rem,env(safe-area-inset-right)) .2rem max(.75rem,env(safe-area-inset-left))}
+  .mobile-bar .brand,.mobile-menu .brand {margin:0;padding:0;flex:none;align-items:center;font-size:1.3rem;gap:.45rem}
+  .mobile-bar .brand-mark,.mobile-menu .brand-mark {height:1.55rem}
+  .mobile-bar small {min-width:0;overflow-wrap:anywhere;font-size:.72rem}
+  .mobile-bar button,.mobile-menu header button {display:inline-flex;align-items:center;justify-content:center;flex:none;gap:.4rem;min-height:44px;min-width:44px;width:auto;margin:0;padding:.4rem .55rem;color:white;background:transparent;border:0}
+  .mobile-menu.sidebar {position:fixed;inset:0 auto 0 0;margin:0;width:min(87vw,21rem);max-width:none;
+    height:100dvh;max-height:none;padding:.45rem .75rem max(.8rem,env(safe-area-inset-bottom));border:0;overflow:auto;overscroll-behavior:contain}
+  .mobile-menu:not([open]) {display:none}
+  .mobile-menu[open],.mobile-menu .menu-links,.mobile-menu nav,.mobile-menu .sidebar-bottom {display:flex;flex-direction:column;align-items:stretch}
+  .mobile-menu::backdrop {background:rgb(12 30 51 / .5)}
+  body:has(.mobile-menu[open]) {overflow:hidden}
+  .mobile-menu.sidebar header button {width:44px;min-height:44px;margin:0;padding:0;justify-content:center}
+  .mobile-menu header {border-bottom:1px solid #435772;padding-bottom:.45rem}
+  .mobile-menu .menu-links {flex:1;gap:1rem}
+  .mobile-menu nav {gap:0;padding:0;overflow:visible}
+  .mobile-menu nav a,.mobile-menu .sidebar-bottom :is(a,button) {min-height:44px;width:100%;padding:.65rem .75rem;font-size:.94rem}
+  .mobile-menu nav a svg {width:19px}
+  .mobile-menu .sidebar-bottom {margin-top:auto;border-top:1px solid #435772;padding:.6rem 0 0;gap:.3rem}
+  .mobile-menu .sidebar-bottom small,.mobile-menu .sidebar-bottom p {display:block;font-size:.8rem}
+  .mobile-menu .sidebar-bottom p {padding:.5rem .75rem}
+  .mobile-menu .sidebar-bottom p button {padding-left:0}
+  .workspace :is(input:not([type=checkbox],[type=radio]),select,textarea) {font-size:1rem}
+  .excusal-event small {font-size:1rem}
+  .excusal-status time {font-size:.85rem}
+  .workspace .excusal-actions button {min-width:4rem;font-size:.93rem}
+  .workspace .excusal-actions select {width:4.75rem}
 }
 
 .assistant-page {max-width:none;margin:0}

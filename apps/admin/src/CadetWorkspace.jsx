@@ -518,7 +518,7 @@ export default function CadetWorkspace({ session }) {
     access: { capabilities: { fullSnapshot: false } },
   };
   return (
-    <WorkspaceShell workspace="cadet" pages={pages} page={page} navigate={navigate} account={<>
+    <WorkspaceShell mobileContext={preview && ((state?.readOnly === false ? "Acting as " : "Viewing as ") + (name || "selected cadet"))} workspace="cadet" pages={pages} page={page} navigate={navigate} account={<>
       {state && !state.writable && <small role="status" className="submission-status">Submissions are paused.</small>}
       {preview && <ViewAsAccount acting={state?.readOnly === false} label={name || "selected cadet"} busy={busy} onExit={async () => {
         try {

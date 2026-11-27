@@ -1,3 +1,4 @@
+import { openNavigation } from "./navigation.mjs";
 import assert from 'node:assert/strict';
 import {chromium} from 'playwright';
 import {createLocalBackend} from '../backend.mjs';
@@ -94,8 +95,13 @@ try{
  assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
  assert(await eventTable.locator('.compact-event-status').first().isVisible());
  assert(await eventTable.evaluate(table=>table.parentElement.scrollWidth<=table.parentElement.clientWidth+1));
- const account=await page.locator('.sidebar-bottom').boundingBox(),nav=await page.getByRole('navigation').boundingBox();
- assert(account.y+account.height<=nav.y,'account controls have their own row above mobile navigation');
+ const toggle=page.getByRole("button",{name:"Open navigation"});
+ assert((await page.locator(".mobile-bar").boundingBox()).height<=58);
+ await toggle.focus();await page.keyboard.press("Enter");
+ await page.getByRole("dialog",{name:"Navigation",exact:true}).waitFor();
+ await page.keyboard.press("Escape");
+ assert(await toggle.evaluate(el=>el===document.activeElement));
+ await openNavigation(page);
  await page.getByRole('navigation').getByRole('link',{name:'History',exact:true}).click();
  await page.getByRole("status",{name:"Loading historical attendance"}).waitFor();
  assert(await page.getByLabel("Semester",{exact:true}).isDisabled());
@@ -124,11 +130,13 @@ try{
  assert.equal(reportReads,1);
  const afterHistory=requests.length;release();await page.waitForTimeout(120);
  assert.equal(requests.length,afterHistory,'History stops remaining current-record pages');
- assert.equal(await page.locator('dialog').count(),0,'late capture cannot open old editor');
+ assert.equal(await page.locator('dialog[open]').count(),0,'late capture cannot open old editor');
  assert.equal(await page.locator('.error').count(),0);
  blockSection=null;holdSession=true;const beforeBootstrap=stateCalls;
  await page.reload();
+ await openNavigation(page);
  await page.getByRole('navigation').getByRole('link',{name:'Cadets',exact:true}).click();
+ await openNavigation(page);
  await page.getByRole('navigation').getByRole('link',{name:'Leadership',exact:true}).click();
  await page.waitForTimeout(80);assert.equal(stateCalls,beforeBootstrap,'no reads before session bootstrap');
  releaseSession();await page.getByRole('button',{name:'Add contact',exact:true}).waitFor();
@@ -150,6 +158,7 @@ try{
    await route.fulfill({json:{manifest:await host.panelAuthority(),browse:semester,captureKey:host.binding,
      transport:'paged-v1',reportingTime:Date.now(),history:[],meta:{hosted:true}}});
  });
+ await openNavigation(page);
  await page.getByRole('navigation').getByRole('link',{name:'Semester planning'}).click();
  await page.getByText('Opening Semester planning…').waitFor();
  assert.equal(await page.locator('[inert] h1').textContent(),'Leadership');
@@ -182,6 +191,7 @@ try{
        transport:'paged-v1',reportingTime:Date.now(),history:[],meta:{hosted:true}}});
    });
  }
+ await openNavigation(page);
  await page.getByRole('navigation').getByRole('link',{name:'Cadets',exact:true}).click();
  await page.getByRole('button',{name:'Add cadet'}).waitFor();
  assert.equal(await page.getByLabel('Sort by').locator('option:checked').innerText(),'Default');

@@ -45,10 +45,12 @@ try {
     return [...form.elements].map(e => ({ tag: e.tagName, type: e.type, value: e.value, checked: e.checked }));
   });
   const beforeReads = stateReads, beforeEvent = (await service.snapshot()).events.find(e => e.eventId === 'veterans');
-  assert.equal(await page.locator('dialog:modal').count(), 1, 'editor starts in the modal top layer');
+  assert.equal(await page.locator('dialog[open]').count(), 1, 'desktop editor is open');
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.locator('dialog:modal').waitFor();
   await page.getByRole('button', { name: 'Review change', exact: true }).click();
   await page.getByText("You're signed in", { exact: true }).waitFor();
-  await page.screenshot({ path: '/tmp/shamrock-outage-draft-desktop.png', animations: 'disabled' });
+  await page.screenshot({ path: '/tmp/shamrock-outage-draft-paused.png', animations: 'disabled' });
   assert.equal(await page.getByRole('dialog').count(), 0, 'outage removes the draft dialog from the accessibility tree');
   assert.equal(await page.locator('dialog:modal').count(), 0, 'outage closes the top-layer modal without unmounting its draft');
   assert.equal(await page.getByRole('navigation').count(), 0);
