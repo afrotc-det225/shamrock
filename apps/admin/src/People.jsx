@@ -7,16 +7,22 @@ import {
   SearchBox,
   Editor,
   Table,
-  Status,
   Empty,
 
 } from "./components";
 import { ToolbarPopover } from "./ToolbarPopover";
-import { cellStyle, flightColors, yearColors } from "./roster-colors";
+import { cellStyle, flightColors, flightPathColors, profileColorStyle, yearColors } from "./roster-colors";
 import { LeadershipChart, textOrder, alphabetic } from "./RosterViews";
 import { api,name, label, years, statuses, profileFields } from "./api";
 import { DIRECTORY_FIELDS } from "../../../packages/domain/src/admin";
 import { compareCadetsForDisplay, compareLeadershipForDisplay } from "../../../packages/domain/src/cadet-display-order";
+
+function DirectoryValue({ field, value }) {
+  const style = profileColorStyle(field, value);
+  const label = String(value || "—");
+  return style ? <span className="profile-tag" style={style}>{label}</span> : label;
+}
+
 export default function People({
   snapshot, list, run, captureKey, manifest, viewAsRevision,
   propose,
@@ -229,11 +235,13 @@ export default function People({
                   {flightOf(p)?.label || "Unassigned"}
                 </td>
                 <td>
-                  <Status>{p.flightPathStatus}</Status>
+                  <span className="status" style={cellStyle(flightPathColors(p.flightPathStatus))}>
+                    {p.flightPathStatus || "—"}
+                  </span>
                 </td>
               </>
             )}
-            {visibleField && <td>{String(p[field] || "—")}</td>}
+            {visibleField && <td><DirectoryValue field={field} value={p[field]} /></td>}
             <td>
               <button
                 className="icon"

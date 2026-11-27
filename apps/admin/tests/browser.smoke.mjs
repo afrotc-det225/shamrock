@@ -178,7 +178,20 @@ try {
   await page.keyboard.press("Enter");
   await page.getByRole("region",{name:"More fields",exact:true}).waitFor();
   assert.equal(await tableTop(),rosterTop);
+  const colors = (locator) => locator.evaluate(node => {
+    const { backgroundColor, color } = getComputedStyle(node);
+    return [backgroundColor, color];
+  });
+  const cadetRow = page.getByRole("row").filter({
+    has: page.getByRole("button", {name:"Edit Alex Morgan", exact:true}),
+  });
+  assert.deepEqual(await colors(cadetRow.getByText("AS400", {exact:true})), ["rgb(52, 78, 102)", "rgb(255, 255, 255)"]);
+  assert.deepEqual(await colors(cadetRow.getByText("Alpha", {exact:true})), ["rgb(56, 107, 163)", "rgb(255, 255, 255)"]);
+  assert.deepEqual(await colors(cadetRow.getByText("Active 3/4", {exact:true})), ["rgb(135, 201, 195)", "rgb(18, 58, 54)"]);
+  await page.getByLabel("Show field", {exact:true}).selectOption("cipCode");
+  assert.deepEqual(await colors(cadetRow.getByText("11.0701", {exact:true})), ["rgb(194, 223, 230)", "rgb(20, 62, 73)"]);
   await page.getByLabel("Show field", {exact:true}).selectOption("afsc");
+  assert.deepEqual(await colors(cadetRow.getByText("14N - Intelligence", {exact:true})), ["rgb(40, 78, 134)", "rgb(255, 255, 255)"]);
   await page.getByLabel("Filter by AFSC", {exact:true}).fill("no-such-field-value");
   assert.equal(await page.getByRole("button", {name:"Edit Alex Morgan", exact:true}).count(), 0);
   await page.getByLabel("Filter by AFSC", {exact:true}).fill("");
@@ -241,6 +254,8 @@ try {
   await page.keyboard.press("Escape");
   await page.getByRole("button",{name:"Attendance code key", expanded:false}).waitFor();
   const matrix = page.locator(".attendance-matrix");
+  await page.locator(".attendance-rate-key").getByText("100%", {exact:true}).waitFor();
+  assert.deepEqual(await colors(matrix.locator('[data-mark="blank"]').first()), ["rgb(240, 241, 242)", "rgb(66, 74, 81)"]);
   assert.deepEqual(await matrix.locator("thead th[title]").evaluateAll(headers=>
     [...new Set(headers.map(h=>h.getBoundingClientRect().width))]),[68]);
   const layout = () => page.locator("main").evaluate(el=>[el.offsetLeft,el.offsetWidth]);
@@ -255,6 +270,8 @@ try {
     .fill("Verified fictional presence");
   await apply();
   assert.equal((await service.snapshot()).corrections[0].code, "P");
+  const present = matrix.locator('[data-mark="P"]').first();
+  assert.deepEqual(await colors(present), ["rgb(193, 225, 205)", "rgb(22, 74, 50)"]);
   await navigate("Semester planning");
   const example = (await service.snapshot()).people.find(person => person.flightId && person.active);
   const fullName = example.firstName+" "+example.lastName;
