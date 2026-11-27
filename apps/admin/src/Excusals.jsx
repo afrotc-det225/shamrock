@@ -98,17 +98,16 @@ export default function Excusals({
     <>
       <section className="page-controls">
         <Heading title="Excusals" />
-        {squadrons.length > 1 && <div className="squadron-tabs" aria-label="Squadron queues">
-          {["", ...squadrons].map(label => <button key={label} aria-pressed={squadron === label}
-            onClick={() => { setSquadron(label); setFlight(""); }}>{label || "Wing"} · {queue.filter(r => (!label || r.capturedSquadronLabel === label) && r.status === "Submitted").length}</button>)}
-        </div>}
         <div className="toolbar">
           <SearchBox
             placeholder="Find cadet or event"
             value={query}
             onChange={setQuery}
           />
-          <ToolbarFilters active={Boolean(flight || status !== "Submitted")}>
+          <ToolbarFilters active={Boolean(squadron || flight || status !== "Submitted")}>
+            {squadrons.length > 1 && <Select label="Squadron" value={squadron}
+              onChange={value => {setSquadron(value);setFlight("");}}
+              options={[{value:"",label:"Entire wing"},...squadrons]}/>}
             <Select
               label="Decision status"
               value={status}

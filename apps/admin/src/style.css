@@ -1435,8 +1435,6 @@ h1.page-title {position:absolute;width:1px;height:1px;margin:0;padding:0;overflo
 }
 .chart-tip strong,.chart-tip span {display:block}
 
-.squadron-tabs {display:flex;align-items:center;gap:.6rem;flex-wrap:wrap;margin:1rem 0}
-.squadron-tabs button[aria-pressed=true] {background:#173d54;color:white}
 .account-name {display:block}
 .sidebar-bottom a {color:inherit;text-underline-offset:.2em}
 .cadet-requests {display:grid;grid-template-columns:repeat(auto-fit,minmax(min(25rem,100%),1fr));gap:1rem;align-items:start}
@@ -1615,7 +1613,6 @@ main:has(.matrix-scroll) { padding-bottom: 8px; }
   .mobile-menu .sidebar-bottom small,.mobile-menu .sidebar-bottom p {display:block;font-size:.8rem}
   .mobile-menu .sidebar-bottom p {padding:.5rem .75rem}
   .mobile-menu .sidebar-bottom p button {padding-left:0}
-  .workspace :is(input:not([type=checkbox],[type=radio]),select,textarea) {font-size:1rem}
   .excusal-event small {font-size:1rem}
   .excusal-status time {font-size:.85rem}
   .workspace .excusal-actions button {min-width:4rem;font-size:.93rem}
@@ -1686,3 +1683,12 @@ main:has(.matrix-scroll) { padding-bottom: 8px; }
   body:has(.app) {background:var(--navy)}
   .app,.workspace {background:white}
 }
+
+/* Keep typing at the current zoom, including in dialogs portaled under body. */
+@media (max-width:640px), (pointer:coarse) {
+  body :is(input:not([type="checkbox"],[type="radio"]),select,textarea) {
+    font-size:max(16px,1rem);
+  }
+}
+.matrix-name-heading {display:flex;align-items:center;justify-content:space-between;gap:.25rem}
+.matrix-name-heading .toolbar-tool {min-width:32px;min-height:32px;padding:.25rem}

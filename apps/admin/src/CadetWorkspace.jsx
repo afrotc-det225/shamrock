@@ -9,7 +9,7 @@ import { DirectoryPhoto } from "./DirectoryPhoto";
 import WorkspaceShell from "./WorkspaceShell";
 import { ViewAsAccount } from "./ViewAs";
 import { ClipboardList, FileCheck2, Users, UserRound } from "lucide-react";
-import { AttendanceKey, AttendanceMatrix } from "./AttendanceMatrix";
+import { AttendanceMatrix } from "./AttendanceMatrix";
 import { calculateAttendanceCredit } from "../../../packages/domain/src/frontend-reporting";
 import { ATTENDANCE_CODES } from "../../../packages/domain/src/index";
 import { AS_YEARS } from "../../../packages/domain/src/admin";
@@ -252,7 +252,7 @@ function PersonalAttendance({state, flags, save, disabled}) {
   function dismiss(){setSelected([]);resetSelection(n=>n+1);}
   const cells=(state.attendance || []).map(e=>({...e,effectiveCode:e.code,eligible:true}));
   const row={...state.profile,cells,overall:calculateAttendanceCredit(cells),llab:calculateAttendanceCredit(cells.filter(e=>e.eventType==="llab"))};
-  return <section><AttendanceKey/>
+  return <section>
     {cells.length ? <AttendanceMatrix key={generation} rows={[row]} events={state.attendance} canCorrect={()=>true} onSelection={targets=>{if(!disabled)setSelected(targets.map(t=>t.event));}}/> : <Empty>No attendance events for this semester.</Empty>}
     {selected.length>0 && <Drawer title="Request correction" bottomSheet onClose={dismiss}><form key={JSON.stringify(selected.map(e=>e.eventId))} className="cadet-form" onSubmit={e=>{
       e.preventDefault();

@@ -1,10 +1,12 @@
 import React, { useEffect, useId, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 
 export function ToolbarPopover({
   label,
   icon: Icon,
   shortLabel,
   iconOnly,
+  portal = false,
   active,
   children,
 }) {
@@ -43,6 +45,22 @@ export function ToolbarPopover({
     };
   }, [open]);
 
+  const content = (
+    <div
+      ref={panel}
+      id={id}
+      popover="auto"
+      role="region"
+      aria-label={label}
+      className="toolbar-popover"
+      onBeforeToggle={(e) => {
+        if (e.nativeEvent.newState === "open") position();
+      }}
+      onToggle={() => setOpen(panel.current.matches(":popover-open"))}
+    >
+      {children}
+    </div>
+  );
   return (
     <>
       <button
@@ -58,20 +76,7 @@ export function ToolbarPopover({
         <Icon size={16} aria-hidden="true" />
         {!iconOnly && <span>{shortLabel || label}</span>}
       </button>
-      <div
-        ref={panel}
-        id={id}
-        popover="auto"
-        role="region"
-        aria-label={label}
-        className="toolbar-popover"
-        onBeforeToggle={(e) => {
-          if (e.nativeEvent.newState === "open") position();
-        }}
-        onToggle={() => setOpen(panel.current.matches(":popover-open"))}
-      >
-        {children}
-      </div>
+      {portal ? createPortal(content, document.body) : content}
     </>
   );
 }

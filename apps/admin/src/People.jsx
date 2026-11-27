@@ -61,6 +61,7 @@ export default function People({
   const s = snapshot || list;
   const [query, setQuery] = useState(""),
     [flight, setFlight] = useState(""),
+    [squadron, setSquadron] = useState(""),
     [edit, setEdit] = useState(null);
   const set = (k, v) => setEdit({ ...edit, [k]: v }),
     profile = (k, v) =>
@@ -127,6 +128,11 @@ export default function People({
     [field,setField]=useState(""), [match,setMatch]=useState(""), [view,setView]=useState("List");
   const flightOf = p => s.flights.find(f=>f.flightId===p.flightId);
   const squadronOf = f => s.squadrons?.find(q=>q.squadronId===f?.squadronId)?.label;
+  const rosterFlights = s.flights.filter(f => !squadron || f.squadronId === squadron);
+  function changeSquadron(id) {
+    setSquadron(id);
+    if (id && !s.flights.some(f => f.flightId === flight && f.squadronId === id)) setFlight("");
+  }
   const [columns,setColumns]=useState(initialColumns), [descending,setDescending]=useState(false);
   const [transferMessage,setTransferMessage]=useState("");
   const hasCadet = columns.includes("cadet");
@@ -171,7 +177,7 @@ export default function People({
   const waitingForField = extra && extended?.binding !== binding;
   const directory = extra && !waitingForField ? extended.people : s.people;
   const rows = (leadership ? s.leadership : directory).filter(p=>{
-    if (!leadership && (flight && p.flightId!==flight || year && p.asYear!==year ||
+    if (!leadership && (squadron && flightOf(p)?.squadronId !== squadron || flight && p.flightId!==flight || year && p.asYear!==year ||
       status==="current" && ["Dropped","Commissioned"].includes(p.flightPathStatus) ||
       !["current","all"].includes(status) && p.flightPathStatus!==status ||
       field && match && !waitingForField && !String(valueOf(p,field) ?? "").toLowerCase().includes(match.toLowerCase()))) return false;
@@ -241,11 +247,14 @@ export default function People({
             placeholder={leadership ? "Find a leader" : "Find a cadet"}
             value={query}
             onChange={setQuery}
-            resultCount={query || flight || year || match || !["current","all"].includes(status) ? rows.length : undefined}
+            resultCount={query || squadron || flight || year || match || !["current","all"].includes(status) ? rows.length : undefined}
           />
-          <ToolbarFilters active={Boolean(flight || year || status !== "current" || sort !== "seniority" || view !== "List")}>
+          <ToolbarFilters active={Boolean(squadron || flight || year || status !== "current" || sort !== "seniority" || view !== "List")}>
             {leadership ? <Select label="View" value={view} onChange={setView} options={["List","Organization"]}/> : <>
-              <Select label="Flight" value={flight} onChange={setFlight} options={[{value:"",label:"All flights"},...s.flights.map(f=>({value:f.flightId,label:f.label})).sort((a,b)=>textOrder(a.label,b.label))]}/>
+              <Select label="Squadron" value={squadron} onChange={changeSquadron} options={[
+                {value:"",label:"Entire wing"},...(s.squadrons || []).map(q=>({value:q.squadronId,label:q.label})).sort((a,b)=>textOrder(a.label,b.label))
+              ]}/>
+              <Select label="Flight" value={flight} onChange={setFlight} options={[{value:"",label:"All flights"},...rosterFlights.map(f=>({value:f.flightId,label:f.label})).sort((a,b)=>textOrder(a.label,b.label))]}/>
               <Select label="AS year" value={year} onChange={setYear} options={[{value:"",label:"All AS years"},...years]}/>
               <Select label="Roster status" value={status} onChange={setStatus} options={[{value:"current",label:"Current roster"},{value:"all",label:"All statuses"},...statuses]}/>
               <Select label="Sort by" value={sort} onChange={key=>{setSort(key);setDescending(false);}} options={[{value:"seniority",label:"Default"},...columnKeys.map(k=>({value:k,label:columnLabel(k)}))]}/>
