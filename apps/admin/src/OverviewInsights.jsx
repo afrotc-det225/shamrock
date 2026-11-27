@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import { LoadingRows } from "./components";
 import { api } from "./api";
 import BirthdayAgenda from "./BirthdayAgenda";
 import { WingCharts, percent, archivedComparisons } from "./WingCharts";
@@ -162,7 +163,7 @@ export default function OverviewInsights({
               {error} <button onClick={() => setRetry(retry + 1)}>Retry</button>
             </p>
           ) : (
-            <p role="status">Loading attendance…</p>
+            <LoadingRows label="Loading Wing attendance" rows={2} />
           )}
         </section>
       )}

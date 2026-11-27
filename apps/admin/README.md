@@ -374,3 +374,5 @@ Semester planning groups active cadets by current AS year. For Fall to Spring, A
 The panel keeps the last loaded page visible while opening another page within the same session. The previous page is temporarily read-only during the switch. Visiting the sign-in link with a valid SHAMROCK session returns to the workspace. Expired or revoked sessions follow the Google sign-in flow.
 
 Workspace navigation uses bookmarkable links, such as `/attendance` and `/me/profile`. Refresh, opening a link in another tab, and browser Back and Forward preserve the requested page. Leadership pages use top-level paths. Personal pages use /me/. Existing query-string bookmarks resolve to the corresponding path. Existing sign-in and role checks still determine what the viewer can open.
+
+History opens with the semester selector and roster filters already in place. The hosted archive returns its semester list and latest published report together. Choosing another semester loads that report on demand.

@@ -203,7 +203,7 @@ export default {
       if (request.method === "POST" && url.pathname === "/api/page")
         return secure(json(await backend.page(body)));
       if (env.HISTORY_FILES && url.pathname === "/api/history/list" && request.method === "GET")
-        return secure(await semesterHistory(backend, env.HISTORY_FILES, null));
+        return secure(await semesterHistory(backend, env.HISTORY_FILES, null, url.searchParams.get("include") === "latest"));
       if (env.HISTORY_FILES && url.pathname === "/api/history/report" && request.method === "POST") {
         if (!body || typeof body.version !== "string" || !/^[a-f0-9]{64}$/.test(body.version))
           throw new PanelError("INVALID_REQUEST", "Select a semester from History.");

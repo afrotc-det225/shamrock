@@ -42,6 +42,7 @@ test('versioned download checks live scope and source, detects corrupt files and
   allowed=false;
   await assert.rejects(()=>semesterHistory(backend,store,{version}),/denied/);assert.equal(reads.length,3);
   allowed=true;
+  assert.deepEqual(await (await semesterHistory(backend,store,null,true)).json(),{semesters,latest:{version,report:{rows:[]}}});
   await assert.rejects(()=>semesterHistory(backend,store,{version:'b'.repeat(64)}),e=>e.status===409);
   await assert.rejects(()=>semesterHistory(backend,{get:k=>{if(k===fileKey(version))allowed=false;return items.get(k);}},
     {version}),e=>e.status===409);

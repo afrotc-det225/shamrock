@@ -46,6 +46,11 @@ export function SearchBox({ value, onChange, placeholder, resultCount }) {
     </label>
   );
 }
+export function LoadingRows({ label, rows = 3 }) {
+  return <div className="pending-rows" role="status" aria-label={label}>
+    {Array.from({length:rows}, (_, index) => <div key={index} aria-hidden="true"><i/><i/><i/></div>)}
+  </div>;
+}
 export function Heading({ title, description, children }) {
   return (
     <div className="heading">

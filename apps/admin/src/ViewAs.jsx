@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from "react";
 import { Eye } from "lucide-react";
-import { Drawer, SearchBox, Empty } from "./components";
+import { Drawer, SearchBox, Empty, LoadingRows } from "./components";
 import { name,api } from "./api";
 import { compareCadetsForDisplay } from "../../../packages/domain/src/cadet-display-order";
 export function ViewAsSelector({ people, onSelect, busy }) {
@@ -25,7 +25,7 @@ export function ViewAsSelector({ people, onSelect, busy }) {
         <div className="view-as-people">{rows.map(person => <button key={person.personId} disabled={busy}
           onClick={() => { setOpen(false); onSelect(person); }}>{name(person)}<small>{person.role || person.asYear}</small></button>)}</div>
         {error && <p role="alert">{error} <button onClick={()=>setRetry(n=>n+1)}>Retry</button></p>}
-        {!people && !loaded && !error && <p role="status">Loading cadets…</p>}
+        {!people && !loaded && !error && <LoadingRows label="Loading cadets" />}
         {(people || loaded) && !rows.length && <Empty>No matching cadets.</Empty>}
       </div>
     </Drawer>}

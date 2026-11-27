@@ -26,14 +26,20 @@ try{
     return route.fulfill({json:{manifest:await host.panelAuthority(),browse,captureKey:host.binding,viewAs:null,viewAsRevision:null,transport:'paged-v1',reportingTime:Date.now(),history:[],meta:{hosted:true}}});
   }
   return route.fulfill({json:{manifest:await host.panelManifest(),captureKey:host.binding,viewAs:null,viewAsRevision:null,transport:'paged-v1',reportingTime:Date.now(),history:[],meta:{hosted:true}}});});
- let archiveReads = 0;
- await page.route('**/api/history/list',route=>route.fulfill({json:{semesters:[{version:"archive",label:"2025 Fall"}]}}));
- await page.route('**/api/history/report',route=>{
+ let archiveReads=0, reportReads=0, releaseCatalog;
+ const catalogGate=new Promise(resolve=>{releaseCatalog=resolve;});
+ const firstReport={headers:["TW-1 LLAB","Veterans Day"],summary:{},rows:[
+   {rowId:"a",firstName:"Avery",lastName:"North",asYear:"AS100",flight:"Alpha",overall:0.84,llab:1,codes:["P","N/A"]},
+   {rowId:"b",firstName:"Blair",lastName:"River",asYear:"AS400",flight:"Bravo",overall:1,llab:null,codes:["E",""]},
+ ]};
+ await page.route('**/api/history/list?include=latest',async route=>{
    archiveReads++;
-   return route.fulfill({json:{headers:["TW-1 LLAB","Veterans Day"],summary:{},rows:[
-     {rowId:"a",firstName:"Avery",lastName:"North",asYear:"AS100",flight:"Alpha",overall:0.84,llab:1,codes:["P","N/A"]},
-     {rowId:"b",firstName:"Blair",lastName:"River",asYear:"AS400",flight:"Bravo",overall:1,llab:null,codes:["E",""]},
-   ]}});
+   await catalogGate;
+   await route.fulfill({json:{semesters:[{version:"older",label:"2025 Spring"},{version:"archive",label:"2025 Fall"}],latest:{version:"archive",report:firstReport}}});
+ });
+ await page.route('**/api/history/report',route=>{
+   reportReads++;
+   return route.fulfill({json:{...firstReport,rows:firstReport.rows.slice(0,1)}});
  });
  await page.route('**/api/page',async route=>{
   const body=route.request().postDataJSON(),delay=!held&&body.section===blockSection;
@@ -67,6 +73,10 @@ try{
  const account=await page.locator('.sidebar-bottom').boundingBox(),nav=await page.getByRole('navigation').boundingBox();
  assert(account.y+account.height<=nav.y,'account controls have their own row above mobile navigation');
  await page.getByRole('navigation').getByRole('link',{name:'History',exact:true}).click();
+ await page.getByRole("status",{name:"Loading historical attendance"}).waitFor();
+ assert(await page.getByLabel("Semester",{exact:true}).isDisabled());
+ assert.equal(await page.getByText("Loading semesters…",{exact:true}).count(),0);
+ releaseCatalog();
  const archive=page.getByRole("table",{name:"History",exact:true});
  await archive.getByRole("rowheader",{name:"Blair River"}).waitFor();
  assert.deepEqual(await archive.getByRole("rowheader").allTextContents(),["Blair River","Avery North"]);
@@ -82,6 +92,10 @@ try{
  await page.getByLabel("Sort by").selectOption("flight");
  assert.deepEqual(await archive.getByRole("rowheader").allTextContents(),["Avery North","Blair River"]);
  assert.equal(archiveReads,1);
+ assert.equal(reportReads,0);
+ await page.getByLabel("Semester",{exact:true}).selectOption("older");
+ await archive.getByRole("rowheader",{name:"Avery North"}).waitFor();
+ assert.equal(reportReads,1);
  const afterHistory=requests.length;release();await page.waitForTimeout(120);
  assert.equal(requests.length,afterHistory,'History stops remaining current-record pages');
  assert.equal(await page.locator('dialog').count(),0,'late capture cannot open old editor');

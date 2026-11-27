@@ -1558,3 +1558,8 @@ html:has(dialog:modal) {
 @keyframes reveal-transfer { from { opacity: 0; } to { opacity: 1; } }
 
 .sidebar .workspace-page-link { display: inline-flex; align-items: center; text-decoration: none; }
+
+.pending-rows { padding: .3rem .8rem; }
+.pending-rows > div { display: grid; grid-template-columns: 2fr 1fr 1fr; align-items: center; gap: 6%; height: 2rem; border-bottom: 1px solid var(--line); }
+.pending-rows i { height: .42rem; border-radius: .2rem; background: #e5ebe9; }
+.pending-rows i:first-child { width: 76%; }
