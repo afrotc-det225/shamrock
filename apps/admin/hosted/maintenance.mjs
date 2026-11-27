@@ -29,18 +29,6 @@ export const areas = {
 };
 export const runnable = {
   "Sunday closeout": "closeoutCode",
-  "Wing overview": "apps/admin/src/OverviewInsights.jsx",
-  "Wing charts": "apps/admin/src/WingCharts.jsx",
-  "Cadet profile and submissions": "apps/admin/src/CadetWorkspace.jsx",
-  "Cadet profile fields": "apps/admin/src/ProfileField.jsx",
-  "Flight home": "apps/admin/src/FlightHome.jsx",
-  "Cadet directory and Leadership": "apps/admin/src/People.jsx",
-  "Directory roster views": "apps/admin/src/RosterViews.jsx",
-  "Attendance matrix": "apps/admin/src/AttendanceMatrix.jsx",
-  "Attendance page": "apps/admin/src/AttendancePage.jsx",
-  "Excusals page": "apps/admin/src/Excusals.jsx",
-  "Semester planner": "apps/admin/src/Semester.jsx",
-  "Event management page": "apps/admin/src/Events.jsx",
   "Cadet sorting": "compareCadetsForDisplay",
   "Excusal queue": "currentExcusalRequests",
   "Birthday agenda": "birthdayGroups",
@@ -66,7 +54,7 @@ export function maintenanceRequest(area, question, catalog) {
     .filter(x=>x.score>0).sort((a,b)=>b.score-a.score).slice(0,2)
     .map(({name,file})=>({area:name,path:file,source:sourceWindow(catalog.files[name],2800)}));
   return {
-    instructions: "You maintain SHAMROCK. Use only the supplied release source. Explain the change and cite its path and function. If this file cannot support the requested change, explain what else is needed and leave before/after empty. Propose one primary literal substitution and any necessary companion edits in the provided related files: before must be unique verbatim source, after is its replacement. No markdown fences inside either field. Never claim tests ran. For a runnable function provide one meaningful fictional behavioral case, encode each positional argument separately as a JSON string in args, and encode the expected return value in expected. For other files use an empty args array and empty expected string and describe the required integration test.",
+    instructions: "Describe the edit as a proposal awaiting repository checks. You maintain SHAMROCK. Use only the supplied release source. Explain the change and cite its path and function. If this file cannot support the requested change, explain what else is needed and leave before/after empty. Propose one primary literal substitution and any necessary companion edits in the provided related files: before must be unique verbatim source, after is its replacement. No markdown fences inside either field. Never claim tests ran. For a runnable function provide one meaningful fictional behavioral case, encode each positional argument separately as a JSON string in args, and encode the expected return value in expected. For other files use an empty args array and empty expected string and describe the required integration test.",
     input: JSON.stringify({revision:catalog.commit,path,source:sourceWindow(source,14000),related,entry:runnable[area] || null,question}),
     text: {format:{type:"json_schema",name:"maintenance",strict:true,schema:{
       type:"object",additionalProperties:false,required:["summary","before","after","args","expected","companions"],
