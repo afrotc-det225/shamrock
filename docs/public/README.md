@@ -401,3 +401,5 @@ Directory questions can combine AS year, flight, squadron, school, class year, a
 In the Assistant, the sidebar button beside the title opens recent conversations. Conversations are grouped by date, with two lines available for longer titles. Search across all dates or select **New chat** at the top. Closing the drawer returns to the same conversation.
 
 The Assistant can suggest improvements and discuss your selection. Ask it to implement the selected change when you want a tested proposal.
+
+From a cadet page, **View as administrator** opens the Wing overview when the signed-in or selected cadet has Wing access. During View as, switching pages keeps that cadet selected. If the sidebar cannot load permissions, use **Retry loading menu**.

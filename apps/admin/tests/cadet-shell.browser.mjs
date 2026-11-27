@@ -371,7 +371,7 @@ try {
       const url=new URL(route.request().url());
       if(url.pathname==="/api/session"){
         sessions++;
-        return route.fulfill({json:{hosted:true,csrf:"fixture",cadetWorkspace:true,schoolLogin:false}});
+        return route.fulfill({json:{hosted:true,csrf:"fixture",cadetWorkspace:true,schoolLogin:false,schoolWingAccess:full}});
       }
       if(url.pathname==="/api/navigation" && failMenu)return route.fulfill({status:503,json:{error:{message:"Unavailable"}}});
       if(url.pathname==="/api/navigation")return route.fulfill({json:url.searchParams.get("include")==="personal"
@@ -414,10 +414,11 @@ try {
     await page.goto(origin+"/me/requests");
     await page.getByRole("heading",{name:"My excusals",level:1}).waitFor();
     await openNavigation(page);
-    assert.equal(await page.getByRole("button",{name:"Retry loading menu"}).count(),0);
-    assert.equal(await page.getByRole("link",{name:"View as administrator"}).count(),0);
+    const retry = page.getByRole("button",{name:"Retry loading menu"});
+    await retry.waitFor();
+    await page.getByRole("link",{name:"View as administrator"}).waitFor();
     failMenu=false;
-    await page.evaluate(()=>window.dispatchEvent(new Event("online")));
+    await retry.click();
     const switcher=page.getByRole("link",{name:"View as administrator",exact:true});
     await switcher.waitFor();
     assert.equal(await page.getByRole("link",{name:"Assistant",exact:true}).count(),0);
@@ -437,6 +438,12 @@ try {
     await page.waitForURL("**/me/flight");
     assert.equal(await page.getByRole("dialog",{name:"Navigation"}).count(),0);
     assert.equal(documents,2,"logo navigation keeps the current document");
+    await page.route("**/api/session",route=>route.fulfill({json:{hosted:true,cadetWorkspace:true,csrf:"fixture",
+      viewAs:{personId:"fixture",status:"ready",entryAuditId:"entry"}}}));
+    await page.goto(origin+"/me/requests");
+    await openNavigation(page);
+    await switcher.waitFor();
+    assert.equal(await page.getByRole("link",{name:"Assistant",exact:true}).count(),0);
     await page.close();
   }
   console.log("Cadet, Flight, Squadron, registration and delegated cadet workspace passed on desktop and phone.");

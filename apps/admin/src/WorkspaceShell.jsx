@@ -47,17 +47,19 @@ export default function WorkspaceShell({ workspace="leadership", pages, page, ta
   const dual = session && !session.schoolLogin && (preview ? preview.status === "ready" && session.hosted : (session.cadetWorkspace || workspace === "cadet" && session.hosted));
   const key = dual ? include + "/" + (preview?.entryAuditId || "self") : null;
   const [navigation, setNavigation] = useState(null);
+  const [menuAttempt, setMenuAttempt] = useState(0);
   useEffect(() => {
     if (!key) return;
     const controller = new AbortController();
     const load = () => api("/navigation?include="+include, undefined, {signal:controller.signal})
       .then(value => { if (!controller.signal.aborted) setNavigation({key,value}); })
-      .catch(() => { if (!controller.signal.aborted) setNavigation(null); });
+      .catch(() => { if (!controller.signal.aborted) setNavigation({key,failed:true}); });
     load();
     window.addEventListener("online",load);
     return () => { controller.abort(); window.removeEventListener("online",load); };
-  }, [key,include]);
+  }, [key,include,menuAttempt]);
   const other = key && navigation?.key === key ? navigation.value : null;
+  const showWingSwitch = workspace === "cadet" && (other ? other.leadership?.full : !preview && session?.schoolWingAccess);
   const personal = workspace === "cadet" ? pages : other?.personal?.registration
     ? [["My profile",UserRound]] : personalPages(other?.personal);
   const leadership = workspace === "leadership" ? pages : other?.leadership ? leadershipPages(other.leadership.full,preview) : [];
@@ -91,7 +93,8 @@ export default function WorkspaceShell({ workspace="leadership", pages, page, ta
       ))}
     </nav>
     <div className="sidebar-bottom">
-      {workspace === "cadet" && other?.leadership?.full && !preview &&
+      {key && navigation?.key === key && navigation.failed && <button type="button" data-keep-menu-open onClick={()=>setMenuAttempt(n=>n+1)}>Retry loading menu</button>}
+      {showWingSwitch &&
         <PageLink workspace="leadership" title="Overview" navigate={name=>openPage("leadership",name)}>
           <Shield size={18} aria-hidden="true"/>View as administrator
         </PageLink>}
@@ -124,7 +127,7 @@ export default function WorkspaceShell({ workspace="leadership", pages, page, ta
           <div className="mobile-menu-screen">
           <header>{brand}<button aria-label="Close navigation" onClick={() => menu.current.close()}><X size={20}/></button></header>
           <div className="menu-links" onClickCapture={e => {
-            if (menu.current.contains(e.target) && e.target.closest("button,a") &&
+            if (menu.current.contains(e.target) && e.target.closest("button,a") && !e.target.closest("[data-keep-menu-open]") &&
                 !e.metaKey && !e.ctrlKey && !e.shiftKey && !e.altKey) menu.current.close();
           }}>{links}</div>
           </div>

@@ -332,7 +332,7 @@ export async function authRoute(
   if (url.pathname === "/api/session" && request.method === "POST") {
     originCheck(request, env.APP_ORIGIN);
     const current = await session(request, env);
-    return json({ authenticated: true, hosted: true, cadetWorkspace:!!current.schoolEmail, schoolLogin:current.principal_id.startsWith("school.") && !current.wingAccess, csrf: current.csrf, viewAs: previewResponse(previewFromSession(current)) });
+    return json({ authenticated: true, hosted: true, cadetWorkspace:!!current.schoolEmail, schoolWingAccess:current.wingAccess===true, schoolLogin:current.principal_id.startsWith("school.") && !current.wingAccess, csrf: current.csrf, viewAs: previewResponse(previewFromSession(current)) });
   }
   if (url.pathname === "/auth/logout" && request.method === "POST") {
     const current = await session(request, env);
